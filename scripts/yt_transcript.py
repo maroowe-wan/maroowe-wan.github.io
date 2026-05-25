@@ -4,7 +4,7 @@
 import argparse, glob, os, re, subprocess, sys, tempfile
 
 def vtt_to_text(vtt_path):
-    """VTT에서 타임스탬프/태그/중복을 제거해 읽을 수 있는 텍스트로."""
+    """VTT에서 타임스탐프/태그/중복을 제거해 읽을 수 있는 텍스트로."""
     lines, seen, out = open(vtt_path, encoding="utf-8").read().splitlines(), set(), []
     for ln in lines:
         if "-->" in ln or ln.strip() in ("WEBVTT", "") or ln.strip().isdigit():
@@ -18,15 +18,30 @@ def vtt_to_text(vtt_path):
 
 def run_ytdlp(video_id, langs, cookies_from_browser, tmpdir):
     url = f"https://www.youtube.com/watch?v={video_id}"
+    # 지정된 언어 자막 다운로드
     cmd = [
-        "yt-dlp", "--skip-download",
+        "yt-dlp",
+        "--skip-download",
         "--write-subs", "--write-auto-subs",
-        "--sub-langs", langs, "--sub-format", "vtt",
+        "--sub-langs", langs,  # 요청한 언어만
+        "--sub-format", "vtt",
         "-o", os.path.join(tmpdir, "%(id)s.%(ext)s"), url,
     ]
     if cookies_from_browser:
         cmd[1:1] = ["--cookies-from-browser", cookies_from_browser]
     return subprocess.run(cmd, capture_output=True, text=True)
+
+def pick_subtitle(vtts, prefer_langs):
+    """선호 언어 순서대로 자막 파일 선택."""
+    # prefer_langs는 "ko,en" 같은 형식
+    langs = [l.strip() for l in prefer_langs.split(",")]
+    for lang in langs:
+        for vtt in vtts:
+            # 파일명: TlHvYWVUZyc.ko.vtt, TlHvYWVUZyc.en-US.vtt 등
+            if f".{lang}" in vtt or f".{lang}-" in vtt:
+                return vtt
+    # 기본값: 첫 번째 (보통 en-US)
+    return vtts[0] if vtts else None
 
 def main():
     p = argparse.ArgumentParser()
@@ -42,13 +57,13 @@ def main():
         if "Sign in to confirm you" in (r.stderr or "") and not a.cookies_from_browser:
             print("BOT_BLOCK: 봇 차단 감지. --cookies-from-browser chrome 으로 재시도하세요.", file=sys.stderr)
             sys.exit(2)
-        vtts = glob.glob(os.path.join(tmp, "*.vtt"))
+        vtts = sorted(glob.glob(os.path.join(tmp, "*.vtt")))
         if not vtts:
             print(f"NO_SUBTITLE: {a.video_id} 자막 없음", file=sys.stderr)
             sys.exit(3)
-        # 선호 언어 순으로 첫 번째 채택
-        vtts.sort(key=lambda f: (0 if ".ko." in f else 1 if ".en." in f else 2))
-        text = vtt_to_text(vtts[0])
+        # 선호 언어 순으로 선택
+        selected_vtt = pick_subtitle(vtts, a.lang)
+        text = vtt_to_text(selected_vtt)
         os.makedirs(os.path.dirname(a.out), exist_ok=True)
         open(a.out, "w", encoding="utf-8").write(text)
         print(f"자막 저장: {a.out} ({len(text)}자)")
