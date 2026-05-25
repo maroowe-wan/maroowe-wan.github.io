@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>쿠버네티스 초급</title>
+<title>Kubernetes for Beginners</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
@@ -10,167 +10,187 @@
 <body><div class="wrap">
 <nav>
   <div class="navtop"><a class="home" href="../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/kubernetes-beginner/index.html'>한국어</a></div>
-  <h1>쿠버네티스 초급</h1>
-  <div class="sub">쿠버네티스를 처음 접하는 입문자/초급자 (컨테이너·도커 기초 정도만 아는 수준) · 5 lectures</div>
-  <ul><li><a href='#lec1'>01. 쿠버네티스란 무엇인가 - 왜 컨테이너 오케스트레이션이 필요한가</a></li>
-<li><a href='#lec2'>02. 쿠버네티스 아키텍처 - 컨트롤 플레인과 워커 노드</a></li>
-<li><a href='#lec3'>03. Pod와 컨테이너 - 쿠버네티스의 최소 배포 단위</a></li>
-<li><a href='#lec4'>04. Deployment와 Service - 앱 배포와 외부 노출</a></li>
-<li><a href='#lec5'>05. YAML 매니페스트로 직접 배포하기 - 선언형 구성 실습</a></li></ul>
+  <h1>Kubernetes for Beginners</h1>
+  <div class="sub">Absolute beginners to Kubernetes who have a basic familiarity with containers and Docker · 5 lectures</div>
+  <ul><li><a href='#lec1'>01. What Is Kubernetes - Why Container Orchestration Matters</a></li>
+<li><a href='#lec2'>02. Kubernetes Architecture - Control Plane and Worker Nodes</a></li>
+<li><a href='#lec3'>03. Pods and Containers - The Smallest Deployable Unit in Kubernetes</a></li>
+<li><a href='#lec4'>04. Deployment and Service - Deploying Apps and Exposing Them Externally</a></li>
+<li><a href='#lec5'>05. Deploying with YAML Manifests - Declarative Configuration in Practice</a></li></ul>
 </nav>
 <main><article id='lec1' class='lecture'>
-          <h2>01. 쿠버네티스란 무엇인가 - 왜 컨테이너 오케스트레이션이 필요한가 </h2>
-          <h2>쿠버네티스란 무엇인가 - 왜 컨테이너 오케스트레이션이 필요한가</h2>
-<h3>학습 목표</h3>
+          <h2>01. What Is Kubernetes - Why Container Orchestration Matters </h2>
+          <h2>What Is Kubernetes - Why Container Orchestration Matters</h2>
+<h3>Learning Objectives</h3>
 <ul>
-<li>컨테이너만으로 서비스를 운영할 때 마주치는 한계(확장, 장애 복구, 배포)를 이해한다</li>
-<li>쿠버네티스가 해결하는 문제와 핵심 가치를 자신의 말로 설명할 수 있다</li>
-<li>오케스트레이션이라는 개념을 일상 비유로 직관적으로 이해한다</li>
+<li>Understand the limitations of running services with containers alone (scaling, failure recovery, deployment)</li>
+<li>Explain in your own words the problem Kubernetes solves and the core value it provides</li>
+<li>Grasp the concept of orchestration intuitively through everyday analogies</li>
 </ul>
-<h3>본문</h3>
-<h4>왜 이걸 배우나요?</h4>
-<p>&quot;쿠버네티스로 전환해야 한다&quot;, &quot;우리도 컨테이너를 도입하자&quot; 같은 말을 한 번쯤 들어보셨을 겁니다. 그런데 정작 <em>왜</em> 필요한지를 모른 채 따라가면, 복잡한 용어의 늪에 빠지기 쉽습니다. 이번 강의에서는 명령어나 설정 파일은 잠시 미뤄두고, <strong>&quot;애초에 무슨 문제를 풀려고 쿠버네티스가 등장했는가&quot;</strong> 라는 가장 근본적인 질문부터 함께 풀어보겠습니다. 이 출발점을 제대로 잡으면, 앞으로 배울 모든 개념이 &quot;왜 이게 있는지&quot; 자연스럽게 이해됩니다.</p>
-<h4>컨테이너부터 빠르게 짚고 가기</h4>
-<p>먼저 <strong>컨테이너(Container)</strong> 가 무엇인지 한 줄로 정리해 봅시다. 컨테이너란 <em>애플리케이션과 그것이 돌아가는 데 필요한 모든 것(코드, 라이브러리, 설정)을 하나로 포장한 독립 실행 단위</em> 입니다.</p>
-<p>비유하자면 이렇습니다. 한 건물에 임차인을 들이려는데, 입주할 때마다 벽을 세우고 인테리어 공사를 다시 하면 너무 번거롭겠죠. 그래서 <strong>이사 갈 사람이 살림이 다 갖춰진 &#x27;컨테이너 박스&#x27;를 통째로 가지고 와서 건물 안에 쏙 넣는다</strong>고 상상해 보세요. 공사가 필요 없고, 나갈 때는 박스만 들어내면 됩니다. 컨테이너 기술이 바로 이렇습니다. 예전의 <strong>가상 머신(VM)</strong> 방식이 매번 벽을 세우는 무거운 공사였다면, 컨테이너는 가볍고 빠르게 옮길 수 있는 포장 박스입니다.</p>
+<h3>Content</h3>
+<h4>Why Does This Matter?</h4>
+<p>You have probably heard phrases like &quot;we need to migrate to Kubernetes&quot; or &quot;let&#x27;s adopt containers.&quot; But if you follow along without understanding <em>why</em> it is necessary, you will quickly find yourself lost in a sea of complex terminology. In this lecture, we will set commands and configuration files aside for now and start with the most fundamental question: <strong>&quot;What problem was Kubernetes created to solve in the first place?&quot;</strong> Once you have a solid answer to that question, every concept you learn going forward will naturally make sense.</p>
+<h4>A Quick Recap of Containers</h4>
+<p>Let&#x27;s start with a one-line definition of a <strong>container</strong>. A container is <em>a self-contained, executable unit that packages an application together with everything it needs to run — code, libraries, and configuration.</em></p>
+<p>Here is an analogy. Imagine you are a building owner trying to bring in tenants. If you had to build new walls and renovate the interior every time someone moved in, it would be an enormous hassle. Instead, picture each new tenant arriving with a fully furnished <strong>shipping container</strong> that they simply slot into place inside the building. No construction required, and when they leave, they just take the box with them. That is exactly how container technology works. The older <strong>virtual machine (VM)</strong> approach was like doing heavy construction every time — containers are lightweight, portable boxes that can be moved in seconds.</p>
 <blockquote class='callout'>
-<p>컨테이너 덕분에 &quot;내 PC에서는 잘 됐는데 서버에서는 안 돼요&quot;라는 고질적인 문제가 크게 줄었습니다. 실행 환경을 통째로 싸서 옮기기 때문입니다.</p>
+<p>Thanks to containers, the classic problem of &quot;it works on my machine but not on the server&quot; has been greatly reduced. The entire runtime environment travels with the application.</p>
 </blockquote>
-<h4>컨테이너 하나는 쉽다, 그런데 수백 개라면?</h4>
-<p>문제는 여기서 시작됩니다. 요즘 서비스는 하나의 거대한 프로그램이 아니라, 기능별로 잘게 쪼갠 작은 서비스들의 모음입니다. 이를 <strong>마이크로서비스(Microservice)</strong> 라고 부릅니다. 예를 들어 쇼핑몰 하나에도 화면을 그리는 프론트엔드, 주문을 처리하는 백엔드, 데이터를 보관하는 데이터베이스가 각각 따로 돌아갑니다. 트래픽이 몰리면 잘 나가는 메뉴(예: 프론트엔드)만 여러 개로 복제해야 하니, 컨테이너 개수는 금세 수십, 수백, 때로는 수천 개로 불어납니다.</p>
-<p>이렇게 많은 컨테이너를, 그것도 여러 대의 서버에 걸쳐 사람이 손으로 관리한다고 상상해 보세요. 다음과 같은 일을 <em>직접</em> 챙겨야 합니다.</p>
+<h4>One Container Is Easy — What About Hundreds?</h4>
+<p>This is where things get complicated. Modern services are not single monolithic programs. They are collections of small, independently deployable services — each responsible for a specific function. This is called a <strong>microservice</strong> architecture. A single e-commerce platform, for example, might have a separate frontend for rendering pages, a backend for processing orders, and a database for storing data. When traffic spikes, you may need to scale out only the most-used components (say, the frontend), so the number of containers can quickly grow from dozens to hundreds, or even thousands.</p>
+<p>Now imagine managing all those containers across multiple servers by hand. You would be responsible for <em>all</em> of the following:</p>
 <ul>
-<li>어느 서버에 어떤 컨테이너를 띄울지 일일이 결정하기</li>
-<li>컨테이너가 죽으면 한밤중에라도 깨어나 다시 살리기</li>
-<li>트래픽이 몰리면 수동으로 복제본을 늘리고, 빠지면 줄이기</li>
-<li>새 버전을 배포할 때 서비스가 끊기지 않도록 조심조심 교체하기</li>
-<li>컨테이너끼리 서로를 어떻게 찾아 통신할지 직접 연결해 주기</li>
+<li>Deciding which container goes on which server, one by one</li>
+<li>Waking up at 2 a.m. to restart a container every time one crashes</li>
+<li>Manually scaling replicas up when traffic surges, then scaling them back down</li>
+<li>Carefully swapping out containers during deployments without causing downtime</li>
+<li>Manually wiring up the network so containers can discover and talk to each other</li>
 </ul>
-<p>스크립트나 자체 제작 도구로 어찌어찌 해볼 수는 있지만, 규모가 커지면 곧 한계에 부딪히고 결국 사람이 감당할 수 없는 수준이 됩니다. <strong>바로 이 지점에서 컨테이너 오케스트레이션이 등장합니다.</strong></p>
-<h4>오케스트레이션 - 지휘자 비유로 이해하기</h4>
-<p><strong>오케스트레이션(Orchestration)</strong> 이라는 단어는 오케스트라에서 왔습니다. 수십 명의 연주자(컨테이너)가 각자 악기를 들고 있어도, 이들을 조화롭게 이끄는 <strong>지휘자</strong>가 없으면 음악이 아니라 소음이 됩니다. 컨테이너 오케스트레이션 도구는 바로 이 <em>지휘자</em> 역할을 합니다.</p>
-<p>또 다른 비유를 들어볼까요. 당신이 여러 채의 건물을 가진 건물주라고 해봅시다. 건물마다 컨테이너를 척척 다뤄주는 전문가(이것이 바로 컨테이너 관리 도구인 <strong>도커</strong>입니다)를 한 명씩 배치했습니다. 처음엔 괜찮았지만 건물이 늘어나니, 모든 건물의 전문가에게 일일이 전화로 지시하느라 정신이 없습니다. 그래서 <strong>유능한 총괄 매니저</strong>를 한 명 고용합니다. 그 매니저의 이름이 바로 <strong>쿠버네티스</strong>입니다.</p>
-<p>이제 당신은 매니저에게 큰 그림만 전달하면 됩니다. &quot;프론트엔드는 3개 띄워두고, 백엔드는 2개 유지해줘.&quot; 그러면 쿠버네티스가 알아서 어느 서버에 배치할지 정하고, 하나가 죽으면 조용히 다시 살려 항상 그 개수를 맞춰 줍니다. 사소한 것 하나하나 명령하지 않아도 되는 이유는, 쿠버네티스가 <strong>원하는 상태(desired state)</strong> 를 기억하고 현실을 거기에 끊임없이 맞추기 때문입니다.</p>
-<p>아래 흐름도처럼, 쿠버네티스는 우리가 선언한 &quot;원하는 상태&quot;와 실제 현재 상태를 끊임없이 비교하며 둘이 어긋나면 스스로 행동에 나섭니다. 이 반복 루프가 바로 선언형 관리의 핵심입니다.</p>
+<p>You might get by with scripts and homegrown tooling for a while, but at scale this approach hits a hard wall — it simply becomes more than any team can manage. <strong>This is exactly the point where container orchestration enters the picture.</strong></p>
+<h4>Orchestration — Understanding It Through a Conductor Analogy</h4>
+<p>The word <strong>orchestration</strong> comes from the orchestra. Even if dozens of musicians (containers) each have their instruments ready, without a <strong>conductor</strong> to coordinate them, the result is noise, not music. A container orchestration tool plays the role of that conductor.</p>
+<p>Here is another analogy. Suppose you own several buildings. You have assigned an on-site specialist — essentially a container management tool like <strong>Docker</strong> — to each building. That worked fine at first, but as you acquired more buildings, you found yourself making phone call after phone call to each specialist to issue instructions. So you hire a <strong>highly capable general manager</strong> to run the whole operation. That general manager&#x27;s name is <strong>Kubernetes</strong>.</p>
+<p>Now you only need to give the big picture to your manager. &quot;Keep three frontend instances running at all times; maintain two backend instances.&quot; Kubernetes then figures out which server to place them on, and if any instance dies, it quietly brings a new one back up to keep the count right. The reason you do not have to micromanage every detail is that Kubernetes remembers your <strong>desired state</strong> and continuously reconciles reality to match it.</p>
+<p>As shown in the flow diagram below, Kubernetes constantly compares the desired state you have declared against the actual current state, and takes action on its own whenever the two diverge. This reconciliation loop is the heart of declarative management.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
-    A[&quot;사용자: 원하는 상태 선언&lt;br/&gt;예 - 프론트엔드 3개 유지&quot;] --&gt; B[쿠버네티스가 상태 기억]
-    B --&gt; C{현재 상태와 비교}
-    C --&gt;|일치| D[그대로 유지하며 계속 감시]
-    C --&gt;|부족하거나 죽음| E[새 컨테이너 자동 생성]
-    C --&gt;|초과| F[남는 컨테이너 정리]
+    A[&quot;User declares desired state&lt;br/&gt;e.g. keep 3 frontends&quot;] --&gt; B[Kubernetes stores the state]
+    B --&gt; C{Compare with current state}
+    C --&gt;|Match| D[Keep as-is and keep watching]
+    C --&gt;|Missing or dead| E[Auto-create new container]
+    C --&gt;|Excess| F[Remove surplus container]
     D --&gt; C
     E --&gt; C
-    F --&gt; C</div><figcaption>선언한 원하는 상태에 현실을 맞추는 쿠버네티스의 조정 루프</figcaption></figure>
-<h4>쿠버네티스가 보장하는 핵심 가치</h4>
-<p>쿠버네티스는 구글이 만들어 오픈소스로 공개한 컨테이너 오케스트레이션 플랫폼입니다. 도커든 다른 기술이든 컨테이너의 종류를 가리지 않고, 물리 서버·가상 머신·클라우드 등 어떤 환경에서도 컨테이너 무리를 관리해 줍니다. 그 핵심 가치는 다음 네 가지로 요약할 수 있습니다.</p>
-<p>1. <strong>자가 치유(Self-healing)와 고가용성</strong> — 컨테이너가 죽으면 자동으로 다시 띄워, 사용자가 느끼는 다운타임을 최소화합니다. 항상 &quot;원하는 개수&quot;를 유지합니다.</p>
-<p>2. <strong>확장성(Scalability)</strong> — 트래픽이 몰리면 복제본을 늘리고, 한가하면 줄입니다. 쿠버네티스는 각 서버의 남은 자원을 보고 <em>어디에 띄우는 게 가장 효율적인지</em> 판단해 배치합니다. 이 똑똑한 배치 결정을 <strong>스케줄링</strong>이라고 합니다.</p>
-<p>3. <strong>서비스 디스커버리와 로드 밸런싱</strong> — 컨테이너는 자주 죽고 새로 태어나며, 그때마다 주소(IP)가 바뀝니다. 쿠버네티스는 변하지 않는 고정 창구를 앞에 세워, 뒤의 컨테이너가 바뀌어도 다른 서비스가 항상 같은 주소로 접속하고 트래픽을 고르게 나눠 받게 해줍니다.</p>
-<p>4. <strong>재해 복구(Disaster Recovery)</strong> — 인프라에 문제가 생겨 데이터가 날아가도, 마지막 상태로 되돌릴 수 있는 백업·복구 장치를 갖추고 있습니다.</p>
-<h4>개발자와 운영자의 시야 차이</h4>
-<p>마지막으로 한 가지 관점을 더 짚겠습니다. 같은 시스템을 봐도 <strong>개발자</strong>와 <strong>운영자</strong>의 시야는 다릅니다. 개발자는 컨테이너 <em>안</em>에 집중합니다. 내 코드, 의존성, 동작이 제대로 도는지에만 관심이 있죠. 반면 운영자는 그 아래 전체 그림을 봅니다. 어느 서버에 무엇을 배포하고, 어떻게 확장하고, 외부에 어떻게 노출하고, 장애를 어떻게 감지할지를 책임집니다.</p>
-<p>아래 계층도처럼, 개발자는 위쪽의 &quot;내 컨테이너&quot;에 집중하고, 쿠버네티스가 그 아래 운영 영역을 맡아 여러 서버에 흩어진 컨테이너 무리를 대신 다스립니다.</p>
+    F --&gt; C</div><figcaption>Kubernetes reconciliation loop — continuously aligning reality with the declared desired state</figcaption></figure>
+<h4>The Core Value Kubernetes Delivers</h4>
+<p>Kubernetes is an open-source container orchestration platform originally built at Google. It is agnostic to the container technology you use — Docker or otherwise — and works across physical servers, virtual machines, and cloud environments alike. Its core value can be summarized in four areas:</p>
+<p>1. <strong>Self-healing and High Availability</strong> — When a container crashes, Kubernetes automatically restarts it, minimizing downtime for users. The desired number of instances is always maintained.</p>
+<p>2. <strong>Scalability</strong> — When traffic increases, Kubernetes scales replicas up; when things quiet down, it scales them back. Kubernetes inspects available resources across nodes and determines <em>the most efficient placement</em> for each container. This intelligent placement decision is called <strong>scheduling</strong>.</p>
+<p>3. <strong>Service Discovery and Load Balancing</strong> — Containers die and are replaced frequently, and their IP addresses change each time. Kubernetes puts a stable, fixed endpoint in front of them so that other services always connect to the same address, and incoming traffic is distributed evenly across available instances.</p>
+<p>4. <strong>Disaster Recovery</strong> — If infrastructure failures cause data loss, Kubernetes provides backup and recovery mechanisms to restore the last known good state.</p>
+<h4>How Developers and Operators See Things Differently</h4>
+<p>One more perspective worth addressing: even when looking at the same system, a <strong>developer</strong> and an <strong>operator</strong> have very different views. Developers focus on what is <em>inside</em> the container — their code, dependencies, and whether the application behaves correctly. Operators, on the other hand, look at the broader picture: which servers to deploy on, how to scale, how to expose services externally, and how to detect and respond to failures.</p>
+<p>As illustrated in the layer diagram below, developers focus on the top layer — &quot;my container&quot; — while Kubernetes takes on the operational layer beneath it, governing a fleet of containers distributed across multiple servers.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TB
-    subgraph DEV[&quot;개발자의 시야 - 컨테이너 안&quot;]
-        D1[내 코드]
-        D2[라이브러리 의존성]
-        D3[정상 동작 여부]
+    subgraph DEV[&quot;Developer&#x27;s view — inside the container&quot;]
+        D1[My code]
+        D2[Library dependencies]
+        D3[Whether it works correctly]
     end
-    subgraph K8S[&quot;쿠버네티스 - 운영 자동화 계층&quot;]
-        K1[배치와 스케줄링]
-        K2[확장과 축소]
-        K3[자가 치유]
-        K4[외부 노출과 통신]
+    subgraph K8S[&quot;Kubernetes — operations automation layer&quot;]
+        K1[Placement &amp; scheduling]
+        K2[Scale up &amp; down]
+        K3[Self-healing]
+        K4[External exposure &amp; networking]
     end
-    subgraph OPS[&quot;운영자가 책임지는 인프라&quot;]
-        N1[서버 노드 1]
-        N2[서버 노드 2]
-        N3[서버 노드 3]
+    subgraph OPS[&quot;Infrastructure the operator owns&quot;]
+        N1[Server node 1]
+        N2[Server node 2]
+        N3[Server node 3]
     end
     DEV --&gt; K8S
-    K8S --&gt; OPS</div><figcaption>개발자와 운영자의 관심 영역, 그리고 그 사이를 메우는 쿠버네티스</figcaption></figure>
-<p>쿠버네티스는 이 운영자의 무거운 짐을 대부분 자동화해 줍니다. 그래서 개발자는 &quot;내 컨테이너&quot;에만 집중할 수 있고, 운영팀은 수백 개의 컨테이너를 사람의 야근이 아니라 <strong>선언된 규칙</strong>으로 다스릴 수 있게 됩니다. 최근 SRE(사이트 신뢰성 엔지니어) 같은 역할이 주목받는 것도 이런 자동화된 운영 위에서 안정성을 설계하는 일이 중요해졌기 때문입니다.</p>
-<h3>핵심 요약</h3>
+    K8S --&gt; OPS</div><figcaption>Developer and operator concerns, and how Kubernetes bridges them</figcaption></figure>
+<p>Kubernetes automates most of the heavy lifting that used to fall on operators. Developers can stay focused on &quot;my container,&quot; while operations teams can govern hundreds of containers through <strong>declared rules</strong> rather than late-night manual intervention. The growing prominence of roles like SRE (Site Reliability Engineer) reflects precisely this shift — designing for reliability on top of an automated, policy-driven infrastructure.</p>
+<h3>Key Takeaways</h3>
 <ul>
-<li>컨테이너는 앱과 실행 환경을 통째로 포장한 가볍고 빠른 단위지만, 컨테이너가 수백 개로 늘고 여러 서버에 흩어지면 사람이 손으로 관리하기란 불가능에 가깝다.</li>
-<li>이 문제를 풀기 위한 도구가 <strong>컨테이너 오케스트레이션</strong>이고, 그 사실상의 표준이 구글이 만든 오픈소스 플랫폼 <strong>쿠버네티스</strong>다.</li>
-<li>쿠버네티스는 오케스트라의 지휘자(또는 건물 총괄 매니저)처럼, 우리가 &quot;원하는 상태&quot;만 알려주면 배치·복제·자가 치유·통신 연결을 알아서 맞춰 준다.</li>
-<li>핵심 가치는 자가 치유와 고가용성, 확장성과 스마트 스케줄링, 서비스 디스커버리·로드 밸런싱, 재해 복구의 네 가지다.</li>
-<li>이 &quot;왜&quot;를 이해했다면, 다음 강의에서 다룰 쿠버네티스의 내부 구조(아키텍처)가 훨씬 자연스럽게 읽힐 것이다.</li>
+<li>Containers are a lightweight, portable unit that packages an application together with its runtime environment. But when container counts reach the hundreds and span multiple servers, manual management becomes practically impossible.</li>
+<li>The tool built to solve this problem is <strong>container orchestration</strong>, and its de facto standard is the open-source platform <strong>Kubernetes</strong>, originally created by Google.</li>
+<li>Like an orchestra conductor — or a highly capable building manager — Kubernetes only needs to be told the <strong>desired state</strong>. It handles placement, replication, self-healing, and network connectivity on its own.</li>
+<li>Its four core values are: self-healing and high availability, scalability and smart scheduling, service discovery and load balancing, and disaster recovery.</li>
+<li>With this &quot;why&quot; firmly in mind, the internal structure (architecture) of Kubernetes covered in the next lecture will feel far more natural.</li>
 </ul>
-          
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <p class='q'>Q1. When operating a microservice environment with containers, what problems arise from managing hundreds of containers manually? Select the most appropriate answer based on the lecture content.</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>Container image builds slow down, reducing developer productivity</li><li class='opt' onclick='pick(this,0,1)'>Operators must manually handle decisions such as which server to place each container on, restarting crashed containers, and adjusting replicas as traffic changes</li><li class='opt' onclick='pick(this,0,2)'>Containers consume more server resources than virtual machines</li><li class='opt' onclick='pick(this,0,3)'>Bugs inside container code become difficult to detect automatically</li></ul>
+              <div class='exp'>The correct answer is option 2. The lecture lists the specific problems that arise when managing hundreds of containers by hand: deciding which server to place each container on, manually restarting crashed containers, manually adjusting replica counts as traffic fluctuates, achieving zero-downtime deployments, and wiring up inter-container networking. Option 1 refers to build speed, which is unrelated to orchestration. Option 3 is the opposite of the truth — containers are far lighter than VMs. Option 4 is a code quality concern that falls outside the scope of what orchestration tools address.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q2. Which of the following best describes Kubernetes&#x27; &#x27;desired state&#x27; management model?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>Operators issue commands directly to each individual container following a fixed procedure</li><li class='opt' onclick='pick(this,1,1)'>The user declares a target state, and Kubernetes continuously compares it against the current state and reconciles automatically</li><li class='opt' onclick='pick(this,1,2)'>Whenever a container crashes, Kubernetes sends an alert and waits for an administrator to manually decide whether to recover it</li><li class='opt' onclick='pick(this,1,3)'>Once a container configuration is deployed, it is locked in place to guarantee stability</li></ul>
+              <div class='exp'>The correct answer is option 2. The core of Kubernetes is declarative management. The user simply declares the desired outcome — for example, &#x27;three frontend instances, two backend instances&#x27; — and Kubernetes continuously compares the current state against that declaration, automatically correcting any deviation. The reconciliation loop (flowchart) in the lecture visualizes this. Option 1 describes the imperative approach, which is exactly the problem Kubernetes was designed to eliminate. Option 3 describes manual recovery after an alert, which is the opposite of self-healing. Option 4 contradicts the fact that Kubernetes dynamically adjusts state.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q3. Read the following scenario and select the most appropriate action Kubernetes would take.
+
+[Scenario] At 2 a.m., a surge in event traffic causes one of the frontend containers in a shopping mall service to go down due to overload. The current specification declares that three frontend instances must always be maintained.</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>Kubernetes detects the state change, sends an SMS to the on-call operator, and waits for approval before acting</li><li class='opt' onclick='pick(this,2,1)'>Kubernetes detects the downed container, automatically creates a new one, and if traffic continues to surge, brings up additional replicas to restore the count to three</li><li class='opt' onclick='pick(this,2,2)'>Kubernetes shuts down the entire frontend service and redeploys it in a stable environment</li><li class='opt' onclick='pick(this,2,3)'>Kubernetes collects logs from the downed container, stores them in a database, and stands by</li></ul>
+              <div class='exp'>The correct answer is option 2. This question tests your understanding of how two core Kubernetes values — self-healing and scalability — operate in a real failure scenario. Kubernetes remembers the desired state (three frontend instances) and, when reality diverges (one instance down), immediately creates a new container to restore the count to three. This happens automatically, without human intervention, regardless of the time of day. Option 1 requires human approval, which defeats the purpose of automation. Option 3 involves an unnecessary full shutdown, which is at odds with the high-availability goal. Option 4 only collects logs without taking corrective action — that is not self-healing.</div></div><div class='quiz' data-ans='0'>
+              <p class='q'>Q4. Why does the lecture use the analogy of Kubernetes as a &#x27;general building manager&#x27; and Docker as &#x27;the specialist at each building&#x27;?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>Because Docker operates at the level of a single server running containers, while Kubernetes coordinates containers distributed across many servers as a unified whole</li><li class='opt' onclick='pick(this,3,1)'>Because Docker is an outdated technology that Kubernetes has completely replaced</li><li class='opt' onclick='pick(this,3,2)'>Because Kubernetes can independently create and run containers without Docker</li><li class='opt' onclick='pick(this,3,3)'>Because Docker handles networking and security while Kubernetes is solely responsible for storage</li></ul>
+              <div class='exp'>The correct answer is option 1. The analogy in the lecture — &#x27;a specialist (Docker) was assigned to each building, but as buildings multiplied, a general manager (Kubernetes) became necessary&#x27; — illustrates that Docker is a tool for managing containers on a single host, while Kubernetes is a higher-level layer that orchestrates containers spread across tens or hundreds of servers (nodes). Option 2 is factually incorrect; Docker remains widely used as a container runtime, and Kubernetes supports Docker and other runtimes. Option 3 may be partially true in some configurations but does not capture the core intent of the analogy (single vs. multi-server management). Option 4 describes a role division that is never mentioned in the lecture.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q5. Which of the following best explains the fundamental reason why Kubernetes&#x27; &#x27;service discovery and load balancing&#x27; feature is necessary?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>To centrally manage the version information of container images</li><li class='opt' onclick='pick(this,4,1)'>Because containers get a new IP address every time they die and are recreated, making it impossible for other services to reliably reach them without a stable, fixed endpoint</li><li class='opt' onclick='pick(this,4,2)'>To prevent conflicts when multiple developers deploy code to the same container simultaneously</li><li class='opt' onclick='pick(this,4,3)'>To collect real-time memory usage data from inside containers for performance analysis</li></ul>
+              <div class='exp'>The correct answer is option 2. The lecture explains that &#x27;containers die and are replaced frequently, and their IP addresses change each time.&#x27; Because of this dynamic nature, Kubernetes places a stable, fixed endpoint (a Service object) in front of containers so that clients can always connect to the same address — even as the underlying containers are replaced — and so that incoming traffic is distributed evenly. Option 1 relates to image registry management and has nothing to do with service discovery. Option 3 is a deployment conflict concern, which is a separate CI/CD domain. Option 4 describes the role of monitoring and observability tooling, not service discovery.</div></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=kBF6Bvth0zw' target='_blank'>Container Orchestration Explained</a></li></ul></div>
         </article>
 <article id='lec2' class='lecture'>
-          <h2>02. 쿠버네티스 아키텍처 - 컨트롤 플레인과 워커 노드 </h2>
-          <h2>쿠버네티스 아키텍처 - 컨트롤 플레인과 워커 노드</h2>
-<h3>학습 목표</h3>
+          <h2>02. Kubernetes Architecture - Control Plane and Worker Nodes </h2>
+          <h2>Kubernetes Architecture - Control Plane and Worker Nodes</h2>
+<h3>Learning Objectives</h3>
 <ul>
-<li>클러스터, 마스터(컨트롤 플레인), 워커 노드가 각각 무슨 역할을 하는지 구분한다.</li>
-<li>API Server, Scheduler, etcd, kubelet 등 핵심 구성요소가 무엇을 담당하는지 이해한다.</li>
-<li>사용자가 명령을 내렸을 때 그 요청이 클러스터 안에서 어떤 순서로 처리되는지 그릴 수 있다.</li>
+<li>Distinguish the roles of a cluster, the master (control plane), and worker nodes.</li>
+<li>Understand what each core component — API Server, Scheduler, etcd, kubelet — is responsible for.</li>
+<li>Trace the sequence of steps a user command goes through inside the cluster.</li>
 </ul>
-<h3>본문</h3>
-<h4>왜 아키텍처를 알아야 할까</h4>
-<p>1강에서 우리는 &quot;쿠버네티스가 컨테이너를 알아서 배치하고, 죽으면 다시 살려준다&quot;고 배웠습니다. 그런데 그 &quot;알아서&quot;의 정체를 모르면, 막상 무언가 잘못됐을 때 어디를 들여다봐야 할지 막막합니다. Pod가 안 뜰 때, 어떤 부품이 일을 안 하고 있는 걸까요?</p>
-<p>쿠버네티스는 마법 상자가 아니라, <strong>여러 개의 작은 프로그램(프로세스)이 서로 통신하며 협력하는 시스템</strong>입니다. 이 구조를 한 번 머릿속에 그려 두면, 이후 모든 실습이 훨씬 쉬워집니다. 이번 강의는 직접 명령을 치는 실습은 없지만, 앞으로의 실습을 떠받치는 가장 중요한 밑그림입니다.</p>
-<p>비유하자면 쿠버네티스 클러스터는 <strong>하나의 큰 물류 창고 회사</strong>와 같습니다. 실제로 물건을 나르고 쌓는 작업자들이 있는 창고(워커 노드)가 있고, 그 작업자들에게 &quot;무엇을, 어디에, 몇 개 둘지&quot; 지시하는 본사 관제실(컨트롤 플레인)이 있습니다.</p>
-<h4>클러스터, 컨트롤 플레인, 워커 노드</h4>
-<p>먼저 가장 큰 그림부터 봅시다.</p>
+<h3>Content</h3>
+<h4>Why You Need to Understand the Architecture</h4>
+<p>In Lecture 1, we learned that &quot;Kubernetes automatically places containers and restarts them when they crash.&quot; But if you do not understand what &quot;automatically&quot; actually means, you will be at a loss when something goes wrong. When a Pod fails to start, which component has stopped doing its job?</p>
+<p>Kubernetes is not a magic black box — it is <strong>a system of many small programs (processes) that communicate and cooperate with each other</strong>. Once you have this structure clear in your mind, every hands-on exercise that follows will be much easier to work through. This lecture has no commands to run, but it lays the most important foundation for everything ahead.</p>
+<p>Think of a Kubernetes cluster as <strong>a large logistics company</strong>. There are warehouses (worker nodes) where workers actually move and stack goods, and there is a central control room (the control plane) that tells those workers &quot;what to place, where, and how many.&quot;</p>
+<h4>Cluster, Control Plane, and Worker Nodes</h4>
+<p>Let us start with the big picture.</p>
 <ul>
-<li><strong>클러스터(Cluster)</strong>: 여러 대의 머신(서버)을 하나로 묶어 컨테이너 앱을 실행하는 전체 시스템입니다. 회사 전체라고 보면 됩니다. 한 조직이 운영 환경용, 테스트 환경용처럼 여러 클러스터를 동시에 운영하기도 합니다.</li>
-<li><strong>노드(Node)</strong>: 클러스터를 구성하는 개별 머신 한 대입니다. 클라우드의 가상 머신(EC2 등)일 수도, 물리 서버일 수도, 심지어 여러분의 노트북일 수도 있습니다.</li>
+<li><strong>Cluster</strong>: The overall system that groups multiple machines (servers) together to run containerized applications. Think of it as the entire company. An organization might run several clusters simultaneously — one for production, one for testing, and so on.</li>
+<li><strong>Node</strong>: A single machine that makes up the cluster. It can be a cloud virtual machine (e.g., EC2), a physical server, or even your laptop.</li>
 </ul>
-<p>이 노드들은 역할에 따라 두 종류로 나뉩니다.</p>
+<p>Nodes are divided into two types based on their role.</p>
 <ul>
-<li><strong>컨트롤 플레인(Control Plane, 옛 명칭 &#x27;마스터&#x27;)</strong>: 클러스터 전체를 관리하고 <strong>결정을 내리는 두뇌</strong>입니다. 사용자 요청을 받고, 어떤 컨테이너를 어디에 띄울지 정하고, 클러스터의 상태 데이터를 보관하며, 장애에 반응합니다. 직접 앱을 실행하지는 않습니다 — 명령하는 쪽입니다.</li>
-<li><strong>워커 노드(Worker Node)</strong>: 실제로 여러분의 애플리케이션이 <strong>돌아가는 작업장</strong>입니다. 컨트롤 플레인의 지시를 받아 컨테이너를 실제로 띄우고 유지합니다.</li>
+<li><strong>Control Plane (formerly called &quot;master&quot;)</strong>: The <strong>brain</strong> that manages the entire cluster and makes decisions. It receives user requests, decides which container to run where, stores the cluster&#x27;s state data, and responds to failures. It does not run your applications directly — it is the one giving orders.</li>
+<li><strong>Worker Node</strong>: The <strong>workfloor</strong> where your applications actually <strong>run</strong>. It receives instructions from the control plane and starts and maintains containers.</li>
 </ul>
 <blockquote class='callout'>
-<p>운영 환경에서는 두뇌가 멈추면 클러스터 전체가 위험하므로, 컨트롤 플레인을 여러 노드에 분산 배치해 고가용성을 확보합니다. 반면 테스트용이라면 컨트롤 플레인과 워커를 한 머신에 몰아넣어도 됩니다.</p>
+<p>In production environments, if the brain goes down the entire cluster is at risk, so the control plane is distributed across multiple nodes to ensure high availability. For testing purposes, it is fine to run both the control plane and workers on a single machine.</p>
 </blockquote>
-<p>한 가지 중요한 사실: <strong>워커 노드는 컨테이너를 직접 실행하지 않고 &quot;Pod&quot;라는 단위를 실행합니다.</strong> 도커에서 최소 단위가 컨테이너였다면, 쿠버네티스의 최소 배포 단위는 Pod입니다. Pod 하나 안에는 한 개 이상의 컨테이너가 들어가며, 앱을 더 늘리고 싶으면 Pod를 더 띄우면 됩니다. (Pod는 3강에서 자세히 다룹니다.)</p>
-<h4>컨트롤 플레인의 핵심 부품 4가지</h4>
-<p>관제실(컨트롤 플레인) 안에는 역할이 다른 네 개의 프로그램이 있습니다.</p>
-<p><strong>1. API Server (관제실의 안내데스크)</strong></p>
-<p>클러스터로 들어오는 모든 요청이 거쳐 가는 <strong>유일한 정문</strong>입니다. 우리가 <code class='ic'>kubectl</code>(쿠버네티스 명령줄 도구)이나 대시보드로 명령을 내리면, 실제로는 이 API Server와 대화하는 것입니다. 심지어 워커 노드의 부품들조차 API Server를 통해서만 소통합니다. 정문인 만큼 <strong>인증(누구인지 확인)과 인가(권한이 있는지 확인)</strong>, 요청이 올바른 형식인지 검증하는 일도 여기서 합니다.</p>
-<p><strong>2. etcd (회사의 장부)</strong></p>
-<p>클러스터의 모든 상태 데이터를 저장하는 <strong>키-값 저장소</strong>입니다. 어떤 노드가 있고, 어떤 Pod가 어디서 돌고 있으며, 사용자가 무엇을 요청했는지 — 이 모든 &quot;현재 사실&quot;이 etcd에 기록됩니다. 그래서 etcd를 클러스터의 <strong>단일 진실 공급원(single source of truth)</strong>이라 부릅니다. Pod를 만들면 그 정보가 etcd에 기록되고, 지우면 etcd에서도 지워집니다.</p>
-<p><strong>3. Scheduler (배치 담당자)</strong></p>
-<p>새로 만들어야 할 Pod를 <strong>어느 워커 노드에 올릴지 결정</strong>합니다. 단순히 빈자리에 넣는 게 아니라, Pod가 요구하는 CPU·메모리 양, 노드의 여유 자원, &quot;이 Pod는 저 Pod와 가까이 둬라&quot; 같은 제약 조건을 종합해 가장 적합한 노드를 고릅니다. 한정된 서버에 여러 앱을 최적으로 욱여넣는 이른바 &#x27;짐 싸기(bin packing) 문제&#x27;를 푸는 역할입니다.</p>
-<p><strong>4. Controller Manager (현장 감독)</strong></p>
-<p>시스템을 항상 <strong>사용자가 원하는 상태(desired state)로 되돌리려는</strong> 백그라운드 프로세스입니다. 예를 들어 &quot;Pod 3개가 떠 있어야 한다&quot;고 선언했는데 하나가 죽으면, 컨트롤러가 이를 감지하고 새 Pod를 다시 띄웁니다. 노드가 다운되면 감지하는 노드 컨트롤러, 배포를 관리하는 디플로이먼트 컨트롤러처럼, 자원 종류마다 전담 컨트롤러가 돌아갑니다. 쿠버네티스의 &#x27;자가 치유&#x27;가 바로 여기서 나옵니다.</p>
+<p>One important fact: <strong>worker nodes do not run containers directly — they run units called Pods.</strong> If Docker&#x27;s smallest unit is a container, Kubernetes&#x27; smallest deployable unit is a Pod. A Pod contains one or more containers, and to scale up an application you simply run more Pods. (Pods are covered in detail in Lecture 3.)</p>
+<h4>The 4 Core Components of the Control Plane</h4>
+<p>Inside the control room (control plane) there are four programs, each with a distinct role.</p>
+<p><strong>1. API Server (the front desk of the control room)</strong></p>
+<p>The <strong>sole entry point</strong> through which every request entering the cluster passes. When you issue a command with <code class='ic'>kubectl</code> (the Kubernetes CLI) or through the dashboard, you are actually talking to the API Server. Even the components on worker nodes communicate exclusively through the API Server. As the front desk, it also handles <strong>authentication (verifying who you are) and authorization (verifying what you are allowed to do)</strong>, as well as validating that requests are properly formatted.</p>
+<p><strong>2. etcd (the company ledger)</strong></p>
+<p>A <strong>key-value store</strong> that holds all of the cluster&#x27;s state data. Which nodes exist, which Pods are running where, what the user has requested — every &quot;current fact&quot; is recorded in etcd. This is why etcd is called the cluster&#x27;s <strong>single source of truth</strong>. When you create a Pod, that information is written to etcd; when you delete it, it is removed from etcd.</p>
+<p><strong>3. Scheduler (the placement coordinator)</strong></p>
+<p>Decides <strong>which worker node a newly created Pod should run on</strong>. Rather than simply finding any open slot, the Scheduler considers the CPU and memory a Pod requires, the available resources on each node, and constraints such as &quot;keep this Pod close to that Pod,&quot; then picks the most suitable node. It solves what is essentially a bin-packing problem — fitting multiple applications optimally onto a limited set of servers.</p>
+<p><strong>4. Controller Manager (the floor supervisor)</strong></p>
+<p>A background process that continuously tries to <strong>bring the system back to the user&#x27;s desired state</strong>. For example, if you declared via a Deployment or ReplicaSet that &quot;3 Pods must be running&quot; and one dies, the controller detects this and creates a new Pod object to restore the count. There are dedicated controllers for each resource type — a Node Controller that detects downed nodes, a Deployment Controller that manages rollouts, and so on. Kubernetes&#x27; self-healing capability comes from here.</p>
 <blockquote class='callout'>
-<p>클라우드에서 운영한다면 Cloud Controller Manager가 추가로 붙어, 노드용 가상 머신 생성 같은 작업을 클라우드 제공자(AWS·GCP·Azure)에게 위임합니다.</p>
+<p>The Controller Manager&#x27;s job is to ensure the correct number of Pod objects exist as declared — it does not directly start a Pod on a specific node. Actually starting a Pod that has already been assigned to a node is the job of that node&#x27;s kubelet.</p>
 </blockquote>
-<h4>워커 노드의 핵심 부품 3가지</h4>
-<p>작업장(워커 노드)에는 Pod를 실제로 돌리기 위한 세 가지 프로그램이 있습니다.</p>
-<p><strong>1. kubelet (현장 작업반장)</strong></p>
-<p>모든 워커 노드에서 도는 에이전트입니다. 컨트롤 플레인(API Server)과 통신해 &quot;이 노드에서 어떤 Pod를 돌려라&quot;는 지시를 받고, 그 Pod가 실제로 살아 건강하게 돌아가는지 책임집니다. 노드와 두뇌를 잇는 연락책이라고 보면 됩니다.</p>
-<p><strong>2. Container Runtime (컨테이너 실행 엔진)</strong></p>
-<p>실제로 컨테이너를 실행하는 소프트웨어입니다. 이미지를 레지스트리에서 내려받고, 컨테이너를 시작·중지하며 자원을 관리합니다. 흔히 도커를 떠올리지만, 도커는 여러 런타임 중 하나일 뿐입니다. 쿠버네티스는 표준 규격(CRI)만 만족하면 containerd, CRI-O 등 어떤 런타임이든 끼워 쓸 수 있습니다. kubelet이 이 런타임에게 실제 실행을 지시합니다.</p>
-<p><strong>3. kube-proxy (네트워크 교통정리)</strong></p>
-<p>각 노드의 네트워크 규칙을 관리해, 클러스터 안팎의 트래픽이 올바른 Pod로 전달되도록 라우팅하고 부하를 분산합니다.</p>
-<p>지금까지 설명한 클러스터의 전체 구성을 한 장으로 정리하면 아래 구성도와 같습니다. 컨트롤 플레인의 4대 부품과 워커 노드의 3대 부품이 각각 어디에 속하는지 눈으로 확인해 보세요.</p>
+<blockquote class='callout'>
+<p>When running in a cloud environment, a Cloud Controller Manager is added to delegate cloud-specific tasks — such as provisioning virtual machines for nodes — to the cloud provider (AWS, GCP, or Azure).</p>
+</blockquote>
+<h4>The 3 Core Components of a Worker Node</h4>
+<p>Each worker node (workfloor) runs three programs that together keep Pods running.</p>
+<p><strong>1. kubelet (the on-site crew leader)</strong></p>
+<p>An agent that runs on every worker node. It communicates with the control plane (API Server) to receive instructions about which Pods to run on its node, and takes responsibility for keeping those Pods alive and healthy. Think of it as the liaison between a node and the brain.</p>
+<p><strong>2. Container Runtime (the container execution engine)</strong></p>
+<p>The software that actually runs containers. It pulls images from a registry, starts and stops containers, and manages their resources. Docker comes to mind first, but Docker is only one of several runtimes. Kubernetes can work with any runtime — containerd, CRI-O, and others — as long as it conforms to the standard interface (CRI). The kubelet directs this runtime to carry out actual execution.</p>
+<p><strong>3. kube-proxy (the network traffic director)</strong></p>
+<p>Manages the network rules on each node so that traffic from inside and outside the cluster is correctly routed and load-balanced to the right Pod.</p>
+<p>The full cluster layout described so far is summarized in the diagram below. Confirm for yourself where the control plane&#x27;s four components and the worker node&#x27;s three components each belong.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TB
-    User[&quot;사용자 (kubectl)&quot;]
+    User[&quot;User (kubectl)&quot;]
 
-    subgraph Cluster[&quot;쿠버네티스 클러스터&quot;]
-        subgraph CP[&quot;컨트롤 플레인 (두뇌)&quot;]
-            API[&quot;API Server&lt;br/&gt;유일한 정문·인증&quot;]
-            ETCD[&quot;etcd&lt;br/&gt;상태 저장소&quot;]
-            SCH[&quot;Scheduler&lt;br/&gt;노드 배치 결정&quot;]
-            CM[&quot;Controller Manager&lt;br/&gt;자가 치유&quot;]
+    subgraph Cluster[&quot;Kubernetes Cluster&quot;]
+        subgraph CP[&quot;Control Plane (Brain)&quot;]
+            API[&quot;API Server&lt;br/&gt;Sole Entry Point · Auth&quot;]
+            ETCD[&quot;etcd&lt;br/&gt;State Store&quot;]
+            SCH[&quot;Scheduler&lt;br/&gt;Node Placement Decision&quot;]
+            CM[&quot;Controller Manager&lt;br/&gt;Self-Healing&quot;]
         end
 
-        subgraph W1[&quot;워커 노드 1&quot;]
+        subgraph W1[&quot;Worker Node 1&quot;]
             KL1[&quot;kubelet&quot;]
             CR1[&quot;Container Runtime&quot;]
             KP1[&quot;kube-proxy&quot;]
             POD1[&quot;Pod&quot;]
         end
 
-        subgraph W2[&quot;워커 노드 2&quot;]
+        subgraph W2[&quot;Worker Node 2&quot;]
             KL2[&quot;kubelet&quot;]
             CR2[&quot;Container Runtime&quot;]
             KP2[&quot;kube-proxy&quot;]
@@ -178,156 +198,167 @@
         end
     end
 
-    User --&gt;|명령 요청| API
+    User --&gt;|Command Request| API
     API --- ETCD
     API --- SCH
     API --- CM
-    API --&gt;|Pod 명세 전달| KL1
-    API --&gt;|Pod 명세 전달| KL2
-    KL1 --&gt;|실행 지시| CR1
-    KL2 --&gt;|실행 지시| CR2
-    CR1 --&gt;|컨테이너 실행| POD1
-    CR2 --&gt;|컨테이너 실행| POD2</div><figcaption>쿠버네티스 클러스터 구성도 - 컨트롤 플레인과 워커 노드의 핵심 부품</figcaption></figure>
-<h4>사용자 명령이 처리되는 흐름</h4>
-<p>이제 부품들이 어떻게 협력하는지, &quot;Pod 하나를 만들어줘&quot;라는 요청이 클러스터를 흐르는 과정을 따라가 봅시다. <strong>핵심은 모든 소통이 API Server를 거친다는 점입니다.</strong> 흐름은 다음과 같습니다.</p>
-<p>1. 사용자가 <code class='ic'>kubectl</code>로 &quot;이 컨테이너를 Pod로 실행해줘&quot;를 <strong>API Server</strong>에 요청한다.</p>
-<p>2. API Server가 인증·인가와 요청 형식을 검증한 뒤, 이 Pod 정보를 <strong>etcd</strong>에 기록한다.</p>
-<p>3. 아직 어느 노드에 둘지 안 정해진 Pod를 <strong>Scheduler</strong>가 발견하고, 자원 상황을 분석해 최적의 워커 노드를 골라 API Server에 알린다.</p>
-<p>4. <strong>Controller Manager</strong>가 &quot;노드는 정해졌는데 아직 안 돌고 있네&quot;를 감지하고, 해당 노드에서 Pod를 시작하라고 API Server에 알린다.</p>
-<p>5. API Server가 해당 노드의 <strong>kubelet</strong>에게 Pod 명세를 전달한다.</p>
-<p>6. kubelet이 노드의 <strong>Container Runtime</strong>에게 지시하고, 런타임이 이미지를 내려받아 컨테이너를 실행한다 → Pod가 뜬다.</p>
-<p>7. 모든 상태 변화가 다시 etcd에 저장된다. 이제 사용자가 <code class='ic'>kubectl get pod</code>로 확인하면 &quot;Running&quot;이 보인다.</p>
-<p>이 7단계를 시간 순서대로 그리면 아래 시퀀스 다이어그램과 같습니다. 모든 화살표가 API Server를 지나간다는 점에 주목하세요.</p>
+    API --&gt;|Pod Spec Delivery| KL1
+    API --&gt;|Pod Spec Delivery| KL2
+    KL1 --&gt;|Execution Order| CR1
+    KL2 --&gt;|Execution Order| CR2
+    CR1 --&gt;|Container Start| POD1
+    CR2 --&gt;|Container Start| POD2</div><figcaption>Kubernetes Cluster Architecture - Core Components of the Control Plane and Worker Nodes</figcaption></figure>
+<h4>How a User Command Is Processed</h4>
+<p>Now let us see how these components work together by following a &quot;create a Pod&quot; request as it flows through the cluster. <strong>The key point is that every communication passes through the API Server.</strong> The flow is as follows.</p>
+<p>1. The user sends a &quot;run this container as a Pod&quot; request to the <strong>API Server</strong> via <code class='ic'>kubectl</code>.</p>
+<p>2. The API Server verifies authentication, authorization, and request format, then writes the Pod information to <strong>etcd</strong>.</p>
+<p>3. The <strong>Scheduler</strong> notices the Pod has not yet been assigned to a node. It analyzes resource availability and picks the most suitable worker node, then notifies the API Server of the binding. This decision is also recorded in etcd.</p>
+<p>4. The <strong>kubelet</strong> on the selected worker node is continuously watching the API Server. It spots the Pod assigned to its node and proceeds to start it.</p>
+<p>5. The kubelet instructs the node&#x27;s <strong>Container Runtime</strong> to pull the image and start the container — the Pod comes up.</p>
+<p>6. The kubelet reports &quot;this Pod is now Running&quot; to the API Server, and the state change is saved back to etcd. Now when the user runs <code class='ic'>kubectl get pod</code>, they see &quot;Running.&quot;</p>
+<p>One thing to note: in this single-Pod creation flow, <strong>the Controller Manager does not appear</strong>. Once the Scheduler assigns a node, the kubelet on that node watches the API Server and starts the Pod on its own. The Controller Manager&#x27;s turn comes separately — when a Deployment or ReplicaSet declares &quot;keep N Pods running,&quot; it <strong>creates Pod objects</strong> to make up any shortfall. Those newly created Pods then go through steps 4–6 above (Scheduler assigns a node → kubelet starts the Pod).</p>
+<p>The six steps in chronological order are shown in the sequence diagram below. Notice that every arrow passes through the API Server.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant U as 사용자(kubectl)
+    participant U as User (kubectl)
     participant API as API Server
     participant ETCD as etcd
     participant SCH as Scheduler
-    participant CM as Controller Manager
     participant KL as kubelet
     participant CR as Container Runtime
 
-    U-&gt;&gt;API: 1. Pod 실행 요청
-    API-&gt;&gt;API: 2. 인증·인가·형식 검증
-    API-&gt;&gt;ETCD: 2. Pod 정보 기록
-    SCH-&gt;&gt;API: 3. 배치 안된 Pod 발견, 최적 노드 선정
-    CM-&gt;&gt;API: 4. 미실행 감지, 시작 지시
-    API-&gt;&gt;KL: 5. Pod 명세 전달
-    KL-&gt;&gt;CR: 6. 컨테이너 실행 지시
-    CR--&gt;&gt;KL: 6. Pod 실행 완료
-    KL-&gt;&gt;API: 7. 상태 보고
-    API-&gt;&gt;ETCD: 7. 상태 변화 저장
+    U-&gt;&gt;API: 1. Pod creation request
+    API-&gt;&gt;API: 2. Auth · authz · format validation
+    API-&gt;&gt;ETCD: 2. Write Pod record
+    SCH-&gt;&gt;API: 3. Unscheduled Pod found, optimal node selected (binding)
+    KL-&gt;&gt;API: 4. Pod assigned to this node discovered via watch
+    KL-&gt;&gt;CR: 5. Container execution order
+    CR--&gt;&gt;KL: 5. Pod started successfully
+    KL-&gt;&gt;API: 6. Status report (Running)
+    API-&gt;&gt;ETCD: 6. State change saved
     U-&gt;&gt;API: kubectl get pod
-    API--&gt;&gt;U: Running</div><figcaption>Pod 생성 요청이 클러스터를 흐르는 7단계 처리 순서</figcaption></figure>
-<p>여기서 한 가지 더. 만약 떠 있던 Pod가 갑자기 죽으면 어떻게 될까요? Controller Manager가 &quot;원하는 상태(Pod 실행 중)와 현재 상태(죽음)가 다르다&quot;는 것을 감지하고, 위 흐름을 다시 돌려 새 Pod를 띄웁니다. 이것이 우리가 손대지 않아도 클러스터가 스스로 복구되는 원리입니다.</p>
-<h3>핵심 요약</h3>
+    API--&gt;&gt;U: Running</div><figcaption>6-Step Processing Sequence of a Pod Creation Request Through the Cluster</figcaption></figure>
+<p>One more thing to consider. What happens if a Pod launched via a Deployment suddenly crashes? The <strong>Controller Manager</strong> detects that &quot;the desired state (N Pods running) differs from the current state (N-1 Pods)&quot; and creates a new Pod object to fill the gap. That Pod then rides the same flow (Scheduler assigns a node → kubelet starts it) and comes back up on a new node. This is how the cluster heals itself without any manual intervention.</p>
+<h3>Key Takeaways</h3>
 <ul>
-<li><strong>클러스터</strong>는 여러 노드의 묶음이며, 노드는 결정을 내리는 <strong>컨트롤 플레인</strong>과 앱을 실제 실행하는 <strong>워커 노드</strong>로 나뉜다.</li>
-<li>컨트롤 플레인 4대 부품: <strong>API Server</strong>(유일한 정문·인증), <strong>etcd</strong>(상태를 보관하는 단일 진실 공급원), <strong>Scheduler</strong>(Pod를 어느 노드에 둘지 결정), <strong>Controller Manager</strong>(원하는 상태로 자가 치유).</li>
-<li>워커 노드 3대 부품: <strong>kubelet</strong>(두뇌와 통신하며 Pod 유지), <strong>Container Runtime</strong>(컨테이너 실제 실행), <strong>kube-proxy</strong>(네트워크 라우팅).</li>
-<li>워커 노드는 컨테이너가 아니라 <strong>Pod</strong>를 실행한다.</li>
-<li>모든 요청과 내부 통신은 <strong>반드시 API Server를 거치며</strong>, 사용자 명령은 API Server → etcd → Scheduler → Controller Manager → kubelet → Runtime 순으로 흐른다.</li>
+<li>A <strong>cluster</strong> is a collection of nodes, divided into the <strong>control plane</strong> (makes decisions) and <strong>worker nodes</strong> (run applications).</li>
+<li>Control plane&#x27;s 4 components: <strong>API Server</strong> (sole entry point · authentication), <strong>etcd</strong> (single source of truth for state data), <strong>Scheduler</strong> (decides which node a Pod runs on), <strong>Controller Manager</strong> (self-healing — ensures the declared number of Pod objects exists).</li>
+<li>Worker node&#x27;s 3 components: <strong>kubelet</strong> (watches the API Server and directly starts/maintains Pods on its node), <strong>Container Runtime</strong> (actually runs containers), <strong>kube-proxy</strong> (network routing).</li>
+<li>Worker nodes run <strong>Pods</strong>, not bare containers.</li>
+<li>Every request and internal communication <strong>must go through the API Server</strong>. A single Pod creation flows as: API Server → etcd → Scheduler (node decision) → kubelet on that node (direct execution) → Container Runtime. The Controller Manager creates Pod objects when a Deployment/ReplicaSet needs to maintain a replica count.</li>
 </ul>
-<p>&lt;/content&gt;</p>
-<p>&lt;/invoke&gt;</p>
-          
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <p class='q'>Q1. Which statement best describes the difference in roles between the control plane and worker nodes?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>The control plane directly runs the user&#x27;s application containers, while worker nodes decide which node to place containers on.</li><li class='opt' onclick='pick(this,0,1)'>The control plane acts as the brain that manages the entire cluster and makes decisions, while actual application Pods run on worker nodes.</li><li class='opt' onclick='pick(this,0,2)'>Both the control plane and worker nodes can run Pods, and the role difference is determined by the amount of resources each holds.</li><li class='opt' onclick='pick(this,0,3)'>The control plane alone, without any worker nodes, can serve containerized applications normally.</li></ul>
+              <div class='exp'>Correct answer (B): The control plane handles &#x27;instruction and management,&#x27; while worker nodes handle &#x27;execution.&#x27; The control plane components (API Server, etcd, Scheduler, Controller Manager) do not directly run application containers — they decide what to run and where, and coordinate accordingly. Actual Pods run exclusively on worker nodes. (A) The roles are reversed — this is incorrect. (C) The control plane does not run app Pods in production, and roles are determined by design, not resource size. (D) Without worker nodes there are no nodes to actually run containers on, so applications cannot be served.</div></div><div class='quiz' data-ans='2'>
+              <p class='q'>Q2. Which statement about etcd is correct?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>etcd directly receives kubectl commands from users and acts as the cluster&#x27;s front gate by handling authentication and authorization.</li><li class='opt' onclick='pick(this,1,1)'>etcd is the scheduling engine that calculates which worker node a Pod should be placed on.</li><li class='opt' onclick='pick(this,1,2)'>etcd is a key-value store that holds all of the cluster&#x27;s state data and serves as the cluster&#x27;s single source of truth.</li><li class='opt' onclick='pick(this,1,3)'>etcd runs on each worker node and acts as an agent responsible for container health checks and execution.</li></ul>
+              <div class='exp'>Correct answer (C): etcd is a key-value store that holds all cluster state data — the list of nodes, Pod placement information, user declarations, and more — and is called the &#x27;single source of truth.&#x27; When a Pod is created, it is recorded in etcd; when deleted, it is removed from etcd. (A) Receiving all requests and handling authentication/authorization is the role of the API Server. (B) Deciding the placement node is the role of the Scheduler. (D) Running on each worker node and being responsible for container execution is the role of kubelet.</div></div><div class='quiz' data-ans='2'>
+              <p class='q'>Q3. The Scheduler has decided to place a particular Pod on worker node A. After that decision, which component actually runs the container? (analytical)</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>The Scheduler directly instructs worker node A&#x27;s Container Runtime to start the container.</li><li class='opt' onclick='pick(this,2,1)'>The Controller Manager selects worker node A and then commands kubelet to run the container.</li><li class='opt' onclick='pick(this,2,2)'>Worker node A&#x27;s kubelet watches the API Server, discovers the Pod assigned to its node, and instructs the Container Runtime to start it.</li><li class='opt' onclick='pick(this,2,3)'>The API Server directly calls worker node A&#x27;s Container Runtime to start the container.</li></ul>
+              <div class='exp'>Correct answer (C): The Scheduler&#x27;s role ends at &#x27;deciding (binding) which node to use&#x27; — it does not perform the actual execution. The binding decision is written to etcd via the API Server. After that, the kubelet on the assigned node continuously watches the API Server, discovers the Pod bound to its node, and instructs the node&#x27;s Container Runtime to pull the image and start the container. (A) The Scheduler does not contact nodes directly. (B) The Controller Manager does not appear in this single-Pod creation flow; it creates Pod objects when a Deployment or similar resource needs to maintain a replica count. (D) The API Server relays and validates requests and writes data to etcd — it does not call the Container Runtime directly.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q4. When a user requests Pod creation via kubectl, which sequence is correct?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>kubectl → Scheduler → API Server → etcd → kubelet → Container Runtime</li><li class='opt' onclick='pick(this,3,1)'>kubectl → API Server → etcd write → Scheduler (node decision) → kubelet (execution order) → Container Runtime</li><li class='opt' onclick='pick(this,3,2)'>kubectl → kubelet → Container Runtime → API Server → etcd → Scheduler</li><li class='opt' onclick='pick(this,3,3)'>kubectl → etcd → API Server → Scheduler → Controller Manager → kubelet</li></ul>
+              <div class='exp'>Correct answer (B): Every request must go through the API Server as the first gate. The flow is: (1) kubectl sends a request to the API Server → (2) API Server validates authentication, authorization, and format, then writes Pod information to etcd → (3) Scheduler finds the unscheduled Pod, selects the optimal node (binding), notifies the API Server, and the binding is also recorded in etcd → (4) The kubelet on that node watches the API Server and discovers its Pod → (5) kubelet instructs the Container Runtime to execute → Pod starts. (A) If the Scheduler comes before the API Server, authentication and authorization would be bypassed — incorrect. (C) kubelet and Container Runtime cannot come before etcd and Scheduler. (D) The Controller Manager is not involved in a single Pod creation flow.</div></div><div class='quiz' data-ans='2'>
+              <p class='q'>Q5. You are running 3 Pods via a Deployment. One worker node suddenly goes down and a Pod is lost. When Kubernetes automatically recovers that Pod on another node, which component is the first to &#x27;create the missing Pod object&#x27;? (applied)</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>Scheduler — it calculates the optimal position among the remaining nodes and immediately reschedules the Pod.</li><li class='opt' onclick='pick(this,4,1)'>kubelet — it detects the dead Pod and creates a new Pod object on its own.</li><li class='opt' onclick='pick(this,4,2)'>Controller Manager — it detects the gap between the declared replica count (3) and the actual count (2), and creates the missing Pod object.</li><li class='opt' onclick='pick(this,4,3)'>etcd — it automatically reconciles the difference between the stored desired state and current state to recreate the Pod.</li></ul>
+              <div class='exp'>Correct answer (C): The Controller Manager (ReplicaSet controller) continuously monitors the difference between the desired state (3 Pods) and the current state (2 Pods). When it detects a discrepancy, it creates as many new Pod objects as needed to close the gap. Those Pod objects then follow the normal flow — the Scheduler assigns a node and the kubelet on that node actually starts them. (A) The Scheduler &#x27;decides&#x27; on a node when a Pod object already exists; it does not create Pod objects. (B) kubelet&#x27;s role is to run and maintain Pods assigned to its node — it is not the entity that creates new Pod objects. (D) etcd is purely a storage layer; it does not take any action on its own.</div></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=TlHvYWVUZyc' target='_blank'>Kubernetes Explained in 6 Minutes | k8s Architecture</a></li><li><a href='https://www.youtube.com/watch?v=vZ9gEqeddxQ' target='_blank'>Day 2 | Kubernetes Architecture explained</a></li><li><a href='https://www.youtube.com/watch?v=VQUZF6k6g88' target='_blank'>Kubernetes architecture: Nodes and control plane</a></li></ul></div>
         </article>
 <article id='lec3' class='lecture'>
-          <h2>03. Pod와 컨테이너 - 쿠버네티스의 최소 배포 단위 </h2>
-          <h2>Pod와 컨테이너 - 쿠버네티스의 최소 배포 단위</h2>
-<h3>학습 목표</h3>
+          <h2>03. Pods and Containers - The Smallest Deployable Unit in Kubernetes </h2>
+          <h2>Pods and Containers - The Smallest Deployable Unit in Kubernetes</h2>
+<h3>Learning Objectives</h3>
 <ul>
-<li>Pod가 무엇이며 컨테이너와 어떻게 다른지 이해한다</li>
-<li>Pod의 생명주기와 단일/멀티 컨테이너 패턴을 안다</li>
-<li>kubectl로 Pod를 생성하고 상태를 확인할 수 있다</li>
+<li>Understand what a Pod is and how it differs from a container</li>
+<li>Know the Pod lifecycle and both single-container and multi-container patterns</li>
+<li>Be able to create a Pod with kubectl and check its status</li>
 </ul>
-<h3>본문</h3>
-<h4>왜 컨테이너가 아니라 Pod일까</h4>
-<p>앞선 강의에서 컨테이너가 &quot;애플리케이션 코드와 실행에 필요한 모든 것을 하나로 묶은 단위&quot;라는 것을 배웠습니다. 그런데 막상 쿠버네티스를 다루다 보면 컨테이너를 직접 만지는 명령은 거의 없고, 늘 <strong>Pod(파드)</strong> 라는 단어가 등장합니다. 왜 쿠버네티스는 컨테이너를 직접 다루지 않을까요?</p>
-<p>쿠버네티스에서 <strong>Pod는 배포할 수 있는 가장 작은 단위</strong>입니다. 쿠버네티스는 컨테이너를 직접 다루지 않고, 컨테이너를 Pod라는 봉투에 한 번 감싸서 다룹니다. 즉 우리가 클러스터에 무언가를 올린다는 것은 곧 &quot;Pod를 올린다&quot;는 뜻입니다.</p>
+<h3>Content</h3>
+<h4>Why Pods Instead of Containers?</h4>
+<p>In previous lectures, we learned that a container is &quot;a self-contained unit that bundles application code with everything it needs to run.&quot; Yet when you actually work with Kubernetes, you rarely interact with containers directly - the term <strong>Pod</strong> keeps coming up instead. Why doesn&#x27;t Kubernetes deal with containers directly?</p>
+<p>In Kubernetes, a <strong>Pod is the smallest deployable unit</strong>. Kubernetes does not manage containers directly; instead, it wraps containers inside an envelope called a Pod. In other words, deploying anything to a cluster means deploying a Pod.</p>
 <blockquote class='callout'>
-<p>핵심: 컨테이너는 &quot;패키징 단위&quot;, Pod는 쿠버네티스가 다루는 &quot;실행/배포 단위&quot;입니다. 컨테이너를 직접 클러스터에 던지는 게 아니라, 항상 Pod로 감싸서 올립니다.</p>
+<p>Key point: A container is the &quot;packaging unit.&quot; A Pod is Kubernetes&#x27;s &quot;execution and deployment unit.&quot; You never throw a container straight at the cluster - it always goes inside a Pod first.</p>
 </blockquote>
-<h4>Pod란 무엇인가 - 컨테이너를 담는 봉투</h4>
-<p>Pod는 <strong>하나 이상의 컨테이너를 묶은 그룹</strong>입니다. 핵심은 같은 Pod 안에 든 컨테이너들이 다음을 <strong>공유</strong>한다는 점입니다.</p>
+<h4>What Is a Pod? - An Envelope for Containers</h4>
+<p>A Pod is <strong>a group of one or more containers</strong>. The key feature is that containers within the same Pod <strong>share</strong> the following:</p>
 <ul>
-<li><strong>네트워크</strong>: 같은 Pod의 컨테이너들은 동일한 IP 주소를 가지며, 서로를 <code class='ic'>localhost</code>로 부를 수 있습니다. 포트도 공유합니다.</li>
-<li><strong>스토리지(볼륨)</strong>: 같은 디렉터리를 공유해 데이터를 주고받을 수 있습니다.</li>
+<li><strong>Network</strong>: Containers in the same Pod share a single IP address and can reach each other via <code class='ic'>localhost</code>. They also share port space.</li>
+<li><strong>Storage (volumes)</strong>: They can share directories to exchange data.</li>
 </ul>
-<p>다만 컨테이너는 여전히 각자의 파일시스템을 갖고 있어 <strong>격리</strong>는 유지됩니다. 비유하자면 Pod는 &quot;한 집(주소·네트워크는 공유)에 사는 룸메이트들&quot;이고, 각자의 방(파일시스템)은 분리되어 있는 셈입니다.</p>
-<p>여기서 초보자가 자주 놓치는 중요한 사실이 있습니다. <strong>Pod에 컨테이너가 한 개든 여러 개든, 같은 Pod의 컨테이너는 항상 같은 노드(서버)에 함께 배치되고, 함께 생성되고 함께 사라집니다.</strong> 따로 떼어 다른 노드로 옮길 수 없습니다.</p>
-<h4>단일 컨테이너 vs 멀티 컨테이너 패턴</h4>
-<p>실무에서 <strong>대부분의 Pod는 컨테이너 1개짜리(단일 컨테이너 패턴)</strong> 입니다. &quot;하나의 애플리케이션 = 하나의 컨테이너 = 하나의 Pod&quot;가 가장 기본이고 권장되는 형태입니다. 처음 배울 때는 이 형태만 생각해도 충분합니다.</p>
-<p>그렇다면 멀티 컨테이너는 언제 쓸까요? <strong>서로 아주 밀접하게 협력하며, 떨어지면 의미가 없는 보조 컨테이너</strong>가 있을 때입니다. 대표적인 예가 사이드카(sidecar) 패턴입니다.</p>
+<p>Each container still has its own filesystem, so <strong>isolation is maintained</strong>. Think of a Pod as &quot;roommates living at the same address (shared network and IP),&quot; where each person has their own room (separate filesystem).</p>
+<p>Here is something beginners often miss: <strong>regardless of whether a Pod has one container or several, all containers in the same Pod are always scheduled on the same node, created together, and destroyed together.</strong> You cannot move individual containers to a different node.</p>
+<h4>Single-Container vs. Multi-Container Patterns</h4>
+<p>In practice, <strong>most Pods contain a single container (single-container pattern)</strong>. &quot;One application = one container = one Pod&quot; is the most fundamental and recommended approach. When you are starting out, this is the only pattern you need to think about.</p>
+<p>So when do you use multiple containers? Only when you have a <strong>helper container that must work so closely with the main container that separating them makes no sense</strong>. The canonical example is the sidecar pattern:</p>
 <ul>
-<li>메인 컨테이너: 웹 콘텐츠를 제공하는 파이썬 애플리케이션</li>
-<li>보조 컨테이너: 그 애플리케이션의 로그를 수집해 외부로 전송하는 컨테이너</li>
+<li>Main container: a Python application serving web content</li>
+<li>Sidecar container: a container that collects the application&#x27;s logs and ships them to an external destination</li>
 </ul>
-<p>이 둘은 같은 데이터를 다루고 <code class='ic'>localhost</code>로 긴밀히 통신해야 하므로, 별도 Pod로 떼지 않고 한 Pod에 함께 둡니다. 그러면 항상 같은 곳에서 함께 실행되고 함께 관리됩니다.</p>
-<p>아래 구성도처럼 두 패턴 모두 하나의 Pod 안에서 IP와 볼륨을 공유하되, 컨테이너마다 파일시스템은 분리되어 있습니다.</p>
+<p>Because these two need to operate on the same data and communicate tightly over <code class='ic'>localhost</code>, they are placed in the same Pod rather than split into separate Pods. This way they always run together in the same location and are managed as one unit.</p>
+<p>As shown in the diagram below, both patterns share an IP and volumes within a single Pod, while each container keeps its own isolated filesystem.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
-    subgraph SinglePod[&quot;단일 컨테이너 Pod&quot;]
+    subgraph SinglePod[&quot;Single-Container Pod&quot;]
         direction TB
-        SC[&quot;메인 컨테이너&lt;br/&gt;웹 앱&quot;]
-        SNet[&quot;공유 네트워크&lt;br/&gt;IP 1개 · localhost&quot;]
-        SVol[&quot;공유 볼륨&quot;]
+        SC[&quot;Main Container&lt;br/&gt;Web App&quot;]
+        SNet[&quot;Shared Network&lt;br/&gt;1 IP · localhost&quot;]
+        SVol[&quot;Shared Volume&quot;]
         SC --- SNet
         SC --- SVol
     end
 
-    subgraph MultiPod[&quot;멀티 컨테이너 Pod (사이드카)&quot;]
+    subgraph MultiPod[&quot;Multi-Container Pod (Sidecar)&quot;]
         direction TB
-        MMain[&quot;메인 컨테이너&lt;br/&gt;웹 앱&quot;]
-        MSide[&quot;보조 컨테이너&lt;br/&gt;로그 수집기&quot;]
-        MNet[&quot;공유 네트워크&lt;br/&gt;IP 1개 · localhost&quot;]
-        MVol[&quot;공유 볼륨&quot;]
+        MMain[&quot;Main Container&lt;br/&gt;Web App&quot;]
+        MSide[&quot;Sidecar Container&lt;br/&gt;Log Collector&quot;]
+        MNet[&quot;Shared Network&lt;br/&gt;1 IP · localhost&quot;]
+        MVol[&quot;Shared Volume&quot;]
         MMain --- MNet
         MSide --- MNet
         MMain --- MVol
         MSide --- MVol
-    end</div><figcaption>단일 컨테이너 Pod와 멀티 컨테이너(사이드카) Pod의 내부 구조</figcaption></figure>
+    end</div><figcaption>Internal structure of a single-container Pod and a multi-container (sidecar) Pod</figcaption></figure>
 <blockquote class='callout'>
-<p>주의: 멀티 컨테이너는 &quot;한 화면에 보이니까 그냥 같이 넣자&quot;가 아닙니다. 생명주기를 함께해야 할 만큼 결합도가 높을 때만 사용하고, 그렇지 않으면 각각 별도의 Pod로 분리하는 것이 정석입니다.</p>
+<p>Note: Multi-container Pods are not for grouping things together just because they appear on the same screen. Use this pattern only when the coupling is tight enough that the containers must share a lifecycle. Otherwise, split them into separate Pods.</p>
 </blockquote>
-<h4>Pod의 생명주기 - 그리고 &quot;Pod는 일회용이다&quot;</h4>
-<p>Pod를 만들면 다음과 같은 상태(Phase)를 거칩니다.</p>
+<h4>The Pod Lifecycle - and &quot;Pods Are Ephemeral&quot;</h4>
+<p>Once a Pod is created, it passes through the following phases:</p>
 <ul>
-<li><strong>Pending</strong>: 클러스터가 요청을 받았고, 어느 노드에 둘지 정하고 이미지를 내려받는 등 준비 중인 상태</li>
-<li><strong>Running</strong>: 노드에 배치되어 컨테이너가 실제로 실행 중인 상태</li>
-<li><strong>Succeeded</strong>: (일회성 작업의 경우) 컨테이너가 정상 종료되어 끝난 상태</li>
-<li><strong>Failed</strong>: 컨테이너가 오류로 종료된 상태</li>
+<li><strong>Pending</strong>: The cluster has received the request and is preparing - deciding which node to place it on and pulling the image.</li>
+<li><strong>Running</strong>: The Pod has been scheduled to a node and its containers are actively running.</li>
+<li><strong>Succeeded</strong>: (For one-off jobs) All containers have exited successfully.</li>
+<li><strong>Failed</strong>: At least one container exited with an error.</li>
 </ul>
-<p>아래 상태 전이도처럼 Pod는 준비 단계를 거쳐 실행되고, 작업 성격에 따라 정상 종료 또는 실패로 끝납니다.</p>
+<p>As shown in the state diagram below, a Pod moves through a preparation phase before running, and then ends in either a successful or failed state depending on the nature of the workload.</p>
 <figure class='diagram'><div class='mermaid'>stateDiagram-v2
-    [*] --&gt; Pending: Pod 생성 요청
-    Pending --&gt; Running: 노드 배치 · 이미지 받기 완료
-    Running --&gt; Succeeded: 정상 종료
-    Running --&gt; Failed: 오류로 종료
+    [*] --&gt; Pending: Pod creation requested
+    Pending --&gt; Running: Node assigned · image pull complete
+    Running --&gt; Succeeded: Exited successfully
+    Running --&gt; Failed: Exited with error
     Succeeded --&gt; [*]
-    Failed --&gt; [*]</div><figcaption>Pod 생명주기의 상태(Phase) 전이</figcaption></figure>
-<p>여기서 반드시 기억할 개념이 있습니다. <strong>Pod는 일회용(ephemeral, 임시적)</strong> 입니다. Pod가 죽으면 쿠버네티스는 그 Pod를 &quot;되살리지&quot; 않습니다. 대신 <strong>똑같은 새 Pod를 새로 만들어 줍니다.</strong> 이때 새 Pod는 새 IP를 받을 수도 있습니다.</p>
-<p>그러면 Pod가 죽었을 때 누가 새로 만들어 줄까요? 우리가 Pod를 만들 때 정한 <strong>재시작 정책(restart policy)</strong> 과, 쿠버네티스 내부의 <strong>컨트롤러 매니저(controller manager)</strong> 안에 있는 <strong>레플리케이션 컨트롤러</strong>가 그 일을 합니다. 이 컨트롤러는 &quot;원하는 상태(desired state)&quot;와 &quot;실제 상태(actual state)&quot;를 끊임없이 비교하다가, Pod가 사라진 것을 발견하면 새 Pod를 띄워 다시 원하는 상태로 맞춥니다. 이것이 바로 1강에서 말한 쿠버네티스의 &quot;자가 치유&quot; 원리입니다.</p>
+    Failed --&gt; [*]</div><figcaption>Pod lifecycle phase transitions</figcaption></figure>
+<p>One concept you must internalize: <strong>Pods are ephemeral (temporary)</strong>. When a Pod dies, Kubernetes does not &quot;revive&quot; it. Instead, it <strong>creates a brand-new Pod with the same specification</strong>. The new Pod may even receive a different IP address.</p>
+<p>Who creates the new Pod when one dies? The <strong>restart policy</strong> you set when creating the Pod, along with the <strong>replication controller</strong> inside Kubernetes&#x27;s <strong>controller manager</strong>, handles this. The controller constantly compares the &quot;desired state&quot; with the &quot;actual state.&quot; When it detects that a Pod is gone, it spins up a new one to restore the desired state. This is the &quot;self-healing&quot; principle from Lecture 1 in action.</p>
 <blockquote class='callout'>
-<p>그래서 실무에서는 Pod를 직접 만들기보다, 다음 강의에서 배울 Deployment로 Pod를 관리합니다. 이 강의에서는 개념을 익히기 위해 Pod를 직접 다뤄봅니다.</p>
+<p>In practice, you rarely manage Pods directly. Instead, you use Deployments - covered in the next lecture - to manage Pods on your behalf. This lecture works with Pods directly so you can internalize the concepts.</p>
 </blockquote>
-<h4>kubectl로 Pod 만들고 확인하기 (실습)</h4>
-<p>이제 직접 손으로 해봅니다. 로컬에서 쿠버네티스를 연습하려면 <strong>minikube</strong>(개발 PC에 1노드 클러스터를 띄우는 도구)나 Docker Desktop의 쿠버네티스 기능을 사용하면 됩니다. 클러스터가 준비되어 <code class='ic'>kubectl</code>이 동작하는 상태라고 가정합니다.</p>
-<p><code class='ic'>kubectl</code>은 쿠버네티스에 명령을 보내는 커맨드라인 도구입니다. 명령은 API 서버로 전달되고, 그 흐름은 다음과 같습니다.</p>
+<h4>Creating and Inspecting Pods with kubectl (Hands-On)</h4>
+<p>Time to try it yourself. To practice Kubernetes locally, you can use <strong>minikube</strong> (a tool that runs a single-node cluster on your development machine) or the Kubernetes feature built into Docker Desktop. The following assumes your cluster is up and <code class='ic'>kubectl</code> is connected to it.</p>
+<p><code class='ic'>kubectl</code> is the command-line tool for sending commands to Kubernetes. Commands are delivered to the API server, and the flow looks like this:</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant U as 사용자
+    participant U as User
     participant K as kubectl
-    participant API as API 서버
-    participant Sched as 스케줄러
-    participant Kubelet as kubelet(노드)
+    participant API as API Server
+    participant Sched as Scheduler
+    participant Kubelet as kubelet (Node)
     U-&gt;&gt;K: kubectl run my-web --image=nginx
-    K-&gt;&gt;API: Pod 생성 요청
+    K-&gt;&gt;API: Pod creation request
     API--&gt;&gt;K: pod/my-web created
-    API-&gt;&gt;Sched: 배치할 노드 결정 요청
-    Sched--&gt;&gt;API: 노드 선택 결과
-    API-&gt;&gt;Kubelet: 해당 노드에서 컨테이너 실행 지시
-    Kubelet--&gt;&gt;API: 이미지 받기 · 컨테이너 시작 보고</div><figcaption>kubectl run 명령이 API 서버를 거쳐 Pod로 실행되는 흐름</figcaption></figure>
-<p>먼저 nginx 웹서버 컨테이너 하나를 담은 Pod를 만들어 봅니다.</p>
+    API-&gt;&gt;Sched: Request node assignment
+    Sched--&gt;&gt;API: Selected node
+    API-&gt;&gt;Kubelet: Instruction to start container on assigned node
+    Kubelet--&gt;&gt;API: Image pull · container start report</div><figcaption>Flow of a kubectl run command through the API server to a running Pod</figcaption></figure>
+<p>Let&#x27;s start by creating a Pod containing a single nginx web server container.</p>
 <pre><code>
 kubectl run my-web --image=nginx
 </code></pre>
@@ -335,11 +366,11 @@ kubectl run my-web --image=nginx
 pod/my-web created
 </code></pre>
 <ul>
-<li><code class='ic'>run</code>: Pod를 하나 생성하는 명령</li>
-<li><code class='ic'>my-web</code>: Pod의 이름</li>
-<li><code class='ic'>--image=nginx</code>: 사용할 컨테이너 이미지</li>
+<li><code class='ic'>run</code>: command that creates a single Pod</li>
+<li><code class='ic'>my-web</code>: name of the Pod</li>
+<li><code class='ic'>--image=nginx</code>: the container image to use</li>
 </ul>
-<p>이제 Pod 목록과 상태를 확인합니다.</p>
+<p>Now check the Pod list and its status.</p>
 <pre><code>
 kubectl get pods
 </code></pre>
@@ -348,11 +379,11 @@ NAME     READY   STATUS    RESTARTS   AGE
 my-web   1/1     Running   12s        12s
 </code></pre>
 <ul>
-<li><code class='ic'>READY 1/1</code>: Pod 안의 컨테이너 1개가 모두 준비됨 (멀티 컨테이너라면 <code class='ic'>2/2</code>처럼 표시)</li>
-<li><code class='ic'>STATUS Running</code>: 정상 실행 중 (방금 만들었다면 잠깐 <code class='ic'>ContainerCreating</code>이나 <code class='ic'>Pending</code>으로 보일 수 있습니다)</li>
-<li><code class='ic'>RESTARTS</code>: 컨테이너가 재시작된 횟수</li>
+<li><code class='ic'>READY 1/1</code>: all 1 container in the Pod is ready (for a multi-container Pod this would show <code class='ic'>2/2</code>)</li>
+<li><code class='ic'>STATUS Running</code>: running normally (right after creation you may briefly see <code class='ic'>ContainerCreating</code> or <code class='ic'>Pending</code>)</li>
+<li><code class='ic'>RESTARTS</code>: number of times the container has been restarted</li>
 </ul>
-<p>더 자세한 정보(어느 노드에 배치됐는지, IP, 이벤트 등)를 보려면 <code class='ic'>describe</code>를 씁니다. 문제가 생겼을 때 가장 먼저 보게 될 명령입니다.</p>
+<p>For more detail - which node it landed on, its IP, events, and more - use <code class='ic'>describe</code>. This is the first command you will reach for when something goes wrong.</p>
 <pre><code>
 kubectl describe pod my-web
 </code></pre>
@@ -373,13 +404,13 @@ Events:
   Normal  Pulled     18s   Container image &quot;nginx&quot; already present on machine
   Normal  Started    17s   Started container my-web
 </code></pre>
-<p><code class='ic'>Events</code> 부분을 보면 스케줄러가 노드를 정하고(Scheduled), 이미지를 받고(Pulled), 컨테이너를 시작(Started)하는 2강의 흐름이 실제 로그로 찍혀 있는 것을 확인할 수 있습니다.</p>
-<p>컨테이너가 내보내는 로그를 보거나, 컨테이너 안으로 들어가 명령을 실행할 수도 있습니다.</p>
+<p>Look at the <code class='ic'>Events</code> section: you can see the actual log entries for the scheduler assigning a node (Scheduled), pulling the image (Pulled), and starting the container (Started) - the same flow described in Lecture 2.</p>
+<p>You can also view the container&#x27;s logs or open an interactive shell inside it.</p>
 <pre><code>
 kubectl logs my-web
 kubectl exec -it my-web -- /bin/bash
 </code></pre>
-<p>실습이 끝나면 Pod를 삭제합니다.</p>
+<p>When you are done, delete the Pod.</p>
 <pre><code>
 kubectl delete pod my-web
 </code></pre>
@@ -387,77 +418,314 @@ kubectl delete pod my-web
 pod &quot;my-web&quot; deleted
 </code></pre>
 <blockquote class='callout'>
-<p>직접 만든(<code class='ic'>kubectl run</code>) Pod를 삭제하면 그대로 사라집니다. 하지만 다음 강의의 Deployment로 만든 Pod는, 지우면 컨트롤러가 곧바로 새 Pod를 다시 띄웁니다. 바로 이 차이가 &quot;Pod는 일회용&quot;이라는 말의 실체입니다.</p>
+<p>A Pod created directly with <code class='ic'>kubectl run</code> simply disappears when deleted. By contrast, a Pod managed by a Deployment (covered next) will be immediately replaced by the controller the moment you delete it. That difference is exactly what &quot;Pods are ephemeral&quot; means in practice.</p>
 </blockquote>
-<h4>정리하며</h4>
-<p>Pod는 쿠버네티스가 다루는 최소 단위로, 컨테이너를 감싸 네트워크와 스토리지를 공유하게 해주는 봉투입니다. 대부분은 컨테이너 1개짜리 단일 Pod를 쓰고, 긴밀히 협력하는 보조 컨테이너가 있을 때만 멀티 컨테이너로 묶습니다. 그리고 Pod는 일회용이라 죽으면 되살아나는 게 아니라 새로 태어납니다. 그래서 실무에서는 Pod를 직접 관리하지 않고, 다음 강의에서 배울 Deployment에게 맡기게 됩니다.</p>
-<h3>핵심 요약</h3>
+<h4>Wrapping Up</h4>
+<p>A Pod is the smallest unit Kubernetes works with - an envelope that wraps containers and lets them share networking and storage. Most of the time you use a single-container Pod, and you only bundle multiple containers together when a tightly coupled helper needs to share the same lifecycle. Pods are ephemeral: when one dies it is not revived; a new one takes its place. That is why in production you hand Pod management over to a Deployment rather than dealing with Pods directly - which is the topic of the next lecture.</p>
+<h3>Key Takeaways</h3>
 <ul>
-<li><strong>Pod</strong>는 쿠버네티스의 최소 배포 단위로, 하나 이상의 컨테이너를 감싼 그룹이다. 클러스터에는 컨테이너가 아니라 Pod를 올린다.</li>
-<li>같은 Pod의 컨테이너들은 <strong>IP·네트워크·스토리지를 공유</strong>하고 <code class='ic'>localhost</code>로 통신하지만, 파일시스템은 격리된다. 항상 같은 노드에서 함께 생성·소멸한다.</li>
-<li>대부분은 <strong>단일 컨테이너 Pod</strong>를 쓰고, 떼어낼 수 없을 만큼 결합도가 높은 보조 컨테이너가 있을 때만 <strong>멀티 컨테이너(사이드카)</strong> 로 묶는다.</li>
-<li>Pod 생명주기는 <code class='ic'>Pending → Running → (Succeeded/Failed)</code>이며, <strong>Pod는 일회용</strong>이라 죽으면 컨트롤러가 동일한 새 Pod를 만들어 원하는 상태를 유지한다.</li>
-<li>실습 명령: <code class='ic'>kubectl run</code>(생성) → <code class='ic'>kubectl get pods</code>(목록·상태) → <code class='ic'>kubectl describe pod</code>(상세·이벤트) → <code class='ic'>kubectl logs</code>/<code class='ic'>kubectl exec</code>(로그·접속) → <code class='ic'>kubectl delete pod</code>(삭제).</li>
+<li>A <strong>Pod</strong> is the smallest deployable unit in Kubernetes - a group wrapping one or more containers. You deploy Pods to the cluster, not bare containers.</li>
+<li>Containers in the same Pod <strong>share an IP, network, and storage volumes</strong> and communicate over <code class='ic'>localhost</code>, but each has its own isolated filesystem. They are always co-located on the same node and are created and destroyed together.</li>
+<li>Use a <strong>single-container Pod</strong> by default. Only use a <strong>multi-container (sidecar)</strong> Pod when a helper container is so tightly coupled to the main container that they must share a lifecycle.</li>
+<li>The Pod lifecycle is <code class='ic'>Pending → Running → (Succeeded / Failed)</code>. <strong>Pods are ephemeral</strong> - when one dies the controller creates an identical new Pod to restore the desired state.</li>
+<li>Key commands: <code class='ic'>kubectl run</code> (create) → <code class='ic'>kubectl get pods</code> (list and status) → <code class='ic'>kubectl describe pod</code> (detail and events) → <code class='ic'>kubectl logs</code> / <code class='ic'>kubectl exec</code> (logs and shell access) → <code class='ic'>kubectl delete pod</code> (delete).</li>
 </ul>
-          
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <p class='q'>Practice 1. Use kubectl run to create a Pod named &#x27;my-web&#x27; using the nginx image. After creating it, do the following three things.
+1. Read the READY, STATUS, RESTARTS, and AGE columns from the Pod list.
+2. Add the &#x27;-o wide&#x27; flag to see the node name and IP address where the Pod was scheduled.
+3. When you are done, delete the Pod and confirm it no longer appears in the list.</p>
+              <pre class='starter'><code># Verify cluster connection
+kubectl cluster-info
+
+# Fill in the blanks and run each command
+# (1) Create the Pod
+kubectl run ___ --image=___
+
+# (2) List Pods
+kubectl get pods
+
+# (3) Wide output to see node/IP
+kubectl get pods ___
+
+# (4) Delete the Pod
+kubectl delete pod ___
+
+# (5) Confirm deletion
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>The &#x27;1/1&#x27; in the READY column means &#x27;ready containers / total containers&#x27;. A multi-container Pod would show &#x27;2/2&#x27;.</li><li>If STATUS is stuck at &#x27;ContainerCreating&#x27;, the image pull is still in progress. Run &#x27;kubectl describe pod my-web&#x27; and look at the Events section to track the Pulling → Pulled → Started sequence.</li><li>Instead of &#x27;-o wide&#x27;, try &#x27;-o yaml&#x27; to see the full Pod spec in YAML format. Glancing at the spec.containers section before the next task will help you get familiar with the structure.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># (1) Create the Pod
+kubectl run my-web --image=nginx
+# Expected output: pod/my-web created
+
+# (2) List Pods
+kubectl get pods
+# Expected output:
+# NAME     READY   STATUS    RESTARTS   AGE
+# my-web   1/1     Running   0          8s
+# Note: if it shows ContainerCreating or Pending, wait a few seconds and re-run
+
+# (3) Wide output to see node/IP
+kubectl get pods -o wide
+# Expected output:
+# NAME     READY   STATUS    RESTARTS   AGE   IP           NODE       NOMINATED NODE   READINESS GATES
+# my-web   1/1     Running   0          30s   10.244.0.4   minikube   &lt;none&gt;           &lt;none&gt;
+
+# (4) Delete the Pod
+kubectl delete pod my-web
+# Expected output: pod &quot;my-web&quot; deleted
+
+# (5) Confirm deletion
+kubectl get pods
+# Expected output: No resources found in default namespace.</code></pre>
+                <p class='exp2'>&#x27;kubectl run &lt;name&gt; --image=&lt;image&gt;&#x27; is an imperative command that creates a Pod quickly without writing a YAML file. The &#x27;-o wide&#x27; flag appends the node name and Pod IP to the default columns, letting you see placement at a glance. A Pod created with &#x27;kubectl run&#x27; has no backing controller, so deleting it makes it disappear permanently - it is not recreated. This is the key difference from Deployments, covered in the next lecture.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 2. Save the starter YAML below as &#x27;simple-pod.yaml&#x27;, then create the Pod with kubectl apply -f. After creation, perform the following steps in order.
+1. Run &#x27;kubectl describe pod simple-pod&#x27; and check the IP, the assigned node, and the Events section.
+2. Run &#x27;kubectl logs simple-pod&#x27; to print the initial nginx logs.
+3. Run &#x27;kubectl exec -it simple-pod -- /bin/bash&#x27; to open a shell inside the container, run &#x27;ls /usr/share/nginx/html&#x27;, then exit.
+4. Delete the Pod using the YAML file (&#x27;kubectl delete -f simple-pod.yaml&#x27;).</p>
+              <pre class='starter'><code># Contents of simple-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: simple-pod
+  labels:
+    app: web
+spec:
+  containers:
+    - name: web-container
+      image: nginx
+      ports:
+        - containerPort: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>YAML indentation must use spaces, not tabs. Using a tab character causes the error &#x27;error: yaml: line N: found character that cannot start any token&#x27;.</li><li>In &#x27;kubectl exec -it simple-pod -- /bin/bash&#x27;, the &#x27;--&#x27; separates kubectl&#x27;s own flags from the command passed to the container. If the image does not include /bin/bash (e.g., lightweight images like busybox), use &#x27;/bin/sh&#x27; instead.</li><li>If the logs appear empty, run &#x27;curl localhost&#x27; from inside the container via &#x27;kubectl exec&#x27;, then run &#x27;kubectl logs simple-pod&#x27; again - you will see an access log entry.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Apply the YAML file
+kubectl apply -f simple-pod.yaml
+# Expected output: pod/simple-pod created
+
+# 2. Inspect with describe
+kubectl describe pod simple-pod
+# Key fields to note:
+#   IP: 10.244.0.x (varies by cluster)
+#   Node: minikube
+#   Last three Events:
+#     Normal  Scheduled  ...  Successfully assigned default/simple-pod to minikube
+#     Normal  Pulled     ...  Container image &quot;nginx&quot; already present on machine
+#     Normal  Started    ...  Started container web-container
+
+# 3. View logs
+kubectl logs simple-pod
+# If no HTTP requests have been made yet, only the nginx startup message is shown
+
+# 4. Open a shell inside the container
+kubectl exec -it simple-pod -- /bin/bash
+# Once the prompt changes, run the internal command
+ls /usr/share/nginx/html
+# Expected output: 50x.html  index.html
+exit
+
+# 5. Delete using the YAML file
+kubectl delete -f simple-pod.yaml
+# Expected output: pod &quot;simple-pod&quot; deleted</code></pre>
+                <p class='exp2'>The YAML approach lets you manage all configuration in a file, making it suitable for version control (git) and the standard for production use - unlike &#x27;kubectl run&#x27;. &#x27;kubectl apply -f&#x27; applies a file declaratively and can also be used to apply updates to the same resource. The Events section in &#x27;describe&#x27; records the Scheduled → Pulled → Started sequence and is the first place to look when diagnosing problems. &#x27;exec -it&#x27; opens an interactive shell inside a running container, which is useful for inspecting file structures, checking environment variables, and general debugging. &#x27;delete -f&#x27; pairs with &#x27;apply -f&#x27; to remove resources using the same file, so you do not need to remember resource names separately.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 3. Intentionally create a Pod named &#x27;broken-pod&#x27; using a non-existent image &#x27;nginx:doesnotexist999&#x27;. Immediately after creation, run &#x27;kubectl get pods&#x27; a few times to observe how the STATUS changes. Once STATUS shows &#x27;ErrImagePull&#x27; or &#x27;ImagePullBackOff&#x27;, run &#x27;kubectl describe pod broken-pod&#x27; and find the failure reason in the Events section, noting it down. After the diagnosis, delete the Pod, then create a new Pod named &#x27;fixed-pod&#x27; using the correct image (&#x27;nginx:stable&#x27;) and confirm it reaches Running status.</p>
+              <pre class='starter'><code># Create the broken Pod
+kubectl run broken-pod --image=nginx:doesnotexist999
+
+# Check status repeatedly (run 2-3 times a few seconds apart)
+kubectl get pods
+
+# Once STATUS shows ErrImagePull or ImagePullBackOff, inspect in detail
+kubectl describe pod broken-pod
+# Look for the &#x27;Failed to pull image&#x27; message in the Events section
+
+# Delete after diagnosis
+kubectl delete pod broken-pod
+
+# Recreate with the correct image
+kubectl run fixed-pod --image=___
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>If STATUS does not change and the Pod stays at Pending for a long time, the issue may be insufficient node resources rather than an image pull failure. In that case, &#x27;describe&#x27; Events will show an &#x27;Insufficient cpu/memory&#x27; message instead.</li><li>ErrImagePull and ImagePullBackOff are two stages of the same problem. ErrImagePull appears immediately after the first failure; ImagePullBackOff is the state where Kubernetes is waiting before the next retry. Both indicate an image issue.</li><li>The full list of valid tags for the official nginx image is available on Docker Hub (hub.docker.com/_/nginx/tags). The most commonly used ones are &#x27;latest&#x27;, &#x27;stable&#x27;, and &#x27;alpine&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create the broken Pod
+kubectl run broken-pod --image=nginx:doesnotexist999
+# Output: pod/broken-pod created (the creation request itself succeeds)
+
+# 2. Check status (after 20-30 seconds)
+kubectl get pods
+# Expected output:
+# NAME         READY   STATUS             RESTARTS   AGE
+# broken-pod   0/1     ImagePullBackOff   0          35s
+# Note: it first appears as ErrImagePull, then transitions to ImagePullBackOff as retry intervals grow
+
+# 3. Diagnose the cause with describe
+kubectl describe pod broken-pod
+# Key Events content:
+#   Warning  Failed  ...  Failed to pull image &quot;nginx:doesnotexist999&quot;:
+#            rpc error: code = NotFound desc = failed to pull and unpack image
+#            ...: not found
+#   Warning  Failed  ...  Error: ErrImagePull
+#   Normal   BackOff ...  Back-off pulling image &quot;nginx:doesnotexist999&quot;
+
+# 4. Delete the broken Pod
+kubectl delete pod broken-pod
+
+# 5. Recreate with the correct image
+kubectl run fixed-pod --image=nginx:stable
+# Output: pod/fixed-pod created
+
+# 6. Confirm Running status
+kubectl get pods
+# Expected output:
+# NAME        READY   STATUS    RESTARTS   AGE
+# fixed-pod   1/1     Running   0          12s
+
+# 7. Clean up
+kubectl delete pod fixed-pod</code></pre>
+                <p class='exp2'>Even though the Pod creation request succeeds (pod created), whether the container actually runs is determined only when kubelet attempts to pull the image. A non-existent image tag causes the registry to return a 404, and kubelet records this as &#x27;ErrImagePull&#x27;. Kubernetes retries the pull using exponential backoff, increasing the interval between attempts - this waiting state is &#x27;ImagePullBackOff&#x27;. The Events section in &#x27;describe&#x27; includes &#x27;Failed to pull image&#x27; along with the specific error reason, making it the first diagnostic command to run when a Pod is stuck at 0/1. Image name typos, private registry authentication failures, and non-existent tags are the most common culprits in production.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 4. Write a YAML file from scratch that defines two containers inside a single Pod.
+- Main container: name &#x27;web&#x27;, image &#x27;nginx&#x27;, port 80
+- Sidecar container: name &#x27;log-watcher&#x27;, image &#x27;busybox&#x27;, args that run &#x27;/bin/sh -c while true; do echo sidecar-running; sleep 5; done&#x27; as an infinite loop
+
+Name the file &#x27;sidecar-pod.yaml&#x27; and the Pod &#x27;sidecar-demo&#x27;. After creating it, do the following.
+1. Confirm the READY column in &#x27;kubectl get pods&#x27; shows &#x27;2/2&#x27;.
+2. Print the logs of the web container using &#x27;-c web&#x27;, and the logs of the sidecar using &#x27;-c log-watcher&#x27;.
+3. Verify that both containers share the same Pod IP by checking the IP field in &#x27;kubectl describe pod sidecar-demo&#x27; and running &#x27;kubectl exec -it sidecar-demo -c web -- printenv HOSTNAME&#x27;.
+4. Delete the Pod when done.</p>
+              <pre class='starter'><code># Write sidecar-pod.yaml (fill in the blank)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-demo
+spec:
+  containers:
+    - name: web
+      image: nginx
+      ports:
+        - containerPort: 80
+    - name: log-watcher
+      image: busybox
+      args:
+        - /bin/sh
+        - -c
+        - ___  # infinite loop that prints &#x27;sidecar-running&#x27; every 5 seconds</code></pre>
+              <details><summary>Hint</summary><ul><li>In the YAML args array, the entire while-loop command must be a single string element. The element that follows &#x27;-c&#x27; must be one string so that /bin/sh interprets it as a script.</li><li>If a container enters CrashLoopBackOff, it means the command exited immediately. Running just &#x27;echo hello&#x27; in busybox without an infinite loop causes the container to exit, triggering repeated restarts. Make sure to use an infinite loop.</li><li>To actually verify localhost communication between the two containers, run &#x27;kubectl exec -it sidecar-demo -c log-watcher -- wget -qO- localhost:80&#x27;. You will receive the nginx response from inside the log-watcher container.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Completed sidecar-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-demo
+spec:
+  containers:
+    - name: web
+      image: nginx
+      ports:
+        - containerPort: 80
+    - name: log-watcher
+      image: busybox
+      args:
+        - /bin/sh
+        - -c
+        - while true; do echo sidecar-running; sleep 5; done
+
+# 1. Create the Pod
+kubectl apply -f sidecar-pod.yaml
+# Output: pod/sidecar-demo created
+
+# 2. Confirm READY 2/2
+kubectl get pods
+# Expected output:
+# NAME           READY   STATUS    RESTARTS   AGE
+# sidecar-demo   2/2     Running   0          20s
+
+# 3. web container logs (nginx startup message)
+kubectl logs sidecar-demo -c web
+# Expected output: nginx initialization logs
+
+# 4. log-watcher container logs
+kubectl logs sidecar-demo -c log-watcher
+# Expected output:
+# sidecar-running
+# sidecar-running
+# (every 5 seconds)
+
+# 5. Check Pod IP with describe
+kubectl describe pod sidecar-demo | grep -E &#x27;^IP:&#x27;
+# Expected output: IP:   10.244.0.5
+# -&gt; both containers share the same IP
+
+# 6. Check HOSTNAME env var of the web container (matches Pod name)
+kubectl exec -it sidecar-demo -c web -- printenv HOSTNAME
+# Expected output: sidecar-demo
+
+# 7. Clean up
+kubectl delete -f sidecar-pod.yaml
+# Or: kubectl delete pod sidecar-demo</code></pre>
+                <p class='exp2'>A multi-container Pod is defined by listing multiple entries in the spec.containers array. Since both containers share the same Pod IP, &#x27;describe&#x27; shows only one IP field and the containers can communicate over localhost. Without the &#x27;-c &lt;container-name&gt;&#x27; flag, &#x27;kubectl logs&#x27; will fail with &#x27;Error: a container name must be specified for pod sidecar-demo, because it has multiple containers&#x27; - always specify the container name. The &#x27;2/2&#x27; in the READY column means both containers in the Pod are ready; if one crashes, it drops to &#x27;1/2&#x27;. The busybox infinite loop is a simplified stand-in for the pattern where a sidecar must terminate together with the main application.</p>
+              </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=vxtq_pJp7_A' target='_blank'>Containers vs Pods</a></li><li><a href='https://www.youtube.com/watch?v=BgrQ16r84pM' target='_blank'>How does Kubernetes create a Pod?</a></li></ul></div>
         </article>
 <article id='lec4' class='lecture'>
-          <h2>04. Deployment와 Service - 앱 배포와 외부 노출 </h2>
-          <h2>Deployment와 Service - 앱 배포와 외부 노출</h2>
-<h3>학습 목표</h3>
+          <h2>04. Deployment and Service - Deploying Apps and Exposing Them Externally </h2>
+          <h2>Deployment and Service - Deploying Apps and Exposing Them Externally</h2>
+<h3>Learning Objectives</h3>
 <ul>
-<li>Deployment로 Pod 복제, 자가 치유(self-healing), 롤링 업데이트를 관리한다.</li>
-<li>Service(ClusterIP / NodePort)로 Pod에 접근하는 방법을 이해한다.</li>
-<li>kubectl로 Deployment를 배포하고 Service로 외부에 노출해본다.</li>
+<li>Manage Pod replication, self-healing, and rolling updates using a Deployment.</li>
+<li>Understand how to access Pods through a Service (ClusterIP / NodePort).</li>
+<li>Deploy a Deployment with kubectl and expose it externally via a Service.</li>
 </ul>
-<h3>본문</h3>
-<h4>왜 Pod를 직접 만들지 않을까</h4>
-<p>3강에서 우리는 <code class='ic'>kubectl run</code>으로 Pod를 직접 만들어 보았습니다. 그런데 실무에서는 Pod를 손으로 직접 만드는 일이 거의 없습니다. 이유는 간단합니다. Pod는 <strong>언제든 사라질 수 있는 일회용 자원</strong>이기 때문입니다. 노드가 죽거나, 누군가 실수로 지우거나, 클러스터가 Pod를 다른 노드로 옮기면 그 Pod는 그대로 없어집니다. 직접 만든 Pod라면 누군가 다시 만들어주기 전까지 서비스는 멈춰 있게 됩니다.</p>
-<p>그래서 쿠버네티스는 Pod 위에 한 단계 더 높은 추상화인 <strong>Deployment</strong>를 제공합니다. 우리는 &quot;Pod 몇 개를 항상 띄워 둬&quot;라고 원하는 상태만 선언하고, 실제로 그 상태를 유지하는 일은 쿠버네티스에게 맡깁니다.</p>
+<h3>Content</h3>
+<h4>Why Not Create Pods Directly?</h4>
+<p>In Lecture 3 we created a Pod directly with <code class='ic'>kubectl run</code>. In practice, however, you will rarely — if ever — create Pods by hand. The reason is simple: a Pod is a <strong>disposable resource that can disappear at any moment</strong>. If a node goes down, someone accidentally deletes the Pod, or the cluster migrates the Pod to another node, that Pod is gone. If you created it by hand, the service stays down until someone manually recreates it.</p>
+<p>That is why Kubernetes provides <strong>Deployment</strong> as a higher-level abstraction on top of Pods. You simply declare the desired state — &quot;keep N Pods running at all times&quot; — and let Kubernetes do the work of actually maintaining that state.</p>
 <blockquote class='callout'>
-<p>쿠버네티스의 핵심 철학은 &quot;어떻게 하라&quot;가 아니라 &quot;어떤 상태가 되길 원한다&quot;를 선언하는 것입니다. Deployment는 이 선언형 사고방식의 대표적인 예입니다.</p>
+<p>The core philosophy of Kubernetes is to declare <em>what state you want</em>, not <em>how to get there</em>. A Deployment is the canonical example of this declarative mindset.</p>
 </blockquote>
-<h4>Deployment가 하는 세 가지 일</h4>
-<p>Deployment는 Pod의 <strong>복제본(replica)</strong> 묶음을 관리합니다. 핵심 기능은 세 가지입니다.</p>
-<p><strong>1. 복제(Replication) — 여러 개를 똑같이 띄운다.</strong></p>
-<p>Deployment에 <code class='ic'>replicas: 3</code>이라고 적으면, 동일한 Pod 3개가 항상 떠 있도록 유지됩니다. 트래픽이 늘면 숫자만 키우면 되고, 여러 개가 떠 있으니 한 개가 죽어도 서비스는 계속됩니다.</p>
-<p><strong>2. 자가 치유(Self-healing) — 죽으면 알아서 살린다.</strong></p>
-<p>Deployment는 자신이 관리하는 Pod 개수를 끊임없이 감시합니다. 만약 Pod 하나가 죽어서 3개에서 2개가 되면, 쿠버네티스는 곧바로 새 Pod 하나를 만들어 다시 3개를 맞춥니다. 사람이 개입하지 않아도 &quot;원하는 상태(3개)&quot;가 자동으로 회복됩니다. 이것이 우리가 Pod를 직접 만들지 않는 가장 큰 이유입니다.</p>
-<p><strong>3. 롤링 업데이트(Rolling Update) — 무중단으로 새 버전을 배포한다.</strong></p>
-<p>앱을 v1에서 v2로 올릴 때, Deployment는 모든 Pod를 한꺼번에 갈아치우지 않습니다. 기존 Pod를 하나씩 새 버전으로 천천히 교체합니다. 이렇게 하면 업데이트 중에도 서비스가 멈추지 않습니다(zero downtime).</p>
-<p>롤링 업데이트의 흐름은 다음과 같습니다.</p>
-<p>1. 새 버전(v2) Pod를 하나 추가로 생성한다.</p>
-<p>2. 새 Pod가 정상적으로 떠서 요청을 받을 준비가 되면, 트래픽을 그 Pod로 보낸다.</p>
-<p>3. 그 다음 기존 버전(v1) Pod를 하나 종료한다.</p>
-<p>4. 이 과정을 모든 Pod가 새 버전이 될 때까지 반복한다.</p>
-<p>아래 흐름도처럼 새 Pod를 먼저 띄우고 기존 Pod를 하나씩 내리는 과정을 반복합니다.</p>
+<h4>Three Things a Deployment Does</h4>
+<p>A Deployment manages a group of Pod <strong>replicas</strong>. It has three core capabilities.</p>
+<p><strong>1. Replication — run multiple identical copies.</strong></p>
+<p>If you specify <code class='ic'>replicas: 3</code> in a Deployment, Kubernetes ensures exactly three identical Pods are always running. When traffic increases, simply raise the number. With multiple replicas, losing one Pod does not interrupt the service.</p>
+<p><strong>2. Self-healing — automatically restart what dies.</strong></p>
+<p>A Deployment continuously monitors the number of Pods it manages. If one Pod dies and the count drops from 3 to 2, Kubernetes immediately creates a new Pod to bring it back to 3. The desired state (3 replicas) is restored automatically without any human intervention. This is the single biggest reason to use a Deployment instead of raw Pods.</p>
+<p><strong>3. Rolling Update — deploy a new version without downtime.</strong></p>
+<p>When upgrading an app from v1 to v2, a Deployment does not replace all Pods at once. It gradually swaps them out one at a time, ensuring the service never goes down (zero downtime).</p>
+<p>The rolling update process works as follows:</p>
+<p>1. Create one additional Pod running the new version (v2).</p>
+<p>2. Once the new Pod is ready and accepting traffic, route requests to it.</p>
+<p>3. Terminate one Pod running the old version (v1).</p>
+<p>4. Repeat until every Pod runs the new version.</p>
+<p>The diagram below illustrates the cycle of bringing up a new Pod and tearing down an old one.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TD
-    A[&quot;새 버전 v2 Pod 1개 추가 생성&quot;] --&gt; B{&quot;새 Pod가 준비 완료 상태인가&quot;}
-    B --&gt;|아니오| B
-    B --&gt;|예| C[&quot;트래픽을 새 Pod로 전달&quot;]
-    C --&gt; D[&quot;기존 v1 Pod 1개 종료&quot;]
-    D --&gt; E{&quot;모든 Pod가 v2로 교체됐는가&quot;}
-    E --&gt;|아니오| A
-    E --&gt;|예| F[&quot;롤링 업데이트 완료 - 무중단 배포&quot;]</div><figcaption>롤링 업데이트 단계별 진행 흐름</figcaption></figure>
-<p>이때 두 가지 안전장치가 동작합니다. <strong>maxUnavailable</strong>은 &quot;동시에 몇 개까지 내려가도 되는가&quot;를, <strong>maxSurge</strong>는 &quot;원하는 개수보다 몇 개까지 더 띄워도 되는가&quot;를 정합니다. 기본값은 둘 다 25%입니다. 즉 Pod가 4개라면 한 번에 1개만 내려가고, 잠깐 1개를 더 띄워(최대 5개) 빈자리 없이 교체합니다.</p>
+    A[&quot;Spin up one new v2 Pod&quot;] --&gt; B{&quot;Is the new Pod ready?&quot;}
+    B --&gt;|No| B
+    B --&gt;|Yes| C[&quot;Route traffic to the new Pod&quot;]
+    C --&gt; D[&quot;Terminate one old v1 Pod&quot;]
+    D --&gt; E{&quot;Have all Pods been replaced with v2?&quot;}
+    E --&gt;|No| A
+    E --&gt;|Yes| F[&quot;Rolling update complete — zero downtime&quot;]</div><figcaption>Rolling update step-by-step flow</figcaption></figure>
+<p>Two safety parameters control the process. <strong>maxUnavailable</strong> sets how many Pods may be taken down simultaneously, and <strong>maxSurge</strong> sets how many extra Pods may exist above the desired count. Both default to 25%. With 4 Pods, for example, at most 1 is taken down at a time, and at most 1 extra (5 total) is spun up to fill the gap.</p>
 <blockquote class='callout'>
-<p>새 버전에 문제가 생겼다면 <code class='ic'>kubectl rollout undo</code>로 이전 버전으로 즉시 되돌릴 수 있습니다. Deployment가 버전 이력을 기억하고 있기 때문입니다.</p>
+<p>If the new version has a problem, <code class='ic'>kubectl rollout undo</code> instantly reverts to the previous version. A Deployment retains the revision history to make this possible.</p>
 </blockquote>
-<h4>Deployment를 직접 배포해 보자</h4>
-<p>이제 직접 해봅니다. (Minikube 같은 로컬 클러스터가 떠 있다고 가정합니다.) 아래는 nginx 웹 서버를 3개 복제본으로 배포하는 명령입니다.</p>
+<h4>Let&#x27;s Deploy a Deployment</h4>
+<p>Time to try it hands-on. (Assumes a local cluster such as Minikube is already running.) The command below deploys an nginx web server with 3 replicas.</p>
 <pre><code>
-# nginx 이미지로 Deployment 생성, 복제본 3개
+# Create a Deployment using the nginx image with 3 replicas
 kubectl create deployment web --image=nginx --replicas=3
 
-# 결과 확인
+# Check the result
 kubectl get deployments
 </code></pre>
 <pre><code>
 NAME   READY   UP-TO-DATE   AVAILABLE   AGE
 web    3/3     3            3           15s
 </code></pre>
-<p><code class='ic'>READY 3/3</code>은 원하는 3개가 모두 정상이라는 뜻입니다. 실제로 만들어진 Pod도 봅니다.</p>
+<p><code class='ic'>READY 3/3</code> means all three desired replicas are healthy. Let&#x27;s also look at the Pods that were created.</p>
 <pre><code>
 kubectl get pods
 </code></pre>
@@ -467,7 +735,7 @@ web-5d4f8c7b9c-7k2lp   1/1     Running   0          30s
 web-5d4f8c7b9c-q8xvr   1/1     Running   0          30s
 web-5d4f8c7b9c-zm4tn   1/1     Running   0          30s
 </code></pre>
-<p>이제 자가 치유를 눈으로 확인해 봅시다. Pod 하나를 강제로 지워봅니다.</p>
+<p>Now let&#x27;s witness self-healing firsthand. Force-delete one of the Pods.</p>
 <pre><code>
 kubectl delete pod web-5d4f8c7b9c-7k2lp
 kubectl get pods
@@ -478,56 +746,56 @@ web-5d4f8c7b9c-q8xvr   1/1     Running             0          1m
 web-5d4f8c7b9c-zm4tn   1/1     Running             0          1m
 web-5d4f8c7b9c-rt9wd   0/1     ContainerCreating   0          2s
 </code></pre>
-<p>지운 Pod 자리에 이름이 다른 새 Pod(<code class='ic'>...-rt9wd</code>)가 즉시 생기는 것을 볼 수 있습니다. 우리가 아무것도 하지 않았는데 다시 3개로 맞춰지죠. 이것이 자가 치유입니다.</p>
-<p>복제본 개수를 바꾸는 것도 명령 한 줄입니다.</p>
+<p>A new Pod with a different name (<code class='ic'>...-rt9wd</code>) appears immediately in place of the deleted one. We did nothing, yet the count is back to 3. That is self-healing in action.</p>
+<p>Changing the replica count is equally straightforward — just one command.</p>
 <pre><code>
 kubectl scale deployment web --replicas=5
 </code></pre>
-<h4>Service - 흩어진 Pod에 안정적으로 접근하기</h4>
-<p>문제가 하나 남았습니다. Pod는 죽고 다시 태어날 때마다 <strong>IP 주소가 바뀝니다.</strong> 위에서 봤듯이 Pod가 교체되면 이름도, IP도 달라집니다. 그렇다면 우리 앱에 접속하려는 사용자는 매번 바뀌는 IP를 어떻게 알 수 있을까요?</p>
-<p>이 문제를 해결하는 것이 <strong>Service</strong>입니다. Service는 여러 Pod 앞에 놓인 <strong>고정된 출입구이자 부하 분산기</strong>입니다. Service는 변하지 않는 하나의 주소를 가지며, 들어온 요청을 자신이 관리하는 Pod들에게 골고루 나눠 보냅니다(load balancing). Pod가 죽고 새로 생겨 IP가 바뀌어도, Service는 자동으로 살아있는 Pod 목록을 갱신하므로 사용자는 변화를 전혀 느끼지 못합니다.</p>
-<p>Service가 어떤 Pod에게 요청을 보낼지는 <strong>레이블(label) 셀렉터</strong>로 결정합니다. &quot;<code class='ic'>app=web</code> 레이블이 붙은 Pod에게 보내&quot;라고 지정하면, 그 레이블을 가진 Pod가 몇 개든 알아서 찾아 분배합니다.</p>
-<p>Service에는 여러 종류가 있는데, 초급 단계에서 꼭 알아야 할 두 가지는 다음과 같습니다.</p>
-<p><strong>ClusterIP (기본값)</strong> — 클러스터 <em>내부</em>에서만 통하는 주소를 부여합니다. 외부에서는 접근할 수 없고, 같은 클러스터 안의 다른 Pod끼리 통신할 때 씁니다. 예를 들어 웹 서버 Pod가 데이터베이스 Pod에 접속할 때 데이터베이스를 ClusterIP Service로 노출합니다. 외부에 열 필요가 없으니 가장 안전한 기본 선택입니다.</p>
-<p><strong>NodePort</strong> — 클러스터의 <em>모든 노드</em>에 동일한 포트(30000~32767 범위)를 열어, 그 포트로 들어온 외부 요청을 Service로 연결합니다. <code class='ic'>노드의IP:노드포트</code>로 클러스터 밖에서도 접속할 수 있어, 학습이나 간단한 테스트에 적합합니다.</p>
-<p>세 가지 접근 경로를 정리하면 이렇습니다.</p>
+<h4>Service - Stable Access to a Shifting Set of Pods</h4>
+<p>There is one problem left. Every time a Pod dies and is recreated, its <strong>IP address changes</strong>. As you saw above, a replaced Pod gets a new name and a new IP. How would users of your app know which IP to connect to?</p>
+<p><strong>Service</strong> solves this. A Service is a <strong>stable front door and load balancer</strong> placed in front of a set of Pods. It holds a single address that never changes and distributes incoming requests evenly across the Pods behind it (load balancing). Even as Pods die and are recreated with new IPs, the Service automatically refreshes its list of healthy Pods, so users never notice any change.</p>
+<p>The Service decides which Pods to send traffic to using a <strong>label selector</strong>. If you specify &quot;send to Pods with the label <code class='ic'>app=web</code>&quot;, the Service will find and distribute requests to all Pods carrying that label, regardless of how many there are.</p>
+<p>There are several types of Service. The two you must know at the beginner level are:</p>
+<p><strong>ClusterIP (default)</strong> — assigns an address that is reachable only <em>inside</em> the cluster. It cannot be accessed from outside, and is used for Pod-to-Pod communication within the cluster. For example, a web server Pod connecting to a database Pod would access the database through a ClusterIP Service. Because there is no external exposure, this is the safest default choice.</p>
+<p><strong>NodePort</strong> — opens the same port (in the range 30000–32767) on <em>every node</em> in the cluster and forwards external traffic on that port to the Service. You can reach the cluster from outside using <code class='ic'>&lt;NodeIP&gt;:&lt;NodePort&gt;</code>, making it well-suited for learning and simple testing.</p>
+<p>The two access paths can be summarised as:</p>
 <ul>
-<li>외부 사용자 → (NodePort) → Service → Pod 여러 개</li>
-<li>클러스터 내부 Pod → (ClusterIP) → Service → Pod 여러 개</li>
+<li>External user → (NodePort) → Service → multiple Pods</li>
+<li>Pod inside the cluster → (ClusterIP) → Service → multiple Pods</li>
 </ul>
-<p>아래 구성도처럼 외부 요청은 NodePort를 통해, 내부 통신은 ClusterIP를 통해 같은 Service로 들어와 뒤쪽 Pod들로 분배됩니다.</p>
+<p>The architecture diagram below shows how external traffic comes in through NodePort and internal traffic through ClusterIP, both reaching the same Service and then being distributed to the backing Pods.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
-    User[&quot;외부 사용자&quot;] --&gt;|&quot;노드IP:노드포트&quot;| NP[&quot;NodePort Service&quot;]
-    InPod[&quot;클러스터 내부 Pod&quot;] --&gt;|&quot;클러스터 내부 주소&quot;| CIP[&quot;ClusterIP Service&quot;]
+    User[&quot;External User&quot;] --&gt;|&quot;NodeIP:NodePort&quot;| NP[&quot;NodePort Service&quot;]
+    InPod[&quot;Pod Inside Cluster&quot;] --&gt;|&quot;ClusterIP address&quot;| CIP[&quot;ClusterIP Service&quot;]
 
-    subgraph Cluster[&quot;쿠버네티스 클러스터&quot;]
+    subgraph Cluster[&quot;Kubernetes Cluster&quot;]
         NP --&gt; P1[&quot;Pod web-1&quot;]
         NP --&gt; P2[&quot;Pod web-2&quot;]
         NP --&gt; P3[&quot;Pod web-3&quot;]
         CIP --&gt; D1[&quot;Pod db-1&quot;]
         CIP --&gt; D2[&quot;Pod db-2&quot;]
-    end</div><figcaption>Service 접근 경로 구성도 - 외부 NodePort와 내부 ClusterIP</figcaption></figure>
-<h4>Service로 노출해 보자</h4>
-<p>앞서 만든 <code class='ic'>web</code> Deployment를 NodePort Service로 외부에 노출합니다.</p>
+    end</div><figcaption>Service access paths - external NodePort and internal ClusterIP</figcaption></figure>
+<h4>Let&#x27;s Expose the Service</h4>
+<p>Expose the <code class='ic'>web</code> Deployment we created earlier as a NodePort Service.</p>
 <pre><code>
-# web Deployment를 80번 포트로 받는 NodePort Service로 노출
+# Expose the web Deployment as a NodePort Service on port 80
 kubectl expose deployment web --type=NodePort --port=80
 
-# 생성된 Service 확인
+# Check the created Service
 kubectl get service web
 </code></pre>
 <pre><code>
 NAME   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
 web    NodePort   10.96.142.31    &lt;none&gt;        80:31845/TCP   5s
 </code></pre>
-<p><code class='ic'>PORT(S)</code> 칸의 <code class='ic'>80:31845</code>를 봅시다. 왼쪽 80은 Service 내부 포트, 오른쪽 31845가 외부에 열린 NodePort입니다(번호는 자동 할당되므로 환경마다 다릅니다). Minikube에서는 아래 명령으로 접속 가능한 전체 주소를 바로 얻을 수 있습니다.</p>
+<p>Look at the <code class='ic'>PORT(S)</code> column: <code class='ic'>80:31845</code>. The left-hand <code class='ic'>80</code> is the Service&#x27;s internal port; the right-hand <code class='ic'>31845</code> is the NodePort opened to the outside (the number is assigned automatically and varies by environment). On Minikube, you can get the full accessible URL with a single command:</p>
 <pre><code>
 minikube service web --url
 </code></pre>
 <pre><code>
 http://192.168.49.2:31845
 </code></pre>
-<p>이 주소를 브라우저나 curl로 열면 nginx 기본 페이지가 보입니다.</p>
+<p>Open that URL in a browser or with curl and you will see the default nginx page.</p>
 <pre><code>
 curl http://192.168.49.2:31845
 </code></pre>
@@ -537,143 +805,302 @@ curl http://192.168.49.2:31845
 &lt;head&gt;&lt;title&gt;Welcome to nginx!&lt;/title&gt;&lt;/head&gt;
 ...
 </code></pre>
-<p>이제 새 버전을 배포하는 롤링 업데이트도 해봅니다. 이미지를 바꾸기만 하면 됩니다.</p>
+<p>Now let&#x27;s also try a rolling update. Simply change the image:</p>
 <pre><code>
-# 컨테이너 이미지를 새 버전으로 변경 → 롤링 업데이트 자동 시작
+# Update the container image to a new version → rolling update starts automatically
 kubectl set image deployment/web nginx=nginx:1.25
 
-# 교체 진행 상황을 사람이 읽기 좋게 확인
+# Watch the rollout progress in a human-readable format
 kubectl rollout status deployment/web
 </code></pre>
 <pre><code>
 Waiting for deployment &quot;web&quot; rollout to finish: 2 out of 3 new replicas have been updated...
 deployment &quot;web&quot; successfully rolled out
 </code></pre>
-<p>업데이트 도중 문제가 발견되면 즉시 되돌립니다.</p>
+<p>If a problem is spotted during the update, roll back immediately:</p>
 <pre><code>
 kubectl rollout undo deployment/web
 </code></pre>
-<p>이 모든 과정 동안 Service의 주소는 그대로이고, 사용자 요청은 끊기지 않습니다. Deployment(앱의 생명 유지)와 Service(안정적인 접근 통로)가 짝을 이뤄 동작하는 것이 쿠버네티스 앱 운영의 가장 기본적인 형태입니다.</p>
-<h3>핵심 요약</h3>
+<p>Throughout this entire process, the Service address remains the same and user requests are never interrupted. A Deployment (keeping the app alive) paired with a Service (providing a stable access point) is the most fundamental pattern for running applications on Kubernetes.</p>
+<h3>Key Takeaways</h3>
 <ul>
-<li><strong>Pod는 일회용</strong>이라 직접 만들지 않고, <strong>Deployment</strong>로 관리한다.</li>
-<li>Deployment는 <strong>복제(원하는 개수 유지)</strong>, <strong>자가 치유(죽으면 자동 재생성)</strong>, <strong>롤링 업데이트(무중단 배포)</strong>를 담당한다.</li>
-<li>롤링 업데이트는 새 Pod를 준비 완료까지 띄운 뒤 기존 Pod를 하나씩 교체하며, <code class='ic'>maxUnavailable</code>·<code class='ic'>maxSurge</code>로 속도와 안전을 조절한다. 문제가 생기면 <code class='ic'>kubectl rollout undo</code>로 되돌린다.</li>
-<li>Pod는 IP가 계속 바뀌므로, <strong>Service</strong>가 고정 주소와 부하 분산을 제공한다. 어떤 Pod로 보낼지는 <strong>레이블 셀렉터</strong>로 정한다.</li>
-<li><strong>ClusterIP</strong>는 클러스터 내부 통신용(기본값), <strong>NodePort</strong>는 외부 노출용(노드 포트로 접근).</li>
-<li>실습 명령: <code class='ic'>kubectl create deployment</code>, <code class='ic'>kubectl scale</code>, <code class='ic'>kubectl expose</code>, <code class='ic'>kubectl set image</code>, <code class='ic'>kubectl rollout status/undo</code>.</li>
+<li><strong>Pods are ephemeral</strong>, so instead of creating them directly, manage them through a <strong>Deployment</strong>.</li>
+<li>A Deployment handles three things: <strong>replication</strong> (maintaining the desired number), <strong>self-healing</strong> (auto-recreating failed Pods), and <strong>rolling updates</strong> (zero-downtime deployments).</li>
+<li>A rolling update brings up new Pods until they are ready, then replaces old Pods one at a time. <code class='ic'>maxUnavailable</code> and <code class='ic'>maxSurge</code> control the pace and safety margin. Use <code class='ic'>kubectl rollout undo</code> to revert if something goes wrong.</li>
+<li>Because Pod IPs change constantly, a <strong>Service</strong> provides a stable address and load balancing. The <strong>label selector</strong> determines which Pods receive traffic.</li>
+<li><strong>ClusterIP</strong> is for internal cluster communication (default); <strong>NodePort</strong> exposes the Service externally via a port on each node.</li>
+<li>Key commands: <code class='ic'>kubectl create deployment</code>, <code class='ic'>kubectl scale</code>, <code class='ic'>kubectl expose</code>, <code class='ic'>kubectl set image</code>, <code class='ic'>kubectl rollout status/undo</code>.</li>
 </ul>
-<p>&lt;/content&gt;</p>
-<p>&lt;/invoke&gt;</p>
-          
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <p class='q'>Practice 1. With a single kubectl command, create a Deployment named &#x27;web&#x27; using the &#x27;nginx&#x27; image with 3 replicas. After creating it, query both the Deployment status and the list of Pods that were created, and confirm the &#x27;READY 3/3&#x27; state.</p>
+              <pre class='starter'><code># Start from a state where no Deployment exists yet.
+# Run the two commands below in order.
+
+kubectl create deployment web --image=nginx --replicas=___
+kubectl get deployments
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>Omitting &#x27;--replicas=3&#x27; creates only 1 replica (the default). Always specify it explicitly.</li><li>Pods may briefly sit in &#x27;ContainerCreating&#x27; while the image is pulled for the first time, which can take tens of seconds. Run &#x27;kubectl get pods&#x27; repeatedly and wait until they reach Running status.</li><li>To inspect the Deployment in detail, run &#x27;kubectl describe deployment web&#x27; — it includes the event log.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create the Deployment
+kubectl create deployment web --image=nginx --replicas=3
+
+# 2. Check Deployment status
+kubectl get deployments
+# Expected output:
+# NAME   READY   UP-TO-DATE   AVAILABLE   AGE
+# web    3/3     3            3           15s
+
+# 3. Verify the actual Pods
+kubectl get pods
+# Expected output (the hash portion of the names will differ per environment):
+# NAME                   READY   STATUS    RESTARTS   AGE
+# web-&lt;hash&gt;-aaaaa       1/1     Running   0          20s
+# web-&lt;hash&gt;-bbbbb       1/1     Running   0          20s
+# web-&lt;hash&gt;-ccccc       1/1     Running   0          20s</code></pre>
+                <p class='exp2'>&#x27;kubectl create deployment web --image=nginx --replicas=3&#x27; declaratively registers a Deployment object with the Kubernetes API server instructing it to always maintain 3 Pods labeled app=web. The Deployment controller reads this declaration and creates 3 Pods via a ReplicaSet. &#x27;READY 3/3&#x27; means the desired count (3) matches the number of Pods that are actually ready (3). Pod names take the form &#x27;web-&lt;random-hash&gt;-&lt;random-hash&gt;&#x27; because the Deployment assigns names automatically — which is also why names change whenever a Pod is recreated.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 2. From the Pod list of the &#x27;web&#x27; Deployment created in Task 1, copy one Pod name and force-delete it. Immediately after deletion, query the Pod list again to watch Kubernetes automatically create a replacement Pod, then confirm that the total count returns to 3.</p>
+              <pre class='starter'><code># Step 1: Check current Pod names.
+kubectl get pods
+
+# Step 2: Copy a Pod name from the list, paste it into the command below, and run it.
+kubectl delete pod &lt;paste-Pod-name-here&gt;
+
+# Step 3: Query the Pod list repeatedly right after deletion.
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>Pod names are easy to mistype. Drag to select the name from &#x27;kubectl get pods&#x27; output and paste it into the terminal.</li><li>You need to run &#x27;kubectl get pods&#x27; within 0–2 seconds of deletion to catch the new Pod in ContainerCreating state. If you miss the window, it may already be Running — just verify the total count is still 3.</li><li>Run &#x27;kubectl get pods -w&#x27; to stream Pod status changes in real time. Press Ctrl+C to exit.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Check Pod names
+kubectl get pods
+# Example: web-5d4f8c7b9c-7k2lp, web-5d4f8c7b9c-q8xvr, web-5d4f8c7b9c-zm4tn
+
+# 2. Force-delete one Pod (replace with the actual name in your environment)
+kubectl delete pod web-5d4f8c7b9c-7k2lp
+
+# 3. Query the Pod list immediately after deletion
+kubectl get pods
+# Expected output — a new Pod with a different name appears in ContainerCreating:
+# NAME                   READY   STATUS              RESTARTS   AGE
+# web-5d4f8c7b9c-q8xvr   1/1     Running             0          3m
+# web-5d4f8c7b9c-zm4tn   1/1     Running             0          3m
+# web-5d4f8c7b9c-rt9wd   0/1     ContainerCreating   0          2s
+
+# 4. Query again after a moment to confirm 3 Pods are Running
+kubectl get pods</code></pre>
+                <p class='exp2'>Deleting a Pod causes the Deployment controller to immediately detect a mismatch between the desired state (replicas=3) and the current state (2 Running). The controller asks the ReplicaSet to resolve the difference (1 short) by creating a new Pod, restoring the count to 3. The fact that the new Pod has a different name hash shows it was *created fresh*, not restarted. This is the core reason to use a Deployment instead of managing Pods by hand.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 3. Expose the &#x27;web&#x27; Deployment as a NodePort Service, find the assigned NodePort number, and send a curl request to the Minikube IP and that port to receive the nginx default page HTML. Then use &#x27;kubectl scale&#x27; to scale the replicas up to 5, and confirm that the Service URL remains unchanged.</p>
+              <pre class='starter'><code># Step 1: Create the Service
+kubectl expose deployment web --type=___ --port=80
+
+# Step 2: Query the created Service
+kubectl get service web
+
+# Step 3: Get the access URL from Minikube
+minikube service web --url
+
+# Step 4: Receive the nginx page with curl
+curl &lt;URL-from-above&gt;
+
+# Step 5: Scale out to 5 replicas
+kubectl scale deployment web --replicas=___
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>Omitting &#x27;--type=NodePort&#x27; creates a ClusterIP Service by default, which is not reachable from outside the cluster. Always specify the type explicitly.</li><li>If curl returns &#x27;Connection refused&#x27;, the Pods may still be in ContainerCreating state. Run &#x27;kubectl get pods&#x27; to confirm all Pods are Running before retrying.</li><li>If Minikube is running in docker driver mode, NodePort addresses may not be directly reachable without &#x27;minikube service web --url&#x27;. Use the URL this command outputs — it is the safest approach.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create the NodePort Service
+kubectl expose deployment web --type=NodePort --port=80
+
+# 2. Verify the Service (the NodePort number varies by environment)
+kubectl get service web
+# Expected output:
+# NAME   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+# web    NodePort   10.96.142.31    &lt;none&gt;        80:31845/TCP   5s
+
+# 3. Get the full URL from Minikube
+minikube service web --url
+# Example: http://192.168.49.2:31845
+
+# 4. Retrieve the nginx default page with curl
+curl http://192.168.49.2:31845
+# Expected output:
+# &lt;!DOCTYPE html&gt;
+# &lt;html&gt;
+# &lt;head&gt;&lt;title&gt;Welcome to nginx!&lt;/title&gt;&lt;/head&gt;
+# ...
+
+# 5. Scale out to 5 replicas
+kubectl scale deployment web --replicas=5
+kubectl get pods
+# 5 Pods should appear in Running state
+
+# 6. Confirm the Service URL is still the same after scaling
+curl http://192.168.49.2:31845
+# Same nginx page responds → Service address is stable</code></pre>
+                <p class='exp2'>&#x27;kubectl expose&#x27; creates a Service object that inherits the Deployment&#x27;s label selector (app=web). Specifying type NodePort causes Kubernetes to automatically assign an unused port in the range 30000–32767 and open it on every node. Because the Service has a fixed ClusterIP, the access address does not change even when Pod IPs change due to Pod replacement. When you scale up with &#x27;kubectl scale&#x27;, the Service automatically adds the new Pods to its endpoints via the label selector — no additional configuration needed. The Minikube-specific &#x27;minikube service --url&#x27; command resolves the node IP and prints the full URL for you.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 4. Update the nginx image version of the &#x27;web&#x27; Deployment to &#x27;nginx:1.25&#x27; to trigger a rolling update, and observe the progress with &#x27;kubectl rollout status&#x27;. After the update completes, intentionally update to a non-existent image tag (&#x27;nginx:99.99.99&#x27;) to create a stuck rolling update scenario, then use &#x27;kubectl rollout undo&#x27; to recover to the last working version. Confirm that all Pods are in Running state after recovery.</p>
+              <pre class='starter'><code># Step 1: Perform a successful rolling update to nginx:1.25
+kubectl set image deployment/web nginx=nginx:___
+kubectl rollout status deployment/web
+
+# Step 2: Update to a non-existent image (intentional failure)
+kubectl set image deployment/web nginx=nginx:99.99.99
+
+# Step 3: Repeatedly query Pod status to observe the ImagePullBackOff state
+kubectl get pods
+
+# Step 4: Roll back to the previous version
+kubectl rollout undo deployment/web
+
+# Step 5: Verify Pod state after recovery
+kubectl get pods
+kubectl rollout status deployment/web</code></pre>
+              <details><summary>Hint</summary><ul><li>The container name in &#x27;kubectl set image&#x27; defaults to the image name. For a Deployment using the nginx image, the container name is also &#x27;nginx&#x27;. Verify it with &#x27;kubectl describe deployment web | grep -A5 Containers&#x27;.</li><li>ImagePullBackOff may not appear immediately. The status first shows &#x27;ErrImagePull&#x27; and switches to &#x27;ImagePullBackOff&#x27; after a few seconds. Use &#x27;kubectl get pods -w&#x27; to stream the transition in real time.</li><li>Run &#x27;kubectl rollout history deployment/web&#x27; to see the Deployment&#x27;s revision history. You can also roll back to a specific revision with &#x27;kubectl rollout undo deployment/web --to-revision=1&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Rolling update to nginx:1.25
+kubectl set image deployment/web nginx=nginx:1.25
+kubectl rollout status deployment/web
+# Expected output:
+# Waiting for deployment &quot;web&quot; rollout to finish: 2 out of 5 new replicas have been updated...
+# deployment &quot;web&quot; successfully rolled out
+
+# 2. Update to a non-existent image (failure scenario)
+kubectl set image deployment/web nginx=nginx:99.99.99
+
+# 3. Observe new Pods failing with ImagePullBackOff
+kubectl get pods
+# Expected output:
+# NAME                   READY   STATUS             RESTARTS   AGE
+# web-&lt;new-hash&gt;-aaaaa   0/1     ImagePullBackOff   0          15s
+# web-&lt;old-hash&gt;-bbbbb   1/1     Running            0          3m
+# web-&lt;old-hash&gt;-ccccc   1/1     Running            0          3m
+# ...
+# → Rolling update stalls; old Pods remain alive
+
+# 4. Immediately roll back to the previous version
+kubectl rollout undo deployment/web
+# Output: deployment.apps/web rolled back
+
+# 5. Verify state after rollback
+kubectl rollout status deployment/web
+# Output: deployment &quot;web&quot; successfully rolled out
+
+kubectl get pods
+# All Pods should be Running 1/1
+
+# 6. Confirm the current image version (should be back to nginx:1.25)
+kubectl describe deployment web | grep Image
+# Output: Image: nginx:1.25</code></pre>
+                <p class='exp2'>A rolling update adds new Pods one at a time and tears down old Pods only after the new ones are Ready. If the new image tag does not exist, the new Pods fail with &#x27;ImagePullBackOff&#x27; and never become Ready. Because the existing Pods remain alive within the maxUnavailable limit, the service continues uninterrupted. &#x27;kubectl rollout undo&#x27; reactivates the previous ReplicaSet recorded in the Deployment&#x27;s revision history, cancelling the change. The reversion also uses a rolling strategy, so there is no service interruption during recovery. This scenario mirrors a real-world emergency rollback after a bad image is pushed to production.</p>
+              </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=lxc4EXZOOvE' target='_blank'>Most Common Kubernetes Deployment Strategies (Examples &amp; Code)</a></li><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=mNK14yXIZF4' target='_blank'>How Kubernetes deployments work</a></li></ul></div>
         </article>
 <article id='lec5' class='lecture'>
-          <h2>05. YAML 매니페스트로 직접 배포하기 - 선언형 구성 실습 </h2>
-          <h2>YAML 매니페스트로 직접 배포하기 - 선언형 구성 실습</h2>
-<h3>학습 목표</h3>
+          <h2>05. Deploying with YAML Manifests - Declarative Configuration in Practice </h2>
+          <h2>Deploying with YAML Manifests - Declarative Configuration in Practice</h2>
+<h3>Learning Objectives</h3>
 <ul>
-<li>명령형(imperative)과 선언형(declarative) 배포 방식의 차이를 이해한다</li>
-<li>Deployment와 Service의 YAML 매니페스트를 직접 작성한다</li>
-<li><code class='ic'>kubectl apply</code>로 매니페스트를 적용하고 결과를 검증한다</li>
+<li>Understand the difference between imperative and declarative deployment approaches</li>
+<li>Write YAML manifests for a Deployment and a Service from scratch</li>
+<li>Apply manifests with <code class='ic'>kubectl apply</code> and verify the results</li>
 </ul>
-<h3>본문</h3>
-<h4>왜 YAML로 배포하는가</h4>
-<p>3강과 4강에서 우리는 <code class='ic'>kubectl run</code>이나 <code class='ic'>kubectl create deployment</code> 같은 명령어로 Pod와 Deployment를 만들었습니다. 명령어 한 줄로 끝나니 빠르고 편리하죠. 그런데 실무 현장에서는 이렇게 명령어로 자원을 만드는 경우가 거의 없습니다. 대신 <strong>YAML 파일에 원하는 상태를 적어 두고</strong> 그 파일을 클러스터에 적용합니다. 이번 강의에서는 그 이유와 방법을 직접 손으로 따라 하며 익힙니다.</p>
+<h3>Content</h3>
+<h4>Why Deploy with YAML?</h4>
+<p>In lectures 3 and 4, we created Pods and Deployments using commands like <code class='ic'>kubectl run</code> and <code class='ic'>kubectl create deployment</code>. One line and you&#x27;re done — fast and convenient. In real-world environments, however, resources are almost never created this way. Instead, teams <strong>describe the desired state in a YAML file</strong> and apply that file to the cluster. In this lecture, you will learn why, and practice the technique hands-on.</p>
 <blockquote class='callout'>
-<p>YAML(YAML Ain&#x27;t Markup Language)은 사람이 읽기 쉬운 설정 파일 형식입니다. 쿠버네티스에서는 &quot;어떤 자원을, 어떤 모습으로 띄울지&quot;를 적는 설계도 역할을 합니다.</p>
+<p>YAML (YAML Ain&#x27;t Markup Language) is a human-readable configuration file format. In Kubernetes, it acts as a blueprint that specifies &quot;what resource to run and what it should look like.&quot;</p>
 </blockquote>
-<h4>명령형 vs 선언형 — 핵심 차이</h4>
-<p>두 방식의 차이는 한 문장으로 요약됩니다.</p>
+<h4>Imperative vs. Declarative — The Core Difference</h4>
+<p>The distinction between the two approaches comes down to one sentence.</p>
 <ul>
-<li><strong>명령형(Imperative)</strong>: &quot;이렇게 <strong>해라</strong>&quot;라고 <em>행동</em>을 지시합니다. 예) <code class='ic'>kubectl run</code>, <code class='ic'>kubectl create</code>, <code class='ic'>kubectl delete</code>. 내가 어떤 절차를 밟아야 할지 직접 명령합니다.</li>
-<li><strong>선언형(Declarative)</strong>: &quot;최종 모습은 <strong>이래야 한다</strong>&quot;라고 <em>상태</em>를 선언합니다. 예) YAML 파일 + <code class='ic'>kubectl apply</code>. 어떻게 거기에 도달할지는 쿠버네티스가 알아서 계산합니다.</li>
+<li><strong>Imperative</strong>: You tell Kubernetes <em>what to do</em>, step by step. Examples: <code class='ic'>kubectl run</code>, <code class='ic'>kubectl create</code>, <code class='ic'>kubectl delete</code>. You explicitly dictate each action.</li>
+<li><strong>Declarative</strong>: You tell Kubernetes <em>what the end state should look like</em>. Examples: YAML file + <code class='ic'>kubectl apply</code>. Kubernetes figures out on its own how to get there.</li>
 </ul>
-<p>식당에 비유하면, 명령형은 주방에 들어가 &quot;불을 켜고, 패티를 굽고, 빵을 데워라&quot;라고 단계마다 지시하는 것이고, 선언형은 &quot;치즈버거 하나 주세요&quot;라고 <strong>원하는 결과만 말하는 것</strong>입니다. 주방(쿠버네티스)이 현재 상태와 목표 상태를 비교해 부족한 만큼만 알아서 채웁니다.</p>
-<p>이 &quot;현재 상태를 목표 상태에 맞춰 끊임없이 조정하는 것&quot;을 <strong>조정 루프(reconciliation loop)</strong> 라고 부릅니다. 선언형 방식이 강력한 이유가 바로 여기 있습니다. 같은 YAML을 두 번, 세 번 적용해도 결과는 항상 동일하고(멱등성), 누군가 Pod를 지워도 쿠버네티스가 선언된 상태로 되돌립니다.</p>
-<p>아래 그림처럼 조정 루프는 &quot;목표 상태와 현재 상태를 비교 → 차이가 있으면 조정 → 다시 비교&quot;를 끝없이 반복합니다.</p>
+<p>Think of it like a restaurant. The imperative approach is walking into the kitchen and barking orders: &quot;Light the burner, grill the patty, toast the bun.&quot; The declarative approach is simply saying, <strong>&quot;One cheeseburger, please.&quot;</strong> The kitchen (Kubernetes) compares the current state to the desired state and fills in whatever is missing.</p>
+<p>This continuous process of <strong>adjusting the current state to match the desired state</strong> is called the <strong>reconciliation loop</strong>. That is precisely what makes the declarative approach so powerful. Applying the same YAML file two or three times always produces the same result (idempotency), and if someone deletes a Pod, Kubernetes automatically restores it to the declared state.</p>
+<p>As shown in the diagram below, the reconciliation loop endlessly repeats: compare desired state to current state → adjust if there is a difference → compare again.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
-    A[&quot;목표 상태&lt;br/&gt;(YAML 선언)&quot;] --&gt; B{&quot;현재 상태와&lt;br/&gt;일치하는가&quot;}
-    C[&quot;현재 상태&lt;br/&gt;(실제 클러스터)&quot;] --&gt; B
-    B -- &quot;일치&quot; --&gt; D[&quot;그대로 유지&quot;]
-    B -- &quot;불일치&quot; --&gt; E[&quot;부족한 만큼&lt;br/&gt;생성·삭제로 조정&quot;]
+    A[&quot;Desired State&lt;br/&gt;(YAML Declaration)&quot;] --&gt; B{&quot;Does it match&lt;br/&gt;current state?&quot;}
+    C[&quot;Current State&lt;br/&gt;(Actual Cluster)&quot;] --&gt; B
+    B -- &quot;Match&quot; --&gt; D[&quot;No action needed&quot;]
+    B -- &quot;Mismatch&quot; --&gt; E[&quot;Create or delete resources&lt;br/&gt;to close the gap&quot;]
     E --&gt; C
-    D --&gt; B</div><figcaption>선언된 상태를 끊임없이 지키는 조정 루프</figcaption></figure>
-<p>선언형 방식의 실무 장점을 정리하면 다음과 같습니다.</p>
+    D --&gt; B</div><figcaption>Reconciliation loop that continuously enforces the declared state</figcaption></figure>
+<p>The practical advantages of the declarative approach can be summarized as follows:</p>
 <ul>
-<li><strong>버전 관리</strong>: YAML을 Git에 올려 변경 이력을 추적하고 되돌릴 수 있습니다.</li>
-<li><strong>재현성</strong>: 같은 파일로 개발/스테이징/운영 환경에 똑같은 구성을 재현합니다.</li>
-<li><strong>협업</strong>: 팀원에게 파일만 공유하면 동일한 자원을 만들 수 있습니다.</li>
-<li><strong>검토 가능</strong>: 코드처럼 리뷰(PR)를 거쳐 배포할 수 있습니다.</li>
+<li><strong>Version control</strong>: Store YAML files in Git to track changes and roll back when needed.</li>
+<li><strong>Reproducibility</strong>: Use the same file to deploy identical configurations across development, staging, and production environments.</li>
+<li><strong>Collaboration</strong>: Share the file with teammates and anyone can recreate the exact same resources.</li>
+<li><strong>Reviewability</strong>: Changes can go through code review (pull requests) before being applied.</li>
 </ul>
 <blockquote class='callout'>
-<p>실험·학습 단계에서는 <code class='ic'>kubectl run</code>도 충분합니다. 하지만 실제 운영 환경이라면 YAML + <code class='ic'>kubectl apply</code>가 정답입니다.</p>
+<p>For experimentation and learning, <code class='ic'>kubectl run</code> works just fine. But for production environments, YAML + <code class='ic'>kubectl apply</code> is the right approach.</p>
 </blockquote>
-<h4>모든 매니페스트의 공통 뼈대</h4>
-<p>자원 종류가 Pod든 Deployment든 Service든, 매니페스트는 항상 4개의 최상위 필드로 시작합니다.</p>
-<p>| 필드 | 의미 |</p>
-<p>|------|------|</p>
-<p>| <code class='ic'>apiVersion</code> | 사용할 쿠버네티스 API 버전 (자원 종류마다 다름) |</p>
-<p>| <code class='ic'>kind</code> | 만들 자원의 종류 (Pod, Deployment, Service 등) |</p>
-<p>| <code class='ic'>metadata</code> | 이름·라벨 등 자원을 식별하는 정보 |</p>
-<p>| <code class='ic'>spec</code> | 자원이 갖춰야 할 실제 명세(원하는 상태) |</p>
-<p>여기서 초보자가 가장 많이 틀리는 지점이 <code class='ic'>apiVersion</code>입니다. 자원마다 값이 다릅니다. Pod와 Service는 <code class='ic'>v1</code>, Deployment는 <code class='ic'>apps/v1</code>을 씁니다. 또 YAML은 <strong>들여쓰기(공백 2칸)로 계층을 표현</strong>하므로, 탭 대신 스페이스를 쓰고 콜론(<code class='ic'>:</code>) 뒤에는 반드시 한 칸을 띄워야 합니다.</p>
-<h4>실습 1 — Deployment 매니페스트 작성</h4>
-<p>이제 nginx 웹 서버를 2개 복제본으로 띄우는 Deployment를 작성해 봅니다. <code class='ic'>nginx-deployment.yaml</code> 파일을 만듭니다.</p>
+<h4>The Common Structure of Every Manifest</h4>
+<p>Regardless of whether the resource is a Pod, a Deployment, or a Service, every manifest starts with the same four top-level fields.</p>
+<p>| Field | Description |</p>
+<p>|-------|-------------|</p>
+<p>| <code class='ic'>apiVersion</code> | The Kubernetes API version to use (varies by resource type) |</p>
+<p>| <code class='ic'>kind</code> | The type of resource to create (Pod, Deployment, Service, etc.) |</p>
+<p>| <code class='ic'>metadata</code> | Identifying information such as the resource name and labels |</p>
+<p>| <code class='ic'>spec</code> | The actual specification describing the desired state of the resource |</p>
+<p>The field beginners get wrong most often is <code class='ic'>apiVersion</code>, because the value differs by resource type. Pods and Services use <code class='ic'>v1</code>; Deployments use <code class='ic'>apps/v1</code>. Also, YAML <strong>uses indentation (2 spaces) to represent hierarchy</strong>, so always use spaces instead of tabs and leave exactly one space after each colon (<code class='ic'>:</code>).</p>
+<h4>Exercise 1 — Writing a Deployment Manifest</h4>
+<p>Let&#x27;s write a Deployment that runs the nginx web server with 2 replicas. Create a file called <code class='ic'>nginx-deployment.yaml</code>.</p>
 <pre><code>
-apiVersion: apps/v1          # Deployment는 apps/v1
+apiVersion: apps/v1          # Deployments use apps/v1
 kind: Deployment
 metadata:
-  name: nginx-deployment      # 이 Deployment의 이름
+  name: nginx-deployment      # The name of this Deployment
   labels:
     app: nginx
 spec:
-  replicas: 2                 # Pod를 몇 개 띄울지 (원하는 상태)
+  replicas: 2                 # Number of Pods to run (desired state)
   selector:
     matchLabels:
-      app: nginx              # 아래 라벨과 일치하는 Pod를 내 관리 대상으로 삼음
-  template:                   # 찍어낼 Pod의 설계도
+      app: nginx              # Pods with this label are managed by this Deployment
+  template:                   # Blueprint for the Pods to be created
     metadata:
       labels:
-        app: nginx            # selector와 반드시 일치해야 함
+        app: nginx            # Must match the selector above
     spec:
       containers:
-        - name: nginx         # 컨테이너 목록(리스트)이라 &#x27;-&#x27;로 시작
+        - name: nginx         # Container list uses &#x27;-&#x27; because it is a YAML list
           image: nginx:1.27
           ports:
             - containerPort: 80
 </code></pre>
-<p>핵심은 <code class='ic'>selector</code>의 라벨과 <code class='ic'>template</code>의 라벨이 <strong>반드시 일치</strong>해야 한다는 점입니다. Deployment는 이 라벨을 기준으로 &quot;내가 책임질 Pod&quot;를 찾기 때문입니다. 불일치하면 적용 단계에서 에러가 납니다.</p>
-<h4>실습 2 — Service 매니페스트 작성</h4>
-<p>Deployment가 만든 Pod들은 클러스터 내부에서만 보이고, IP도 재시작 때마다 바뀝니다. 외부에서 접속하려면 안정적인 진입점인 <strong>Service</strong>가 필요합니다. <code class='ic'>nginx-service.yaml</code>을 만듭니다.</p>
+<p>The critical rule here is that the label in <code class='ic'>selector</code> and the label in <code class='ic'>template</code> <strong>must match exactly</strong>. The Deployment uses this label to identify which Pods it is responsible for. A mismatch will produce an error when you apply the manifest.</p>
+<h4>Exercise 2 — Writing a Service Manifest</h4>
+<p>Pods created by a Deployment are only visible inside the cluster, and their IP addresses change every time they restart. To allow external access, you need a <strong>Service</strong> — a stable entry point into the cluster. Create <code class='ic'>nginx-service.yaml</code>.</p>
 <pre><code>
-apiVersion: v1               # Service는 v1
+apiVersion: v1               # Services use v1
 kind: Service
 metadata:
   name: nginx-service
 spec:
-  type: NodePort             # 노드의 포트로 외부 노출
+  type: NodePort             # Expose the service on a port of each node
   selector:
-    app: nginx               # 이 라벨을 가진 Pod로 트래픽 전달
+    app: nginx               # Forward traffic to Pods with this label
   ports:
-    - port: 80               # Service가 받는 포트
-      targetPort: 80         # Pod(컨테이너)로 전달할 포트
-      nodePort: 30080        # 외부에서 접속할 노드 포트(30000~32767)
+    - port: 80               # The port the Service listens on
+      targetPort: 80         # The port to forward to inside the Pod (container)
+      nodePort: 30080        # The node port accessible from outside (30000–32767)
 </code></pre>
-<p>Service 역시 <code class='ic'>selector</code> 라벨(<code class='ic'>app: nginx</code>)로 대상 Pod를 찾습니다. Deployment에서 붙인 라벨과 같기 때문에, Service는 그 2개의 Pod에 트래픽을 자동으로 나눠 보냅니다. Pod IP를 일일이 몰라도 되고, Pod가 죽고 새로 떠도 라벨만 맞으면 알아서 연결됩니다.</p>
-<p>아래 구성도처럼 Deployment와 Service는 둘 다 <code class='ic'>app: nginx</code> 라벨을 매개로 같은 Pod 묶음과 연결됩니다. 이 라벨이 일치해야 모든 연결이 성립합니다.</p>
+<p>The Service also uses the <code class='ic'>selector</code> label (<code class='ic'>app: nginx</code>) to find its target Pods. Because this matches the label on the Pods created by the Deployment, the Service automatically distributes traffic across those 2 Pods. You don&#x27;t need to know any Pod&#x27;s IP, and even if a Pod dies and is replaced, the label match keeps traffic flowing seamlessly.</p>
+<p>As shown in the diagram below, the Deployment and the Service are both connected to the same set of Pods through the shared <code class='ic'>app: nginx</code> label. All connectivity depends on this label matching correctly.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TB
     Dep[&quot;Deployment&lt;br/&gt;nginx-deployment&lt;br/&gt;replicas: 2&quot;]
     Svc[&quot;Service&lt;br/&gt;nginx-service&lt;br/&gt;type: NodePort&quot;]
     P1[&quot;Pod&lt;br/&gt;app=nginx&quot;]
     P2[&quot;Pod&lt;br/&gt;app=nginx&quot;]
 
-    Dep -- &quot;template으로 생성·관리&quot; --&gt; P1
-    Dep -- &quot;template으로 생성·관리&quot; --&gt; P2
-    Svc -- &quot;selector app=nginx&lt;br/&gt;로 트래픽 전달&quot; --&gt; P1
-    Svc -- &quot;selector app=nginx&lt;br/&gt;로 트래픽 전달&quot; --&gt; P2</div><figcaption>&quot;app: nginx 라벨로 묶이는 Deployment·Service·Pod 관계&quot;</figcaption></figure>
-<h4>실습 3 — kubectl apply로 적용하고 검증하기</h4>
-<p>작성한 매니페스트를 클러스터에 적용합니다. 명령형의 <code class='ic'>create</code>와 달리 <code class='ic'>apply</code>를 씁니다.</p>
+    Dep -- &quot;Creates and manages via template&quot; --&gt; P1
+    Dep -- &quot;Creates and manages via template&quot; --&gt; P2
+    Svc -- &quot;Routes traffic via&lt;br/&gt;selector app=nginx&quot; --&gt; P1
+    Svc -- &quot;Routes traffic via&lt;br/&gt;selector app=nginx&quot; --&gt; P2</div><figcaption>&quot;Deployment, Service, and Pod relationships linked by the app: nginx label&quot;</figcaption></figure>
+<h4>Exercise 3 — Applying Manifests with kubectl apply and Verifying Results</h4>
+<p>Apply the manifests to the cluster. Notice that we use <code class='ic'>apply</code> rather than the imperative <code class='ic'>create</code>.</p>
 <pre><code>
 kubectl apply -f nginx-deployment.yaml
 kubectl apply -f nginx-service.yaml
@@ -683,9 +1110,9 @@ deployment.apps/nginx-deployment created
 service/nginx-service created
 </code></pre>
 <blockquote class='callout'>
-<p><code class='ic'>create</code>는 &quot;새로 만들기&quot;만 하지만, <code class='ic'>apply</code>는 &quot;이 상태가 되도록 맞춰라&quot;입니다. 파일을 수정한 뒤 다시 <code class='ic'>apply</code>하면 바뀐 부분만 반영됩니다. 이것이 선언형 운영의 핵심입니다.</p>
+<p><code class='ic'>create</code> only creates a resource if it doesn&#x27;t already exist, but <code class='ic'>apply</code> means &quot;make the cluster match this state.&quot; If you edit the file and run <code class='ic'>apply</code> again, only the changed parts are updated. This is the essence of declarative operations.</p>
 </blockquote>
-<p>이제 결과를 검증합니다.</p>
+<p>Now verify the results.</p>
 <pre><code>
 kubectl get deployment
 kubectl get pods
@@ -702,7 +1129,7 @@ nginx-deployment-7d9c5b8f6c-fghij   1/1     Running   0          20s
 NAME            TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
 nginx-service   NodePort   10.96.120.45    &lt;none&gt;        80:30080/TCP   18s
 </code></pre>
-<p><code class='ic'>READY 2/2</code>는 원하던 복제본 2개가 모두 떠 있다는 뜻이고, Pod가 2개 <code class='ic'>Running</code> 상태인 것이 보입니다. 선언형의 위력을 확인하려면 Pod 하나를 강제로 지워 보세요.</p>
+<p><code class='ic'>READY 2/2</code> means both requested replicas are up and running, and you can see 2 Pods in <code class='ic'>Running</code> status. To see the power of the declarative approach in action, try forcibly deleting one of those Pods.</p>
 <pre><code>
 kubectl delete pod nginx-deployment-7d9c5b8f6c-abcde
 kubectl get pods
@@ -712,42 +1139,238 @@ NAME                                READY   STATUS    RESTARTS   AGE
 nginx-deployment-7d9c5b8f6c-fghij   1/1     Running   0          90s
 nginx-deployment-7d9c5b8f6c-klmno   1/1     Running   0          5s
 </code></pre>
-<p>지운 즉시 쿠버네티스가 새 Pod를 띄워 다시 2개를 맞춥니다. &quot;복제본 2개&quot;라는 선언된 상태를 조정 루프가 끊임없이 지켜 주는 것입니다. 마지막으로 동작을 확인합니다.</p>
+<p>The moment the Pod is deleted, Kubernetes brings up a new one to restore the count to 2. The reconciliation loop continuously enforces the declared state of &quot;2 replicas.&quot; Finally, verify everything is working.</p>
 <pre><code>
 curl http://localhost:30080
 </code></pre>
-<p>응답에 <code class='ic'>Welcome to nginx!</code>가 보이면 배포 성공입니다. 실습이 끝나면 다음으로 정리합니다.</p>
+<p>If you see <code class='ic'>Welcome to nginx!</code> in the response, the deployment is successful. When you&#x27;re finished with the exercise, clean up.</p>
 <pre><code>
 kubectl delete -f nginx-service.yaml -f nginx-deployment.yaml
 </code></pre>
-<h4>적용 흐름 한눈에 보기</h4>
-<p>매니페스트를 적용했을 때 클러스터 내부에서 벌어지는 흐름은 다음과 같습니다. 사용자가 <code class='ic'>kubectl apply</code>로 YAML을 API Server에 보내면, API Server가 그 목표 상태를 etcd에 저장하고, Deployment 컨트롤러가 ReplicaSet을, ReplicaSet 컨트롤러가 Pod를 만들고, 스케줄러가 노드를 정한 뒤, 노드의 kubelet이 실제 컨테이너를 띄웁니다. 아래 시퀀스 다이어그램이 그 순서를 시간 흐름으로 보여 줍니다.</p>
+<h4>The Full Apply Flow at a Glance</h4>
+<p>Here is what happens inside the cluster when you apply a manifest. When you send a YAML file to the API Server via <code class='ic'>kubectl apply</code>, the API Server stores the desired state in etcd, the Deployment controller creates a ReplicaSet, the ReplicaSet controller creates Pods, the scheduler assigns them to nodes, and the kubelet on each node actually starts the containers. The sequence diagram below shows this flow in chronological order.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant U as 사용자(kubectl)
+    participant U as User (kubectl)
     participant API as API Server
     participant ETCD as etcd
-    participant CTRL as 컨트롤러
-    participant SCH as 스케줄러
-    participant KUBELET as kubelet(노드)
+    participant CTRL as Controller
+    participant SCH as Scheduler
+    participant KUBELET as kubelet (Node)
 
-    U-&gt;&gt;API: kubectl apply, YAML 목표 상태 전송
-    API-&gt;&gt;ETCD: 목표 상태 저장
-    API--&gt;&gt;U: 접수 응답(created)
-    CTRL-&gt;&gt;API: 목표와 현재 상태 비교
-    CTRL-&gt;&gt;API: ReplicaSet, Pod 생성 요청
-    SCH-&gt;&gt;API: 배치할 노드 결정
-    KUBELET-&gt;&gt;API: 내게 할당된 Pod 확인
-    KUBELET-&gt;&gt;KUBELET: 컨테이너 실행
-    KUBELET-&gt;&gt;API: 실행 상태 보고(Running)</div><figcaption>kubectl apply 한 번이 컨테이너 실행까지 이어지는 순서</figcaption></figure>
-<h3>핵심 요약</h3>
+    U-&gt;&gt;API: kubectl apply — sends YAML desired state
+    API-&gt;&gt;ETCD: Stores desired state
+    API--&gt;&gt;U: Acknowledgement (created)
+    CTRL-&gt;&gt;API: Compares desired state vs. current state
+    CTRL-&gt;&gt;API: Requests ReplicaSet and Pod creation
+    SCH-&gt;&gt;API: Selects a node for scheduling
+    KUBELET-&gt;&gt;API: Checks Pods assigned to this node
+    KUBELET-&gt;&gt;KUBELET: Starts the container
+    KUBELET-&gt;&gt;API: Reports status (Running)</div><figcaption>How a single kubectl apply leads to a running container</figcaption></figure>
+<h3>Key Takeaways</h3>
 <ul>
-<li>명령형은 &quot;행동&quot;을 지시하고(<code class='ic'>kubectl run/create</code>), 선언형은 &quot;원하는 상태&quot;를 선언한다(YAML + <code class='ic'>kubectl apply</code>).</li>
-<li>선언형은 버전 관리·재현성·협업에 유리하며, 조정 루프 덕분에 멱등성과 자가 치유가 보장된다.</li>
-<li>모든 매니페스트는 <code class='ic'>apiVersion</code>, <code class='ic'>kind</code>, <code class='ic'>metadata</code>, <code class='ic'>spec</code> 4개 필드로 구성된다. Pod/Service는 <code class='ic'>v1</code>, Deployment는 <code class='ic'>apps/v1</code>.</li>
-<li>Deployment·Service는 <code class='ic'>selector</code> 라벨로 대상 Pod를 찾으므로 라벨 일치가 매우 중요하다.</li>
-<li><code class='ic'>kubectl apply -f</code>로 적용하고 <code class='ic'>kubectl get</code>으로 검증하며, 파일을 고쳐 다시 apply하면 변경분만 반영된다.</li>
+<li>The imperative approach tells Kubernetes <em>what actions to perform</em> (<code class='ic'>kubectl run/create</code>); the declarative approach tells it <em>what the desired state should be</em> (YAML + <code class='ic'>kubectl apply</code>).</li>
+<li>The declarative approach is better for version control, reproducibility, and team collaboration. The reconciliation loop guarantees idempotency and self-healing.</li>
+<li>Every manifest is composed of four fields: <code class='ic'>apiVersion</code>, <code class='ic'>kind</code>, <code class='ic'>metadata</code>, and <code class='ic'>spec</code>. Pods and Services use <code class='ic'>v1</code>; Deployments use <code class='ic'>apps/v1</code>.</li>
+<li>Both Deployments and Services find their target Pods via <code class='ic'>selector</code> labels, so label matching is critical.</li>
+<li>Apply with <code class='ic'>kubectl apply -f</code> and verify with <code class='ic'>kubectl get</code>. Running <code class='ic'>apply</code> again after editing the file updates only the changed portions.</li>
 </ul>
-          
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <p class='q'>Practice 1. The manifest below is for a Pod named &#x27;hello-pod&#x27;, but some of the required fields are missing. Fill in the blanks (_____), apply the manifest with `kubectl apply -f hello-pod.yaml`, and confirm that `kubectl get pod hello-pod` shows a STATUS of Running.
+
+```yaml
+_____: v1          # Pod belongs to the core API group
+kind: _____
+metadata:
+  name: hello-pod
+spec:
+  containers:
+    - name: hello
+      image: _____
+```</p>
+              <pre class='starter'><code># hello-pod.yaml (fill in the blanks)
+_____: v1
+kind: _____
+metadata:
+  name: hello-pod
+spec:
+  containers:
+    - name: hello
+      image: _____</code></pre>
+              <details><summary>Hint</summary><ul><li>Every manifest requires four top-level fields: `apiVersion`, `kind`, `metadata`, and `spec`. The first blank is one of those fields.</li><li>The `apiVersion` for `kind: Pod` is `v1`. Remember: Deployments use `apps/v1`, while Pods and Services use `v1`.</li><li>Images are written in the format `image-name:tag`, for example `nginx:1.27`. Omitting the tag (just `nginx`) is valid, but specifying a version tag is standard practice in production.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># hello-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hello-pod
+spec:
+  containers:
+    - name: hello
+      image: nginx:1.27</code></pre>
+                <p class='exp2'>`apiVersion` depends on the resource type. Pods and Services belong to the Kubernetes core API group, so they use `v1`. `kind` is the type of resource you want to create — write `Pod` exactly as shown (case-sensitive). `image` must refer to a publicly available image. Here we use the official `nginx:1.27` image from Docker Hub.
+
+After applying, run `kubectl get pod hello-pod -w` to watch the STATUS change in real time. It should transition from ContainerCreating to Running. To clean up: `kubectl delete pod hello-pod`.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 2. Write a Deployment manifest (`my-deployment.yaml`) from scratch that meets the following requirements and apply it to the cluster.
+
+Requirements:
+- Name: `my-nginx`
+- Replicas: 3
+- Container name: `nginx-container`, image: `nginx:1.27`, container port: 80
+- Pod label: `app: my-nginx`
+
+After applying, verify the state with the commands below.
+```bash
+kubectl get deployment my-nginx
+kubectl get pods -l app=my-nginx
+```
+
+Expected result: READY column shows `3/3`, and all 3 Pods are in Running status.</p>
+              <pre class='starter'><code># my-deployment.yaml — write your manifest below
+# Hint: start with the four top-level fields (apiVersion, kind, metadata, spec)</code></pre>
+              <details><summary>Hint</summary><ul><li>The `apiVersion` for a Deployment is `apps/v1`. Using just `v1` will produce a `no kind &#x27;Deployment&#x27; is registered...` error.</li><li>Make sure the label values under `spec.selector.matchLabels` and `spec.template.metadata.labels` are identical. If they differ, Kubernetes will reject the manifest immediately.</li><li>The `containers` field is a YAML list, so each entry starts with a `-` (hyphen). Use 2 spaces per indent level — tab characters are not allowed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># my-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+  labels:
+    app: my-nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-nginx
+  template:
+    metadata:
+      labels:
+        app: my-nginx
+    spec:
+      containers:
+        - name: nginx-container
+          image: nginx:1.27
+          ports:
+            - containerPort: 80</code></pre>
+                <p class='exp2'>The most important rule in a Deployment manifest is that `spec.selector.matchLabels` and `spec.template.metadata.labels` must match exactly. The Deployment controller uses this label selector to identify which Pods it manages, so a mismatch will cause an error at `kubectl apply` time.
+
+`kubectl get pods -l app=my-nginx` uses the `-l` (label selector) flag to show only Pods with that label. Also notice that all three Pod names follow the pattern `my-nginx-&lt;hash&gt;-&lt;hash&gt;` — these names are auto-generated by the Deployment through its ReplicaSet.
+
+To clean up: `kubectl delete deployment my-nginx`</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 3. With the `my-nginx` Deployment from Core Exercise 1 still running, write a NodePort Service manifest (`my-service.yaml`) and apply it to the cluster.
+
+Requirements:
+- Name: `my-nginx-svc`
+- Type: NodePort
+- Selector label: `app: my-nginx`
+- port: 80, targetPort: 80, nodePort: 30090
+
+After applying, verify with the commands below. If you are using minikube, confirm the response with curl.
+```bash
+kubectl get service my-nginx-svc
+# Verify connectivity in a minikube environment
+curl http://$(minikube ip):30090
+```
+
+Success is confirmed when `Welcome to nginx!` appears in the response.</p>
+              <pre class='starter'><code># my-service.yaml — write your manifest below
+# Write fields in the order: apiVersion, kind, metadata, spec
+# You will need spec.type, spec.selector, and spec.ports</code></pre>
+              <details><summary>Hint</summary><ul><li>The `apiVersion` for a Service is `v1`. If you omit `spec.type: NodePort`, the Service defaults to ClusterIP type and will not be reachable from outside the cluster.</li><li>The label value in `spec.selector` must exactly match `app: my-nginx` as defined in Core Exercise 1. Even a single typo will prevent traffic from reaching the Pods.</li><li>If curl returns no response or a `Connection refused` error, run `kubectl get endpoints my-nginx-svc`. If the ENDPOINTS column shows Pod IPs, the Service is connected to the Pods. If it shows `&lt;none&gt;`, there is a label selector mismatch.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># my-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-nginx-svc
+spec:
+  type: NodePort
+  selector:
+    app: my-nginx
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30090</code></pre>
+                <p class='exp2'>The `apiVersion` for a Service is `v1` (not `apps/v1` like a Deployment). The label in `spec.selector` (`app: my-nginx`) must match the label the Deployment placed on its Pods. This label match determines which Pods the Service forwards traffic to.
+
+For NodePort Services, here is what each port field does:
+- `port: 80` — the port the Service listens on within the cluster (via its ClusterIP)
+- `targetPort: 80` — the port the actual container (Pod) is listening on
+- `nodePort: 30090` — the port exposed on each node for external access (must be in the range 30000–32767)
+
+If `kubectl get service my-nginx-svc` shows `80:30090/TCP` in the PORT(S) column, the Service is configured correctly.
+
+In a minikube environment, `minikube ip` returns the node IP (typically in the 192.168.x.x range), and nginx is accessible on port 30090 of that IP.
+
+To clean up: `kubectl delete -f my-service.yaml -f my-deployment.yaml`</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 4. Edit `my-deployment.yaml` from Core Exercise 1 and change `replicas` from 3 to 5, then run `kubectl apply` again. The key point is to modify only the file and re-apply — do not delete the existing cluster resources.
+
+Steps:
+1. Edit `my-deployment.yaml` and change `replicas: 3` to `replicas: 5`
+2. Run `kubectl apply -f my-deployment.yaml`
+3. Verify that the Pod count has increased to 5
+
+```bash
+kubectl get deployment my-nginx
+kubectl get pods -l app=my-nginx
+```
+
+Expected result: READY `5/5`, with 5 Running Pods.
+
+Bonus challenge: Force-delete one Pod with `kubectl delete pod &lt;pod-name&gt;`, wait a moment, then run `kubectl get pods -l app=my-nginx` again and confirm that Kubernetes automatically recovers to 5 Pods.</p>
+              <pre class='starter'><code># File to edit: my-deployment.yaml (created in Core Exercise 1)
+# Change only the replicas field from 3 to 5 and save
+# Before:
+#   replicas: 3
+# After:
+#   replicas: 5</code></pre>
+              <details><summary>Hint</summary><ul><li>Only change the `replicas: 3` line to `replicas: 5`. No other fields need to be modified. Save the file, then run `kubectl apply -f my-deployment.yaml`.</li><li>Right after running `kubectl apply`, run `kubectl get pods -l app=my-nginx -w` to watch the new Pods transition from ContainerCreating to Running in real time (press Ctrl+C to stop watching).</li><li>If you don&#x27;t know the Pod name, run `kubectl get pods -l app=my-nginx` to find one, copy any Pod name, and delete it with `kubectl delete pod &lt;name&gt;`. After about 5–10 seconds, querying again should show a new Pod in Running status, keeping the total at 5.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># my-deployment.yaml (final version with updated replicas)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+  labels:
+    app: my-nginx
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: my-nginx
+  template:
+    metadata:
+      labels:
+        app: my-nginx
+    spec:
+      containers:
+        - name: nginx-container
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+
+# Apply command
+# kubectl apply -f my-deployment.yaml
+
+# Verification commands
+# kubectl get deployment my-nginx
+# kubectl get pods -l app=my-nginx
+
+# Self-healing verification (replace pod name with your actual pod name)
+# kubectl delete pod &lt;my-nginx-xxx-yyy&gt;
+# kubectl get pods -l app=my-nginx   # Run again after a moment — should still show 5 Pods</code></pre>
+                <p class='exp2'>This advanced exercise lets you experience two core advantages of the declarative approach firsthand.
+
+First, **idempotency**: `kubectl apply` compares the file&#x27;s state to the cluster&#x27;s current state and applies only the differences. Changing `replicas: 3` to `replicas: 5` tells Kubernetes to keep the existing 3 Pods and add 2 new ones. The scale-out happens without any service interruption.
+
+Second, **self-healing**: The Deployment controller continuously works through its reconciliation loop to maintain the declared goal of 5 replicas. When you force-delete a Pod, the controller detects the shortfall immediately and creates a new Pod to restore the count to 5. This is the core reason Deployments are used in production environments.
+
+Watch the `UP-TO-DATE` value in `kubectl get deployment my-nginx` change to 5, and wait for `AVAILABLE` to reach 5 as well.
+
+Full cleanup: `kubectl delete deployment my-nginx &amp;&amp; kubectl delete service my-nginx-svc`</p>
+              </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=YZ3cdDBYY9I' target='_blank'>Kubernetes Pods: From kubectl Commands to YAML Manifests</a></li><li><a href='https://www.youtube.com/watch?v=Dn3RkWlPDAk' target='_blank'>What really happens when we run &quot;kubectl create deployment&quot;?</a></li><li><a href='https://www.youtube.com/watch?v=HkVYcfva9vw' target='_blank'>Kubernetes Pods Creating and Managing with YAML | How to Define Pod Specifications with YAML</a></li></ul></div>
         </article></main>
 </div>
