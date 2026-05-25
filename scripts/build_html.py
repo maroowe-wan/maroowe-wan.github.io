@@ -271,7 +271,7 @@ def build_course(course_dir, docs, lang, S):
         toc="\n".join(toc),
         sections="\n".join(sections),
         asset_base="../../../assets",
-        home_href="../index.html",
+        home_href="../../index.html",
         home_label=S["home"],
         lang_attr=lang,
         lang_toggle=lang_toggle,
