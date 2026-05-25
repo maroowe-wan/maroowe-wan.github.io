@@ -506,10 +506,10 @@ a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
 nav{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;padding:32px 24px;background:var(--surface-container-lowest);border-right:1px solid var(--outline-variant)}
 nav .home{display:inline-block;font-size:13px;font-weight:600;color:var(--on-surface-variant);margin-bottom:18px}
 nav .home:hover{color:var(--primary);text-decoration:none}
-nav h1{font-size:20px;font-weight:700;line-height:1.3;color:var(--primary);margin:0 0 6px}
-nav .sub{color:var(--on-surface-variant);font-size:13px}
+nav h1{font-size:17px;font-weight:700;line-height:1.3;color:var(--primary);margin:0 0 6px}
+nav .sub{color:var(--on-surface-variant);font-size:12px}
 nav ul{list-style:none;padding:0;margin:20px 0 0}nav li{margin:2px 0}
-nav a{display:block;padding:8px 12px;border-left:4px solid transparent;border-radius:0 6px 6px 0;color:var(--on-surface-variant);font-size:14px;line-height:1.4}
+nav a{display:block;padding:7px 12px;border-left:4px solid transparent;border-radius:0 6px 6px 0;color:var(--on-surface-variant);font-size:13px;line-height:1.4}
 nav a:hover{background:var(--surface-container);color:var(--primary);text-decoration:none}
 nav a.active{border-left-color:var(--secondary);background:var(--surface-container);color:var(--primary);font-weight:600}
 main{padding:48px 48px 80px;min-width:0}
@@ -522,17 +522,17 @@ main{padding:48px 48px 80px;min-width:0}
 .lecture:last-child{border-bottom:0}
 
 /* 제목 (Hanken Grotesk) */
-h2{font-family:var(--font-ui);font-size:32px;font-weight:600;line-height:1.25;color:var(--on-surface);margin:0 0 20px;padding-bottom:14px;border-bottom:2px solid var(--primary-fixed)}
-h3{font-family:var(--font-ui);font-size:22px;font-weight:600;color:var(--primary);margin:32px 0 12px}
-h4{font-family:var(--font-ui);font-weight:600;margin:24px 0 8px}
+h2{font-family:var(--font-ui);font-size:23px;font-weight:600;line-height:1.3;color:var(--on-surface);margin:0 0 16px;padding-bottom:10px;border-bottom:2px solid var(--primary-fixed)}
+h3{font-family:var(--font-ui);font-size:18px;font-weight:600;color:var(--primary);margin:28px 0 10px}
+h4{font-family:var(--font-ui);font-size:15px;font-weight:600;margin:22px 0 8px}
 
 /* 본문 (Source Serif 4) */
-.lecture p,.lecture li{font-family:var(--font-read);font-size:18px;line-height:1.7;color:var(--on-surface)}
+.lecture p,.lecture li{font-family:var(--font-read);font-size:16px;line-height:1.7;color:var(--on-surface)}
 .lecture ul{padding-left:22px}.lecture li{margin:6px 0}
 strong{font-weight:600}em{font-style:italic}
 
 /* 코드 (JetBrains Mono) */
-pre{background:var(--surface-container-low);border:1px solid var(--outline-variant);padding:16px;border-radius:var(--radius);overflow:auto;font-size:13.5px}
+pre{background:var(--surface-container-low);border:1px solid var(--outline-variant);padding:14px;border-radius:var(--radius);overflow:auto;font-size:12.5px}
 pre code{font-family:var(--font-code)}
 code.ic{font-family:var(--font-code);background:var(--surface-container);color:var(--surface-tint);padding:2px 6px;border-radius:4px;font-size:.9em}
 
@@ -548,13 +548,13 @@ blockquote.callout p{margin:6px 0;font-family:var(--font-read);color:var(--on-su
 .ex{background:var(--surface-container-lowest);border:1px solid var(--outline-variant);box-shadow:var(--shadow-academic);border-radius:var(--radius-lg);padding:24px 28px;margin-top:28px;max-width:var(--reading-max)}
 .ex h3{margin-top:0}
 .quiz,.task{margin:16px 0;padding:16px;background:var(--surface-container-low);border:1px solid var(--outline-variant);border-radius:var(--radius)}
-.q{font-family:var(--font-ui);font-weight:600;margin:0 0 10px}
+.q{font-family:var(--font-ui);font-size:15px;font-weight:600;margin:0 0 10px}
 .opts{list-style:none;padding:0;margin:0}
 .opt{padding:10px 14px;margin:8px 0;background:var(--surface-container-lowest);border:1px solid var(--outline-variant);border-radius:var(--radius);cursor:pointer;transition:background .12s,border-color .12s}
 .opt:hover{background:var(--surface-container);border-color:var(--outline)}
 .opt.correct{background:var(--secondary-container);border-color:var(--secondary);color:var(--on-secondary-container);font-weight:600}
 .opt.wrong{background:var(--error-container);border-color:var(--error);color:var(--on-error-container)}
-.exp,.exp2{display:none;margin-top:12px;color:var(--on-surface-variant);font-size:14px}
+.exp,.exp2{display:none;margin-top:12px;color:var(--on-surface-variant);font-size:13px}
 .quiz.answered .exp{display:block}
 .starter,.sol{margin:8px 0}
 details summary{cursor:pointer;color:var(--primary);font-family:var(--font-ui);font-weight:600;margin:10px 0}
@@ -572,17 +572,17 @@ details summary{cursor:pointer;color:var(--primary);font-family:var(--font-ui);f
 
 /* ---- 랜딩 페이지 ---- */
 .site-header{max-width:var(--container-max);margin:0 auto;padding:64px 48px 24px}
-.site-header h1{font-family:var(--font-ui);font-size:48px;font-weight:700;letter-spacing:-.02em;color:var(--primary);margin:0 0 8px}
-.site-header .sub{font-family:var(--font-ui);color:var(--on-surface-variant);font-size:16px;margin:0}
+.site-header h1{font-family:var(--font-ui);font-size:34px;font-weight:700;letter-spacing:-.02em;color:var(--primary);margin:0 0 8px}
+.site-header .sub{font-family:var(--font-ui);color:var(--on-surface-variant);font-size:14px;margin:0}
 .landing{max-width:var(--container-max);margin:0 auto;padding:24px 48px 80px}
 .course-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px}
 .course-card{display:flex;flex-direction:column;background:var(--surface-container-lowest);border:1px solid var(--outline-variant);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-academic);text-decoration:none;color:var(--on-surface);transition:transform .18s,border-color .18s}
 .course-card:hover{transform:translateY(-2px);border-color:var(--primary);text-decoration:none}
 .course-card .card-accent{display:block;height:8px;background:linear-gradient(90deg,var(--primary),var(--secondary))}
 .course-card .card-body{padding:22px 24px;display:flex;flex-direction:column;flex-grow:1}
-.course-card h2{font-family:var(--font-ui);font-size:20px;font-weight:600;color:var(--primary);border:0;padding:0;margin:0 0 10px}
-.course-card .desc{font-family:var(--font-read);color:var(--on-surface-variant);font-size:15px;line-height:1.5;margin:0 0 16px}
-.course-card .meta{margin-top:auto;font-family:var(--font-ui);font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--on-surface-variant)}
+.course-card h2{font-family:var(--font-ui);font-size:18px;font-weight:600;color:var(--primary);border:0;padding:0;margin:0 0 10px}
+.course-card .desc{font-family:var(--font-read);color:var(--on-surface-variant);font-size:14px;line-height:1.55;margin:0 0 16px}
+.course-card .meta{margin-top:auto;font-family:var(--font-ui);font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--on-surface-variant)}
 .empty{color:var(--on-surface-variant)}
 
 /* 반응형 */
@@ -590,9 +590,9 @@ details summary{cursor:pointer;color:var(--primary);font-family:var(--font-ui);f
   .wrap{grid-template-columns:1fr}
   nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--outline-variant)}
   main{padding:24px 16px 56px}
-  .site-header{padding:40px 16px 16px}.site-header h1{font-size:32px}
+  .site-header{padding:40px 16px 16px}.site-header h1{font-size:26px}
   .landing{padding:16px 16px 56px}
-  h2{font-size:26px}
+  h2{font-size:20px}
 }
 """
 
