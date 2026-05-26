@@ -42,6 +42,12 @@ PROMPT_TEMPLATE = """\
 
 [감수 본문] 은 아래 "===== 감수 대상 content.md =====" 구분선 뒤에 이어지는 content.md 전체다.
 
+[프로젝트 규약 — 오탐(false positive) 금지]
+아래는 이 파이프라인의 정상 규약이니 결함으로 지적하지 말 것:
+- 코드펜스 첫 줄의 ```mermaid 뒤에 오는 한국어 텍스트는 이 빌더(build_html.py)가 그림 설명(figcaption)으로 렌더링하는 공식 규약이다. 이를 "표준이 아니다 / 문법 오류 / title 지시어를 쓰라"고 지적하지 말 것. 다이어그램 결함은 그 다음 줄부터의 다이어그램 본문(노드·화살표·문법·본문과의 의미 일치)만 본다.
+- content.md는 자막을 재구성·재작성한 본문이지 원문 복제가 아니다. "자막 복제"를 전제로 지적하지 말 것.
+- 기술 용어가 표준 한국어 표기 또는 원어 병기로 의미가 통하면 "직역"으로 보지 말 것.
+
 [감수 체크리스트] 항목별로 점검한다:
 1. 정확성: 사실 오류·오래된 정보·잘못된 개념. 도메인 전문가가 틀렸다 할 기술 오류. (실패 시 반드시 REVISE)
 2. 목표 충족: objectives를 모두 다루는가? 빠진 목표는 missing_topics에 적는다.
@@ -57,6 +63,7 @@ PROMPT_TEMPLATE = """\
 [판정 규칙]
 - PASS: 모든 항목 통과. 사소한 개선점은 minor_notes 에만 적는다.
 - REVISE: 정확성/목표충족/충분성 중 하나라도 실패. 구체적 issues 와 (목표 누락 시) missing_topics 를 반드시 적는다.
+- **REVISE는 사실 오류·학습목표 누락·명백한 분량 부족에만 쓴다.** "더 깊이 다루면 좋다", "이런 주제도 추가하면 좋다" 같은 심화·확장·취향 제안은 결함이 아니므로 issues 가 아니라 minor_notes 에만 적는다(이미 정확한 본문을 반복해서 REVISE 시키지 말 것).
 
 [출력 형식] 오직 아래 스키마의 raw JSON 만 출력한다. 마크다운 펜스(```), 설명, 머리말 금지.
 issue 의 type 은 다음 중 하나: {issue_types}
@@ -221,9 +228,9 @@ def main():
     missing = result.get("missing_topics", []) or []
     minor = result.get("minor_notes", []) or []
 
-    # 재시도 한계: 2회 후에도 REVISE면 escalate=true 로 통과시키고 파이프라인을 멈추지 않는다.
+    # 재시도 한계: 4회 후에도 REVISE면 escalate=true 로 통과시키고 파이프라인을 멈추지 않는다.
     escalate = False
-    if verdict == "REVISE" and revision_count >= 2:
+    if verdict == "REVISE" and revision_count >= 4:
         verdict = "PASS"
         escalate = True
 

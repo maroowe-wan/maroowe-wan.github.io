@@ -21,7 +21,7 @@
 <li><a href='#lec7'>07. Retention, Log Compaction, and Operations and Monitoring Fundamentals</a></li></ul>
 </nav>
 <main><article id='lec1' class='lecture'>
-          <h2>01. Replication and ISR - The Foundation of High Availability and Durability <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h2>01. Replication and ISR - The Foundation of High Availability and Durability </h2>
           <h3>Learning Objectives</h3>
 <ul>
 <li>Understand how the leader-follower replication model and ISR (In-Sync Replicas) guarantee data durability</li>
@@ -44,27 +44,27 @@
 </blockquote>
 <p><strong>Reads have an exception, however.</strong> Since Kafka 2.4 (KIP-392), consumers can read from the <strong>nearest follower</strong> — one in the same data center or rack — rather than always going to the leader. By setting <code class='ic'>client.rack</code> on the consumer and enabling rack-aware replica selection on the broker, clients can reduce <strong>latency and cross-datacenter traffic costs</strong> by reading from a geographically close follower. The accurate picture is: &quot;writes always go to the leader; reads go to the leader by default but can be optimized to read from followers.&quot; Note that since a follower may lag slightly behind the leader, it only exposes data up to its High Watermark to consumers.</p>
 <h4>ISR and High Watermark — What Does &quot;Safe&quot; Data Mean?</h4>
-<p><strong>ISR (In-Sync Replicas)</strong> is the set of replicas that have sufficiently caught up with the leader. The leader is always in the ISR; a follower is only included when it is not falling behind. If a follower becomes too slow and fails to catch up within a configured window (<code class='ic'>replica.lag.time.max.ms</code>), the leader removes it from the ISR. Having fewer than the full set of replicas in the ISR is called being <strong>under-replicated</strong>.</p>
+<p><strong>ISR (In-Sync Replicas)</strong> is the set of replicas that have sufficiently caught up with the leader. The leader is always in the ISR; a follower is included only when it is not falling behind. If a follower becomes too slow and fails to catch up within a configured window (<code class='ic'>replica.lag.time.max.ms</code>), the leader removes it from the ISR. Having fewer than the full set of replicas in the ISR is called being <strong>under-replicated</strong>.</p>
 <p>A record is considered &quot;safe&quot; only when <strong>all replicas in the ISR have received it</strong>. At that point the record is <strong>committed</strong>, and only then is it exposed to consumers. The marker indicating the committed point is the <strong>High Watermark</strong>. Consumers can only read up to the High Watermark — if uncommitted data were exposed and then lost due to a failure, consumers would have seen data that no longer exists, which would be a contradiction.</p>
 <p>The sequence diagram below shows how replication and the High Watermark work, from a producer write all the way through to a consumer read.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant P as 프로듀서
-    participant L as 리더 브로커
-    participant F1 as 팔로워1
-    participant F2 as 팔로워2
-    participant C as 컨슈머
+    participant P as Producer
+    participant L as Leader Broker
+    participant F1 as Follower 1
+    participant F2 as Follower 2
+    participant C as Consumer
 
-    P-&gt;&gt;L: 메시지 쓰기 (acks=all)
-    L-&gt;&gt;L: 로컬 로그에 저장
-    F1-&gt;&gt;L: fetch 요청
-    L--&gt;&gt;F1: 새 메시지 전달
-    F2-&gt;&gt;L: fetch 요청
-    L--&gt;&gt;F2: 새 메시지 전달
-    Note over L,F2: ISR 전원 복제 완료
-    L-&gt;&gt;L: High Watermark 전진 (커밋)
-    L--&gt;&gt;P: ack 응답 (쓰기 성공)
-    C-&gt;&gt;L: poll 요청
-    L--&gt;&gt;C: High Watermark까지 데이터 전달</div><figcaption>Producer write → follower replication → High Watermark commit flow</figcaption></figure>
+    P-&gt;&gt;L: write message (acks=all)
+    L-&gt;&gt;L: append to local log
+    F1-&gt;&gt;L: fetch request
+    L--&gt;&gt;F1: deliver new message
+    F2-&gt;&gt;L: fetch request
+    L--&gt;&gt;F2: deliver new message
+    Note over L,F2: All ISR members have replicated
+    L-&gt;&gt;L: advance High Watermark (commit)
+    L--&gt;&gt;P: ack response (write success)
+    C-&gt;&gt;L: poll request
+    L--&gt;&gt;C: deliver data up to High Watermark</div><figcaption>Producer write → follower replication → High Watermark commit flow</figcaption></figure>
 <h4>The Triangle of Three Settings: replication.factor, min.insync.replicas, and acks</h4>
 <p>The combination of three settings determines how durable and available your cluster is.</p>
 <ul>
@@ -73,15 +73,22 @@
 <li><code class='ic'>acks=0</code>: no acknowledgment (fire-and-forget). Fastest, but data can be lost.</li>
 <li><code class='ic'>acks=1</code>: the leader alone must acknowledge. Data can be lost if the leader crashes before replication completes.</li>
 <li><code class='ic'>acks=all</code>: every ISR replica must acknowledge. The safest option.</li>
-<li><strong>min.insync.replicas</strong> (topic/broker setting): when <code class='ic'>acks=all</code>, how many ISR replicas must be present for a write to succeed.</li>
+<li><strong>min.insync.replicas</strong> (topic/broker setting): the minimum number of ISR replicas that must be present for a write to succeed — a hard lower bound enforced on every write.</li>
 </ul>
-<p>The key insight is that <strong><code class='ic'>acks=all</code> and <code class='ic'>min.insync.replicas</code> only make sense together</strong>. For example, with <code class='ic'>replication.factor=3</code>, <code class='ic'>min.insync.replicas=2</code>, and <code class='ic'>acks=all</code>:</p>
+<p>The critical insight is exactly how <code class='ic'>acks=all</code> and <code class='ic'>min.insync.replicas</code> interact. They operate at two distinct stages:</p>
+<p>1. <strong>Pre-write ISR check (min.insync.replicas).</strong> When a producer sends a message with <code class='ic'>acks=all</code>, the leader broker checks — <strong>before accepting any data</strong> — whether the current number of ISR members meets or exceeds <code class='ic'>min.insync.replicas</code>. If the ISR count falls below that threshold, the broker <strong>immediately rejects the write with a <code class='ic'>NotEnoughReplicasException</code> (or <code class='ic'>NotEnoughReplicasAfterAppendException</code>)</strong> without writing anything. This is the safety gate that prevents a write from landing on too few copies.</p>
+<p>2. <strong>Write success confirmation (acks=all).</strong> Once the pre-write check passes and the request is accepted, the leader writes the data to its own log and then <strong>waits for every current ISR member to replicate it</strong> before sending a success response to the producer.</p>
+<p>In other words, <code class='ic'>min.insync.replicas</code> sets the minimum ISR size required for a write to even begin, while <code class='ic'>acks=all</code> makes full replication across that ISR the condition for success. The two settings only make sense when used together.</p>
+<blockquote class='callout'>
+<p>An important trap: if <code class='ic'>min.insync.replicas=1</code>, setting <code class='ic'>acks=all</code> is effectively the same as <code class='ic'>acks=1</code>. The pre-write check passes as long as even a single ISR member (the leader itself) is present, and the leader receiving the write is enough to call it successful. This is why the standard recommended combination is <strong>replication.factor=3 + min.insync.replicas=2 + acks=all</strong>.</p>
+</blockquote>
+<p>For example, with <code class='ic'>replication.factor=3</code>, <code class='ic'>min.insync.replicas=2</code>, and <code class='ic'>acks=all</code>:</p>
 <ul>
-<li>Under normal conditions, all three replicas receive writes. If one broker dies and the ISR shrinks to two, writes continue because <code class='ic'>min.insync.replicas=2</code> is still met. This is the <strong>golden combination: tolerating one failure while preserving durability</strong>.</li>
-<li>If two brokers die and the ISR drops to one, writes fail with a <code class='ic'>NotEnoughReplicas</code> exception because <code class='ic'>min.insync.replicas=2</code> cannot be satisfied. This is a deliberate <strong>durability-first</strong> decision: &quot;if data can&#x27;t be replicated safely, stop accepting writes.&quot;</li>
+<li>Under normal conditions, all three replicas receive writes. If one broker dies and the ISR shrinks to two, the pre-write check still passes because <code class='ic'>min.insync.replicas=2</code> is satisfied, so writes continue uninterrupted. This is the <strong>golden combination: tolerating one failure while preserving durability</strong>.</li>
+<li>If two brokers die and the ISR drops to one, the pre-write check fails before any data is written — the producer receives a <code class='ic'>NotEnoughReplicasException</code>. This is a deliberate <strong>durability-first</strong> decision: &quot;if data cannot be replicated safely, stop accepting writes.&quot;</li>
 </ul>
 <blockquote class='callout'>
-<p>A common pitfall: setting <code class='ic'>replication.factor</code> and <code class='ic'>min.insync.replicas</code> to the same value (e.g., both 3) means a single broker failure shuts down all writes. Keep <code class='ic'>min.insync.replicas</code> at <code class='ic'>replication.factor - 1</code>.</p>
+<p>A common pitfall: setting <code class='ic'>replication.factor</code> and <code class='ic'>min.insync.replicas</code> to the same value (e.g., both 3) means a single broker failure causes the pre-write check to fail and shuts down all writes entirely. Keep <code class='ic'>min.insync.replicas</code> at <code class='ic'>replication.factor - 1</code>.</p>
 </blockquote>
 <p>This is where the availability-durability trade-off becomes clear. Raising <code class='ic'>min.insync.replicas</code> means data is stored more safely across more copies (higher durability), but it also means more brokers must be alive for writes to succeed (lower availability).</p>
 <h4>Leader Failure and Recovery</h4>
@@ -90,17 +97,17 @@
 <p>Kafka also distributes leaders evenly across brokers by designating each partition&#x27;s first replica as the <strong>preferred replica</strong>, preventing any single broker from becoming a hotspot.</p>
 <p>The state diagram below shows how a partition&#x27;s replication state transitions through failures and recoveries.</p>
 <figure class='diagram'><div class='mermaid'>stateDiagram-v2
-    [*] --&gt; 정상: 클러스터 시작
-    정상: ISR = 3, 리더 정상
-    정상 --&gt; 리더장애: 리더 브로커 다운
-    리더장애: 컨트롤러가 ISR에서 새 리더 선출
-    리더장애 --&gt; 축소운영: 새 리더 선출 완료
-    축소운영: ISR = 2, 쓰기 정상
-    축소운영 --&gt; 쓰기거부: 추가 브로커 다운
-    쓰기거부: ISR = 1 &lt; min.insync.replicas
-    쓰기거부 --&gt; 축소운영: 브로커 1대 복구
-    축소운영 --&gt; 정상: 장애 브로커 복구 및 ISR 재합류
-    쓰기거부 --&gt; 정상: 모든 브로커 복구</div><figcaption>Partition replication state transitions — failure and recovery</figcaption></figure>
+    [*] --&gt; Normal: Cluster starts
+    Normal: ISR = 3, leader healthy
+    Normal --&gt; LeaderDown: Leader broker goes down
+    LeaderDown: Controller elects new leader from ISR
+    LeaderDown --&gt; Degraded: New leader elected
+    Degraded: ISR = 2, writes continue
+    Degraded --&gt; WritesRejected: Another broker goes down
+    WritesRejected: ISR = 1 &lt; min.insync.replicas
+    WritesRejected --&gt; Degraded: One broker recovers
+    Degraded --&gt; Normal: Failed broker recovers and rejoins ISR
+    WritesRejected --&gt; Normal: All brokers recover</div><figcaption>Partition replication state transitions — failure and recovery</figcaption></figure>
 <p>The full flow is: producer writes to the leader → followers replicate via fetch → once all ISR members have received the record it is committed (High Watermark advances) → the record becomes visible to consumers → if the leader fails, a new leader is elected from the ISR → the recovered broker catches up and rejoins the ISR.</p>
 <h4>Hands-On: Create a Replicated Topic and Simulate a Failure</h4>
 <p>Assume a three-broker cluster (or a 3-broker environment started with <code class='ic'>docker-compose</code>).</p>
@@ -127,16 +134,16 @@ kafka-console-producer.sh \
   --bootstrap-server localhost:9092 \
   --producer-property acks=all
 </code></pre>
-<p>Now force-stop one of the leader brokers (e.g., <code class='ic'>docker stop</code> or kill the process), then run <code class='ic'>--describe</code> again. You&#x27;ll see that the <strong>Leader has changed to a different broker ID and Isr has shrunk to two replicas</strong>. Producers and consumers still work normally because two ISR replicas still satisfy <code class='ic'>min.insync.replicas=2</code>. Restart the broker and, after a moment, <code class='ic'>Isr</code> returns to all three. Try stopping one more broker to bring the ISR down to one and observe that producer writes are rejected.</p>
+<p>Now force-stop one of the leader brokers (e.g., <code class='ic'>docker stop</code> or kill the process), then run <code class='ic'>--describe</code> again. You will see that the <strong>Leader has changed to a different broker ID and Isr has shrunk to two replicas</strong>. Producers and consumers still work normally because two ISR replicas still satisfy <code class='ic'>min.insync.replicas=2</code>. Restart the broker and, after a moment, <code class='ic'>Isr</code> returns to all three. Try stopping one more broker to bring the ISR down to one — at that point the pre-write ISR check fails and producer writes are rejected with a <code class='ic'>NotEnoughReplicasException</code>.</p>
 <h3>Key Takeaways</h3>
 <ul>
 <li>Replication keeps copies of each partition on multiple brokers, forming the reliability foundation of Kafka. With <code class='ic'>replication.factor=N</code>, the cluster tolerates up to N-1 broker failures.</li>
 <li>The leader accepts writes; followers replicate via fetch. Reads default to the leader, but since KIP-392, setting <code class='ic'>client.rack</code> allows consumers to read from the nearest follower to reduce latency and cross-datacenter traffic. Only records received by all ISR members are committed and visible to consumers up to the High Watermark.</li>
-<li>Combining <code class='ic'>acks=all</code> with <code class='ic'>min.insync.replicas</code> (typically <code class='ic'>replication.factor - 1</code>) strikes the right balance between durability and availability. Setting them to the same value causes writes to halt on a single broker failure.</li>
+<li><code class='ic'>acks=all</code> operates in two stages: before accepting any data, the broker checks that the current ISR size meets <code class='ic'>min.insync.replicas</code> (if not, the write is immediately rejected with <code class='ic'>NotEnoughReplicasException</code>); if the check passes, the broker waits for every ISR member to replicate the data before acknowledging success. Setting <code class='ic'>min.insync.replicas=1</code> therefore makes <code class='ic'>acks=all</code> behave like <code class='ic'>acks=1</code> in practice. The standard recommended combination is replication.factor=3 + min.insync.replicas=2 + acks=all. Setting both values equal causes writes to halt on a single broker failure.</li>
 <li>When a leader fails, a new leader is elected from the ISR with no data loss. The leader epoch prevents log divergence caused by zombie leaders. Recovered brokers catch up and rejoin the ISR. You can observe all of this directly using <code class='ic'>kafka-topics --describe</code> and watching the <code class='ic'>Leader</code> and <code class='ic'>Isr</code> fields.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. Set up a 3-broker Docker environment and create an &#x27;orders&#x27; topic with replication.factor=3, partitions=3, and min.insync.replicas=2. After creation, run kafka-topics.sh --describe to display the Leader, Replicas, and Isr fields for each partition, and confirm that all three broker IDs appear in the Isr.</p>
+              <div class='q'><p>Practice 1. Set up a 3-broker Docker environment and create an &#x27;orders&#x27; topic with replication.factor=3, partitions=3, and min.insync.replicas=2. After creation, run kafka-topics.sh --describe to display the Leader, Replicas, and Isr fields for each partition, and confirm that all three broker IDs appear in the Isr.</p></div>
               <pre class='starter'><code># 1. docker-compose.yml (minimal 3-broker configuration)
 # Save the content below as docker-compose.yml and run &#x27;docker-compose up -d&#x27;
 #
@@ -211,9 +218,9 @@ kafka-topics.sh --describe \
 #   - ReplicationFactor: 3
 #   - Configs: min.insync.replicas=2
 #   - All three broker IDs appear in the Isr list for every partition</code></pre>
-                <p class='exp2'>replication.factor=3 instructs Kafka to distribute three copies of each partition across three brokers. The Isr (In-Sync Replicas) is the set of replicas that are sufficiently caught up with the leader — in a healthy cluster, all three broker IDs should be present. min.insync.replicas=2 means that an acks=all write succeeds only when at least two replicas are in the ISR. In the --describe output, pay attention to three distinct fields: Leader (the broker currently handling reads and writes), Replicas (the full list of all replicas), and Isr (the replicas currently in sync). Understanding the difference between these three is the foundation for all subsequent labs.</p>
+                <div class='exp2'><p>replication.factor=3 instructs Kafka to distribute three copies of each partition across three brokers. The Isr (In-Sync Replicas) is the set of replicas that are sufficiently caught up with the leader — in a healthy cluster, all three broker IDs should be present. min.insync.replicas=2 means that an acks=all write succeeds only when at least two replicas are in the ISR. In the --describe output, pay attention to three distinct fields: Leader (the broker currently handling reads and writes), Replicas (the full list of all replicas), and Isr (the replicas currently in sync). Understanding the difference between these three is the foundation for all subsequent labs.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. Send messages to the same &#x27;orders&#x27; topic using three different producer configurations in turn: acks=0, acks=1, and acks=all. Confirm that each sends successfully. Then, with acks=all still active, stop two brokers (docker stop) so that min.insync.replicas can no longer be satisfied, and deliberately trigger a NotEnoughReplicasException.</p>
+              <div class='q'><p>Practice 2. Send messages to the same &#x27;orders&#x27; topic using three different producer configurations in turn: acks=0, acks=1, and acks=all. Confirm that each sends successfully. Then, with acks=all still active, stop two brokers (docker stop) so that min.insync.replicas can no longer be satisfied, and deliberately trigger a NotEnoughReplicasException.</p></div>
               <pre class='starter'><code># --- acks=0 (fire-and-forget) ---
 kafka-console-producer.sh \
   --topic orders \
@@ -266,9 +273,9 @@ kafka-console-producer.sh \
 # - acks=0, acks=1: fast response with no replication check (risk of data loss)
 # - acks=all: waits for confirmation from all ISR members (safest; rejected when ISR is insufficient)
 # - With min.insync.replicas=2 and ISR=1, NotEnoughReplicasException is thrown</code></pre>
-                <p class='exp2'>acks=0 sends the message to the network without waiting for any response, giving the highest throughput at the cost of potential data loss. acks=1 considers the write successful once the leader receives it, but if the leader dies before replicating to followers, the message is lost. acks=all waits for all ISR replicas to acknowledge the write, making it the safest option. When combined with min.insync.replicas=2, if the ISR drops below 2, writes are rejected outright. This is Kafka&#x27;s durability-first philosophy: if the data cannot be safely replicated, it is better to refuse the write. Once the brokers are restarted and the ISR recovers to 2 or more, writes resume immediately.</p>
+                <div class='exp2'><p>acks=0 sends the message to the network without waiting for any response, giving the highest throughput at the cost of potential data loss. acks=1 considers the write successful once the leader receives it, but if the leader dies before replicating to followers, the message is lost. acks=all waits for all ISR replicas to acknowledge the write, making it the safest option. When combined with min.insync.replicas=2, if the ISR drops below 2, writes are rejected outright. This is Kafka&#x27;s durability-first philosophy: if the data cannot be safely replicated, it is better to refuse the write. Once the brokers are restarted and the ISR recovers to 2 or more, writes resume immediately.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. After restoring all three brokers to a healthy state, use --describe to identify the current leader broker for Partition 0. Stop that leader broker with docker stop, then immediately run --describe repeatedly to watch Partition 0&#x27;s Leader ID change to another broker and the Isr shrink to two. Also verify that producers and consumers continue to operate during the transition.</p>
+              <div class='q'><p>Practice 3. After restoring all three brokers to a healthy state, use --describe to identify the current leader broker for Partition 0. Stop that leader broker with docker stop, then immediately run --describe repeatedly to watch Partition 0&#x27;s Leader ID change to another broker and the Isr shrink to two. Also verify that producers and consumers continue to operate during the transition.</p></div>
               <pre class='starter'><code># 1. Restart brokers if they were stopped in the previous lab
 docker start &lt;broker2_container&gt; &lt;broker3_container&gt;
 # Repeat the command below until the Isr recovers to 3 (may take 10–30 seconds)
@@ -319,14 +326,14 @@ docker start kafka-intermediate-broker1-1
 # After 30–60 seconds, verify that broker 1 rejoins the Isr
 # Partition: 0  Leader: 2  Replicas: 1,2,3  Isr: 2,3,1
 # (The leader stays at 2; preferred replica rebalancing can be triggered manually or automatically)</code></pre>
-                <p class='exp2'>When the leader goes down, the Kafka controller (the leader controller in KRaft mode) immediately elects a new leader from the remaining ISR members. Because every ISR replica is guaranteed to hold all committed data, the transition happens with no data loss. Producers and consumers update their metadata and reconnect to the new leader, so there may be a brief reconnection delay but no message loss. Once the failed broker is restarted, it catches up with the new leader by replicating any missing data, then rejoins the ISR. This ISR-based recovery mechanism is the core of Kafka&#x27;s data-loss-free fault tolerance.</p>
+                <div class='exp2'><p>When the leader goes down, the Kafka controller (the leader controller in KRaft mode) immediately elects a new leader from the remaining ISR members. Because every ISR replica is guaranteed to hold all committed data, the transition happens with no data loss. Producers and consumers update their metadata and reconnect to the new leader, so there may be a brief reconnection delay but no message loss. Once the failed broker is restarted, it catches up with the new leader by replicating any missing data, then rejoins the ISR. This ISR-based recovery mechanism is the core of Kafka&#x27;s data-loss-free fault tolerance.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Create two topics with the configurations below, then compare their write behavior when one broker is stopped.
-
-- Topic A: replication.factor=3, min.insync.replicas=3, acks=all  (the trap)
-- Topic B: replication.factor=3, min.insync.replicas=2, acks=all  (the golden combination)
-
-Send acks=all messages to both topics before and after stopping one broker. Record and compare the results.</p>
+              <div class='q'><p>Practice 4. Create two topics with the configurations below, then compare their write behavior when one broker is stopped.</p>
+<ul>
+<li>Topic A: replication.factor=3, min.insync.replicas=3, acks=all  (the trap)</li>
+<li>Topic B: replication.factor=3, min.insync.replicas=2, acks=all  (the golden combination)</li>
+</ul>
+<p>Send acks=all messages to both topics before and after stopping one broker. Record and compare the results.</p></div>
               <pre class='starter'><code># 1. Create both topics
 kafka-topics.sh --create \
   --topic trap-topic \
@@ -377,7 +384,7 @@ docker stop &lt;any_one_broker&gt;
 # Conclusion: setting replication.factor and min.insync.replicas to the same value
 #             halts all writes on a single broker failure.
 #             Always set min.insync.replicas to (replication.factor - 1).</code></pre>
-                <p class='exp2'>replication.factor=3 with min.insync.replicas=3 means &#x27;all three replicas must be alive for writes to be permitted.&#x27; Even a single broker failure drops the ISR to 2, which is less than min.insync.replicas=3, and writes stop immediately. This is a classic example of an excessive durability requirement sacrificing availability. By contrast, min.insync.replicas=2 (replication.factor - 1) tolerates one broker failure while still writing to at least two copies, striking the right balance between durability and availability. This &#x27;golden combination&#x27; is the most widely recommended Kafka configuration in production. Only when two brokers fail simultaneously will writes be rejected, preventing data loss.</p>
+                <div class='exp2'><p>replication.factor=3 with min.insync.replicas=3 means &#x27;all three replicas must be alive for writes to be permitted.&#x27; Even a single broker failure drops the ISR to 2, which is less than min.insync.replicas=3, and writes stop immediately. This is a classic example of an excessive durability requirement sacrificing availability. By contrast, min.insync.replicas=2 (replication.factor - 1) tolerates one broker failure while still writing to at least two copies, striking the right balance between durability and availability. This &#x27;golden combination&#x27; is the most widely recommended Kafka configuration in production. Only when two brokers fail simultaneously will writes be rejected, preventing data loss.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=PPDffzAy86I' target='_blank'>Data Plane: Apache Kafka&#x27;s Replication Protocol</a></li><li><a href='https://www.youtube.com/watch?v=TGZUQsuhDV0' target='_blank'>Kafka Replication and Min Insync Replicas | Learn Kafka | Kafka Tutorial</a></li><li><a href='https://www.youtube.com/watch?v=CWe52zSeGxU' target='_blank'>Replication | Apache Kafka 101 (2025 Edition)</a></li></ul></div>
         </article>
@@ -485,21 +492,21 @@ docker stop &lt;any_one_broker&gt;
 <li>At-least-once with idempotent consumer logic is sufficient for most use cases. Reserve exactly-once for situations where the added cost is clearly worth it.</li>
 </ul>
           <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
-              <p class='q'>Q1. Which of the following correctly describes the behavior of a producer configured with `acks=0`?</p>
+              <div class='q'><p>Q1. Which of the following correctly describes the behavior of a producer configured with <code class='ic'>acks=0</code>?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>Messages are never lost, but duplicates can occur.</li><li class='opt' onclick='pick(this,0,1)'>Messages can be lost, but duplicates never occur.</li><li class='opt' onclick='pick(this,0,2)'>This is the safest mode — neither data loss nor duplicates are possible.</li><li class='opt' onclick='pick(this,0,3)'>The broker writes to all ISR replicas before responding, giving the lowest throughput.</li></ul>
-              <div class='exp'>acks=0 corresponds to the at-most-once guarantee. The producer sends the message and immediately moves on without waiting for a response (fire-and-forget). If the message is never written to the broker, no retry is issued, so data loss is possible. However, because there are no retries, duplicates never occur. &#x27;No data loss but duplicates possible&#x27; describes at-least-once (option A). &#x27;Neither loss nor duplicates&#x27; describes exactly-once (option C). acks=all — which waits for all ISR replicas to acknowledge — has the lowest throughput, the opposite of acks=0 (option D).</div></div><div class='quiz' data-ans='2'>
-              <p class='q'>Q2. What is the root cause of duplicate messages in the at-least-once delivery guarantee?</p>
+              <div class='exp'><p>acks=0 corresponds to the at-most-once guarantee. The producer sends the message and immediately moves on without waiting for a response (fire-and-forget). If the message is never written to the broker, no retry is issued, so data loss is possible. However, because there are no retries, duplicates never occur. &#x27;No data loss but duplicates possible&#x27; describes at-least-once (option A). &#x27;Neither loss nor duplicates&#x27; describes exactly-once (option C). acks=all — which waits for all ISR replicas to acknowledge — has the lowest throughput, the opposite of acks=0 (option D).</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q2. What is the root cause of duplicate messages in the at-least-once delivery guarantee?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>The producer is intentionally designed to send the same message twice.</li><li class='opt' onclick='pick(this,1,1)'>The broker&#x27;s internal policy automatically stores every message twice.</li><li class='opt' onclick='pick(this,1,2)'>If the message is written to the broker but the ack is lost in the network, the producer cannot distinguish success from failure and retries, causing the message to be written a second time.</li><li class='opt' onclick='pick(this,1,3)'>The consumer re-processes the same message by not committing its offset.</li></ul>
-              <div class='exp'>Duplicates in at-least-once arise from &#x27;lost acknowledgments.&#x27; When a message is successfully written to the broker but the ack fails to reach the producer due to a network issue, the producer cannot tell the difference between a write failure and a lost ack. After a timeout, the producer retries, and the already-written message is recorded a second time. The producer never intentionally sends duplicates (option A), and there is no double-storage policy in the broker (option B). Uncommitted consumer offsets cause re-processing at the consumer side, which is a separate issue (option D).</div></div><div class='quiz' data-ans='1'>
-              <p class='q'>Q3. How does an idempotent producer prevent duplicates caused by retries?</p>
+              <div class='exp'><p>Duplicates in at-least-once arise from &#x27;lost acknowledgments.&#x27; When a message is successfully written to the broker but the ack fails to reach the producer due to a network issue, the producer cannot tell the difference between a write failure and a lost ack. After a timeout, the producer retries, and the already-written message is recorded a second time. The producer never intentionally sends duplicates (option A), and there is no double-storage policy in the broker (option B). Uncommitted consumer offsets cause re-processing at the consumer side, which is a separate issue (option D).</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q3. How does an idempotent producer prevent duplicates caused by retries?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>It sets the retry count to 0, preventing any retransmission.</li><li class='opt' onclick='pick(this,2,1)'>It attaches a PID (Producer ID) and sequence number to each message; the broker remembers which sequences it has already received and does not re-record retransmitted messages.</li><li class='opt' onclick='pick(this,2,2)'>It hashes the message content, and the broker rejects messages with identical content.</li><li class='opt' onclick='pick(this,2,3)'>It requests a new PID for each retry so that the retransmitted message appears distinct from the original.</li></ul>
-              <div class='exp'>The idempotent producer attaches a PID (Producer ID) and a monotonically increasing sequence number to each write request. The broker tracks the last successfully processed sequence number per PID. If a sequence that has already been processed is retransmitted, the broker does not write it to the partition again — it simply returns an ack. Setting retries to 0 prevents retransmission but leads to data loss (at-most-once, option A). Content hashing would incorrectly block legitimately identical messages and is not the actual implementation (option C). Retries must use the same PID for the broker to track duplicates; issuing a new PID on each retry would defeat the purpose (option D).</div></div><div class='quiz' data-ans='1'>
-              <p class='q'>Q4. What does setting `isolation.level=read_committed` on a consumer actually do?</p>
+              <div class='exp'><p>The idempotent producer attaches a PID (Producer ID) and a monotonically increasing sequence number to each write request. The broker tracks the last successfully processed sequence number per PID. If a sequence that has already been processed is retransmitted, the broker does not write it to the partition again — it simply returns an ack. Setting retries to 0 prevents retransmission but leads to data loss (at-most-once, option A). Content hashing would incorrectly block legitimately identical messages and is not the actual implementation (option C). Retries must use the same PID for the broker to track duplicates; issuing a new PID on each retry would defeat the purpose (option D).</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q4. What does setting <code class='ic'>isolation.level=read_committed</code> on a consumer actually do?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>The consumer automatically commits its offset as soon as it reads a message.</li><li class='opt' onclick='pick(this,3,1)'>It skips messages from transactions that are still in-flight (pending) or have been aborted, and reads only data from fully committed transactions.</li><li class='opt' onclick='pick(this,3,2)'>The consumer reads only transactional messages and ignores regular non-transactional messages.</li><li class='opt' onclick='pick(this,3,3)'>It blocks consumer polling until the producer calls commit.</li></ul>
-              <div class='exp'>With the read_committed isolation level, the consumer uses the Last Stable Offset (LSO) and abort metadata provided by the broker to skip messages from pending transactions (not yet committed) and skip messages from aborted (rolled-back) transactions. Only data from successfully committed transactions is processed. Automatic offset commit is a separate concern controlled by enable.auto.commit (option A). Regular, non-transactional messages are also visible with read_committed (option C). Consumer polling is not physically blocked; the consumer simply does not receive data beyond the LSO for uncommitted transactions (option D).</div></div><div class='quiz' data-ans='2'>
-              <p class='q'>Q5. You are designing a real-time payment processing system. The system reads payment events from an input topic and must write both a &#x27;debit event&#x27; and a &#x27;credit event&#x27; to separate output topics. Having only one of the two writes succeed is completely unacceptable. Additionally, if the application restarts mid-processing, the same payment must not be processed twice. Which Kafka configuration combination is most appropriate?</p>
+              <div class='exp'><p>With the read_committed isolation level, the consumer uses the Last Stable Offset (LSO) and abort metadata provided by the broker to skip messages from pending transactions (not yet committed) and skip messages from aborted (rolled-back) transactions. Only data from successfully committed transactions is processed. Automatic offset commit is a separate concern controlled by enable.auto.commit (option A). Regular, non-transactional messages are also visible with read_committed (option C). Consumer polling is not physically blocked; the consumer simply does not receive data beyond the LSO for uncommitted transactions (option D).</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q5. You are designing a real-time payment processing system. The system reads payment events from an input topic and must write both a &#x27;debit event&#x27; and a &#x27;credit event&#x27; to separate output topics. Having only one of the two writes succeed is completely unacceptable. Additionally, if the application restarts mid-processing, the same payment must not be processed twice. Which Kafka configuration combination is most appropriate?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>acks=0, retries=0 — prioritize throughput to process payments as fast as possible.</li><li class='opt' onclick='pick(this,4,1)'>enable.idempotence=true only — single-partition duplicate prevention is sufficient.</li><li class='opt' onclick='pick(this,4,2)'>transactional.id setting + consumer isolation.level=read_committed — processes multiple partition writes and offset commits as an all-or-nothing operation.</li><li class='opt' onclick='pick(this,4,3)'>acks=all, retries=MAX_INT — waiting for acknowledgment automatically guarantees exactly-once delivery.</li></ul>
-              <div class='exp'>This scenario requires atomically committing &#x27;writes to multiple output partitions + the input offset commit&#x27; as an all-or-nothing operation — a classic exactly-once requirement. The idempotent producer alone (enable.idempotence) only prevents retry duplicates within a single partition; it cannot guarantee atomicity across the debit and credit partitions (option B). Kafka transactions (transactional.id) group multiple partition writes into a single transaction, and read_committed on the consumer side ensures that only committed data is consumed, preventing duplicate processing after a restart. acks=0 is at-most-once and risks losing payment events (option A). acks=all with high retries improves durability but does not prevent duplicates, so it does not guarantee exactly-once (option D).</div></div></section>
+              <div class='exp'><p>This scenario requires atomically committing &#x27;writes to multiple output partitions + the input offset commit&#x27; as an all-or-nothing operation — a classic exactly-once requirement. The idempotent producer alone (enable.idempotence) only prevents retry duplicates within a single partition; it cannot guarantee atomicity across the debit and credit partitions (option B). Kafka transactions (transactional.id) group multiple partition writes into a single transaction, and read_committed on the consumer side ensures that only committed data is consumed, preventing duplicate processing after a restart. acks=0 is at-most-once and risks losing payment events (option A). acks=all with high retries improves durability but does not prevent duplicates, so it does not guarantee exactly-once (option D).</p></div></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=V0c0qAP7sWk' target='_blank'>Kafka Delivery Semantics | At-Least-Once, At-Most-Once &amp; Exactly-Once</a></li><li><a href='https://www.youtube.com/watch?v=_9et90BCRnc' target='_blank'>Idempotent Producer in Apache Kafka [Apache Kafka Tutorials #16]</a></li><li><a href='https://www.youtube.com/watch?v=Ki2D2o9aVl8' target='_blank'>Apache Kafka Transactions: Message Delivery and Exactly-Once Semantics</a></li></ul></div>
         </article>
 <article id='lec3' class='lecture'>
@@ -646,7 +653,7 @@ kafka-console-consumer.sh --topic events \
 <li>Implement the <code class='ic'>Partitioner</code> interface and register it via <code class='ic'>partitioner.class</code> to take direct control of routing. The partitioner must never throw an exception — guard against a single partition and null keys. Use the correct divisor (<code class='ic'>numPartitions - 1</code> when excluding one partition) to avoid inadvertently creating the very hot partition you are trying to prevent.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. Create a topic called &#x27;events&#x27; with 4 partitions, then use the console producer to send (1) 5 messages without a key and (2) 3 messages each with keys &#x27;user1&#x27; and &#x27;user2&#x27;. After sending, read each partition individually and record how the messages were distributed.</p>
+              <div class='q'><p>Practice 1. Create a topic called &#x27;events&#x27; with 4 partitions, then use the console producer to send (1) 5 messages without a key and (2) 3 messages each with keys &#x27;user1&#x27; and &#x27;user2&#x27;. After sending, read each partition individually and record how the messages were distributed.</p></div>
               <pre class='starter'><code># 1. Create the topic
 kafka-topics.sh --create --topic events \
   --bootstrap-server localhost:9092 \
@@ -718,9 +725,9 @@ done
 #   user2 -&gt; hash(&quot;user2&quot;) % 4 = a different partition (e.g., partition 3)
 # Confirm that user1&#x27;s login/view/logout appear on the same partition in order,
 # and user2&#x27;s messages appear together on a different partition in order.</code></pre>
-                <p class='exp2'>Kafka&#x27;s default partitioner uses the murmur2 hash function to compute hash(key) % partitionCount and route each message accordingly. The same string key always produces the same hash, so it always maps to the same partition. This is the mechanism behind Kafka&#x27;s &#x27;intra-partition ordering guarantee&#x27; for a given key. Without a key, the sticky partitioner fills up a batch on one partition before moving to the next. Reading each partition directly from the console makes this contrast immediately visible.</p>
+                <div class='exp2'><p>Kafka&#x27;s default partitioner uses the murmur2 hash function to compute hash(key) % partitionCount and route each message accordingly. The same string key always produces the same hash, so it always maps to the same partition. This is the mechanism behind Kafka&#x27;s &#x27;intra-partition ordering guarantee&#x27; for a given key. Without a key, the sticky partitioner fills up a batch on one partition before moving to the next. Reading each partition directly from the console makes this contrast immediately visible.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. Use a Java KafkaProducer to send events for three users (user1 through user3) in sequence, and verify via the partition() field of RecordMetadata that all messages for each user land on the same partition. The events for user1 should be sent in the order [login, view, purchase, logout], interleaved with events from the other two users.</p>
+              <div class='q'><p>Practice 2. Use a Java KafkaProducer to send events for three users (user1 through user3) in sequence, and verify via the partition() field of RecordMetadata that all messages for each user land on the same partition. The events for user1 should be sent in the order [login, view, purchase, logout], interleaved with events from the other two users.</p></div>
               <pre class='starter'><code>// Dependency (Maven pom.xml)
 // &lt;dependency&gt;
 //   &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
@@ -840,9 +847,9 @@ public class KeyOrderingDemo {
    key=user2  -&gt; partition=3 (consistent across all messages)
    key=user3  -&gt; partition=2 (consistent across all messages)
 */</code></pre>
-                <p class='exp2'>producer.send(record).get() performs a synchronous send and returns RecordMetadata immediately. Recording the returned meta.partition() in a Map and throwing an exception if the same key is assigned a different partition provides a live ordering-guarantee validator. Running the program shows that user1&#x27;s four messages (login → view → purchase → logout) always land on the same partition number, regardless of the interleaved messages from other users. This is Kafka&#x27;s actual mechanism for guaranteeing the ordering of events for a specific key. Switching to async sends (callbacks) raises throughput but can mix up the print order, so synchronous sends are used here for clear verification.</p>
+                <div class='exp2'><p>producer.send(record).get() performs a synchronous send and returns RecordMetadata immediately. Recording the returned meta.partition() in a Map and throwing an exception if the same key is assigned a different partition provides a live ordering-guarantee validator. Running the program shows that user1&#x27;s four messages (login → view → purchase → logout) always land on the same partition number, regardless of the interleaved messages from other users. This is Kafka&#x27;s actual mechanism for guaranteeing the ordering of events for a specific key. Switching to async sends (callbacks) raises throughput but can mix up the print order, so synchronous sends are used here for clear verification.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. Reproduce a hot partition scenario in code by concentrating traffic on a single key, then resolve the skew by splitting into a composite key (userId + bucket number). Specifically: (1) send 1000 messages using the single key &#x27;vip_user&#x27; to create a hot partition where all messages land on one partition, then (2) re-send 1000 messages using keys &#x27;vip_user-0&#x27; through &#x27;vip_user-3&#x27; (4 buckets) and compare the per-partition message counts.</p>
+              <div class='q'><p>Practice 3. Reproduce a hot partition scenario in code by concentrating traffic on a single key, then resolve the skew by splitting into a composite key (userId + bucket number). Specifically: (1) send 1000 messages using the single key &#x27;vip_user&#x27; to create a hot partition where all messages land on one partition, then (2) re-send 1000 messages using keys &#x27;vip_user-0&#x27; through &#x27;vip_user-3&#x27; (4 buckets) and compare the per-partition message counts.</p></div>
               <pre class='starter'><code>import org.apache.kafka.clients.producer.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -971,16 +978,14 @@ public class HotPartitionDemo {
    partition 3:  248 msgs ( 24.8%) ############
    (actual partition numbers and percentages may vary depending on hash values)
 */</code></pre>
-                <p class='exp2'>Sending 1000 messages with the single key &#x27;vip_user&#x27; means hash(&#x27;vip_user&#x27;) % 4 always produces the same result, so all 1000 messages pile up on one partition. The broker and consumer handling that partition get overloaded while the other three sit completely idle — the benefit of having four partitions is entirely wasted. Switching to composite keys &#x27;vip_user-0&#x27; through &#x27;vip_user-3&#x27; produces four distinct keys that hash to different partitions, distributing traffic evenly. In production, the bucket suffix would typically be based on a user attribute (region, signup date range, random suffix, etc.) rather than a simple modulo. Keep in mind the trade-off: composite keys guarantee ordering only within each sub-key, not across the entire &#x27;vip_user&#x27; space.</p>
+                <div class='exp2'><p>Sending 1000 messages with the single key &#x27;vip_user&#x27; means hash(&#x27;vip_user&#x27;) % 4 always produces the same result, so all 1000 messages pile up on one partition. The broker and consumer handling that partition get overloaded while the other three sit completely idle — the benefit of having four partitions is entirely wasted. Switching to composite keys &#x27;vip_user-0&#x27; through &#x27;vip_user-3&#x27; produces four distinct keys that hash to different partitions, distributing traffic evenly. In production, the bucket suffix would typically be based on a user attribute (region, signup date range, random suffix, etc.) rather than a simple modulo. Keep in mind the trade-off: composite keys guarantee ordering only within each sub-key, not across the entire &#x27;vip_user&#x27; space.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Implement a custom partitioner that satisfies the following business rules and register it with the producer.
-
-Rules:
-1. If the key starts with &#x27;VIP:&#x27;, route to partition 0 (dedicated fast-lane).
-2. If the key starts with &#x27;BATCH:&#x27;, route to partition (numPartitions - 1) (background processing lane).
-3. All other keys are hash-distributed evenly across partitions 1 through numPartitions-2.
-
-Also add a guard that throws an IllegalStateException if numPartitions is less than 3.</p>
+              <div class='q'><p>Practice 4. Implement a custom partitioner that satisfies the following business rules and register it with the producer.</p>
+<p>Rules:</p>
+<p>1. If the key starts with &#x27;VIP:&#x27;, route to partition 0 (dedicated fast-lane).</p>
+<p>2. If the key starts with &#x27;BATCH:&#x27;, route to partition (numPartitions - 1) (background processing lane).</p>
+<p>3. All other keys are hash-distributed evenly across partitions 1 through numPartitions-2.</p>
+<p>Also add a guard that throws an IllegalStateException if numPartitions is less than 3.</p></div>
               <pre class='starter'><code>// PriorityPartitioner.java
 import org.apache.kafka.clients.producer.Partitioner;
 import org.apache.kafka.common.Cluster;
@@ -1148,7 +1153,7 @@ public class PriorityPartitionerTest {
 
    All checks passed
 */</code></pre>
-                <p class='exp2'>The key insight of a custom partitioner is that the integer returned by partition() is the destination partition number. Three branches enforce the business rules at the infrastructure level: VIP isolation, BATCH demotion to a background lane, and even hash distribution for general traffic. Math.floorMod(keyStr.hashCode(), availablePartitions) is used instead of the % operator because Java&#x27;s String.hashCode() can return negative values — % with a negative operand returns a negative result, while Math.floorMod always returns a non-negative value in [0, availablePartitions). The numPartitions &lt; 3 guard prevents a subtle bug where numPartitions - 2 equals 0, causing the general-key partition to overlap with VIP partition 0. Registering via props.put(&#x27;partitioner.class&#x27;, ...) applies this partitioner to all topics for that producer instance; to restrict it to specific topics, add a conditional branch on the topic parameter inside partition().</p>
+                <div class='exp2'><p>The key insight of a custom partitioner is that the integer returned by partition() is the destination partition number. Three branches enforce the business rules at the infrastructure level: VIP isolation, BATCH demotion to a background lane, and even hash distribution for general traffic. Math.floorMod(keyStr.hashCode(), availablePartitions) is used instead of the % operator because Java&#x27;s String.hashCode() can return negative values — % with a negative operand returns a negative result, while Math.floorMod always returns a non-negative value in [0, availablePartitions). The numPartitions &lt; 3 guard prevents a subtle bug where numPartitions - 2 equals 0, causing the general-key partition to overlap with VIP partition 0. Registering via props.put(&#x27;partitioner.class&#x27;, ...) applies this partitioner to all topics for that producer instance; to restrict it to specific topics, add a conditional branch on the topic parameter inside partition().</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=y9BStKvVzSs' target='_blank'>Apache Kafka 101: Partitioning (2023)</a></li><li><a href='https://www.youtube.com/watch?v=GvdlpbQr6jo' target='_blank'>Apache Kafka 101: Partitioning (Hands On - 2023)</a></li><li><a href='https://www.youtube.com/watch?v=rosyiZNlwXQ' target='_blank'>How a partitioner works in Kafka? | Best practices for data partitioning in Apache Kafka. Part 4</a></li></ul></div>
         </article>
@@ -1258,7 +1263,7 @@ curl -X POST http://localhost:8081/subjects/users-value/versions \
 <li>The safest rule of thumb: always provide a default value when adding a field. In BACKWARD mode, adding a field is the risky operation; in FORWARD mode, deleting a field is the risk. All compatibility settings and schema registrations can be managed through the Schema Registry REST API.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-Up] Assume Schema Registry is running at localhost:8081. The subject name for the users topic is &#x27;users-value&#x27;. Use curl to set the compatibility mode for this subject to BACKWARD. Then verify the setting took effect by sending a GET request to retrieve the current compatibility mode.</p>
+              <div class='q'><p>Practice 1. [Warm-Up] Assume Schema Registry is running at localhost:8081. The subject name for the users topic is &#x27;users-value&#x27;. Use curl to set the compatibility mode for this subject to BACKWARD. Then verify the setting took effect by sending a GET request to retrieve the current compatibility mode.</p></div>
               <pre class='starter'><code># Schema Registry URL
 SR=http://localhost:8081
 SUBJECT=users-value
@@ -1283,9 +1288,9 @@ curl -X PUT http://localhost:8081/config/users-value \
 curl http://localhost:8081/config/users-value
 
 # Expected response: {&quot;compatibilityLevel&quot;:&quot;BACKWARD&quot;}</code></pre>
-                <p class='exp2'>Compatibility mode is configured per subject in Schema Registry. Subject names conventionally follow the &#x27;&lt;topic&gt;-value&#x27; or &#x27;&lt;topic&gt;-key&#x27; pattern. Sending a JSON body to PUT /config/{subject} stores the rule for that subject. In BACKWARD mode, Schema Registry automatically checks every new schema registration against the rule: &#x27;Can the new schema read data written with the previous version?&#x27; Note that the response key when reading back the setting is &#x27;compatibilityLevel&#x27; — slightly different from the &#x27;compatibility&#x27; key used when writing it.</p>
+                <div class='exp2'><p>Compatibility mode is configured per subject in Schema Registry. Subject names conventionally follow the &#x27;&lt;topic&gt;-value&#x27; or &#x27;&lt;topic&gt;-key&#x27; pattern. Sending a JSON body to PUT /config/{subject} stores the rule for that subject. In BACKWARD mode, Schema Registry automatically checks every new schema registration against the rule: &#x27;Can the new schema read data written with the previous version?&#x27; Note that the response key when reading back the setting is &#x27;compatibilityLevel&#x27; — slightly different from the &#x27;compatibility&#x27; key used when writing it.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Exercise 1] Register User schema v1 under the users-value subject. The v1 schema has two fields: &#x27;id&#x27; of type int and &#x27;name&#x27; of type string. After registration, retrieve the list of registered versions and the v1 schema details to confirm everything was stored correctly.</p>
+              <div class='q'><p>Practice 2. [Core Exercise 1] Register User schema v1 under the users-value subject. The v1 schema has two fields: &#x27;id&#x27; of type int and &#x27;name&#x27; of type string. After registration, retrieve the list of registered versions and the v1 schema details to confirm everything was stored correctly.</p></div>
               <pre class='starter'><code>SR=http://localhost:8081
 SUBJECT=users-value
 
@@ -1315,15 +1320,12 @@ curl http://localhost:8081/subjects/users-value/versions
 # Retrieve v1 schema details
 curl http://localhost:8081/subjects/users-value/versions/1
 # Expected response: {&quot;subject&quot;:&quot;users-value&quot;,&quot;version&quot;:1,&quot;id&quot;:1,&quot;schema&quot;:&quot;{...}&quot;}</code></pre>
-                <p class='exp2'>Posting to /subjects/{subject}/versions assigns a globally unique ID and stores the schema as version 1 of that subject. The &#x27;id&#x27; field in the response is the global schema ID that producers embed in the first 5 bytes of every serialized message (1 magic byte + 4 bytes for the schema ID). The &#x27;schema&#x27; field in the request body must be the Avro schema JSON **escaped as a string** — because it is JSON-inside-JSON, all internal double quotes must be backslash-escaped. GET /subjects/{subject}/versions returns an array of version numbers; GET /subjects/{subject}/versions/{version} returns the full details for that version.</p>
+                <div class='exp2'><p>Posting to /subjects/{subject}/versions assigns a globally unique ID and stores the schema as version 1 of that subject. The &#x27;id&#x27; field in the response is the global schema ID that producers embed in the first 5 bytes of every serialized message (1 magic byte + 4 bytes for the schema ID). The &#x27;schema&#x27; field in the request body must be the Avro schema JSON <strong>escaped as a string</strong> — because it is JSON-inside-JSON, all internal double quotes must be backslash-escaped. GET /subjects/{subject}/versions returns an array of version numbers; GET /subjects/{subject}/versions/{version} returns the full details for that version.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Exercise 2] Practice schema evolution with two scenarios and compare the results.
-
-Scenario A (BACKWARD-compatible): Add a &#x27;email&#x27; field of type string with default value &quot;&quot; and register it as v2. Record whether it succeeds and what the response looks like.
-
-Scenario B (BACKWARD-incompatible): Attempt to register a schema that adds a &#x27;phone&#x27; field of type string with no default. Observe whether it fails and note the HTTP status code.
-
-Explain the difference in outcomes using the BACKWARD compatibility rule.</p>
+              <div class='q'><p>Practice 3. [Core Exercise 2] Practice schema evolution with two scenarios and compare the results.</p>
+<p>Scenario A (BACKWARD-compatible): Add a &#x27;email&#x27; field of type string with default value &quot;&quot; and register it as v2. Record whether it succeeds and what the response looks like.</p>
+<p>Scenario B (BACKWARD-incompatible): Attempt to register a schema that adds a &#x27;phone&#x27; field of type string with no default. Observe whether it fails and note the HTTP status code.</p>
+<p>Explain the difference in outcomes using the BACKWARD compatibility rule.</p></div>
               <pre class='starter'><code>SR=http://localhost:8081
 SUBJECT=users-value
 
@@ -1359,18 +1361,14 @@ curl -v -X POST http://localhost:8081/subjects/users-value/versions \
 # Check version list
 curl http://localhost:8081/subjects/users-value/versions
 # Expected response: [1, 2]  ← Scenario B failed, so no version 3</code></pre>
-                <p class='exp2'>The core rule of BACKWARD compatibility is: &#x27;The new schema must be able to read data written with previous schema versions.&#x27;
-
-Scenario A (success): The email field has default=&quot;&quot;. When old v1 messages (which have no email field) are deserialized using the new schema, Avro fills in the default value. Reading old data with the new schema works — BACKWARD-compatible.
-
-Scenario B (failure): The phone field has no default. Deserializing a v1 message with the new schema would fail because the required phone field is absent. The new schema cannot read old data, so it is BACKWARD-incompatible and Schema Registry rejects it with a 409. This is the central value proposition of Schema Registry: catching breaking changes before any deployment.</p>
+                <div class='exp2'><p>The core rule of BACKWARD compatibility is: &#x27;The new schema must be able to read data written with previous schema versions.&#x27;</p>
+<p>Scenario A (success): The email field has default=&quot;&quot;. When old v1 messages (which have no email field) are deserialized using the new schema, Avro fills in the default value. Reading old data with the new schema works — BACKWARD-compatible.</p>
+<p>Scenario B (failure): The phone field has no default. Deserializing a v1 message with the new schema would fail because the required phone field is absent. The new schema cannot read old data, so it is BACKWARD-incompatible and Schema Registry rejects it with a 409. This is the central value proposition of Schema Registry: catching breaking changes before any deployment.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Applied] In real-world operations, it is good practice to check schema compatibility before actually registering. Use Schema Registry&#x27;s compatibility pre-check endpoint to verify whether the following two schemas are BACKWARD-compatible with the current latest version (v2) — before any deployment.
-
-Candidate A: The schema with an &#x27;age&#x27; field of type int and default 0 added
-Candidate B: The schema with the existing &#x27;name&#x27; field&#x27;s type changed from string to int
-
-Interpret the difference in outcomes and explain why changing a field&#x27;s type is BACKWARD-incompatible.</p>
+              <div class='q'><p>Practice 4. [Applied] In real-world operations, it is good practice to check schema compatibility before actually registering. Use Schema Registry&#x27;s compatibility pre-check endpoint to verify whether the following two schemas are BACKWARD-compatible with the current latest version (v2) — before any deployment.</p>
+<p>Candidate A: The schema with an &#x27;age&#x27; field of type int and default 0 added</p>
+<p>Candidate B: The schema with the existing &#x27;name&#x27; field&#x27;s type changed from string to int</p>
+<p>Interpret the difference in outcomes and explain why changing a field&#x27;s type is BACKWARD-incompatible.</p></div>
               <pre class='starter'><code>SR=http://localhost:8081
 SUBJECT=users-value
 
@@ -1404,11 +1402,9 @@ curl -X POST $SR/compatibility/subjects/$SUBJECT/versions/latest \
   -d &#x27;{&quot;schema&quot;: &quot;{\&quot;type\&quot;:\&quot;record\&quot;,\&quot;name\&quot;:\&quot;User\&quot;,\&quot;fields\&quot;:[{\&quot;name\&quot;:\&quot;id\&quot;,\&quot;type\&quot;:\&quot;int\&quot;},{\&quot;name\&quot;:\&quot;name\&quot;,\&quot;type\&quot;:\&quot;int\&quot;},{\&quot;name\&quot;:\&quot;email\&quot;,\&quot;type\&quot;:\&quot;string\&quot;,\&quot;default\&quot;:\&quot;\&quot;}]}&quot;}&#x27;
 
 # Expected response: {&quot;is_compatible&quot;:false}</code></pre>
-                <p class='exp2'>POST /compatibility/subjects/{subject}/versions/latest is a dry-run endpoint — it checks compatibility without actually registering the schema. This is ideal for automated pre-deployment validation in a CI/CD pipeline.
-
-Candidate A (is_compatible: true): The age field has default 0, so when reading v2 or older messages (which lack the age field) with the new schema, Avro fills in 0. The BACKWARD compatibility condition is satisfied.
-
-Candidate B (is_compatible: false): Changing the name field&#x27;s type from string to int means old messages containing a string value cannot be deserialized with the new schema — Avro does not perform implicit type coercion between string and int. Changing a field&#x27;s type is incompatible under virtually every compatibility mode. If you genuinely need to change a field type on a live topic, the safest approach is to create a new topic.</p>
+                <div class='exp2'><p>POST /compatibility/subjects/{subject}/versions/latest is a dry-run endpoint — it checks compatibility without actually registering the schema. This is ideal for automated pre-deployment validation in a CI/CD pipeline.</p>
+<p>Candidate A (is_compatible: true): The age field has default 0, so when reading v2 or older messages (which lack the age field) with the new schema, Avro fills in 0. The BACKWARD compatibility condition is satisfied.</p>
+<p>Candidate B (is_compatible: false): Changing the name field&#x27;s type from string to int means old messages containing a string value cannot be deserialized with the new schema — Avro does not perform implicit type coercion between string and int. Changing a field&#x27;s type is incompatible under virtually every compatibility mode. If you genuinely need to change a field type on a live topic, the safest approach is to create a new topic.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=_x9RacHDQY0' target='_blank'>Apache Kafka 101: Schema Registry (2023)</a></li><li><a href='https://www.youtube.com/watch?v=2bPx3hfKX04' target='_blank'>Key Concepts of Schema Registry | Schema Registry 101</a></li><li><a href='https://www.youtube.com/watch?v=nCiTat06Ius' target='_blank'>Introduction to Schema Registry in Kafka | Part 1</a></li></ul></div>
         </article>
@@ -1565,7 +1561,7 @@ curl -X DELETE http://localhost:8083/connectors/file-source
 <li>Standalone mode uses a single worker with file-based state and no scaling capability. Distributed mode uses multiple workers, stores state in internal Kafka topics, exposes a REST API, and automatically rebalances tasks — making it the production standard. Connectors are created, queried, and deleted via POST/GET/DELETE on the REST API; swap out <code class='ic'>connector.class</code> to integrate a different system using the exact same workflow.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-Up] Assume a Kafka Connect Distributed worker is running at http://localhost:8083. Use the REST API to retrieve (1) the list of currently registered connectors and (2) the list of available connector plugins. Confirm that both FileStreamSource and FileStreamSink appear in the plugins list.</p>
+              <div class='q'><p>Practice 1. [Warm-Up] Assume a Kafka Connect Distributed worker is running at http://localhost:8083. Use the REST API to retrieve (1) the list of currently registered connectors and (2) the list of available connector plugins. Confirm that both FileStreamSource and FileStreamSink appear in the plugins list.</p></div>
               <pre class='starter'><code># Assume the Kafka Connect worker is already running.
 # Run the commands below in a docker-compose or local Kafka environment.
 
@@ -1585,9 +1581,9 @@ curl http://localhost:8083/connector-plugins
 # The JSON array should contain entries similar to:
 # {&quot;class&quot;:&quot;org.apache.kafka.connect.file.FileStreamSourceConnector&quot;, ...}
 # {&quot;class&quot;:&quot;org.apache.kafka.connect.file.FileStreamSinkConnector&quot;, ...}</code></pre>
-                <p class='exp2'>A Kafka Connect worker in Distributed mode exposes a REST API on port 8083 by default. The /connectors endpoint returns the names of all currently registered connector instances. The /connector-plugins endpoint returns the list of connector classes installed on the worker&#x27;s classpath. FileStreamSource and FileStreamSink ship with the Kafka distribution and are available without any additional installation. Mastering these read operations is the foundation for the register → monitor → delete workflow that follows.</p>
+                <div class='exp2'><p>A Kafka Connect worker in Distributed mode exposes a REST API on port 8083 by default. The /connectors endpoint returns the names of all currently registered connector instances. The /connector-plugins endpoint returns the list of connector classes installed on the worker&#x27;s classpath. FileStreamSource and FileStreamSink ship with the Kafka distribution and are available without any additional installation. Mastering these read operations is the foundation for the register → monitor → delete workflow that follows.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Exercise 1] Register a FileStreamSource connector to stream the contents of /tmp/input.txt into the connect-file-topic. After registration, (1) query the connector status to confirm it is RUNNING, and (2) append a new line to /tmp/input.txt, then use kafka-console-consumer to subscribe to connect-file-topic and verify that the message arrives.</p>
+              <div class='q'><p>Practice 2. [Core Exercise 1] Register a FileStreamSource connector to stream the contents of /tmp/input.txt into the connect-file-topic. After registration, (1) query the connector status to confirm it is RUNNING, and (2) append a new line to /tmp/input.txt, then use kafka-console-consumer to subscribe to connect-file-topic and verify that the message arrives.</p></div>
               <pre class='starter'><code># Step 1: Create the input file
 echo &#x27;hello kafka connect&#x27; &gt; /tmp/input.txt
 
@@ -1641,9 +1637,9 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 # Step 5 (extra verification): Append a new line and observe real-time delivery
 echo &#x27;second line&#x27; &gt;&gt; /tmp/input.txt
 # A new message containing &#x27;second line&#x27; should appear in the consumer output.</code></pre>
-                <p class='exp2'>The FileStreamSource connector reads the specified file from the beginning to end, producing each line as a Kafka message. When a new line is appended, the connector resumes reading from the last position it recorded (its offset), behaving like a real-time file tail. The connector.class can be specified as a short alias (FileStreamSource) or the fully qualified class name (org.apache.kafka.connect.file.FileStreamSourceConnector). The /connectors/{name}/status endpoint returns both the connector-level state and the per-task state, so a FAILED task is immediately visible here. The fact that this entire pipeline runs with no application code is the core value of Kafka Connect.</p>
+                <div class='exp2'><p>The FileStreamSource connector reads the specified file from the beginning to end, producing each line as a Kafka message. When a new line is appended, the connector resumes reading from the last position it recorded (its offset), behaving like a real-time file tail. The connector.class can be specified as a short alias (FileStreamSource) or the fully qualified class name (org.apache.kafka.connect.file.FileStreamSourceConnector). The /connectors/{name}/status endpoint returns both the connector-level state and the per-task state, so a FAILED task is immediately visible here. The fact that this entire pipeline runs with no application code is the core value of Kafka Connect.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Exercise 2] Register an additional FileStreamSink connector to write messages from connect-file-topic to /tmp/output.txt. After registration, append several new lines to /tmp/input.txt and run cat /tmp/output.txt to verify that the content has been delivered end-to-end. Once verified, delete both connectors.</p>
+              <div class='q'><p>Practice 3. [Core Exercise 2] Register an additional FileStreamSink connector to write messages from connect-file-topic to /tmp/output.txt. After registration, append several new lines to /tmp/input.txt and run cat /tmp/output.txt to verify that the content has been delivered end-to-end. Once verified, delete both connectors.</p></div>
               <pre class='starter'><code># Step 1: Register the Sink connector (fill in the blanks)
 curl -X POST http://localhost:8083/connectors \
   -H &quot;Content-Type: application/json&quot; \
@@ -1701,9 +1697,9 @@ curl -X DELETE http://localhost:8083/connectors/file-sink
 # Confirm deletion
 curl http://localhost:8083/connectors
 # [] returned means both connectors are gone</code></pre>
-                <p class='exp2'>With both Source and Sink connectors running simultaneously, the complete pipeline /tmp/input.txt → (FileStreamSource) → connect-file-topic → (FileStreamSink) → /tmp/output.txt is operational — with no application code whatsoever. Note the subtle difference in config key names: the Source connector uses &quot;topic&quot; (singular), while the Sink connector uses &quot;topics&quot; (plural). When the Sink connector starts, it consumes from the beginning of the topic (offset 0), so messages produced in the previous exercise also appear in output.txt. A DELETE request returns HTTP 204 No Content; after that, /connectors will no longer list the deleted connector. Being able to create, inspect, and tear down a pipeline with a single REST call is one of the key operational advantages of Distributed mode.</p>
+                <div class='exp2'><p>With both Source and Sink connectors running simultaneously, the complete pipeline /tmp/input.txt → (FileStreamSource) → connect-file-topic → (FileStreamSink) → /tmp/output.txt is operational — with no application code whatsoever. Note the subtle difference in config key names: the Source connector uses &quot;topic&quot; (singular), while the Sink connector uses &quot;topics&quot; (plural). When the Sink connector starts, it consumes from the beginning of the topic (offset 0), so messages produced in the previous exercise also appear in output.txt. A DELETE request returns HTTP 204 No Content; after that, /connectors will no longer list the deleted connector. Being able to create, inspect, and tear down a pipeline with a single REST call is one of the key operational advantages of Distributed mode.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Applied] Register a FileStreamSource connector with an SMT (Single Message Transform) that meets the following requirements: (1) Read /tmp/app.log and produce its contents to app-log-topic. (2) Use the ReplaceField SMT to strip the &#x27;schema&#x27; field from the default payload structure, leaving only the &#x27;payload&#x27; field (schemaless output). (3) After registering, check the connector status, append 3 sample log lines to the file, and verify that messages are produced to the topic correctly. Once verified, explain: which mode (standalone/distributed) is this pipeline running in, and what would happen if you increased tasks.max from 1 to 3?</p>
+              <div class='q'><p>Practice 4. [Applied] Register a FileStreamSource connector with an SMT (Single Message Transform) that meets the following requirements: (1) Read /tmp/app.log and produce its contents to app-log-topic. (2) Use the ReplaceField SMT to strip the &#x27;schema&#x27; field from the default payload structure, leaving only the &#x27;payload&#x27; field (schemaless output). (3) After registering, check the connector status, append 3 sample log lines to the file, and verify that messages are produced to the topic correctly. Once verified, explain: which mode (standalone/distributed) is this pipeline running in, and what would happen if you increased tasks.max from 1 to 3?</p></div>
               <pre class='starter'><code># Create the sample log file
 touch /tmp/app.log
 
@@ -1783,7 +1779,7 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 # multiple tables, or a Sink consuming multiple partitions — will
 # benefit from a higher tasks.max, spawning more parallel tasks
 # and increasing throughput accordingly.</code></pre>
-                <p class='exp2'>SMTs are declared inside the connector config using the &#x27;transforms&#x27; key. Multiple transforms can be chained by listing their aliases as a comma-separated value. Each transform&#x27;s class is specified with transforms.{alias}.type, and additional parameters follow the transforms.{alias}.{param} pattern. ReplaceField$Value removes fields listed in &#x27;blacklist&#x27; from the record&#x27;s Value struct (Kafka 3.x and later prefer the &#x27;exclude&#x27; key instead). SMTs are strictly for stateless, per-record transformations — field manipulation, masking, routing, and similar operations. Anything requiring state from previous records, such as aggregations, must be handled outside Connect. The key insight about tasks.max is that the connector implementation, not the configuration, determines the actual number of tasks via its taskConfigs() method.</p>
+                <div class='exp2'><p>SMTs are declared inside the connector config using the &#x27;transforms&#x27; key. Multiple transforms can be chained by listing their aliases as a comma-separated value. Each transform&#x27;s class is specified with transforms.{alias}.type, and additional parameters follow the transforms.{alias}.{param} pattern. ReplaceField$Value removes fields listed in &#x27;blacklist&#x27; from the record&#x27;s Value struct (Kafka 3.x and later prefer the &#x27;exclude&#x27; key instead). SMTs are strictly for stateless, per-record transformations — field manipulation, masking, routing, and similar operations. Anything requiring state from previous records, such as aggregations, must be handled outside Connect. The key insight about tasks.max is that the connector implementation, not the configuration, determines the actual number of tasks via its taskConfigs() method.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=mdsNGujpsF8' target='_blank'>Introduction to Kafka Connect | Kafka Connect 101 (2023)</a></li><li><a href='https://www.youtube.com/watch?v=MjJABMOywFM' target='_blank'>Kafka Connect | Apache Kafka 101 (2025 Edition)</a></li><li><a href='https://www.youtube.com/watch?v=nsy5ObOGXEA' target='_blank'>Deploying Kafka Connect | Kafka Connect 101 (2023)</a></li></ul></div>
         </article>
@@ -1903,17 +1899,14 @@ kafka-console-consumer.sh --topic words-count-output \
 <li>Stateful operations (count / reduce / aggregate) follow <code class='ic'>groupByKey</code> and persist results in a state store; the result is a KTable. Because of internal caching and the commit interval, results are buffered before being emitted rather than appearing immediately.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-Up] Complete a Stateless Pipeline
-
-Fill in the two TODO placeholders in the starter code below to build a Kafka Streams pipeline that satisfies the following requirements.
-
-Requirements:
-1. Discard records whose value is 5 characters or fewer.
-2. Convert the value of every passing record to uppercase.
-3. Write the results to &#x27;output-topic&#x27;.
-
-Input topic: &#x27;input-topic&#x27; (key: String, value: String)
-Output topic: &#x27;output-topic&#x27;</p>
+              <div class='q'><p>Practice 1. [Warm-Up] Complete a Stateless Pipeline</p>
+<p>Fill in the two TODO placeholders in the starter code below to build a Kafka Streams pipeline that satisfies the following requirements.</p>
+<p>Requirements:</p>
+<p>1. Discard records whose value is 5 characters or fewer.</p>
+<p>2. Convert the value of every passing record to uppercase.</p>
+<p>3. Write the results to &#x27;output-topic&#x27;.</p>
+<p>Input topic: &#x27;input-topic&#x27; (key: String, value: String)</p>
+<p>Output topic: &#x27;output-topic&#x27;</p></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.KStream;
@@ -1976,21 +1969,20 @@ public class StatelessPipeline {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>filter((key, value) -&gt; value.length() &gt; 5) removes records for which the lambda returns false (values of 5 characters or fewer) from the pipeline. mapValues(value -&gt; value.toUpperCase()) leaves the key untouched and transforms only the value to uppercase. Because the key is not modified, mapValues is used instead of map — changing the key with map would trigger repartitioning, which carries an additional cost. Both operations are stateless, meaning they do not remember previous records and require no state store. Importantly, the source stream is never mutated; result is a brand-new stream derived from it.</p>
+                <div class='exp2'><p>filter((key, value) -&gt; value.length() &gt; 5) removes records for which the lambda returns false (values of 5 characters or fewer) from the pipeline. mapValues(value -&gt; value.toUpperCase()) leaves the key untouched and transforms only the value to uppercase. Because the key is not modified, mapValues is used instead of map — changing the key with map would trigger repartitioning, which carries an additional cost. Both operations are stateless, meaning they do not remember previous records and require no state store. Importantly, the source stream is never mutated; result is a brand-new stream derived from it.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Lab 1] Build a WordCount Streams Application
-
-Write a Kafka Streams application that reads English sentences from the &#x27;words-input&#x27; topic, splits them into individual words, counts the occurrences of each word, and writes the results to the &#x27;words-count-output&#x27; topic.
-
-Processing requirements:
-1. Take the value (sentence) of each record, convert it to lowercase, then split on non-word characters (\W+) to produce an array of words.
-2. Use each individual word as the key for grouping.
-3. Accumulate the per-key (per-word) count in a state store named &#x27;counts-store&#x27;.
-4. Convert the aggregation result to a KStream and write it to &#x27;words-count-output&#x27;, specifying Produced.with(Serdes.String(), Serdes.Long()) because the value type is Long.
-
-After writing the application, verify its behavior with the commands below:
-- Producer: kafka-console-producer.sh --topic words-input --bootstrap-server localhost:9092
-- Consumer: kafka-console-consumer.sh --topic words-count-output --bootstrap-server localhost:9092 --from-beginning --property print.key=true --value-deserializer org.apache.kafka.common.serialization.LongDeserializer</p>
+              <div class='q'><p>Practice 2. [Core Lab 1] Build a WordCount Streams Application</p>
+<p>Write a Kafka Streams application that reads English sentences from the &#x27;words-input&#x27; topic, splits them into individual words, counts the occurrences of each word, and writes the results to the &#x27;words-count-output&#x27; topic.</p>
+<p>Processing requirements:</p>
+<p>1. Take the value (sentence) of each record, convert it to lowercase, then split on non-word characters (\W+) to produce an array of words.</p>
+<p>2. Use each individual word as the key for grouping.</p>
+<p>3. Accumulate the per-key (per-word) count in a state store named &#x27;counts-store&#x27;.</p>
+<p>4. Convert the aggregation result to a KStream and write it to &#x27;words-count-output&#x27;, specifying Produced.with(Serdes.String(), Serdes.Long()) because the value type is Long.</p>
+<p>After writing the application, verify its behavior with the commands below:</p>
+<ul>
+<li>Producer: kafka-console-producer.sh --topic words-input --bootstrap-server localhost:9092</li>
+<li>Consumer: kafka-console-consumer.sh --topic words-count-output --bootstrap-server localhost:9092 --from-beginning --property print.key=true --value-deserializer org.apache.kafka.common.serialization.LongDeserializer</li>
+</ul></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -2063,28 +2055,28 @@ public class WordCountApp {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>flatMapValues expands a single value (a sentence) into multiple values (a list of words), keeping the key unchanged. groupBy((key, word) -&gt; word) uses the word itself as the new key; internally this triggers repartitioning so that all occurrences of the same word end up on the same partition. count(Materialized.as(&quot;counts-store&quot;)) accumulates the per-key (per-word) count in the named state store. The result type is KTable&lt;String, Long&gt; because it represents a snapshot of current state — &#x27;word → count so far&#x27;. toStream() converts the KTable back into a KStream so it can be written to the output topic. Produced.with(Serdes.String(), Serdes.Long()) must be specified explicitly because the default Serde is String and cannot serialize Long values. During development, setting CACHE_MAX_BYTES_BUFFERING_CONFIG=0 and COMMIT_INTERVAL_MS_CONFIG=0 disables buffering so every update appears immediately (keep the defaults in production).</p>
+                <div class='exp2'><p>flatMapValues expands a single value (a sentence) into multiple values (a list of words), keeping the key unchanged. groupBy((key, word) -&gt; word) uses the word itself as the new key; internally this triggers repartitioning so that all occurrences of the same word end up on the same partition. count(Materialized.as(&quot;counts-store&quot;)) accumulates the per-key (per-word) count in the named state store. The result type is KTable&lt;String, Long&gt; because it represents a snapshot of current state — &#x27;word → count so far&#x27;. toStream() converts the KTable back into a KStream so it can be written to the output topic. Produced.with(Serdes.String(), Serdes.Long()) must be specified explicitly because the default Serde is String and cannot serialize Long values. During development, setting CACHE_MAX_BYTES_BUFFERING_CONFIG=0 and COMMIT_INTERVAL_MS_CONFIG=0 disables buffering so every update appears immediately (keep the defaults in production).</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Lab 2] Observe the Behavioral Difference Between KStream and KTable
-
-Write two pipelines — one reading the same topic (&#x27;user-status&#x27;) as a KStream and the other as a KTable — each forwarding records to a separate output topic. Then verify how the number of output records differs for identical input messages.
-
-Scenario:
-- Send the following messages to the &#x27;user-status&#x27; topic in order (key:value format).
-  user1:ACTIVE
-  user2:ACTIVE
-  user1:INACTIVE   &lt;- user1 status changes
-  user2:INACTIVE   &lt;- user2 status changes
-  user1:ACTIVE     &lt;- user1 status changes again
-
-Requirements:
-1. Read the topic as a KStream and write all records as-is to &#x27;stream-output&#x27;.
-2. Read the topic as a KTable and write only the latest values to &#x27;table-output&#x27;.
-3. Read each output topic from the beginning and directly observe the difference in record counts.
-
-Expected results:
-- stream-output: 5 records (all events)
-- table-output: 2 records (user1:ACTIVE, user2:INACTIVE — the latest value per key)</p>
+              <div class='q'><p>Practice 3. [Core Lab 2] Observe the Behavioral Difference Between KStream and KTable</p>
+<p>Write two pipelines — one reading the same topic (&#x27;user-status&#x27;) as a KStream and the other as a KTable — each forwarding records to a separate output topic. Then verify how the number of output records differs for identical input messages.</p>
+<p>Scenario:</p>
+<ul>
+<li>Send the following messages to the &#x27;user-status&#x27; topic in order (key:value format).</li>
+</ul>
+<p>  user1:ACTIVE</p>
+<p>  user2:ACTIVE</p>
+<p>  user1:INACTIVE   &lt;- user1 status changes</p>
+<p>  user2:INACTIVE   &lt;- user2 status changes</p>
+<p>  user1:ACTIVE     &lt;- user1 status changes again</p>
+<p>Requirements:</p>
+<p>1. Read the topic as a KStream and write all records as-is to &#x27;stream-output&#x27;.</p>
+<p>2. Read the topic as a KTable and write only the latest values to &#x27;table-output&#x27;.</p>
+<p>3. Read each output topic from the beginning and directly observe the difference in record counts.</p>
+<p>Expected results:</p>
+<ul>
+<li>stream-output: 5 records (all events)</li>
+<li>table-output: 2 records (user1:ACTIVE, user2:INACTIVE — the latest value per key)</li>
+</ul></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -2147,26 +2139,22 @@ public class StreamVsTable {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>builder.stream(&quot;user-status&quot;) treats every record in the topic as an independent event. Because user1 arrives three times, all three records are written to &#x27;stream-output&#x27;. By contrast, builder.table(&quot;user-status&quot;) overwrites the stored value in the state store each time a record with the same key arrives. As a result, only the final value for user1 (ACTIVE) and the final value for user2 (INACTIVE) — two records total — are reflected in &#x27;table-output&#x27;. This is the stream-table duality in action: the same physical topic, but the abstraction you choose determines whether you see &#x27;a history of changes&#x27; (KStream) or &#x27;a snapshot of current state&#x27; (KTable). Because KTable uses an internal state store (backed by RocksDB), it can restore the last known state even after the application restarts.</p>
+                <div class='exp2'><p>builder.stream(&quot;user-status&quot;) treats every record in the topic as an independent event. Because user1 arrives three times, all three records are written to &#x27;stream-output&#x27;. By contrast, builder.table(&quot;user-status&quot;) overwrites the stored value in the state store each time a record with the same key arrives. As a result, only the final value for user1 (ACTIVE) and the final value for user2 (INACTIVE) — two records total — are reflected in &#x27;table-output&#x27;. This is the stream-table duality in action: the same physical topic, but the abstraction you choose determines whether you see &#x27;a history of changes&#x27; (KStream) or &#x27;a snapshot of current state&#x27; (KTable). Because KTable uses an internal state store (backed by RocksDB), it can restore the last known state even after the application restarts.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Applied] Build a Real-Time Counter by Event Type
-
-Write a Kafka Streams application to process e-commerce event logs. The &#x27;shop-events&#x27; topic contains messages in the format &#x27;userId:eventType&#x27; (e.g., user1:CLICK, user2:PURCHASE, user1:PURCHASE). The userId is the key and the eventType is the value.
-
-Requirements:
-1. Pass only events whose value is &#x27;PURCHASE&#x27;.
-2. Group the PURCHASE events by event type (value). (In this lab only PURCHASE events remain after filtering, but structure the code so it would generalize easily to multiple types.)
-3. Aggregate the count per type and store it in a state store named &#x27;event-count-store&#x27;.
-4. Write the results to the &#x27;event-count-output&#x27; topic (value type Long).
-
-Verify the behavior by sending the test messages below (use kafka-console-producer with --property parse.key=true --property key.separator=:):
-  user1:CLICK
-  user2:PURCHASE
-  user3:CLICK
-  user1:PURCHASE
-  user4:PURCHASE
-
-Expected output (event-count-output): final count of 3 for the PURCHASE key</p>
+              <div class='q'><p>Practice 4. [Applied] Build a Real-Time Counter by Event Type</p>
+<p>Write a Kafka Streams application to process e-commerce event logs. The &#x27;shop-events&#x27; topic contains messages in the format &#x27;userId:eventType&#x27; (e.g., user1:CLICK, user2:PURCHASE, user1:PURCHASE). The userId is the key and the eventType is the value.</p>
+<p>Requirements:</p>
+<p>1. Pass only events whose value is &#x27;PURCHASE&#x27;.</p>
+<p>2. Group the PURCHASE events by event type (value). (In this lab only PURCHASE events remain after filtering, but structure the code so it would generalize easily to multiple types.)</p>
+<p>3. Aggregate the count per type and store it in a state store named &#x27;event-count-store&#x27;.</p>
+<p>4. Write the results to the &#x27;event-count-output&#x27; topic (value type Long).</p>
+<p>Verify the behavior by sending the test messages below (use kafka-console-producer with --property parse.key=true --property key.separator=:):</p>
+<p>  user1:CLICK</p>
+<p>  user2:PURCHASE</p>
+<p>  user3:CLICK</p>
+<p>  user1:PURCHASE</p>
+<p>  user4:PURCHASE</p>
+<p>Expected output (event-count-output): final count of 3 for the PURCHASE key</p></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -2233,12 +2221,12 @@ public class EventTypeCounter {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>This exercise combines a stateless operation (filter) with stateful operations (groupBy + count), which is a common real-world pattern. filter((userId, eventType) -&gt; &quot;PURCHASE&quot;.equals(eventType)) removes uninteresting events (CLICK, etc.) upfront, reducing unnecessary aggregation overhead. groupBy((userId, eventType) -&gt; eventType) discards the original key (userId) and promotes the value (eventType) as the new key — at this point repartitioning occurs so all records with the same eventType end up on the same partition. count(Materialized.as(&quot;event-count-store&quot;)) accumulates the per-key count in the named state store. Of the 5 test messages, the 2 CLICK events are filtered out and only the 3 PURCHASE events are counted, so the final output is PURCHASE:3. In production, this pattern applies directly to real-time statistics by event category — payment counts, error counts, and so on.</p>
+                <div class='exp2'><p>This exercise combines a stateless operation (filter) with stateful operations (groupBy + count), which is a common real-world pattern. filter((userId, eventType) -&gt; &quot;PURCHASE&quot;.equals(eventType)) removes uninteresting events (CLICK, etc.) upfront, reducing unnecessary aggregation overhead. groupBy((userId, eventType) -&gt; eventType) discards the original key (userId) and promotes the value (eventType) as the new key — at this point repartitioning occurs so all records with the same eventType end up on the same partition. count(Materialized.as(&quot;event-count-store&quot;)) accumulates the per-key count in the named state store. Of the 5 test messages, the 2 CLICK events are filtered out and only the 3 PURCHASE events are counted, so the final output is PURCHASE:3. In production, this pattern applies directly to real-time statistics by event category — payment counts, error counts, and so on.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=DoLIvp1CRJg' target='_blank'>Kafka Streams 101: Basic Operations (2023)</a></li><li><a href='https://www.youtube.com/watch?v=C9aXtOy5pPc' target='_blank'>Kafka Streams 101: KTable (2023)</a></li><li><a href='https://www.youtube.com/watch?v=wztNQy1ESwU' target='_blank'>Kafka Streams 101: Stateful Operations (2023)</a></li></ul></div>
         </article>
 <article id='lec7' class='lecture'>
-          <h2>07. Retention, Log Compaction, and Operations and Monitoring Fundamentals <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h2>07. Retention, Log Compaction, and Operations and Monitoring Fundamentals </h2>
           <h3>Learning Objectives</h3>
 <ul>
 <li>Understand the difference and use cases of time/size-based retention versus log compaction, which keeps only the latest value per key</li>
@@ -2270,19 +2258,24 @@ public class EventTypeCounter {
 </blockquote>
 <p>To permanently delete a specific key, send a message for that key with a <strong>null value (a tombstone)</strong>. The compactor interprets this as a &quot;delete this key&quot; signal. However, tombstones are not removed immediately — they are retained for a configurable period (<code class='ic'>delete.retention.ms</code>) to ensure that any consumers that were offline during that window can still observe the deletion before the tombstone disappears.</p>
 <p>Compaction is ideal for storing <strong>mutable state</strong> — customer profiles, product catalogs, CDC output from a database — any scenario where &quot;you don&#x27;t need the full history, just the latest value per key.&quot; An additional benefit is that a consumer reading from the beginning of a compacted topic can bootstrap the complete current state of all keys in a single pass. This is precisely why Kafka Streams&#x27; state store changelog topics and Kafka Connect&#x27;s internal configuration topics use compaction.</p>
-<p>The diagram below shows how the log cleaner processes the clean and dirty regions of a partition log. The arrow between the two regions represents physical ordering in the log (older → newer), not data movement.</p>
-<figure class='diagram'><div class='mermaid'>flowchart LR
-    subgraph LOG[&quot;파티션 로그 (왼쪽이 오래된 쪽)&quot;]
+<p>The flowchart below shows how the Log Cleaner selects only the <strong>Dirty segments</strong> for processing. Compaction does not replace the entire Clean region — instead, it reads the Dirty segments, writes new compacted segments in their place, and those new segments are then incorporated into the Clean region.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph BEFORE[&quot;Partition log before compaction (older on the left)&quot;]
         direction LR
-        C[&quot;Clean 영역\n(이미 압축됨)&quot;]
-        D[&quot;Dirty 영역\n(아직 압축 안 됨)&quot;]
-        C -- &quot;로그상 순서 (앞 → 뒤)&quot; --- D
+        C1[&quot;Clean region\n(already compacted)&quot;]
+        D1[&quot;Dirty segments\n(not yet compacted)&quot;]
+        C1 -- &quot;log order (older → newer)&quot; --- D1
     end
 
-    D -- &quot;dirty 비율 &gt; 임계값&quot; --&gt; CMP[&quot;압축기(Log Cleaner)&quot;]
-    CMP -- &quot;1. 키 → 최신 offset 맵 생성&quot; --&gt; MAP[&quot;키-offset 맵&quot;]
-    MAP -- &quot;2. 옛 레코드 제거&quot; --&gt; NEW[&quot;새 세그먼트\n(키별 최신값만)&quot;]
-    NEW -- &quot;교체&quot; --&gt; C</div><figcaption>Log compaction process flow</figcaption></figure>
+    D1 -- &quot;dirty ratio &gt; threshold → start&quot; --&gt; CMP[&quot;Log Cleaner\nreads only the Dirty segments&quot;]
+    CMP -- &quot;1. build key → latest-offset map&quot; --&gt; MAP[&quot;key-offset map&quot;]
+    MAP -- &quot;2. remove stale records,\nwrite new segment&quot; --&gt; NEW[&quot;new segment\n(latest value per key from Dirty)&quot;]
+    NEW -- &quot;3. replace the original Dirty segments\nwith this new segment&quot; --&gt; AFTER
+
+    subgraph AFTER[&quot;Partition log after compaction&quot;]
+        direction LR
+        C2[&quot;Clean region\n(original Clean + newly compacted segment)&quot;]
+    end</div><figcaption>Log Compaction process flow</figcaption></figure>
 <h4>Key Operational Metrics</h4>
 <p>Once a Kafka cluster is in production, a handful of metrics tell you immediately whether it is healthy. Kafka exposes a large number of metrics via JMX; to start, focus on the following.</p>
 <p><strong>Broker health metrics</strong> (typically visualized with Prometheus + Grafana):</p>
@@ -2299,20 +2292,20 @@ public class EventTypeCounter {
 </blockquote>
 <p>Current Offset is where the consumer will read next — the position immediately after the last offset it has committed as processed. Lag therefore tells you exactly how many messages the consumer still has to catch up on. In the example above, if the consumer has processed up to offset 2 so that its Current Offset is 3, then Lag = 6 − 3 = 3 (offsets 3, 4, and 5 have not yet been processed). This is exactly the <code class='ic'>LAG = LOG-END-OFFSET − CURRENT-OFFSET</code> figure shown by the <code class='ic'>kafka-consumer-groups</code> tool.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
-    P[&quot;프로듀서&quot;] -- &quot;메시지 쓰기&quot; --&gt; PART
+    P[&quot;Producer&quot;] -- &quot;write messages&quot; --&gt; PART
 
-    subgraph PART[&quot;파티션 로그&quot;]
+    subgraph PART[&quot;Partition log&quot;]
         direction LR
-        O0[&quot;offset 0&quot;] --&gt; O1[&quot;offset 1&quot;] --&gt; O2[&quot;offset 2&quot;] --&gt; O3[&quot;offset 3&quot;] --&gt; O4[&quot;offset 4&quot;] --&gt; O5[&quot;offset 5&quot;] --&gt; O6[&quot;offset 6\n(빈자리)&quot;]
+        O0[&quot;offset 0&quot;] --&gt; O1[&quot;offset 1&quot;] --&gt; O2[&quot;offset 2&quot;] --&gt; O3[&quot;offset 3&quot;] --&gt; O4[&quot;offset 4&quot;] --&gt; O5[&quot;offset 5&quot;] --&gt; O6[&quot;offset 6\n(empty slot)&quot;]
     end
 
-    CO[&quot;Current Offset = 3\n(offset 2까지 처리·커밋, 다음에 읽을 위치)&quot;] -. &quot;여기부터 읽을 차례&quot; .-&gt; O3
-    LEO[&quot;Log-End-Offset = 6\n(마지막 offset 5 + 1 = 다음에 쓰일 위치)&quot;] -. &quot;다음 메시지가 들어갈 빈자리&quot; .-&gt; O6
+    CO[&quot;Current Offset = 3\n(processed &amp; committed up to offset 2,\nnext read position)&quot;] -. &quot;will read from here&quot; .-&gt; O3
+    LEO[&quot;Log-End-Offset = 6\n(last offset 5 + 1 = next write position)&quot;] -. &quot;next message lands here&quot; .-&gt; O6
 
-    LAG[&quot;Lag = LEO 6 − Current 3 = 3\n(offset 3·4·5 미처리)&quot;]
-    LAG -. 대상 .-&gt; O3
-    LAG -. 대상 .-&gt; O4
-    LAG -. 대상 .-&gt; O5
+    LAG[&quot;Lag = LEO 6 − Current 3 = 3\n(offsets 3, 4, 5 unprocessed)&quot;]
+    LAG -. target .-&gt; O3
+    LAG -. target .-&gt; O4
+    LAG -. target .-&gt; O5
 
     style O3 fill:#f9a825,stroke:#f57f17
     style O4 fill:#f9a825,stroke:#f57f17
@@ -2373,7 +2366,7 @@ kafka-consumer-groups.sh --describe \
 <li>LEO (Log-End-Offset) is the last written offset + 1 (the position where the next message will be written). Consumer Lag = LEO − Current Offset, representing how many messages the consumer has yet to process. Use <code class='ic'>kafka-consumer-groups --describe</code> and check the LAG column; a continuously growing lag signals a need to scale out consumers, optimize processing, or adjust configuration.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. Change the retention period of the existing topic `my-events` to 1 hour (3,600,000 ms), then use `kafka-configs.sh` to confirm the change has taken effect.</p>
+              <div class='q'><p>Practice 1. Change the retention period of the existing topic <code class='ic'>my-events</code> to 1 hour (3,600,000 ms), then use <code class='ic'>kafka-configs.sh</code> to confirm the change has taken effect.</p></div>
               <pre class='starter'><code># Prerequisites: create the topic first if it does not exist
 kafka-topics.sh --create --topic my-events \
   --bootstrap-server localhost:9092 \
@@ -2391,18 +2384,19 @@ kafka-configs.sh --alter --topic my-events \
 # 2. Verify the change
 kafka-configs.sh --describe --topic my-events \
   --bootstrap-server localhost:9092</code></pre>
-                <p class='exp2'>`kafka-configs.sh --alter` dynamically overwrites topic configuration stored in the broker. The change takes effect immediately without a broker restart, and `--describe` retrieves the current configuration values. `retention.ms=3600000` equals 1 hour (60 × 60 × 1000 ms); any segment older than this threshold will be removed on the next cleanup cycle. Shortening the retention period saves disk space, but setting it too aggressively risks slow consumers permanently missing data they have not yet read.</p>
+                <div class='exp2'><p><code class='ic'>kafka-configs.sh --alter</code> dynamically overwrites topic configuration stored in the broker. The change takes effect immediately without a broker restart, and <code class='ic'>--describe</code> retrieves the current configuration values. <code class='ic'>retention.ms=3600000</code> equals 1 hour (60 × 60 × 1000 ms); any segment older than this threshold will be removed on the next cleanup cycle. Shortening the retention period saves disk space, but setting it too aggressively risks slow consumers permanently missing data they have not yet read.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. Create a compacted topic `employee-salary` to manage employee salary records. Send salary data for the same key (employee ID) twice, then confirm that the consumer reads only the latest value.
-
-Step-by-step:
-1. Create the topic with `cleanup.policy=compact`, `min.cleanable.dirty.ratio=0.001`, and `segment.ms=5000`
-2. Use the console producer to send the following records in order (key separator `:`)
-   - `1:100`  (employee 1, initial salary)
-   - `2:200`  (employee 2)
-   - `1:400`  (employee 1, salary increase)
-3. Wait at least 30 seconds to give the compactor time to run
-4. Read from the beginning and verify that only 400 remains for key 1</p>
+              <div class='q'><p>Practice 2. Create a compacted topic <code class='ic'>employee-salary</code> to manage employee salary records. Send salary data for the same key (employee ID) twice, then confirm that the consumer reads only the latest value.</p>
+<p>Step-by-step:</p>
+<p>1. Create the topic with <code class='ic'>cleanup.policy=compact</code>, <code class='ic'>min.cleanable.dirty.ratio=0.001</code>, and <code class='ic'>segment.ms=5000</code></p>
+<p>2. Use the console producer to send the following records in order (key separator <code class='ic'>:</code>)</p>
+<ul>
+<li><code class='ic'>1:100</code>  (employee 1, initial salary)</li>
+<li><code class='ic'>2:200</code>  (employee 2)</li>
+<li><code class='ic'>1:400</code>  (employee 1, salary increase)</li>
+</ul>
+<p>3. Wait at least 30 seconds to give the compactor time to run</p>
+<p>4. Read from the beginning and verify that only 400 remains for key 1</p></div>
               <pre class='starter'><code># Step 1: Create the compacted topic (fill in the command and run it)
 kafka-topics.sh --create --topic employee-salary \
   --bootstrap-server localhost:9092 \
@@ -2451,16 +2445,15 @@ kafka-console-consumer.sh --topic employee-salary \
 # Expected output (the old value 100 for key 1 should be gone, only 400 remains):
 # 2:200
 # 1:400</code></pre>
-                <p class='exp2'>On a topic created with `cleanup.policy=compact`, the Log Cleaner scans the dirty region (segments not yet compacted), builds a map of each key&#x27;s latest offset, and removes all stale records. `min.cleanable.dirty.ratio=0.001` instructs the cleaner to start as soon as just 0.1% of the log is dirty, so results appear quickly in a lab environment. `segment.ms=5000` rolls a new segment every 5 seconds, making older segments eligible for compaction sooner. After compaction, only `1:400` survives for key 1 because offset 46 (value 400) is the most recent record for that key. The topic now acts as a snapshot of the latest state for every key.</p>
+                <div class='exp2'><p>On a topic created with <code class='ic'>cleanup.policy=compact</code>, the Log Cleaner scans the dirty region (segments not yet compacted), builds a map of each key&#x27;s latest offset, and removes all stale records. <code class='ic'>min.cleanable.dirty.ratio=0.001</code> instructs the cleaner to start as soon as just 0.1% of the log is dirty, so results appear quickly in a lab environment. <code class='ic'>segment.ms=5000</code> rolls a new segment every 5 seconds, making older segments eligible for compaction sooner. After compaction, only <code class='ic'>1:400</code> survives for key 1 because offset 46 (value 400) is the most recent record for that key. The topic now acts as a snapshot of the latest state for every key.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. Pause a consumer group, produce messages while it is stopped to build up Consumer Lag artificially, then read the LAG value using `kafka-consumer-groups.sh --describe`.
-
-Step-by-step:
-1. Create a topic `lag-test` (1 partition, replication factor 1)
-2. Start a consumer in consumer group `lag-group`, then immediately stop it with Ctrl+C to register a committed offset
-3. While the consumer is stopped, send 5 messages (`msg-1` through `msg-5`) with the producer
-4. Run `kafka-consumer-groups.sh --describe` and confirm the LAG column shows 5 or more
-5. Restart the consumer to consume all messages, then verify that LAG returns to 0</p>
+              <div class='q'><p>Practice 3. Pause a consumer group, produce messages while it is stopped to build up Consumer Lag artificially, then read the LAG value using <code class='ic'>kafka-consumer-groups.sh --describe</code>.</p>
+<p>Step-by-step:</p>
+<p>1. Create a topic <code class='ic'>lag-test</code> (1 partition, replication factor 1)</p>
+<p>2. Start a consumer in consumer group <code class='ic'>lag-group</code>, then immediately stop it with Ctrl+C to register a committed offset</p>
+<p>3. While the consumer is stopped, send 5 messages (<code class='ic'>msg-1</code> through <code class='ic'>msg-5</code>) with the producer</p>
+<p>4. Run <code class='ic'>kafka-consumer-groups.sh --describe</code> and confirm the LAG column shows 5 or more</p>
+<p>5. Restart the consumer to consume all messages, then verify that LAG returns to 0</p></div>
               <pre class='starter'><code># Step 1: Create the topic
 kafka-topics.sh --create --topic lag-test \
   --bootstrap-server localhost:9092 \
@@ -2520,14 +2513,13 @@ kafka-consumer-groups.sh --describe \
   --group lag-group \
   --bootstrap-server localhost:9092
 # Expected: LAG column = 0</code></pre>
-                <p class='exp2'>Consumer Lag is calculated as `LOG-END-OFFSET - CURRENT-OFFSET`. While the consumer was stopped, the producer wrote 5 messages, pushing `LOG-END-OFFSET` to 5 while `CURRENT-OFFSET` remained at 0 — giving `LAG=5`. Once the consumer is restarted and reads all 5 messages, `CURRENT-OFFSET=5` and `LOG-END-OFFSET=5`, so `LAG=0`. In production, a consumer group whose lag is continuously growing cannot keep up with the producer&#x27;s write rate; the appropriate remedies are scaling out consumers (up to the number of partitions), optimizing processing logic, or tuning batch sizes.</p>
+                <div class='exp2'><p>Consumer Lag is calculated as <code class='ic'>LOG-END-OFFSET - CURRENT-OFFSET</code>. While the consumer was stopped, the producer wrote 5 messages, pushing <code class='ic'>LOG-END-OFFSET</code> to 5 while <code class='ic'>CURRENT-OFFSET</code> remained at 0 — giving <code class='ic'>LAG=5</code>. Once the consumer is restarted and reads all 5 messages, <code class='ic'>CURRENT-OFFSET=5</code> and <code class='ic'>LOG-END-OFFSET=5</code>, so <code class='ic'>LAG=0</code>. In production, a consumer group whose lag is continuously growing cannot keep up with the producer&#x27;s write rate; the appropriate remedies are scaling out consumers (up to the number of partitions), optimizing processing logic, or tuning batch sizes.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Delete employee 2&#x27;s data entirely from the `employee-salary` topic you created earlier. On a compacted topic, the way to delete a key is to send a tombstone — a message with a null value for that key.
-
-Step-by-step:
-1. Enable the `null-marker` option in the console producer and send a tombstone for employee 2
-2. Wait 30 seconds, then read from the beginning and confirm key 2 is no longer visible
-3. (Written response) Explain why tombstones are not deleted immediately but instead retained for `delete.retention.ms`</p>
+              <div class='q'><p>Practice 4. Delete employee 2&#x27;s data entirely from the <code class='ic'>employee-salary</code> topic you created earlier. On a compacted topic, the way to delete a key is to send a tombstone — a message with a null value for that key.</p>
+<p>Step-by-step:</p>
+<p>1. Enable the <code class='ic'>null-marker</code> option in the console producer and send a tombstone for employee 2</p>
+<p>2. Wait 30 seconds, then read from the beginning and confirm key 2 is no longer visible</p>
+<p>3. (Written response) Explain why tombstones are not deleted immediately but instead retained for <code class='ic'>delete.retention.ms</code></p></div>
               <pre class='starter'><code># Step 1: Send a tombstone message
 # With --property null.marker=NULL, entering NULL as the value sends a null-value record
 kafka-console-producer.sh --topic employee-salary \
@@ -2582,7 +2574,7 @@ kafka-configs.sh --describe --topic employee-salary \
 # Retaining the tombstone for delete.retention.ms (default 24 hours)
 # ensures that every consumer has a sufficient window to observe the deletion signal
 # before it is finally removed.</code></pre>
-                <p class='exp2'>Deleting a key from a compacted topic is a two-step process. First, send a tombstone — a message with a null value for the target key. In the console producer, `--property null.marker=NULL` converts any input value matching the string NULL into an actual null byte before writing. Second, when the compactor runs, it sees the tombstone and removes all previous records for that key, as well as the tombstone itself. However, the tombstone is not removed immediately — it is retained for `delete.retention.ms` (default 86,400,000 ms = 24 hours). This delay guarantees that consumers or CDC pipelines that were offline during that window can still observe the &#x27;key deleted&#x27; signal upon recovery. Only after `delete.retention.ms` has elapsed is the tombstone itself finally purged.</p>
+                <div class='exp2'><p>Deleting a key from a compacted topic is a two-step process. First, send a tombstone — a message with a null value for the target key. In the console producer, <code class='ic'>--property null.marker=NULL</code> converts any input value matching the string NULL into an actual null byte before writing. Second, when the compactor runs, it sees the tombstone and removes all previous records for that key, as well as the tombstone itself. However, the tombstone is not removed immediately — it is retained for <code class='ic'>delete.retention.ms</code> (default 86,400,000 ms = 24 hours). This delay guarantees that consumers or CDC pipelines that were offline during that window can still observe the &#x27;key deleted&#x27; signal upon recovery. Only after <code class='ic'>delete.retention.ms</code> has elapsed is the tombstone itself finally purged.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=VAkhYxu1qII' target='_blank'>Apache Kafka Topic Compaction</a></li><li><a href='https://www.youtube.com/watch?v=NlIHCP65xzg' target='_blank'>In-depth intuition on Topic Log Compaction in Apache Kafka</a></li><li><a href='https://www.youtube.com/watch?v=XXLe0KNEbR4' target='_blank'>Which Metrics to Monitor in Kafka?</a></li></ul></div>
         </article></main>

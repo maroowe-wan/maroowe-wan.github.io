@@ -21,7 +21,7 @@
 <li><a href='#lec7'>07. 보존·로그 압축(Retention/Compaction)과 운영·모니터링 기초</a></li></ul>
 </nav>
 <main><article id='lec1' class='lecture'>
-          <h2>01. 복제(Replication)와 ISR - 고가용성·내구성의 토대 <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h2>01. 복제(Replication)와 ISR - 고가용성·내구성의 토대 </h2>
           <h3>학습 목표</h3>
 <ul>
 <li>리더·팔로워 복제 구조와 ISR(In-Sync Replicas)이 데이터 내구성을 보장하는 원리를 이해한다</li>
@@ -73,15 +73,22 @@
 <li><code class='ic'>acks=0</code>: 확인 안 받음(fire-and-forget). 가장 빠르지만 유실 가능.</li>
 <li><code class='ic'>acks=1</code>: 리더만 받으면 성공. 리더가 복제 전에 죽으면 유실 가능.</li>
 <li><code class='ic'>acks=all</code>: ISR의 <strong>모든</strong> 복사본이 받아야 성공. 가장 안전.</li>
-<li><strong>min.insync.replicas</strong> (토픽/브로커 설정): <code class='ic'>acks=all</code>일 때, 쓰기가 성공하려면 ISR에 최소 몇 개가 있어야 하는가.</li>
+<li><strong>min.insync.replicas</strong> (토픽/브로커 설정): 쓰기가 성립하기 위해 ISR에 최소 몇 개의 복사본이 살아 있어야 하는지를 <strong>강제하는 하한선</strong>.</li>
 </ul>
-<p>핵심은 <strong><code class='ic'>acks=all</code>과 <code class='ic'>min.insync.replicas</code>를 함께 써야 의미가 있다</strong>는 점이다. 예를 들어 replication.factor=3, min.insync.replicas=2, acks=all로 설정하면:</p>
+<p>여기서 <code class='ic'>acks=all</code>과 <code class='ic'>min.insync.replicas</code>가 정확히 어떻게 맞물리는지가 핵심이다. 둘은 서로 다른 두 단계에서 작동한다.</p>
+<p>1. <strong>쓰기 수락 전 사전 검사 (min.insync.replicas).</strong> 프로듀서가 <code class='ic'>acks=all</code>로 메시지를 보내면, 리더 브로커는 데이터를 받기 <strong>전에</strong> 먼저 현재 ISR 멤버 수가 <code class='ic'>min.insync.replicas</code> 값 이상인지 확인한다. ISR 수가 그 값보다 <strong>작으면 쓰기 요청을 아예 처리하지 않고 즉시 <code class='ic'>NotEnoughReplicasException</code>(또는 <code class='ic'>NotEnoughReplicasAfterAppendException</code>)으로 거부</strong>한다. 이것이 &quot;데이터를 위험하게 1곳에만 쓰고 마는&quot; 사태를 사전에 막는 안전장치다.</p>
+<p>2. <strong>쓰기 성공 판정 (acks=all).</strong> 사전 검사를 통과해 요청이 수락되면, 그제서야 리더는 데이터를 자기 로그에 쓰고 <strong>현재 ISR에 속한 모든 복사본</strong>이 그 데이터를 복제할 때까지 기다린 뒤 프로듀서에 성공 응답을 보낸다.</p>
+<p>즉 <code class='ic'>min.insync.replicas</code>는 &quot;쓰기가 시작될 수 있는 최소 ISR 크기&quot;를 정하고, <code class='ic'>acks=all</code>은 &quot;그 ISR 전원이 받았음&quot;을 성공 조건으로 삼는다. 둘이 함께여야 의미가 있다.</p>
+<blockquote class='callout'>
+<p>중요한 함정: <code class='ic'>min.insync.replicas=1</code>이면 <code class='ic'>acks=all</code>을 줘도 사실상 <code class='ic'>acks=1</code>과 같아진다. ISR이 리더 1개만 있어도 검사를 통과하고, 그 1개(리더)만 받으면 성공으로 처리되기 때문이다. 그래서 표준 권장 조합은 <strong>replication.factor=3 + min.insync.replicas=2 + acks=all</strong>이다.</p>
+</blockquote>
+<p>예를 들어 replication.factor=3, min.insync.replicas=2, acks=all로 설정하면:</p>
 <ul>
-<li>평소엔 3개 복사본 모두에 쓰이지만, 1대가 죽어 ISR이 2개로 줄어도 <code class='ic'>min.insync.replicas=2</code>를 만족하므로 쓰기는 계속된다. <strong>장애 1대를 견디면서도 내구성을 유지</strong>하는 황금 조합이다.</li>
-<li>만약 2대가 죽어 ISR이 1개가 되면, <code class='ic'>min.insync.replicas=2</code>를 못 채워 프로듀서 쓰기가 <code class='ic'>NotEnoughReplicas</code> 예외로 거부된다. 이는 &quot;데이터가 충분히 복제되지 못할 바에는 차라리 쓰기를 멈춘다&quot;는 <strong>내구성 우선</strong> 선택이다.</li>
+<li>평소엔 3개 복사본 모두에 쓰이지만, 1대가 죽어 ISR이 2개로 줄어도 <code class='ic'>min.insync.replicas=2</code>를 만족하므로 사전 검사를 통과해 쓰기가 계속된다. <strong>장애 1대를 견디면서도 내구성을 유지</strong>하는 황금 조합이다.</li>
+<li>만약 2대가 죽어 ISR이 1개가 되면, 프로듀서 쓰기는 ISR에 복제되기도 전에 사전 검사에서 <code class='ic'>min.insync.replicas=2</code>를 못 채워 <code class='ic'>NotEnoughReplicasException</code>으로 거부된다. 이는 &quot;데이터가 충분히 복제되지 못할 바에는 차라리 쓰기를 멈춘다&quot;는 <strong>내구성 우선</strong> 선택이다.</li>
 </ul>
 <blockquote class='callout'>
-<p>흔한 함정: replication.factor와 min.insync.replicas를 같은 값(예: 둘 다 3)으로 두면, 단 1대만 죽어도 쓰기가 전면 중단된다. min.insync.replicas는 보통 (replication.factor - 1)로 둔다.</p>
+<p>흔한 함정: replication.factor와 min.insync.replicas를 같은 값(예: 둘 다 3)으로 두면, 단 1대만 죽어도 사전 검사가 실패해 쓰기가 전면 중단된다. min.insync.replicas는 보통 (replication.factor - 1)로 둔다.</p>
 </blockquote>
 <p>여기서 가용성과 내구성의 트레이드오프가 드러난다. min.insync.replicas를 높이면 더 많은 복사본에 안전하게 저장되지만(내구성↑), 그만큼 살아있어야 할 브로커 수도 늘어 쓰기가 멈출 위험도 커진다(가용성↓).</p>
 <h4>리더 장애와 복구의 흐름</h4>
@@ -127,18 +134,16 @@ kafka-console-producer.sh \
   --bootstrap-server localhost:9092 \
   --producer-property acks=all
 </code></pre>
-<p>이제 리더 브로커 하나를 강제로 중단시킨 뒤(예: <code class='ic'>docker stop</code> 또는 프로세스 kill) 다시 <code class='ic'>--describe</code>를 실행하면, <strong>Leader가 다른 브로커 ID로 바뀌고 Isr이 2개로 줄어든</strong> 것을 관찰할 수 있다. 그래도 프로듀서/컨슈머는 정상 동작한다 — ISR 2개가 <code class='ic'>min.insync.replicas=2</code>를 만족하기 때문이다. 브로커를 다시 켜면 잠시 후 Isr이 다시 3개로 복구된다. 한 대를 더 멈춰 ISR이 1개가 되면 프로듀서 쓰기가 거부되는 것도 확인해 보자.</p>
+<p>이제 리더 브로커 하나를 강제로 중단시킨 뒤(예: <code class='ic'>docker stop</code> 또는 프로세스 kill) 다시 <code class='ic'>--describe</code>를 실행하면, <strong>Leader가 다른 브로커 ID로 바뀌고 Isr이 2개로 줄어든</strong> 것을 관찰할 수 있다. 그래도 프로듀서/컨슈머는 정상 동작한다 — ISR 2개가 <code class='ic'>min.insync.replicas=2</code>를 만족하기 때문이다. 브로커를 다시 켜면 잠시 후 Isr이 다시 3개로 복구된다. 한 대를 더 멈춰 ISR이 1개가 되면, 프로듀서 쓰기가 사전 검사 단계에서 <code class='ic'>NotEnoughReplicasException</code>으로 거부되는 것도 확인해 보자.</p>
 <h3>핵심 요약</h3>
 <ul>
 <li>복제는 파티션 복사본을 여러 브로커에 두어 장애를 견디는 Kafka 신뢰성의 토대다. replication.factor=N이면 N-1대 장애까지 견딘다.</li>
 <li>리더가 쓰기를 받고 팔로워는 fetch로 복제한다. 읽기는 기본적으로 리더에서 일어나지만, KIP-392 이후 <code class='ic'>client.rack</code> 설정으로 가까운 팔로워에서 읽어 지연·트래픽 비용을 줄일 수도 있다. ISR(동기화된 복사본) 전원이 받은 기록만 커밋되어 High Watermark까지 컨슈머에 노출된다.</li>
-<li><code class='ic'>acks=all</code> + <code class='ic'>min.insync.replicas</code>(보통 replication.factor-1) 조합이 내구성과 가용성의 균형점이다. 두 값을 같게 두면 1대 장애에도 쓰기가 멈추는 함정에 빠진다.</li>
+<li><code class='ic'>acks=all</code>은 두 단계로 작동한다: 쓰기 수락 <strong>전에</strong> ISR 수가 <code class='ic'>min.insync.replicas</code> 이상인지 검사(미달이면 <code class='ic'>NotEnoughReplicasException</code>으로 거부)하고, 통과하면 ISR 전원의 복제를 기다려 성공 처리한다. 따라서 <code class='ic'>min.insync.replicas=1</code>이면 <code class='ic'>acks=all</code>도 사실상 <code class='ic'>acks=1</code>이며, 표준 권장은 replication.factor=3 + min.insync.replicas=2 + acks=all이다. 두 값을 같게 두면 1대 장애에도 쓰기가 멈추는 함정에 빠진다.</li>
 <li>리더 장애 시 ISR에서 새 리더가 무손실로 선출되며, leader epoch이 좀비 리더로 인한 데이터 불일치를 막는다. 복구된 브로커는 따라잡은 뒤 ISR에 재합류한다. <code class='ic'>kafka-topics --describe</code>의 Leader/Isr로 이를 직접 관찰할 수 있다.</li>
-<pre><code>
 </ul>
-</code></pre>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. 3-broker Docker 환경을 준비하고, replication.factor=3 / partitions=3 / min.insync.replicas=2 로 &#x27;orders&#x27; 토픽을 생성하세요. 생성 후 kafka-topics.sh --describe 로 각 파티션의 Leader, Replicas, Isr 항목을 출력하고, 세 브로커 ID가 모두 Isr 에 들어있는지 확인하세요.</p>
+              <div class='q'><p>실습 1. 3-broker Docker 환경을 준비하고, replication.factor=3 / partitions=3 / min.insync.replicas=2 로 &#x27;orders&#x27; 토픽을 생성하세요. 생성 후 kafka-topics.sh --describe 로 각 파티션의 Leader, Replicas, Isr 항목을 출력하고, 세 브로커 ID가 모두 Isr 에 들어있는지 확인하세요.</p></div>
               <pre class='starter'><code># 1. docker-compose.yml (3-broker 최소 구성)
 # 아래 파일을 docker-compose.yml 로 저장 후 &#x27;docker-compose up -d&#x27; 로 실행합니다.
 #
@@ -213,9 +218,9 @@ kafka-topics.sh --describe \
 #   - ReplicationFactor: 3
 #   - Configs: min.insync.replicas=2
 #   - 각 파티션의 Isr 목록에 브로커 3개가 모두 포함되어 있음</code></pre>
-                <p class='exp2'>replication.factor=3 은 파티션 복사본을 3개 브로커에 분산해 두라는 의미입니다. Isr(In-Sync Replicas) 은 리더와 충분히 동기화된 복사본 목록으로, 정상 상태에서는 세 브로커 ID가 모두 들어있어야 합니다. min.insync.replicas=2 는 acks=all 쓰기가 성공하려면 ISR이 최소 2개여야 한다는 조건입니다. --describe 출력에서 Leader(현재 읽기·쓰기 담당 브로커), Replicas(전체 복사본 목록), Isr(동기화 중인 복사본 목록)을 구분해 읽는 것이 이후 실습의 기반이 됩니다.</p>
+                <div class='exp2'><p>replication.factor=3 은 파티션 복사본을 3개 브로커에 분산해 두라는 의미입니다. Isr(In-Sync Replicas) 은 리더와 충분히 동기화된 복사본 목록으로, 정상 상태에서는 세 브로커 ID가 모두 들어있어야 합니다. min.insync.replicas=2 는 acks=all 쓰기가 성공하려면 ISR이 최소 2개여야 한다는 조건입니다. --describe 출력에서 Leader(현재 읽기·쓰기 담당 브로커), Replicas(전체 복사본 목록), Isr(동기화 중인 복사본 목록)을 구분해 읽는 것이 이후 실습의 기반이 됩니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. 동일한 &#x27;orders&#x27; 토픽에 메시지를 보낼 때 acks=0, acks=1, acks=all 세 가지 프로듀서 설정을 차례로 사용해보세요. 각각 메시지 전송이 성공하는지 확인한 뒤, 이번에는 acks=all 상태에서 min.insync.replicas 를 만족하지 못하도록 브로커 2대를 중단(docker stop)하고 메시지를 보내 NotEnoughReplicasException 에러를 직접 발생시키세요.</p>
+              <div class='q'><p>실습 2. 동일한 &#x27;orders&#x27; 토픽에 메시지를 보낼 때 acks=0, acks=1, acks=all 세 가지 프로듀서 설정을 차례로 사용해보세요. 각각 메시지 전송이 성공하는지 확인한 뒤, 이번에는 acks=all 상태에서 min.insync.replicas 를 만족하지 못하도록 브로커 2대를 중단(docker stop)하고 메시지를 보내 NotEnoughReplicasException 에러를 직접 발생시키세요.</p></div>
               <pre class='starter'><code># --- acks=0 (fire-and-forget) ---
 kafka-console-producer.sh \
   --topic orders \
@@ -268,9 +273,9 @@ kafka-console-producer.sh \
 # - acks=0, acks=1 은 복제 확인 없이 빠르게 응답 (데이터 유실 가능성 있음)
 # - acks=all 은 ISR 전원 확인 후 응답 (가장 안전, 단 ISR 부족 시 거부)
 # - min.insync.replicas=2 인데 ISR=1 이면 NotEnoughReplicasException 발생</code></pre>
-                <p class='exp2'>acks=0 은 네트워크에 던지고 확인을 기다리지 않으므로 가장 빠르지만 유실 위험이 가장 큽니다. acks=1 은 리더가 받으면 성공으로 처리하는데, 리더가 팔로워에 복제하기 전에 죽으면 메시지가 사라질 수 있습니다. acks=all 은 ISR에 있는 모든 복사본이 받아야 성공 응답을 돌려주므로 가장 안전합니다. 여기에 min.insync.replicas=2 조건이 결합되면, ISR이 2 미만으로 줄었을 때 쓰기 자체를 거부합니다. 이것이 &#x27;데이터가 충분히 복제되지 못할 바에는 차라리 쓰기를 멈춘다&#x27;는 내구성 우선 철학입니다. 브로커를 다시 시작해 ISR이 2 이상으로 회복되면 쓰기가 즉시 재개됩니다.</p>
+                <div class='exp2'><p>acks=0 은 네트워크에 던지고 확인을 기다리지 않으므로 가장 빠르지만 유실 위험이 가장 큽니다. acks=1 은 리더가 받으면 성공으로 처리하는데, 리더가 팔로워에 복제하기 전에 죽으면 메시지가 사라질 수 있습니다. acks=all 은 ISR에 있는 모든 복사본이 받아야 성공 응답을 돌려주므로 가장 안전합니다. 여기에 min.insync.replicas=2 조건이 결합되면, ISR이 2 미만으로 줄었을 때 쓰기 자체를 거부합니다. 이것이 &#x27;데이터가 충분히 복제되지 못할 바에는 차라리 쓰기를 멈춘다&#x27;는 내구성 우선 철학입니다. 브로커를 다시 시작해 ISR이 2 이상으로 회복되면 쓰기가 즉시 재개됩니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. 3대가 모두 살아있는 정상 상태로 복구한 뒤, Partition 0의 현재 리더 브로커를 --describe 로 확인하세요. 그 리더 브로커 컨테이너를 docker stop 으로 중단하고, 즉시 --describe 를 반복 실행해 Partition 0의 Leader ID가 다른 브로커로 바뀌고 Isr이 2개로 줄어드는 과정을 관찰하세요. 프로듀서와 컨슈머가 그 동안 계속 동작하는지도 확인하세요.</p>
+              <div class='q'><p>실습 3. 3대가 모두 살아있는 정상 상태로 복구한 뒤, Partition 0의 현재 리더 브로커를 --describe 로 확인하세요. 그 리더 브로커 컨테이너를 docker stop 으로 중단하고, 즉시 --describe 를 반복 실행해 Partition 0의 Leader ID가 다른 브로커로 바뀌고 Isr이 2개로 줄어드는 과정을 관찰하세요. 프로듀서와 컨슈머가 그 동안 계속 동작하는지도 확인하세요.</p></div>
               <pre class='starter'><code># 1. 브로커 3대 모두 재시작(이전 실습에서 중단했다면)
 docker start &lt;broker2_container&gt; &lt;broker3_container&gt;
 # ISR이 3개로 회복될 때까지 아래 명령 반복 (10~30초 소요)
@@ -321,14 +326,14 @@ docker start kafka-intermediate-broker1-1
 # 30~60초 후 상태 재확인 → Isr 에 1이 다시 합류
 # Partition: 0  Leader: 2  Replicas: 1,2,3  Isr: 2,3,1
 # (리더는 2로 유지. preferred replica 리밸런싱은 자동 또는 수동으로 실행 가능)</code></pre>
-                <p class='exp2'>리더가 다운되면 Kafka 컨트롤러(KRaft 모드에서는 리더 컨트롤러)가 ISR에 속한 나머지 복사본 중 하나를 즉시 새 리더로 선출합니다. ISR에 있는 복사본은 커밋된 모든 데이터를 보장하므로 데이터 유실 없이 전환됩니다. 프로듀서와 컨슈머는 메타데이터를 갱신해 새 리더에 재연결하므로 잠깐의 재연결 지연은 있지만 메시지 손실은 없습니다. 죽었던 브로커가 재기동되면 새 리더로부터 빠진 데이터를 복제(catch-up)한 뒤 ISR에 재합류합니다. 이것이 ISR 기반 복구가 데이터 무손실을 보장하는 핵심 메커니즘입니다.</p>
+                <div class='exp2'><p>리더가 다운되면 Kafka 컨트롤러(KRaft 모드에서는 리더 컨트롤러)가 ISR에 속한 나머지 복사본 중 하나를 즉시 새 리더로 선출합니다. ISR에 있는 복사본은 커밋된 모든 데이터를 보장하므로 데이터 유실 없이 전환됩니다. 프로듀서와 컨슈머는 메타데이터를 갱신해 새 리더에 재연결하므로 잠깐의 재연결 지연은 있지만 메시지 손실은 없습니다. 죽었던 브로커가 재기동되면 새 리더로부터 빠진 데이터를 복제(catch-up)한 뒤 ISR에 재합류합니다. 이것이 ISR 기반 복구가 데이터 무손실을 보장하는 핵심 메커니즘입니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. 아래 두 가지 토픽 설정을 각각 만들고, 브로커 1대를 중단했을 때의 쓰기 동작 차이를 비교하세요.
-
-- 토픽 A: replication.factor=3, min.insync.replicas=3, acks=all  (함정 조합)
-- 토픽 B: replication.factor=3, min.insync.replicas=2, acks=all  (황금 조합)
-
-브로커 1대 중단 전후로 두 토픽에 acks=all 프로듀서로 메시지를 보내 동작 차이를 관찰하고, 관찰 결과를 정리하세요.</p>
+              <div class='q'><p>실습 4. 아래 두 가지 토픽 설정을 각각 만들고, 브로커 1대를 중단했을 때의 쓰기 동작 차이를 비교하세요.</p>
+<ul>
+<li>토픽 A: replication.factor=3, min.insync.replicas=3, acks=all  (함정 조합)</li>
+<li>토픽 B: replication.factor=3, min.insync.replicas=2, acks=all  (황금 조합)</li>
+</ul>
+<p>브로커 1대 중단 전후로 두 토픽에 acks=all 프로듀서로 메시지를 보내 동작 차이를 관찰하고, 관찰 결과를 정리하세요.</p></div>
               <pre class='starter'><code># 1. 두 토픽 생성
 kafka-topics.sh --create \
   --topic trap-topic \
@@ -378,7 +383,7 @@ docker stop &lt;any_one_broker&gt;
 
 # 결론: replication.factor 와 min.insync.replicas 를 같은 값으로 두면
 #       단 1대 장애에도 쓰기 전면 중단. 반드시 (replication.factor - 1) 로 설정.</code></pre>
-                <p class='exp2'>replication.factor=3, min.insync.replicas=3 은 &#x27;3대 복제본이 모두 살아있어야 쓰기 허용&#x27;을 의미합니다. 브로커가 단 1대만 죽어도 ISR=2 &lt; min.insync.replicas=3 이 되어 쓰기가 즉시 차단됩니다. 이는 과도한 내구성 요구가 가용성을 희생시키는 대표적인 함정입니다. 반면 min.insync.replicas=2 (replication.factor-1) 는 브로커 1대 장애를 견디면서도 적어도 2개의 복사본에 데이터를 보존하므로 내구성과 가용성의 균형을 맞춥니다. 이 &#x27;황금 조합&#x27;이 Kafka 운영에서 가장 널리 권장되는 설정입니다. 2대까지 동시에 죽으면 그때는 쓰기를 거부해 데이터 유실을 막습니다.</p>
+                <div class='exp2'><p>replication.factor=3, min.insync.replicas=3 은 &#x27;3대 복제본이 모두 살아있어야 쓰기 허용&#x27;을 의미합니다. 브로커가 단 1대만 죽어도 ISR=2 &lt; min.insync.replicas=3 이 되어 쓰기가 즉시 차단됩니다. 이는 과도한 내구성 요구가 가용성을 희생시키는 대표적인 함정입니다. 반면 min.insync.replicas=2 (replication.factor-1) 는 브로커 1대 장애를 견디면서도 적어도 2개의 복사본에 데이터를 보존하므로 내구성과 가용성의 균형을 맞춥니다. 이 &#x27;황금 조합&#x27;이 Kafka 운영에서 가장 널리 권장되는 설정입니다. 2대까지 동시에 죽으면 그때는 쓰기를 거부해 데이터 유실을 막습니다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=PPDffzAy86I' target='_blank'>Data Plane: Apache Kafka&#x27;s Replication Protocol</a></li><li><a href='https://www.youtube.com/watch?v=TGZUQsuhDV0' target='_blank'>Kafka Replication and Min Insync Replicas | Learn Kafka | Kafka Tutorial</a></li><li><a href='https://www.youtube.com/watch?v=CWe52zSeGxU' target='_blank'>Replication | Apache Kafka 101 (2025 Edition)</a></li></ul></div>
         </article>
@@ -486,21 +491,21 @@ docker stop &lt;any_one_broker&gt;
 <li>대부분은 at-least-once + 멱등 처리로 충분하다. exactly-once는 비용을 감수할 가치가 있을 때만 쓴다.</li>
 </ul>
           <section class='ex'><h3>📝 퀴즈</h3><div class='quiz' data-ans='1'>
-              <p class='q'>Q1. 프로듀서가 `acks=0`으로 설정되어 있을 때 나타나는 특성으로 올바른 것은?</p>
+              <div class='q'><p>Q1. 프로듀서가 <code class='ic'>acks=0</code>으로 설정되어 있을 때 나타나는 특성으로 올바른 것은?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>메시지 유실은 없지만 중복이 발생할 수 있다</li><li class='opt' onclick='pick(this,0,1)'>메시지 유실 가능성이 있고 중복은 발생하지 않는다</li><li class='opt' onclick='pick(this,0,2)'>유실도 중복도 발생하지 않는 가장 안전한 모드다</li><li class='opt' onclick='pick(this,0,3)'>브로커가 모든 ISR 복제본에 쓴 뒤 응답하므로 처리량이 가장 낮다</li></ul>
-              <div class='exp'>acks=0은 at-most-once(최대 한 번) 보장에 해당한다. 프로듀서는 응답을 기다리지 않고(fire-and-forget) 바로 다음 메시지로 넘어가므로, 메시지가 브로커에 실제로 기록되지 않아도 재시도하지 않는다. 결과적으로 메시지가 유실될 수 있지만 재시도가 없으니 중복은 발생하지 않는다. &#x27;유실 없음·중복 가능&#x27;은 at-least-once의 특성이고(오답 A), &#x27;유실·중복 모두 없음&#x27;은 exactly-once의 특성이다(오답 C). acks=all은 ISR 전체 확인 후 응답하는 것으로 처리량이 가장 낮은 설정이지만 acks=0과는 반대다(오답 D).</div></div><div class='quiz' data-ans='2'>
-              <p class='q'>Q2. at-least-once 보장에서 메시지 중복이 발생하는 근본 원인은 무엇인가?</p>
+              <div class='exp'><p>acks=0은 at-most-once(최대 한 번) 보장에 해당한다. 프로듀서는 응답을 기다리지 않고(fire-and-forget) 바로 다음 메시지로 넘어가므로, 메시지가 브로커에 실제로 기록되지 않아도 재시도하지 않는다. 결과적으로 메시지가 유실될 수 있지만 재시도가 없으니 중복은 발생하지 않는다. &#x27;유실 없음·중복 가능&#x27;은 at-least-once의 특성이고(오답 A), &#x27;유실·중복 모두 없음&#x27;은 exactly-once의 특성이다(오답 C). acks=all은 ISR 전체 확인 후 응답하는 것으로 처리량이 가장 낮은 설정이지만 acks=0과는 반대다(오답 D).</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q2. at-least-once 보장에서 메시지 중복이 발생하는 근본 원인은 무엇인가?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>프로듀서가 같은 메시지를 의도적으로 두 번 전송하도록 설계되어 있기 때문이다</li><li class='opt' onclick='pick(this,1,1)'>브로커가 메시지를 받으면 자동으로 두 번 기록하는 내부 정책 때문이다</li><li class='opt' onclick='pick(this,1,2)'>메시지는 브로커에 기록되었지만 ack가 네트워크에서 유실되면, 프로듀서가 미기록으로 오판하고 재시도하기 때문이다</li><li class='opt' onclick='pick(this,1,3)'>컨슈머가 오프셋을 커밋하지 않고 같은 메시지를 두 번 소비하기 때문이다</li></ul>
-              <div class='exp'>at-least-once의 중복은 &#x27;응답(ack)의 유실&#x27;에서 비롯된다. 메시지가 브로커에 정상 기록된 뒤 ack가 네트워크 장애로 프로듀서에 도달하지 못하면, 프로듀서 입장에서는 기록 실패와 구분할 수 없다. 타임아웃 후 재시도하면 이미 기록된 메시지가 한 번 더 쓰인다. 프로듀서가 의도적으로 두 번 전송하는 것이 아니며(오답 A), 브로커에 이중 기록 정책은 없다(오답 B). 오프셋 미커밋은 컨슈머 측 재처리를 유발하는 별개 문제다(오답 D).</div></div><div class='quiz' data-ans='1'>
-              <p class='q'>Q3. 멱등(idempotent) 프로듀서가 재시도로 인한 중복을 방지하는 방법으로 올바른 것은?</p>
+              <div class='exp'><p>at-least-once의 중복은 &#x27;응답(ack)의 유실&#x27;에서 비롯된다. 메시지가 브로커에 정상 기록된 뒤 ack가 네트워크 장애로 프로듀서에 도달하지 못하면, 프로듀서 입장에서는 기록 실패와 구분할 수 없다. 타임아웃 후 재시도하면 이미 기록된 메시지가 한 번 더 쓰인다. 프로듀서가 의도적으로 두 번 전송하는 것이 아니며(오답 A), 브로커에 이중 기록 정책은 없다(오답 B). 오프셋 미커밋은 컨슈머 측 재처리를 유발하는 별개 문제다(오답 D).</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q3. 멱등(idempotent) 프로듀서가 재시도로 인한 중복을 방지하는 방법으로 올바른 것은?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>재시도 횟수를 0으로 설정해 재전송 자체를 막는다</li><li class='opt' onclick='pick(this,2,1)'>각 메시지에 PID(프로듀서 ID)와 시퀀스 번호를 붙이고, 브로커가 이미 받은 시퀀스를 기억해 재전송된 메시지를 기록하지 않는다</li><li class='opt' onclick='pick(this,2,2)'>동일한 메시지 내용을 해시하여 브로커가 내용이 같으면 저장을 거부한다</li><li class='opt' onclick='pick(this,2,3)'>재시도 시 새로운 PID를 발급받아 이전 메시지와 구분되지 않도록 한다</li></ul>
-              <div class='exp'>멱등 프로듀서는 각 쓰기 요청에 PID(Producer ID)와 단조 증가하는 시퀀스 번호를 함께 전송한다. 브로커는 PID별로 마지막으로 성공 처리한 시퀀스 번호를 기억하고 있어, 이미 처리한 시퀀스가 재전송되면 파티션에 다시 기록하지 않고 ack만 반환한다. 재시도를 0으로 줄이면 유실이 발생해 at-most-once가 된다(오답 A). 내용 해시 비교는 키가 다른 동일 내용 메시지를 잘못 차단할 수 있으며 실제 구현 방식이 아니다(오답 C). 재시도 시 같은 PID를 유지해야 브로커가 중복을 추적할 수 있으므로 새 PID 발급은 오히려 중복을 방지하지 못한다(오답 D).</div></div><div class='quiz' data-ans='1'>
-              <p class='q'>Q4. 컨슈머의 `isolation.level=read_committed` 설정이 실제로 하는 역할은?</p>
+              <div class='exp'><p>멱등 프로듀서는 각 쓰기 요청에 PID(Producer ID)와 단조 증가하는 시퀀스 번호를 함께 전송한다. 브로커는 PID별로 마지막으로 성공 처리한 시퀀스 번호를 기억하고 있어, 이미 처리한 시퀀스가 재전송되면 파티션에 다시 기록하지 않고 ack만 반환한다. 재시도를 0으로 줄이면 유실이 발생해 at-most-once가 된다(오답 A). 내용 해시 비교는 키가 다른 동일 내용 메시지를 잘못 차단할 수 있으며 실제 구현 방식이 아니다(오답 C). 재시도 시 같은 PID를 유지해야 브로커가 중복을 추적할 수 있으므로 새 PID 발급은 오히려 중복을 방지하지 못한다(오답 D).</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q4. 컨슈머의 <code class='ic'>isolation.level=read_committed</code> 설정이 실제로 하는 역할은?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>컨슈머가 메시지를 읽는 즉시 자동으로 오프셋을 커밋한다</li><li class='opt' onclick='pick(this,3,1)'>아직 커밋되지 않은 진행 중(pending) 트랜잭션의 메시지와 abort된 트랜잭션의 메시지를 건너뛰고, 완전히 커밋된 데이터만 읽는다</li><li class='opt' onclick='pick(this,3,2)'>트랜잭션을 사용하지 않는 일반 메시지는 읽지 않고 트랜잭션 메시지만 읽는다</li><li class='opt' onclick='pick(this,3,3)'>프로듀서가 commit을 호출하기 전까지 컨슈머 폴링을 차단(block)한다</li></ul>
-              <div class='exp'>read_committed 격리 수준에서 컨슈머는 브로커가 제공하는 Last Stable Offset(LSO)과 abort 메타데이터를 활용해, 아직 pending 상태인 트랜잭션의 메시지는 아직 보지 않고, abort(롤백)된 트랜잭션의 메시지는 건너뛴다. 이를 통해 컨슈머는 오직 성공적으로 커밋된 데이터만 처리하게 된다. 오프셋 자동 커밋은 별개의 enable.auto.commit 설정 문제다(오답 A). 트랜잭션 없이 일반 produce된 메시지도 read_committed에서 정상 소비된다(오답 C). 폴링을 물리적으로 차단하지 않으며 단지 LSO 이하의 커밋된 데이터만 반환한다(오답 D).</div></div><div class='quiz' data-ans='2'>
-              <p class='q'>Q5. 실시간 결제 처리 시스템을 설계한다고 가정하자. 입력 토픽에서 결제 이벤트를 읽어 &#x27;출금 이벤트&#x27;와 &#x27;입금 이벤트&#x27;를 각각 다른 출력 토픽에 써야 하며, 두 쓰기 중 하나만 성공하는 상황은 절대 용납할 수 없다. 또한 중간에 애플리케이션이 재시작되어도 같은 결제가 두 번 처리되어서는 안 된다. 가장 적합한 Kafka 설정 조합은?</p>
+              <div class='exp'><p>read_committed 격리 수준에서 컨슈머는 브로커가 제공하는 Last Stable Offset(LSO)과 abort 메타데이터를 활용해, 아직 pending 상태인 트랜잭션의 메시지는 아직 보지 않고, abort(롤백)된 트랜잭션의 메시지는 건너뛴다. 이를 통해 컨슈머는 오직 성공적으로 커밋된 데이터만 처리하게 된다. 오프셋 자동 커밋은 별개의 enable.auto.commit 설정 문제다(오답 A). 트랜잭션 없이 일반 produce된 메시지도 read_committed에서 정상 소비된다(오답 C). 폴링을 물리적으로 차단하지 않으며 단지 LSO 이하의 커밋된 데이터만 반환한다(오답 D).</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q5. 실시간 결제 처리 시스템을 설계한다고 가정하자. 입력 토픽에서 결제 이벤트를 읽어 &#x27;출금 이벤트&#x27;와 &#x27;입금 이벤트&#x27;를 각각 다른 출력 토픽에 써야 하며, 두 쓰기 중 하나만 성공하는 상황은 절대 용납할 수 없다. 또한 중간에 애플리케이션이 재시작되어도 같은 결제가 두 번 처리되어서는 안 된다. 가장 적합한 Kafka 설정 조합은?</p></div>
               <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>acks=0, retries=0 — 처리량을 최우선으로 하여 결제를 빠르게 처리한다</li><li class='opt' onclick='pick(this,4,1)'>enable.idempotence=true만 설정 — 단일 파티션 중복 방지로 충분하다</li><li class='opt' onclick='pick(this,4,2)'>transactional.id 설정 + 컨슈머 isolation.level=read_committed — 여러 파티션 쓰기와 오프셋 커밋을 all-or-nothing으로 처리한다</li><li class='opt' onclick='pick(this,4,3)'>acks=all, retries=MAX_INT — 응답을 반드시 기다리면 exactly-once가 자동으로 보장된다</li></ul>
-              <div class='exp'>이 시나리오는 &#x27;여러 출력 파티션에 대한 쓰기 + 입력 오프셋 커밋&#x27;을 원자적(all-or-nothing)으로 처리해야 하는 exactly-once 요구다. 멱등 프로듀서(enable.idempotence)만으로는 단일 파티션의 재시도 중복만 막을 수 있고, 출금·입금 두 파티션에 걸친 원자성은 보장하지 못한다(오답 B). Kafka 트랜잭션(transactional.id)은 여러 파티션 쓰기를 하나의 트랜잭션으로 묶고, 컨슈머 read_committed는 commit된 데이터만 소비함으로써 재시작 시 중복 처리를 차단한다. acks=0은 at-most-once로 결제 유실 위험이 있다(오답 A). acks=all과 높은 retries는 내구성은 높이지만 중복 방지는 하지 못하므로 exactly-once를 보장하지 않는다(오답 D).</div></div></section>
+              <div class='exp'><p>이 시나리오는 &#x27;여러 출력 파티션에 대한 쓰기 + 입력 오프셋 커밋&#x27;을 원자적(all-or-nothing)으로 처리해야 하는 exactly-once 요구다. 멱등 프로듀서(enable.idempotence)만으로는 단일 파티션의 재시도 중복만 막을 수 있고, 출금·입금 두 파티션에 걸친 원자성은 보장하지 못한다(오답 B). Kafka 트랜잭션(transactional.id)은 여러 파티션 쓰기를 하나의 트랜잭션으로 묶고, 컨슈머 read_committed는 commit된 데이터만 소비함으로써 재시작 시 중복 처리를 차단한다. acks=0은 at-most-once로 결제 유실 위험이 있다(오답 A). acks=all과 높은 retries는 내구성은 높이지만 중복 방지는 하지 못하므로 exactly-once를 보장하지 않는다(오답 D).</p></div></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=V0c0qAP7sWk' target='_blank'>Kafka Delivery Semantics | At-Least-Once, At-Most-Once &amp; Exactly-Once</a></li><li><a href='https://www.youtube.com/watch?v=_9et90BCRnc' target='_blank'>Idempotent Producer in Apache Kafka [Apache Kafka Tutorials #16]</a></li><li><a href='https://www.youtube.com/watch?v=Ki2D2o9aVl8' target='_blank'>Apache Kafka Transactions: Message Delivery and Exactly-Once Semantics</a></li></ul></div>
         </article>
 <article id='lec3' class='lecture'>
@@ -647,7 +652,7 @@ kafka-console-consumer.sh --topic events \
 </ul>
 </code></pre>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. 파티션 4개짜리 토픽 &#x27;events&#x27;를 만들고, 콘솔 프로듀서로 (1) 키 없이 메시지 5개, (2) 키 &#x27;user1&#x27;과 &#x27;user2&#x27;로 각각 3개씩 메시지를 전송하라. 전송 후 각 파티션을 따로 읽어 메시지가 어떻게 분배됐는지 기록하라.</p>
+              <div class='q'><p>실습 1. 파티션 4개짜리 토픽 &#x27;events&#x27;를 만들고, 콘솔 프로듀서로 (1) 키 없이 메시지 5개, (2) 키 &#x27;user1&#x27;과 &#x27;user2&#x27;로 각각 3개씩 메시지를 전송하라. 전송 후 각 파티션을 따로 읽어 메시지가 어떻게 분배됐는지 기록하라.</p></div>
               <pre class='starter'><code># 1. 토픽 생성
 kafka-topics.sh --create --topic events \
   --bootstrap-server localhost:9092 \
@@ -719,9 +724,9 @@ done
 #   user2 -&gt; hash(&quot;user2&quot;) % 4 = 다른 파티션 (예: 파티션 3)
 # user1의 login/view/logout 3개가 모두 같은 파티션에 순서대로 존재하고,
 # user2의 3개도 다른 하나의 파티션에 순서대로 존재함을 확인한다.</code></pre>
-                <p class='exp2'>Kafka의 기본 파티셔너는 키가 있을 때 murmur2 해시 함수로 hash(key) % partitionCount 를 계산해 목적지 파티션을 결정한다. 같은 문자열 키는 동일한 해시값을 가지므로 언제나 같은 파티션으로 배정된다. 이것이 Kafka 가 &#x27;파티션 내 순서 보장&#x27;을 통해 특정 키의 이벤트 순서를 지켜주는 근거다. 반면 키가 없을 때는 스티키 파티셔너가 현재 배치가 가득 찰 때까지 한 파티션에 몰아 보내다가 배치 전송 후 다음 파티션으로 이동한다. 콘솔에서 직접 파티션을 읽어 비교하면 이 차이를 눈으로 확인할 수 있다.</p>
+                <div class='exp2'><p>Kafka의 기본 파티셔너는 키가 있을 때 murmur2 해시 함수로 hash(key) % partitionCount 를 계산해 목적지 파티션을 결정한다. 같은 문자열 키는 동일한 해시값을 가지므로 언제나 같은 파티션으로 배정된다. 이것이 Kafka 가 &#x27;파티션 내 순서 보장&#x27;을 통해 특정 키의 이벤트 순서를 지켜주는 근거다. 반면 키가 없을 때는 스티키 파티셔너가 현재 배치가 가득 찰 때까지 한 파티션에 몰아 보내다가 배치 전송 후 다음 파티션으로 이동한다. 콘솔에서 직접 파티션을 읽어 비교하면 이 차이를 눈으로 확인할 수 있다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. Java KafkaProducer 를 이용해 user1~user3 세 명의 이벤트를 순서대로 전송하고, 각 사용자의 메시지가 모두 동일한 파티션에 쌓이는지 RecordMetadata 의 partition() 값으로 검증하라. 단 user1의 이벤트는 [login, view, purchase, logout] 순서로, 메시지 사이에 다른 사용자의 이벤트가 끼어들도록 인터리빙해 전송하라.</p>
+              <div class='q'><p>실습 2. Java KafkaProducer 를 이용해 user1~user3 세 명의 이벤트를 순서대로 전송하고, 각 사용자의 메시지가 모두 동일한 파티션에 쌓이는지 RecordMetadata 의 partition() 값으로 검증하라. 단 user1의 이벤트는 [login, view, purchase, logout] 순서로, 메시지 사이에 다른 사용자의 이벤트가 끼어들도록 인터리빙해 전송하라.</p></div>
               <pre class='starter'><code>// 의존성 (Maven pom.xml)
 // &lt;dependency&gt;
 //   &lt;groupId&gt;org.apache.kafka&lt;/groupId&gt;
@@ -841,9 +846,9 @@ public class KeyOrderingDemo {
    key=user2  -&gt; partition=3 (모든 메시지 동일)
    key=user3  -&gt; partition=2 (모든 메시지 동일)
 */</code></pre>
-                <p class='exp2'>producer.send(record).get() 는 동기 전송으로 RecordMetadata 를 즉시 반환한다. 반환된 meta.partition() 을 Map 에 기록하면서, 같은 키가 이전과 다른 파티션을 반환하면 즉시 예외를 던져 순서 보장이 깨졌음을 감지한다. 실행해 보면 user1의 네 메시지(login → view → purchase → logout)가 다른 사용자의 메시지가 끼어드는 인터리빙 전송에도 불구하고 항상 같은 파티션 번호를 가짐을 확인할 수 있다. 이것이 Kafka가 &#x27;특정 키의 이벤트 순서&#x27;를 보장하는 실질적 메커니즘이다. 비동기 전송(콜백)으로 바꾸면 처리량은 높아지지만 출력 순서가 뒤섞일 수 있으므로, 순서 검증 목적의 실습에서는 동기 전송을 쓴다.</p>
+                <div class='exp2'><p>producer.send(record).get() 는 동기 전송으로 RecordMetadata 를 즉시 반환한다. 반환된 meta.partition() 을 Map 에 기록하면서, 같은 키가 이전과 다른 파티션을 반환하면 즉시 예외를 던져 순서 보장이 깨졌음을 감지한다. 실행해 보면 user1의 네 메시지(login → view → purchase → logout)가 다른 사용자의 메시지가 끼어드는 인터리빙 전송에도 불구하고 항상 같은 파티션 번호를 가짐을 확인할 수 있다. 이것이 Kafka가 &#x27;특정 키의 이벤트 순서&#x27;를 보장하는 실질적 메커니즘이다. 비동기 전송(콜백)으로 바꾸면 처리량은 높아지지만 출력 순서가 뒤섞일 수 있으므로, 순서 검증 목적의 실습에서는 동기 전송을 쓴다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. 특정 키가 집중될 때 핫 파티션이 발생하는 원인을 코드로 재현하고, 복합 키(userId + 구간 번호)로 쪼개어 쏠림을 해소하라. 구체적으로: (1) &#x27;vip_user&#x27; 라는 단일 키로 메시지 1000개를 전송해 모두 같은 파티션에 쌓이는 핫 파티션 상황을 만들고, (2) 키를 &#x27;vip_user-0&#x27; ~ &#x27;vip_user-3&#x27; 으로 4분할해 1000개를 다시 전송한 뒤 파티션별 메시지 수를 비교하라.</p>
+              <div class='q'><p>실습 3. 특정 키가 집중될 때 핫 파티션이 발생하는 원인을 코드로 재현하고, 복합 키(userId + 구간 번호)로 쪼개어 쏠림을 해소하라. 구체적으로: (1) &#x27;vip_user&#x27; 라는 단일 키로 메시지 1000개를 전송해 모두 같은 파티션에 쌓이는 핫 파티션 상황을 만들고, (2) 키를 &#x27;vip_user-0&#x27; ~ &#x27;vip_user-3&#x27; 으로 4분할해 1000개를 다시 전송한 뒤 파티션별 메시지 수를 비교하라.</p></div>
               <pre class='starter'><code>import org.apache.kafka.clients.producer.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -972,16 +977,14 @@ public class HotPartitionDemo {
    partition 3:  248 msgs ( 24.8%) ############
    (실제 파티션 번호와 비율은 해시값에 따라 달라질 수 있음)
 */</code></pre>
-                <p class='exp2'>단일 키 &#x27;vip_user&#x27; 1000개를 보내면 hash(&#x27;vip_user&#x27;) % 4 가 항상 같은 값이므로 1000개 전부가 파티션 하나에 집중된다. 이 파티션을 담당하는 브로커와 컨슈머만 과부하를 받고 나머지 3개 파티션은 완전히 유휴 상태가 되어, 4개 파티션을 둔 이점이 전혀 없어진다. 복합 키 &#x27;vip_user-0&#x27; ~ &#x27;vip_user-3&#x27; 로 바꾸면 4개의 서로 다른 키가 각각 다른 파티션으로 해시되어 트래픽이 균등하게 퍼진다. 실무에서는 i % splits 대신 사용자 속성(지역, 가입일 구간, 랜덤 접미사 등)을 분할 기준으로 삼는다. 단 복합 키를 쓰면 &#x27;vip_user&#x27; 전체의 전역 순서는 더 이상 보장되지 않고 서브키별 순서만 보장된다는 트레이드오프를 반드시 인식해야 한다.</p>
+                <div class='exp2'><p>단일 키 &#x27;vip_user&#x27; 1000개를 보내면 hash(&#x27;vip_user&#x27;) % 4 가 항상 같은 값이므로 1000개 전부가 파티션 하나에 집중된다. 이 파티션을 담당하는 브로커와 컨슈머만 과부하를 받고 나머지 3개 파티션은 완전히 유휴 상태가 되어, 4개 파티션을 둔 이점이 전혀 없어진다. 복합 키 &#x27;vip_user-0&#x27; ~ &#x27;vip_user-3&#x27; 로 바꾸면 4개의 서로 다른 키가 각각 다른 파티션으로 해시되어 트래픽이 균등하게 퍼진다. 실무에서는 i % splits 대신 사용자 속성(지역, 가입일 구간, 랜덤 접미사 등)을 분할 기준으로 삼는다. 단 복합 키를 쓰면 &#x27;vip_user&#x27; 전체의 전역 순서는 더 이상 보장되지 않고 서브키별 순서만 보장된다는 트레이드오프를 반드시 인식해야 한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. 다음 비즈니스 규칙을 만족하는 커스텀 파티셔너를 구현하고 프로듀서에 등록하라.
-
-규칙:
-1. 키가 &#x27;VIP:&#x27; 로 시작하면 파티션 0 (전용 고속 처리 레인)
-2. 키가 &#x27;BATCH:&#x27; 로 시작하면 파티션 (numPartitions - 1) (백그라운드 처리 레인)
-3. 나머지는 키의 해시를 나머지 파티션(1 ~ numPartitions-2)에 고르게 분산
-
-단 numPartitions 가 3 미만이면 IllegalStateException 을 던지도록 방어 로직을 추가하라.</p>
+              <div class='q'><p>실습 4. 다음 비즈니스 규칙을 만족하는 커스텀 파티셔너를 구현하고 프로듀서에 등록하라.</p>
+<p>규칙:</p>
+<p>1. 키가 &#x27;VIP:&#x27; 로 시작하면 파티션 0 (전용 고속 처리 레인)</p>
+<p>2. 키가 &#x27;BATCH:&#x27; 로 시작하면 파티션 (numPartitions - 1) (백그라운드 처리 레인)</p>
+<p>3. 나머지는 키의 해시를 나머지 파티션(1 ~ numPartitions-2)에 고르게 분산</p>
+<p>단 numPartitions 가 3 미만이면 IllegalStateException 을 던지도록 방어 로직을 추가하라.</p></div>
               <pre class='starter'><code>// PriorityPartitioner.java
 import org.apache.kafka.clients.producer.Partitioner;
 import org.apache.kafka.common.Cluster;
@@ -1149,7 +1152,7 @@ public class PriorityPartitionerTest {
 
    전체 검증 통과
 */</code></pre>
-                <p class='exp2'>커스텀 파티셔너의 핵심은 partition() 메서드가 반환하는 정수가 곧 목적지 파티션 번호라는 것이다. 세 개의 분기로 비즈니스 규칙 — VIP 격리, BATCH 후순위, 일반 균등 분산 — 을 인프라 수준에서 강제한다. Math.floorMod(keyStr.hashCode(), availablePartitions) 는 Java String.hashCode() 가 음수를 반환할 수 있는 상황에서도 항상 0 이상의 나머지를 보장한다(% 연산자는 음수를 그대로 반환하는 반면 Math.floorMod 는 항상 양수 결과를 돌려준다). numPartitions &lt; 3 방어 로직은 양 끝 파티션을 예약할 수 없는 경우 잘못된 파티션 번호(예: numPartitions - 2 = 0 이면 VIP 전용 파티션과 겹침)가 반환되는 버그를 막는다. props.put(&#x27;partitioner.class&#x27;, ...) 로 등록하면 이 파티셔너가 해당 프로듀서 인스턴스의 모든 토픽에 적용되므로, 특정 토픽에만 적용하고 싶으면 partition() 내부에서 topic 파라미터로 분기해야 한다.</p>
+                <div class='exp2'><p>커스텀 파티셔너의 핵심은 partition() 메서드가 반환하는 정수가 곧 목적지 파티션 번호라는 것이다. 세 개의 분기로 비즈니스 규칙 — VIP 격리, BATCH 후순위, 일반 균등 분산 — 을 인프라 수준에서 강제한다. Math.floorMod(keyStr.hashCode(), availablePartitions) 는 Java String.hashCode() 가 음수를 반환할 수 있는 상황에서도 항상 0 이상의 나머지를 보장한다(% 연산자는 음수를 그대로 반환하는 반면 Math.floorMod 는 항상 양수 결과를 돌려준다). numPartitions &lt; 3 방어 로직은 양 끝 파티션을 예약할 수 없는 경우 잘못된 파티션 번호(예: numPartitions - 2 = 0 이면 VIP 전용 파티션과 겹침)가 반환되는 버그를 막는다. props.put(&#x27;partitioner.class&#x27;, ...) 로 등록하면 이 파티셔너가 해당 프로듀서 인스턴스의 모든 토픽에 적용되므로, 특정 토픽에만 적용하고 싶으면 partition() 내부에서 topic 파라미터로 분기해야 한다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=y9BStKvVzSs' target='_blank'>Apache Kafka 101: Partitioning (2023)</a></li><li><a href='https://www.youtube.com/watch?v=GvdlpbQr6jo' target='_blank'>Apache Kafka 101: Partitioning (Hands On - 2023)</a></li><li><a href='https://www.youtube.com/watch?v=rosyiZNlwXQ' target='_blank'>How a partitioner works in Kafka? | Best practices for data partitioning in Apache Kafka. Part 4</a></li></ul></div>
         </article>
@@ -1261,7 +1264,7 @@ curl -X POST http://localhost:8081/subjects/users-value/versions \
 </ul>
 </code></pre>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] Schema Registry가 localhost:8081에서 실행 중이라고 가정합니다. users 토픽에 대한 subject 이름은 &#x27;users-value&#x27;입니다. curl 명령어로 이 subject의 호환성 모드를 BACKWARD로 설정하세요. 설정 후 GET 요청으로 현재 호환성 모드를 조회해 BACKWARD가 제대로 적용되었는지 확인하세요.</p>
+              <div class='q'><p>실습 1. [워밍업] Schema Registry가 localhost:8081에서 실행 중이라고 가정합니다. users 토픽에 대한 subject 이름은 &#x27;users-value&#x27;입니다. curl 명령어로 이 subject의 호환성 모드를 BACKWARD로 설정하세요. 설정 후 GET 요청으로 현재 호환성 모드를 조회해 BACKWARD가 제대로 적용되었는지 확인하세요.</p></div>
               <pre class='starter'><code># Schema Registry URL
 SR=http://localhost:8081
 SUBJECT=users-value
@@ -1286,9 +1289,9 @@ curl -X PUT http://localhost:8081/config/users-value \
 curl http://localhost:8081/config/users-value
 
 # 예상 응답: {&quot;compatibilityLevel&quot;:&quot;BACKWARD&quot;}</code></pre>
-                <p class='exp2'>Schema Registry의 호환성 모드는 subject 단위로 설정됩니다. subject 이름은 관례상 &#x27;&lt;topic명&gt;-value&#x27; 또는 &#x27;&lt;topic명&gt;-key&#x27; 형식을 사용합니다. PUT /config/{subject} 엔드포인트에 JSON 바디로 모드를 전달하면 해당 subject에 대한 규칙이 저장됩니다. BACKWARD 모드에서 Schema Registry는 새 스키마가 등록될 때마다 &#x27;새 스키마로 이전 버전 데이터를 읽을 수 있는가&#x27;를 자동으로 검증합니다. GET /config/{subject} 응답의 키는 &#x27;compatibilityLevel&#x27;로 내려옵니다(설정 시 응답 키인 &#x27;compatibility&#x27;와 미묘하게 다릅니다).</p>
+                <div class='exp2'><p>Schema Registry의 호환성 모드는 subject 단위로 설정됩니다. subject 이름은 관례상 &#x27;&lt;topic명&gt;-value&#x27; 또는 &#x27;&lt;topic명&gt;-key&#x27; 형식을 사용합니다. PUT /config/{subject} 엔드포인트에 JSON 바디로 모드를 전달하면 해당 subject에 대한 규칙이 저장됩니다. BACKWARD 모드에서 Schema Registry는 새 스키마가 등록될 때마다 &#x27;새 스키마로 이전 버전 데이터를 읽을 수 있는가&#x27;를 자동으로 검증합니다. GET /config/{subject} 응답의 키는 &#x27;compatibilityLevel&#x27;로 내려옵니다(설정 시 응답 키인 &#x27;compatibility&#x27;와 미묘하게 다릅니다).</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습 1] users-value subject에 User 스키마 v1을 등록하세요. v1 스키마는 int 타입의 &#x27;id&#x27;와 string 타입의 &#x27;name&#x27; 두 필드를 가집니다. 등록 후 등록된 버전 목록과 v1 스키마 내용을 조회해 올바르게 저장됐는지 확인하세요.</p>
+              <div class='q'><p>실습 2. [핵심 실습 1] users-value subject에 User 스키마 v1을 등록하세요. v1 스키마는 int 타입의 &#x27;id&#x27;와 string 타입의 &#x27;name&#x27; 두 필드를 가집니다. 등록 후 등록된 버전 목록과 v1 스키마 내용을 조회해 올바르게 저장됐는지 확인하세요.</p></div>
               <pre class='starter'><code>SR=http://localhost:8081
 SUBJECT=users-value
 
@@ -1318,15 +1321,12 @@ curl http://localhost:8081/subjects/users-value/versions
 # 버전 1 스키마 상세 조회
 curl http://localhost:8081/subjects/users-value/versions/1
 # 예상 응답: {&quot;subject&quot;:&quot;users-value&quot;,&quot;version&quot;:1,&quot;id&quot;:1,&quot;schema&quot;:&quot;{...}&quot;}</code></pre>
-                <p class='exp2'>POST /subjects/{subject}/versions 에 스키마를 등록하면 Schema Registry가 전역 고유 ID를 부여하고 해당 subject의 버전 1로 저장합니다. 응답의 &#x27;id&#x27; 필드는 전역 ID로, 프로듀서가 직렬화할 때 메시지 바이트 앞 5바이트(매직 바이트 1 + 스키마 ID 4)에 심어서 보냅니다. 바디의 &#x27;schema&#x27; 값은 Avro 스키마 JSON을 **문자열로 escape한 값**입니다(JSON 안의 JSON이므로 큰따옴표를 역슬래시로 이스케이프해야 합니다). GET /subjects/{subject}/versions 는 등록된 버전 번호 배열을, GET /subjects/{subject}/versions/{version} 은 해당 버전의 상세 정보를 반환합니다.</p>
+                <div class='exp2'><p>POST /subjects/{subject}/versions 에 스키마를 등록하면 Schema Registry가 전역 고유 ID를 부여하고 해당 subject의 버전 1로 저장합니다. 응답의 &#x27;id&#x27; 필드는 전역 ID로, 프로듀서가 직렬화할 때 메시지 바이트 앞 5바이트(매직 바이트 1 + 스키마 ID 4)에 심어서 보냅니다. 바디의 &#x27;schema&#x27; 값은 Avro 스키마 JSON을 <strong>문자열로 escape한 값</strong>입니다(JSON 안의 JSON이므로 큰따옴표를 역슬래시로 이스케이프해야 합니다). GET /subjects/{subject}/versions 는 등록된 버전 번호 배열을, GET /subjects/{subject}/versions/{version} 은 해당 버전의 상세 정보를 반환합니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습 2] 스키마 진화를 실습합니다. 다음 두 가지 시나리오를 각각 시도하고 결과를 비교하세요.
-
-시나리오 A (BACKWARD 호환): string 타입의 &#x27;email&#x27; 필드를 default 값 &quot;&quot;로 추가해 v2로 등록하세요. 성공 여부와 응답을 기록하세요.
-
-시나리오 B (BACKWARD 비호환): string 타입의 &#x27;phone&#x27; 필드를 default 없이 추가한 스키마를 등록 시도하세요. 실패 여부와 HTTP 상태 코드를 확인하세요.
-
-두 시나리오의 결과 차이를 BACKWARD 호환성 규칙으로 설명하세요.</p>
+              <div class='q'><p>실습 3. [핵심 실습 2] 스키마 진화를 실습합니다. 다음 두 가지 시나리오를 각각 시도하고 결과를 비교하세요.</p>
+<p>시나리오 A (BACKWARD 호환): string 타입의 &#x27;email&#x27; 필드를 default 값 &quot;&quot;로 추가해 v2로 등록하세요. 성공 여부와 응답을 기록하세요.</p>
+<p>시나리오 B (BACKWARD 비호환): string 타입의 &#x27;phone&#x27; 필드를 default 없이 추가한 스키마를 등록 시도하세요. 실패 여부와 HTTP 상태 코드를 확인하세요.</p>
+<p>두 시나리오의 결과 차이를 BACKWARD 호환성 규칙으로 설명하세요.</p></div>
               <pre class='starter'><code>SR=http://localhost:8081
 SUBJECT=users-value
 
@@ -1362,18 +1362,14 @@ curl -v -X POST http://localhost:8081/subjects/users-value/versions \
 # 버전 목록 확인
 curl http://localhost:8081/subjects/users-value/versions
 # 예상 응답: [1, 2]  ← B 실패로 버전 3은 생기지 않음</code></pre>
-                <p class='exp2'>BACKWARD 호환성의 핵심 규칙: &#x27;새 스키마로 이전 버전 데이터를 읽을 수 있어야 한다&#x27;입니다.
-
-시나리오 A (성공): email 필드에 default=&quot;&quot;를 주었습니다. v1으로 기록된 구 메시지에는 email이 없지만, 새 스키마로 역직렬화할 때 Avro가 default 값으로 채워줍니다. 따라서 구 데이터를 새 스키마로 읽는 것이 가능하므로 BACKWARD 호환입니다.
-
-시나리오 B (실패): phone에 default가 없습니다. v1 메시지를 새 스키마로 역직렬화하면 phone 필드가 없어서 필수 필드가 없다는 오류가 납니다. 즉 구 데이터를 새 스키마로 읽을 수 없으므로 BACKWARD 비호환이고, Schema Registry가 409로 거부합니다. 이것이 &#x27;배포 전에 깨지는 변경을 잡는다&#x27;는 Schema Registry의 핵심 가치입니다.</p>
+                <div class='exp2'><p>BACKWARD 호환성의 핵심 규칙: &#x27;새 스키마로 이전 버전 데이터를 읽을 수 있어야 한다&#x27;입니다.</p>
+<p>시나리오 A (성공): email 필드에 default=&quot;&quot;를 주었습니다. v1으로 기록된 구 메시지에는 email이 없지만, 새 스키마로 역직렬화할 때 Avro가 default 값으로 채워줍니다. 따라서 구 데이터를 새 스키마로 읽는 것이 가능하므로 BACKWARD 호환입니다.</p>
+<p>시나리오 B (실패): phone에 default가 없습니다. v1 메시지를 새 스키마로 역직렬화하면 phone 필드가 없어서 필수 필드가 없다는 오류가 납니다. 즉 구 데이터를 새 스키마로 읽을 수 없으므로 BACKWARD 비호환이고, Schema Registry가 409로 거부합니다. 이것이 &#x27;배포 전에 깨지는 변경을 잡는다&#x27;는 Schema Registry의 핵심 가치입니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] 실제 운영에서는 스키마를 등록하기 전에 호환 여부를 미리 확인하는 것이 좋습니다. Schema Registry의 호환성 사전 검증 엔드포인트를 사용해 다음 두 스키마가 현재 등록된 최신 버전(v2)과 BACKWARD 호환인지 배포 전에 확인하세요.
-
-검증 대상 A: &#x27;age&#x27; 필드를 int 타입, default 0으로 추가한 스키마
-검증 대상 B: 기존 &#x27;name&#x27; 필드의 타입을 string에서 int로 바꾼 스키마
-
-두 검증 결과의 차이를 해석하고, 타입 변경이 BACKWARD 비호환인 이유를 설명하세요.</p>
+              <div class='q'><p>실습 4. [응용] 실제 운영에서는 스키마를 등록하기 전에 호환 여부를 미리 확인하는 것이 좋습니다. Schema Registry의 호환성 사전 검증 엔드포인트를 사용해 다음 두 스키마가 현재 등록된 최신 버전(v2)과 BACKWARD 호환인지 배포 전에 확인하세요.</p>
+<p>검증 대상 A: &#x27;age&#x27; 필드를 int 타입, default 0으로 추가한 스키마</p>
+<p>검증 대상 B: 기존 &#x27;name&#x27; 필드의 타입을 string에서 int로 바꾼 스키마</p>
+<p>두 검증 결과의 차이를 해석하고, 타입 변경이 BACKWARD 비호환인 이유를 설명하세요.</p></div>
               <pre class='starter'><code>SR=http://localhost:8081
 SUBJECT=users-value
 
@@ -1407,11 +1403,9 @@ curl -X POST $SR/compatibility/subjects/$SUBJECT/versions/latest \
   -d &#x27;{&quot;schema&quot;: &quot;{\&quot;type\&quot;:\&quot;record\&quot;,\&quot;name\&quot;:\&quot;User\&quot;,\&quot;fields\&quot;:[{\&quot;name\&quot;:\&quot;id\&quot;,\&quot;type\&quot;:\&quot;int\&quot;},{\&quot;name\&quot;:\&quot;name\&quot;,\&quot;type\&quot;:\&quot;int\&quot;},{\&quot;name\&quot;:\&quot;email\&quot;,\&quot;type\&quot;:\&quot;string\&quot;,\&quot;default\&quot;:\&quot;\&quot;}]}&quot;}&#x27;
 
 # 예상 응답: {&quot;is_compatible&quot;:false}</code></pre>
-                <p class='exp2'>POST /compatibility/subjects/{subject}/versions/latest 는 실제로 스키마를 등록하지 않고 호환 여부만 확인하는 드라이런(dry-run) 엔드포인트입니다. CI/CD 파이프라인에서 배포 전 자동 검증에 활용할 수 있습니다.
-
-검증 A (is_compatible: true): age 필드에 default 0이 있으므로 v2 이하 구 메시지를 새 스키마로 읽을 때 age가 0으로 채워집니다. BACKWARD 호환 조건을 만족합니다.
-
-검증 B (is_compatible: false): name 필드의 타입을 string에서 int로 바꾸는 것은 구 메시지에 있는 string 값을 새 스키마로 읽을 때 int로 해석할 수 없으므로 역직렬화가 실패합니다. Avro는 string과 int 사이의 암묵적 타입 변환을 허용하지 않습니다. 타입 변경은 거의 모든 호환성 모드에서 비호환이며, 운영 중인 토픽에서 필드 타입을 바꾸려면 새 토픽을 만드는 것이 안전합니다.</p>
+                <div class='exp2'><p>POST /compatibility/subjects/{subject}/versions/latest 는 실제로 스키마를 등록하지 않고 호환 여부만 확인하는 드라이런(dry-run) 엔드포인트입니다. CI/CD 파이프라인에서 배포 전 자동 검증에 활용할 수 있습니다.</p>
+<p>검증 A (is_compatible: true): age 필드에 default 0이 있으므로 v2 이하 구 메시지를 새 스키마로 읽을 때 age가 0으로 채워집니다. BACKWARD 호환 조건을 만족합니다.</p>
+<p>검증 B (is_compatible: false): name 필드의 타입을 string에서 int로 바꾸는 것은 구 메시지에 있는 string 값을 새 스키마로 읽을 때 int로 해석할 수 없으므로 역직렬화가 실패합니다. Avro는 string과 int 사이의 암묵적 타입 변환을 허용하지 않습니다. 타입 변경은 거의 모든 호환성 모드에서 비호환이며, 운영 중인 토픽에서 필드 타입을 바꾸려면 새 토픽을 만드는 것이 안전합니다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=_x9RacHDQY0' target='_blank'>Apache Kafka 101: Schema Registry (2023)</a></li><li><a href='https://www.youtube.com/watch?v=2bPx3hfKX04' target='_blank'>Key Concepts of Schema Registry | Schema Registry 101</a></li><li><a href='https://www.youtube.com/watch?v=nCiTat06Ius' target='_blank'>Introduction to Schema Registry in Kafka | Part 1</a></li></ul></div>
         </article>
@@ -1567,7 +1561,7 @@ curl -X DELETE http://localhost:8083/connectors/file-source
 <li>Standalone은 단일 워커·파일 기반·확장 불가, Distributed는 다중 워커·Kafka 토픽에 상태 저장·REST API 관리·자동 리밸런싱으로 실무 표준이다. REST API로 커넥터를 POST/GET/DELETE해 등록·조회·삭제하며, <code class='ic'>connector.class</code>만 바꾸면 다양한 시스템에 동일 방식으로 연동된다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] Kafka Connect Distributed 워커가 http://localhost:8083 에서 실행 중이라고 가정한다. REST API를 사용해 (1) 현재 등록된 커넥터 목록, (2) 사용 가능한 커넥터 플러그인 목록을 각각 조회하라. 응답에서 FileStreamSource와 FileStreamSink 플러그인이 존재하는지 확인하라.</p>
+              <div class='q'><p>실습 1. [워밍업] Kafka Connect Distributed 워커가 http://localhost:8083 에서 실행 중이라고 가정한다. REST API를 사용해 (1) 현재 등록된 커넥터 목록, (2) 사용 가능한 커넥터 플러그인 목록을 각각 조회하라. 응답에서 FileStreamSource와 FileStreamSink 플러그인이 존재하는지 확인하라.</p></div>
               <pre class='starter'><code># Kafka Connect 워커가 이미 기동된 상태를 전제한다.
 # docker-compose 또는 로컬 Kafka 설치 환경에서 아래 명령을 실행한다.
 
@@ -1587,9 +1581,9 @@ curl http://localhost:8083/connector-plugins
 # 응답 JSON 배열 안에 아래와 유사한 항목이 있어야 한다:
 # {&quot;class&quot;:&quot;org.apache.kafka.connect.file.FileStreamSourceConnector&quot;, ...}
 # {&quot;class&quot;:&quot;org.apache.kafka.connect.file.FileStreamSinkConnector&quot;, ...}</code></pre>
-                <p class='exp2'>Distributed 모드의 Kafka Connect 워커는 기본 포트 8083에서 REST API를 제공한다. /connectors 엔드포인트는 현재 등록된 커넥터 이름 목록을 반환하고, /connector-plugins 엔드포인트는 워커 클래스패스에 설치된 플러그인(커넥터 클래스) 목록을 반환한다. FileStreamSource/Sink는 Kafka 배포판에 기본 포함된 학습용 커넥터로, 별도 설치 없이 바로 사용할 수 있다. REST API 조회부터 익혀야 이후 등록·상태 확인·삭제 흐름을 자연스럽게 따라갈 수 있다.</p>
+                <div class='exp2'><p>Distributed 모드의 Kafka Connect 워커는 기본 포트 8083에서 REST API를 제공한다. /connectors 엔드포인트는 현재 등록된 커넥터 이름 목록을 반환하고, /connector-plugins 엔드포인트는 워커 클래스패스에 설치된 플러그인(커넥터 클래스) 목록을 반환한다. FileStreamSource/Sink는 Kafka 배포판에 기본 포함된 학습용 커넥터로, 별도 설치 없이 바로 사용할 수 있다. REST API 조회부터 익혀야 이후 등록·상태 확인·삭제 흐름을 자연스럽게 따라갈 수 있다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습 1] FileStreamSource 커넥터를 등록해 /tmp/input.txt 파일의 내용을 connect-file-topic 토픽으로 흘려 보내라. 커넥터 등록 후 (1) 커넥터 상태를 조회해 RUNNING 인지 확인하고, (2) /tmp/input.txt 에 새 줄을 추가한 뒤 kafka-console-consumer 로 connect-file-topic 을 구독해 메시지가 도착했는지 검증하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습 1] FileStreamSource 커넥터를 등록해 /tmp/input.txt 파일의 내용을 connect-file-topic 토픽으로 흘려 보내라. 커넥터 등록 후 (1) 커넥터 상태를 조회해 RUNNING 인지 확인하고, (2) /tmp/input.txt 에 새 줄을 추가한 뒤 kafka-console-consumer 로 connect-file-topic 을 구독해 메시지가 도착했는지 검증하라.</p></div>
               <pre class='starter'><code># 1단계: 입력 파일 생성
 echo &#x27;hello kafka connect&#x27; &gt; /tmp/input.txt
 
@@ -1643,9 +1637,9 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 # 5단계 (추가 검증): 파일에 새 줄 추가 후 실시간 수신 확인
 echo &#x27;second line&#x27; &gt;&gt; /tmp/input.txt
 # consumer 창에 second line 이 담긴 메시지가 추가로 출력되어야 한다.</code></pre>
-                <p class='exp2'>FileStreamSource 커넥터는 지정된 파일을 처음부터 끝까지 읽어 각 줄을 하나의 Kafka 메시지로 produce한다. 파일에 새 줄이 추가되면 마지막으로 읽은 위치(오프셋)부터 이어서 읽기 때문에 실시간 파일 테일링처럼 동작한다. connector.class 에는 짧은 별칭(FileStreamSource)을 쓸 수도 있고, 완전한 클래스명(org.apache.kafka.connect.file.FileStreamSourceConnector)을 쓸 수도 있다. /connectors/{name}/status 엔드포인트는 커넥터 수준 상태와 각 태스크 수준 상태를 함께 반환하므로 태스크 하나라도 FAILED 이면 이 응답에서 즉시 확인할 수 있다. 코드를 전혀 작성하지 않고 JSON 설정 하나만으로 파이프라인이 동작하는 것이 Kafka Connect의 핵심 가치다.</p>
+                <div class='exp2'><p>FileStreamSource 커넥터는 지정된 파일을 처음부터 끝까지 읽어 각 줄을 하나의 Kafka 메시지로 produce한다. 파일에 새 줄이 추가되면 마지막으로 읽은 위치(오프셋)부터 이어서 읽기 때문에 실시간 파일 테일링처럼 동작한다. connector.class 에는 짧은 별칭(FileStreamSource)을 쓸 수도 있고, 완전한 클래스명(org.apache.kafka.connect.file.FileStreamSourceConnector)을 쓸 수도 있다. /connectors/{name}/status 엔드포인트는 커넥터 수준 상태와 각 태스크 수준 상태를 함께 반환하므로 태스크 하나라도 FAILED 이면 이 응답에서 즉시 확인할 수 있다. 코드를 전혀 작성하지 않고 JSON 설정 하나만으로 파이프라인이 동작하는 것이 Kafka Connect의 핵심 가치다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습 2] FileStreamSink 커넥터를 추가로 등록해 connect-file-topic 의 메시지를 /tmp/output.txt 파일로 내보내라. 등록 후 /tmp/input.txt 에 새 줄을 여러 개 추가하고, cat /tmp/output.txt 로 내용이 그대로 전달됐는지 확인하라. 확인이 끝나면 두 커넥터를 모두 삭제하라.</p>
+              <div class='q'><p>실습 3. [핵심 실습 2] FileStreamSink 커넥터를 추가로 등록해 connect-file-topic 의 메시지를 /tmp/output.txt 파일로 내보내라. 등록 후 /tmp/input.txt 에 새 줄을 여러 개 추가하고, cat /tmp/output.txt 로 내용이 그대로 전달됐는지 확인하라. 확인이 끝나면 두 커넥터를 모두 삭제하라.</p></div>
               <pre class='starter'><code># 1단계: Sink 커넥터 등록 (빈칸을 채워라)
 curl -X POST http://localhost:8083/connectors \
   -H &quot;Content-Type: application/json&quot; \
@@ -1703,9 +1697,9 @@ curl -X DELETE http://localhost:8083/connectors/file-sink
 # 삭제 확인
 curl http://localhost:8083/connectors
 # [] 가 반환되면 정상 삭제 완료</code></pre>
-                <p class='exp2'>Source와 Sink 커넥터가 동시에 동작하면 /tmp/input.txt → (FileStreamSource) → connect-file-topic → (FileStreamSink) → /tmp/output.txt 의 완전한 파이프라인이 코드 없이 구성된다. Source 설정의 topic(단수)과 Sink 설정의 topics(복수) 키 이름이 다른 점에 주의해야 한다. Sink 커넥터 등록 직후에는 토픽의 처음 오프셋부터 consume하므로, 이전 실습에서 이미 produce된 메시지도 output.txt에 함께 기록된다. DELETE 요청은 HTTP 상태 코드 204 No Content를 반환하며, 이후 /connectors 로 다시 조회하면 목록에서 사라진다. 이처럼 REST API 한 번으로 파이프라인의 생성·조회·삭제가 가능한 것이 Distributed 모드의 관리 편의성이다.</p>
+                <div class='exp2'><p>Source와 Sink 커넥터가 동시에 동작하면 /tmp/input.txt → (FileStreamSource) → connect-file-topic → (FileStreamSink) → /tmp/output.txt 의 완전한 파이프라인이 코드 없이 구성된다. Source 설정의 topic(단수)과 Sink 설정의 topics(복수) 키 이름이 다른 점에 주의해야 한다. Sink 커넥터 등록 직후에는 토픽의 처음 오프셋부터 consume하므로, 이전 실습에서 이미 produce된 메시지도 output.txt에 함께 기록된다. DELETE 요청은 HTTP 상태 코드 204 No Content를 반환하며, 이후 /connectors 로 다시 조회하면 목록에서 사라진다. 이처럼 REST API 한 번으로 파이프라인의 생성·조회·삭제가 가능한 것이 Distributed 모드의 관리 편의성이다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] 아래 요구사항을 만족하는 FileStreamSource 커넥터를 SMT(Single Message Transform)와 함께 등록하라. 요구사항: (1) /tmp/app.log 파일을 읽어 app-log-topic 토픽으로 produce한다. (2) SMT ReplaceField를 사용해 기본 payload 스키마에서 schema 필드를 제거하고 payload 필드만 남긴다(schemaless 출력). (3) 커넥터 등록 후 상태를 확인하고, 파일에 샘플 로그 3줄을 추가해 토픽에 메시지가 정상 produce되는지 검증하라. 검증 후 커넥터가 어떤 mode(standalone/distributed)에서 동작하고 있는지, 그리고 이 파이프라인에서 태스크 수를 1에서 3으로 늘리면 어떤 일이 생기는지 서술하라.</p>
+              <div class='q'><p>실습 4. [응용] 아래 요구사항을 만족하는 FileStreamSource 커넥터를 SMT(Single Message Transform)와 함께 등록하라. 요구사항: (1) /tmp/app.log 파일을 읽어 app-log-topic 토픽으로 produce한다. (2) SMT ReplaceField를 사용해 기본 payload 스키마에서 schema 필드를 제거하고 payload 필드만 남긴다(schemaless 출력). (3) 커넥터 등록 후 상태를 확인하고, 파일에 샘플 로그 3줄을 추가해 토픽에 메시지가 정상 produce되는지 검증하라. 검증 후 커넥터가 어떤 mode(standalone/distributed)에서 동작하고 있는지, 그리고 이 파이프라인에서 태스크 수를 1에서 3으로 늘리면 어떤 일이 생기는지 서술하라.</p></div>
               <pre class='starter'><code># 샘플 로그 파일 생성
 touch /tmp/app.log
 
@@ -1784,7 +1778,7 @@ kafka-console-consumer.sh --bootstrap-server localhost:9092 \
 # 범위 안에서만 병렬화된다. 여러 파티션을 동시에 읽는 JDBC Source나
 # 여러 파티션을 소비하는 Sink 커넥터라면 tasks.max를 늘릴수록
 # 실제 병렬 태스크 수가 늘어나 처리량이 향상된다.</code></pre>
-                <p class='exp2'>SMT(Single Message Transform)는 커넥터 설정 안에 transforms 키로 선언하며, 여러 변환을 쉼표로 나열해 체이닝할 수 있다. transforms.{별칭}.type 으로 변환 클래스를 지정하고, 나머지 파라미터는 transforms.{별칭}.{파라미터} 형식으로 추가한다. ReplaceField$Value는 레코드의 Value 구조체에서 blacklist에 나열된 필드를 제거한다(Kafka 3.x 이후에는 exclude 키를 사용). SMT는 상태 없는 단순 변환(필드 추가/제거/이름 변경, 마스킹, 라우팅 등)에만 적합하며 집계처럼 이전 레코드를 참조하는 변환은 지원하지 않는다. tasks.max는 커넥터 구현이 허용하는 범위 안에서만 실제 효과가 있으며, 커넥터 소스 코드에서 taskConfigs() 메서드가 반환하는 리스트 크기가 실제 태스크 수를 결정한다는 점이 핵심이다.</p>
+                <div class='exp2'><p>SMT(Single Message Transform)는 커넥터 설정 안에 transforms 키로 선언하며, 여러 변환을 쉼표로 나열해 체이닝할 수 있다. transforms.{별칭}.type 으로 변환 클래스를 지정하고, 나머지 파라미터는 transforms.{별칭}.{파라미터} 형식으로 추가한다. ReplaceField$Value는 레코드의 Value 구조체에서 blacklist에 나열된 필드를 제거한다(Kafka 3.x 이후에는 exclude 키를 사용). SMT는 상태 없는 단순 변환(필드 추가/제거/이름 변경, 마스킹, 라우팅 등)에만 적합하며 집계처럼 이전 레코드를 참조하는 변환은 지원하지 않는다. tasks.max는 커넥터 구현이 허용하는 범위 안에서만 실제 효과가 있으며, 커넥터 소스 코드에서 taskConfigs() 메서드가 반환하는 리스트 크기가 실제 태스크 수를 결정한다는 점이 핵심이다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=mdsNGujpsF8' target='_blank'>Introduction to Kafka Connect | Kafka Connect 101 (2023)</a></li><li><a href='https://www.youtube.com/watch?v=MjJABMOywFM' target='_blank'>Kafka Connect | Apache Kafka 101 (2025 Edition)</a></li><li><a href='https://www.youtube.com/watch?v=nsy5ObOGXEA' target='_blank'>Deploying Kafka Connect | Kafka Connect 101 (2023)</a></li></ul></div>
         </article>
@@ -1904,17 +1898,14 @@ kafka-console-consumer.sh --topic words-count-output \
 <li>stateful 연산(count/reduce/aggregate)은 groupByKey 후 상태 저장소에 값을 보관하며 결과는 KTable이 된다. 캐시·커밋 간격 때문에 결과는 즉시가 아니라 버퍼링 후 내보내진다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] Stateless 파이프라인 완성하기
-
-아래 starter 코드에서 TODO 두 곳을 채워 다음 요구사항을 만족하는 Kafka Streams 파이프라인을 완성하라.
-
-요구사항:
-1. 값(value)의 길이가 5자 이하인 레코드는 버린다.
-2. 통과한 레코드의 값을 모두 대문자로 바꾼다.
-3. 결과를 &#x27;output-topic&#x27; 으로 내보낸다.
-
-입력 토픽: &#x27;input-topic&#x27; (key: String, value: String)
-출력 토픽: &#x27;output-topic&#x27;</p>
+              <div class='q'><p>실습 1. [워밍업] Stateless 파이프라인 완성하기</p>
+<p>아래 starter 코드에서 TODO 두 곳을 채워 다음 요구사항을 만족하는 Kafka Streams 파이프라인을 완성하라.</p>
+<p>요구사항:</p>
+<p>1. 값(value)의 길이가 5자 이하인 레코드는 버린다.</p>
+<p>2. 통과한 레코드의 값을 모두 대문자로 바꾼다.</p>
+<p>3. 결과를 &#x27;output-topic&#x27; 으로 내보낸다.</p>
+<p>입력 토픽: &#x27;input-topic&#x27; (key: String, value: String)</p>
+<p>출력 토픽: &#x27;output-topic&#x27;</p></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.KStream;
@@ -1977,21 +1968,20 @@ public class StatelessPipeline {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>filter((key, value) -&gt; value.length() &gt; 5) 는 람다가 false를 반환하는 레코드(길이 5 이하)를 파이프라인에서 제거한다. mapValues(value -&gt; value.toUpperCase()) 는 키는 그대로 두고 값만 대문자로 변환한다. 키를 바꾸지 않으므로 map 대신 mapValues를 사용했다 — 키를 바꾸면 리파티셔닝 비용이 발생하기 때문이다. 두 연산 모두 이전 레코드를 기억하지 않는 stateless 연산이라 상태 저장소 없이 동작한다. 이 파이프라인에서 source 스트림은 수정되지 않고, result 는 새로운 스트림으로 만들어진다는 점이 중요하다.</p>
+                <div class='exp2'><p>filter((key, value) -&gt; value.length() &gt; 5) 는 람다가 false를 반환하는 레코드(길이 5 이하)를 파이프라인에서 제거한다. mapValues(value -&gt; value.toUpperCase()) 는 키는 그대로 두고 값만 대문자로 변환한다. 키를 바꾸지 않으므로 map 대신 mapValues를 사용했다 — 키를 바꾸면 리파티셔닝 비용이 발생하기 때문이다. 두 연산 모두 이전 레코드를 기억하지 않는 stateless 연산이라 상태 저장소 없이 동작한다. 이 파이프라인에서 source 스트림은 수정되지 않고, result 는 새로운 스트림으로 만들어진다는 점이 중요하다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습 1] WordCount Streams 애플리케이션 작성하기
-
-&#x27;words-input&#x27; 토픽으로 들어오는 영문 문장을 단어 단위로 분리하고, 단어별 등장 횟수를 집계해 &#x27;words-count-output&#x27; 토픽으로 출력하는 Kafka Streams 애플리케이션을 작성하라.
-
-처리 요구사항:
-1. 각 레코드의 값(문장)을 소문자로 바꾼 뒤 비(非)단어 문자(\W+)로 분리해 단어 배열로 만든다.
-2. 분리된 단어 각각을 키로 사용해 그룹핑한다.
-3. 키(단어)별 등장 횟수를 &#x27;counts-store&#x27; 라는 이름의 상태 저장소에 보관한다.
-4. 집계 결과를 KStream으로 변환해 &#x27;words-count-output&#x27; 에 출력한다. 값의 타입이 Long이므로 Produced.with(Serdes.String(), Serdes.Long()) 을 지정한다.
-
-작성 후 아래 명령으로 동작을 확인한다:
-- 프로듀서: kafka-console-producer.sh --topic words-input --bootstrap-server localhost:9092
-- 컨슈머: kafka-console-consumer.sh --topic words-count-output --bootstrap-server localhost:9092 --from-beginning --property print.key=true --value-deserializer org.apache.kafka.common.serialization.LongDeserializer</p>
+              <div class='q'><p>실습 2. [핵심 실습 1] WordCount Streams 애플리케이션 작성하기</p>
+<p>&#x27;words-input&#x27; 토픽으로 들어오는 영문 문장을 단어 단위로 분리하고, 단어별 등장 횟수를 집계해 &#x27;words-count-output&#x27; 토픽으로 출력하는 Kafka Streams 애플리케이션을 작성하라.</p>
+<p>처리 요구사항:</p>
+<p>1. 각 레코드의 값(문장)을 소문자로 바꾼 뒤 비(非)단어 문자(\W+)로 분리해 단어 배열로 만든다.</p>
+<p>2. 분리된 단어 각각을 키로 사용해 그룹핑한다.</p>
+<p>3. 키(단어)별 등장 횟수를 &#x27;counts-store&#x27; 라는 이름의 상태 저장소에 보관한다.</p>
+<p>4. 집계 결과를 KStream으로 변환해 &#x27;words-count-output&#x27; 에 출력한다. 값의 타입이 Long이므로 Produced.with(Serdes.String(), Serdes.Long()) 을 지정한다.</p>
+<p>작성 후 아래 명령으로 동작을 확인한다:</p>
+<ul>
+<li>프로듀서: kafka-console-producer.sh --topic words-input --bootstrap-server localhost:9092</li>
+<li>컨슈머: kafka-console-consumer.sh --topic words-count-output --bootstrap-server localhost:9092 --from-beginning --property print.key=true --value-deserializer org.apache.kafka.common.serialization.LongDeserializer</li>
+</ul></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -2064,28 +2054,28 @@ public class WordCountApp {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>flatMapValues 는 하나의 값(문장)을 여러 값(단어 리스트)으로 펼친다(flat). 키는 그대로 유지된다. groupBy((key, word) -&gt; word) 는 단어 자체를 새 키로 사용해 그룹핑하며, 이 과정에서 내부적으로 리파티셔닝이 일어나 같은 단어가 같은 파티션으로 모인다. count(Materialized.as(&quot;counts-store&quot;)) 는 키(단어)별 등장 횟수를 상태 저장소에 누적한다. 결과 타입은 KTable&lt;String, Long&gt;이 되는데, 이는 &#x27;단어 → 현재까지의 카운트&#x27;라는 상태의 최신 스냅샷이기 때문이다. toStream() 으로 KTable을 KStream으로 변환해 출력 토픽으로 흘려보낸다. Produced.with(Serdes.String(), Serdes.Long()) 을 명시하는 이유는 기본 Serde가 String으로 설정되어 있어 Long 값을 직렬화할 수 없기 때문이다. 개발 중 CACHE_MAX_BYTES_BUFFERING_CONFIG=0, COMMIT_INTERVAL_MS_CONFIG=0 을 설정하면 캐시·커밋 버퍼링 없이 모든 업데이트가 즉시 출력되어 확인하기 편하다(운영에서는 기본값 유지).</p>
+                <div class='exp2'><p>flatMapValues 는 하나의 값(문장)을 여러 값(단어 리스트)으로 펼친다(flat). 키는 그대로 유지된다. groupBy((key, word) -&gt; word) 는 단어 자체를 새 키로 사용해 그룹핑하며, 이 과정에서 내부적으로 리파티셔닝이 일어나 같은 단어가 같은 파티션으로 모인다. count(Materialized.as(&quot;counts-store&quot;)) 는 키(단어)별 등장 횟수를 상태 저장소에 누적한다. 결과 타입은 KTable&lt;String, Long&gt;이 되는데, 이는 &#x27;단어 → 현재까지의 카운트&#x27;라는 상태의 최신 스냅샷이기 때문이다. toStream() 으로 KTable을 KStream으로 변환해 출력 토픽으로 흘려보낸다. Produced.with(Serdes.String(), Serdes.Long()) 을 명시하는 이유는 기본 Serde가 String으로 설정되어 있어 Long 값을 직렬화할 수 없기 때문이다. 개발 중 CACHE_MAX_BYTES_BUFFERING_CONFIG=0, COMMIT_INTERVAL_MS_CONFIG=0 을 설정하면 캐시·커밋 버퍼링 없이 모든 업데이트가 즉시 출력되어 확인하기 편하다(운영에서는 기본값 유지).</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습 2] KStream vs KTable 동작 차이 확인하기
-
-같은 토픽(&#x27;user-status&#x27;)을 KStream과 KTable로 각각 읽어 출력 토픽에 내보내는 두 개의 파이프라인을 작성하고, 동일한 입력 메시지에 대해 출력 건수가 어떻게 다른지 확인하라.
-
-시나리오:
-- &#x27;user-status&#x27; 토픽에 아래 순서로 메시지를 전송한다 (key:value 형식).
-  user1:ACTIVE
-  user2:ACTIVE
-  user1:INACTIVE   ← user1 의 상태가 바뀜
-  user2:INACTIVE   ← user2 의 상태가 바뀜
-  user1:ACTIVE     ← user1 의 상태가 다시 바뀜
-
-요구사항:
-1. KStream으로 읽어 &#x27;stream-output&#x27; 토픽에 모든 레코드를 그대로 출력한다.
-2. KTable로 읽어 &#x27;table-output&#x27; 토픽에 최신 값만 출력한다.
-3. 각 출력 토픽을 --from-beginning 으로 읽어 건수 차이를 직접 확인한다.
-
-예상 결과:
-- stream-output: 5건 (모든 이벤트)
-- table-output: 2건 (user1:ACTIVE, user2:INACTIVE — 각 키의 최신값)</p>
+              <div class='q'><p>실습 3. [핵심 실습 2] KStream vs KTable 동작 차이 확인하기</p>
+<p>같은 토픽(&#x27;user-status&#x27;)을 KStream과 KTable로 각각 읽어 출력 토픽에 내보내는 두 개의 파이프라인을 작성하고, 동일한 입력 메시지에 대해 출력 건수가 어떻게 다른지 확인하라.</p>
+<p>시나리오:</p>
+<ul>
+<li>&#x27;user-status&#x27; 토픽에 아래 순서로 메시지를 전송한다 (key:value 형식).</li>
+</ul>
+<p>  user1:ACTIVE</p>
+<p>  user2:ACTIVE</p>
+<p>  user1:INACTIVE   ← user1 의 상태가 바뀜</p>
+<p>  user2:INACTIVE   ← user2 의 상태가 바뀜</p>
+<p>  user1:ACTIVE     ← user1 의 상태가 다시 바뀜</p>
+<p>요구사항:</p>
+<p>1. KStream으로 읽어 &#x27;stream-output&#x27; 토픽에 모든 레코드를 그대로 출력한다.</p>
+<p>2. KTable로 읽어 &#x27;table-output&#x27; 토픽에 최신 값만 출력한다.</p>
+<p>3. 각 출력 토픽을 --from-beginning 으로 읽어 건수 차이를 직접 확인한다.</p>
+<p>예상 결과:</p>
+<ul>
+<li>stream-output: 5건 (모든 이벤트)</li>
+<li>table-output: 2건 (user1:ACTIVE, user2:INACTIVE — 각 키의 최신값)</li>
+</ul></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -2148,26 +2138,22 @@ public class StreamVsTable {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>builder.stream(&quot;user-status&quot;) 는 토픽의 모든 레코드를 독립된 이벤트로 취급한다. 따라서 user1 이 세 번 들어오면 세 건 모두 &#x27;stream-output&#x27; 에 기록된다. 반면 builder.table(&quot;user-status&quot;) 는 같은 키의 레코드가 들어올 때마다 상태 저장소의 값을 덮어쓴다. 결국 user1 의 최종값(ACTIVE)과 user2 의 최종값(INACTIVE) 두 건만 &#x27;table-output&#x27; 에 반영된다. 이것이 stream-table duality다 — 물리적으로 같은 토픽이지만 읽는 추상화에 따라 &#x27;변화의 기록&#x27;(KStream) 또는 &#x27;현재 상태의 스냅샷&#x27;(KTable)이 된다. KTable은 내부적으로 상태 저장소(RocksDB 기반)를 사용하므로 애플리케이션을 재시작해도 마지막 상태를 복원할 수 있다.</p>
+                <div class='exp2'><p>builder.stream(&quot;user-status&quot;) 는 토픽의 모든 레코드를 독립된 이벤트로 취급한다. 따라서 user1 이 세 번 들어오면 세 건 모두 &#x27;stream-output&#x27; 에 기록된다. 반면 builder.table(&quot;user-status&quot;) 는 같은 키의 레코드가 들어올 때마다 상태 저장소의 값을 덮어쓴다. 결국 user1 의 최종값(ACTIVE)과 user2 의 최종값(INACTIVE) 두 건만 &#x27;table-output&#x27; 에 반영된다. 이것이 stream-table duality다 — 물리적으로 같은 토픽이지만 읽는 추상화에 따라 &#x27;변화의 기록&#x27;(KStream) 또는 &#x27;현재 상태의 스냅샷&#x27;(KTable)이 된다. KTable은 내부적으로 상태 저장소(RocksDB 기반)를 사용하므로 애플리케이션을 재시작해도 마지막 상태를 복원할 수 있다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] 이벤트 타입별 실시간 카운터 만들기
-
-쇼핑몰 이벤트 로그를 처리하는 Kafka Streams 애플리케이션을 작성하라. &#x27;shop-events&#x27; 토픽에는 &#x27;userId:eventType&#x27; 형식의 메시지가 들어온다 (예: user1:CLICK, user2:PURCHASE, user1:PURCHASE). userId 는 키(key), eventType 은 값(value) 이다.
-
-요구사항:
-1. 값이 &#x27;PURCHASE&#x27; 인 이벤트만 통과시킨다.
-2. PURCHASE 이벤트를 이벤트 타입(value) 기준으로 그룹핑한다. (이 실습에서는 단일 타입 PURCHASE 만 남으므로, 여러 타입 확장을 고려한 구조를 직접 체감한다.)
-3. 타입별 등장 횟수를 집계해 상태 저장소 이름 &#x27;event-count-store&#x27; 에 보관한다.
-4. 결과를 &#x27;event-count-output&#x27; 토픽에 출력한다 (값 타입 Long).
-
-아래 테스트 메시지로 동작을 확인한다 (kafka-console-producer로 전송, --property parse.key=true --property key.separator=: 옵션 필요):
-  user1:CLICK
-  user2:PURCHASE
-  user3:CLICK
-  user1:PURCHASE
-  user4:PURCHASE
-
-예상 출력 (event-count-output): PURCHASE 키에 대해 최종 카운트 3</p>
+              <div class='q'><p>실습 4. [응용] 이벤트 타입별 실시간 카운터 만들기</p>
+<p>쇼핑몰 이벤트 로그를 처리하는 Kafka Streams 애플리케이션을 작성하라. &#x27;shop-events&#x27; 토픽에는 &#x27;userId:eventType&#x27; 형식의 메시지가 들어온다 (예: user1:CLICK, user2:PURCHASE, user1:PURCHASE). userId 는 키(key), eventType 은 값(value) 이다.</p>
+<p>요구사항:</p>
+<p>1. 값이 &#x27;PURCHASE&#x27; 인 이벤트만 통과시킨다.</p>
+<p>2. PURCHASE 이벤트를 이벤트 타입(value) 기준으로 그룹핑한다. (이 실습에서는 단일 타입 PURCHASE 만 남으므로, 여러 타입 확장을 고려한 구조를 직접 체감한다.)</p>
+<p>3. 타입별 등장 횟수를 집계해 상태 저장소 이름 &#x27;event-count-store&#x27; 에 보관한다.</p>
+<p>4. 결과를 &#x27;event-count-output&#x27; 토픽에 출력한다 (값 타입 Long).</p>
+<p>아래 테스트 메시지로 동작을 확인한다 (kafka-console-producer로 전송, --property parse.key=true --property key.separator=: 옵션 필요):</p>
+<p>  user1:CLICK</p>
+<p>  user2:PURCHASE</p>
+<p>  user3:CLICK</p>
+<p>  user1:PURCHASE</p>
+<p>  user4:PURCHASE</p>
+<p>예상 출력 (event-count-output): PURCHASE 키에 대해 최종 카운트 3</p></div>
               <pre class='starter'><code>import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.*;
 import org.apache.kafka.streams.kstream.*;
@@ -2234,12 +2220,12 @@ public class EventTypeCounter {
         Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }</code></pre>
-                <p class='exp2'>이 과제는 stateless 연산(filter)과 stateful 연산(groupBy + count)을 조합하는 실전 패턴이다. filter((userId, eventType) -&gt; &quot;PURCHASE&quot;.equals(eventType)) 로 관심 없는 이벤트(CLICK 등)를 먼저 제거해 불필요한 집계 비용을 줄인다. groupBy((userId, eventType) -&gt; eventType) 은 원래 키(userId)를 버리고 값(eventType)을 새 키로 사용한다 — 이 시점에서 리파티셔닝이 발생해 같은 eventType 의 레코드가 같은 파티션으로 재배치된다. count(Materialized.as(&quot;event-count-store&quot;)) 가 키(PURCHASE)별 카운트를 상태 저장소에 누적한다. 테스트 메시지 5건 중 CLICK 2건이 걸러지고 PURCHASE 3건만 집계되므로 최종 출력은 PURCHASE:3 이 된다. 실무에서 이 패턴은 &#x27;이벤트 종류별 실시간 통계&#x27;(결제 횟수, 오류 횟수 등)에 그대로 응용된다.</p>
+                <div class='exp2'><p>이 과제는 stateless 연산(filter)과 stateful 연산(groupBy + count)을 조합하는 실전 패턴이다. filter((userId, eventType) -&gt; &quot;PURCHASE&quot;.equals(eventType)) 로 관심 없는 이벤트(CLICK 등)를 먼저 제거해 불필요한 집계 비용을 줄인다. groupBy((userId, eventType) -&gt; eventType) 은 원래 키(userId)를 버리고 값(eventType)을 새 키로 사용한다 — 이 시점에서 리파티셔닝이 발생해 같은 eventType 의 레코드가 같은 파티션으로 재배치된다. count(Materialized.as(&quot;event-count-store&quot;)) 가 키(PURCHASE)별 카운트를 상태 저장소에 누적한다. 테스트 메시지 5건 중 CLICK 2건이 걸러지고 PURCHASE 3건만 집계되므로 최종 출력은 PURCHASE:3 이 된다. 실무에서 이 패턴은 &#x27;이벤트 종류별 실시간 통계&#x27;(결제 횟수, 오류 횟수 등)에 그대로 응용된다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=DoLIvp1CRJg' target='_blank'>Kafka Streams 101: Basic Operations (2023)</a></li><li><a href='https://www.youtube.com/watch?v=C9aXtOy5pPc' target='_blank'>Kafka Streams 101: KTable (2023)</a></li><li><a href='https://www.youtube.com/watch?v=wztNQy1ESwU' target='_blank'>Kafka Streams 101: Stateful Operations (2023)</a></li></ul></div>
         </article>
 <article id='lec7' class='lecture'>
-          <h2>07. 보존·로그 압축(Retention/Compaction)과 운영·모니터링 기초 <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h2>07. 보존·로그 압축(Retention/Compaction)과 운영·모니터링 기초 </h2>
           <h3>학습 목표</h3>
 <ul>
 <li>시간·크기 기반 보존(retention)과 키별 최신값을 유지하는 로그 압축(compaction)의 차이와 용도를 이해한다</li>
@@ -2271,19 +2257,24 @@ public class EventTypeCounter {
 </blockquote>
 <p>특정 키를 아예 삭제하고 싶으면, 그 키에 <strong>value가 null인 메시지(tombstone, 묘비)</strong> 를 보낸다. 압축기는 이를 &quot;이 키 삭제&quot; 신호로 해석한다. 단, 묘비를 너무 빨리 지우면 그 사이 멈춰 있던 컨슈머가 삭제 사실을 영영 못 보므로, 일정 시간(<code class='ic'>delete.retention.ms</code>) 동안 묘비를 남겨 둔 뒤 지운다.</p>
 <p>압축은 <strong>업데이트 가능한 상태</strong>를 보관하는 데 적합하다 — 고객 프로필, 상품 카탈로그, DB의 CDC 결과처럼 &quot;전체 이력은 필요 없고 키별 최신값만 알면 되는&quot; 경우. 컨슈머가 토픽을 처음부터 읽으면 모든 키의 최신 상태를 한 번에 부트스트랩할 수 있다는 것도 큰 장점이다(이것이 Kafka Streams의 상태 저장소, Connect의 설정 저장 토픽이 compacted인 이유다).</p>
-<p>아래 흐름도는 압축기가 로그의 clean/dirty 영역을 어떻게 처리하는지 보여준다. 로그 안의 화살표는 데이터 이동이 아니라 &quot;Clean 영역 다음에 Dirty 영역이 이어진다&quot;는 물리적 순서를 뜻한다.</p>
-<figure class='diagram'><div class='mermaid'>flowchart LR
-    subgraph LOG[&quot;파티션 로그 (왼쪽이 오래된 쪽)&quot;]
+<p>아래 흐름도는 압축기(Log Cleaner)가 <strong>Dirty 영역의 세그먼트들만</strong> 골라 정리하는 단계를 보여준다. 압축은 Clean 영역 전체를 갈아치우는 것이 아니라, 처리 대상이던 <strong>기존 Dirty 세그먼트들을 새 세그먼트로 대체</strong>하고 그 결과가 Clean 영역으로 편입되는 과정이다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph BEFORE[&quot;압축 전 파티션 로그 (왼쪽이 오래된 쪽)&quot;]
         direction LR
-        C[&quot;Clean 영역\n(이미 압축됨)&quot;]
-        D[&quot;Dirty 영역\n(아직 압축 안 됨)&quot;]
-        C -- &quot;로그상 순서 (앞 → 뒤)&quot; --- D
+        C1[&quot;Clean 영역\n(이미 압축됨)&quot;]
+        D1[&quot;Dirty 세그먼트들\n(아직 압축 안 됨)&quot;]
+        C1 -- &quot;로그상 순서 (앞 → 뒤)&quot; --- D1
     end
 
-    D -- &quot;dirty 비율 &gt; 임계값&quot; --&gt; CMP[&quot;압축기(Log Cleaner)&quot;]
+    D1 -- &quot;dirty 비율 &gt; 임계값이면 시작&quot; --&gt; CMP[&quot;압축기(Log Cleaner)\nDirty 세그먼트들만 읽음&quot;]
     CMP -- &quot;1. 키 → 최신 offset 맵 생성&quot; --&gt; MAP[&quot;키-offset 맵&quot;]
-    MAP -- &quot;2. 옛 레코드 제거&quot; --&gt; NEW[&quot;새 세그먼트\n(키별 최신값만)&quot;]
-    NEW -- &quot;교체&quot; --&gt; C</div><figcaption>로그 압축(Compaction) 동작 흐름</figcaption></figure>
+    MAP -- &quot;2. 옛 레코드 제거 후\n새 세그먼트 작성&quot; --&gt; NEW[&quot;새 세그먼트\n(Dirty 키들의 최신값만)&quot;]
+    NEW -- &quot;3. 기존 Dirty 세그먼트들을\n이 새 세그먼트로 대체&quot; --&gt; AFTER
+
+    subgraph AFTER[&quot;압축 후 파티션 로그&quot;]
+        direction LR
+        C2[&quot;Clean 영역\n(기존 + 방금 정리된 세그먼트)&quot;]
+    end</div><figcaption>로그 압축(Compaction) 동작 흐름</figcaption></figure>
 <h4>핵심 운영 지표</h4>
 <p>운영 단계에서 &quot;지금 클러스터가 건강한가&quot;를 보는 핵심 지표가 있다. Kafka는 JMX로 수많은 메트릭을 노출하는데, 처음에는 다음에 집중한다.</p>
 <p><strong>브로커 건강 지표</strong> (보통 Prometheus + Grafana로 대시보드화):</p>
@@ -2374,7 +2365,7 @@ kafka-consumer-groups.sh --describe \
 <li>LEO(Log-End-Offset)는 &#x27;마지막 offset + 1&#x27;(다음에 쓰일 위치)이며, Consumer Lag = LEO − Current Offset으로 컨슈머가 못 따라잡은 양이다. <code class='ic'>kafka-consumer-groups --describe</code>의 LAG 열로 확인하며, 계속 커지면 컨슈머 증설·최적화 신호다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. 기존 토픽 `my-events`의 보존 기간을 1시간(3,600,000 ms)으로 변경하고, 변경이 실제로 반영됐는지 `kafka-configs.sh`로 확인하세요.</p>
+              <div class='q'><p>실습 1. 기존 토픽 <code class='ic'>my-events</code>의 보존 기간을 1시간(3,600,000 ms)으로 변경하고, 변경이 실제로 반영됐는지 <code class='ic'>kafka-configs.sh</code>로 확인하세요.</p></div>
               <pre class='starter'><code># 사전 준비: 토픽이 없으면 먼저 생성
 kafka-topics.sh --create --topic my-events \
   --bootstrap-server localhost:9092 \
@@ -2392,18 +2383,19 @@ kafka-configs.sh --alter --topic my-events \
 # 2. 변경 결과 확인
 kafka-configs.sh --describe --topic my-events \
   --bootstrap-server localhost:9092</code></pre>
-                <p class='exp2'>`kafka-configs.sh --alter`는 브로커에 저장된 토픽 설정을 동적으로 덮어씁니다. 브로커를 재시작하지 않아도 즉시 반영되며, `--describe`로 현재 설정 값을 조회할 수 있습니다. `retention.ms=3600000`은 1시간(60 × 60 × 1000 ms)으로, 이 값을 넘긴 세그먼트는 다음 정리 주기에 디스크에서 삭제됩니다. 보존 기간 단축은 디스크를 절약하지만, 기간이 너무 짧으면 뒤처진 컨슈머가 데이터를 영영 못 읽는 위험이 있습니다.</p>
+                <div class='exp2'><p><code class='ic'>kafka-configs.sh --alter</code>는 브로커에 저장된 토픽 설정을 동적으로 덮어씁니다. 브로커를 재시작하지 않아도 즉시 반영되며, <code class='ic'>--describe</code>로 현재 설정 값을 조회할 수 있습니다. <code class='ic'>retention.ms=3600000</code>은 1시간(60 × 60 × 1000 ms)으로, 이 값을 넘긴 세그먼트는 다음 정리 주기에 디스크에서 삭제됩니다. 보존 기간 단축은 디스크를 절약하지만, 기간이 너무 짧으면 뒤처진 컨슈머가 데이터를 영영 못 읽는 위험이 있습니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. 직원 급여 정보를 관리하는 압축 토픽 `employee-salary`를 만들고, 같은 키(직원 ID)로 급여를 두 번 보낸 뒤 컨슈머가 최신값만 읽는지 확인하세요.
-
-구체적인 단계:
-1. `cleanup.policy=compact`, `min.cleanable.dirty.ratio=0.001`, `segment.ms=5000` 설정으로 토픽 생성
-2. 콘솔 프로듀서로 아래 레코드를 순서대로 전송 (키 구분자 `:`)
-   - `1:100`  (직원1, 초기 급여)
-   - `2:200`  (직원2)
-   - `1:400`  (직원1, 급여 인상)
-3. 30초 이상 대기(압축기 동작 시간 확보)
-4. 처음부터 다시 읽어 키 1의 값이 400만 남았는지 검증</p>
+              <div class='q'><p>실습 2. 직원 급여 정보를 관리하는 압축 토픽 <code class='ic'>employee-salary</code>를 만들고, 같은 키(직원 ID)로 급여를 두 번 보낸 뒤 컨슈머가 최신값만 읽는지 확인하세요.</p>
+<p>구체적인 단계:</p>
+<p>1. <code class='ic'>cleanup.policy=compact</code>, <code class='ic'>min.cleanable.dirty.ratio=0.001</code>, <code class='ic'>segment.ms=5000</code> 설정으로 토픽 생성</p>
+<p>2. 콘솔 프로듀서로 아래 레코드를 순서대로 전송 (키 구분자 <code class='ic'>:</code>)</p>
+<ul>
+<li><code class='ic'>1:100</code>  (직원1, 초기 급여)</li>
+<li><code class='ic'>2:200</code>  (직원2)</li>
+<li><code class='ic'>1:400</code>  (직원1, 급여 인상)</li>
+</ul>
+<p>3. 30초 이상 대기(압축기 동작 시간 확보)</p>
+<p>4. 처음부터 다시 읽어 키 1의 값이 400만 남았는지 검증</p></div>
               <pre class='starter'><code># 1단계: 압축 토픽 생성 (아래 명령을 채워 실행하세요)
 kafka-topics.sh --create --topic employee-salary \
   --bootstrap-server localhost:9092 \
@@ -2452,16 +2444,15 @@ kafka-console-consumer.sh --topic employee-salary \
 # 기대 출력 (키 1의 값 100은 사라지고 400만 보여야 함):
 # 2:200
 # 1:400</code></pre>
-                <p class='exp2'>`cleanup.policy=compact`로 생성된 토픽에서 Log Cleaner는 dirty 영역(아직 압축되지 않은 세그먼트)을 스캔해 각 키의 최신 offset만 남기고 옛 레코드를 제거합니다. `min.cleanable.dirty.ratio=0.001`은 dirty 비율이 0.1%만 되어도 즉시 압축을 시작하게 해 학습 환경에서 빠르게 결과를 볼 수 있게 합니다. `segment.ms=5000`은 5초마다 새 세그먼트를 열어 오래된 세그먼트가 압축 대상이 되도록 유도합니다. 압축 후 `1:400`만 남는 이유는 키 1에 대해 마지막으로 전송된 값(offset이 가장 높은 레코드)이 400이기 때문입니다. 이 방식으로 토픽이 항상 &#x27;키별 최신 상태&#x27;의 스냅샷 역할을 합니다.</p>
+                <div class='exp2'><p><code class='ic'>cleanup.policy=compact</code>로 생성된 토픽에서 Log Cleaner는 dirty 영역(아직 압축되지 않은 세그먼트)을 스캔해 각 키의 최신 offset만 남기고 옛 레코드를 제거합니다. <code class='ic'>min.cleanable.dirty.ratio=0.001</code>은 dirty 비율이 0.1%만 되어도 즉시 압축을 시작하게 해 학습 환경에서 빠르게 결과를 볼 수 있게 합니다. <code class='ic'>segment.ms=5000</code>은 5초마다 새 세그먼트를 열어 오래된 세그먼트가 압축 대상이 되도록 유도합니다. 압축 후 <code class='ic'>1:400</code>만 남는 이유는 키 1에 대해 마지막으로 전송된 값(offset이 가장 높은 레코드)이 400이기 때문입니다. 이 방식으로 토픽이 항상 &#x27;키별 최신 상태&#x27;의 스냅샷 역할을 합니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. 컨슈머 그룹을 일시 정지한 상태에서 메시지를 쌓아 Consumer Lag를 인위적으로 만든 뒤, `kafka-consumer-groups.sh --describe`로 LAG 값을 읽어 보세요.
-
-구체적인 단계:
-1. 토픽 `lag-test`를 생성 (파티션 1, 복제 1)
-2. 컨슈머 그룹 `lag-group`으로 컨슈머를 실행하되 백그라운드로 돌린 뒤 바로 종료(Ctrl+C)해 오프셋 커밋 기록만 남깁니다
-3. 컨슈머를 멈춘 상태에서 프로듀서로 메시지 5개를 전송 (`msg-1` ~ `msg-5`)
-4. `kafka-consumer-groups.sh --describe`로 LAG 열 값이 5 이상인지 확인
-5. 컨슈머를 다시 실행해 모두 소비한 뒤 LAG이 0이 되는지 재확인</p>
+              <div class='q'><p>실습 3. 컨슈머 그룹을 일시 정지한 상태에서 메시지를 쌓아 Consumer Lag를 인위적으로 만든 뒤, <code class='ic'>kafka-consumer-groups.sh --describe</code>로 LAG 값을 읽어 보세요.</p>
+<p>구체적인 단계:</p>
+<p>1. 토픽 <code class='ic'>lag-test</code>를 생성 (파티션 1, 복제 1)</p>
+<p>2. 컨슈머 그룹 <code class='ic'>lag-group</code>으로 컨슈머를 실행하되 백그라운드로 돌린 뒤 바로 종료(Ctrl+C)해 오프셋 커밋 기록만 남깁니다</p>
+<p>3. 컨슈머를 멈춘 상태에서 프로듀서로 메시지 5개를 전송 (<code class='ic'>msg-1</code> ~ <code class='ic'>msg-5</code>)</p>
+<p>4. <code class='ic'>kafka-consumer-groups.sh --describe</code>로 LAG 열 값이 5 이상인지 확인</p>
+<p>5. 컨슈머를 다시 실행해 모두 소비한 뒤 LAG이 0이 되는지 재확인</p></div>
               <pre class='starter'><code># 1단계: 토픽 생성
 kafka-topics.sh --create --topic lag-test \
   --bootstrap-server localhost:9092 \
@@ -2521,14 +2512,13 @@ kafka-consumer-groups.sh --describe \
   --group lag-group \
   --bootstrap-server localhost:9092
 # 기대: LAG 열이 0</code></pre>
-                <p class='exp2'>Consumer Lag는 `LOG-END-OFFSET - CURRENT-OFFSET`으로 계산됩니다. 컨슈머가 멈춰 있는 동안 프로듀서가 메시지 5개를 써서 `LOG-END-OFFSET`이 5가 됐지만 `CURRENT-OFFSET`은 0 그대로이므로 `LAG=5`가 됩니다. 컨슈머를 다시 실행해 5개를 모두 읽으면 `CURRENT-OFFSET=5`, `LOG-END-OFFSET=5`가 되어 `LAG=0`입니다. 운영에서 LAG이 지속적으로 증가하는 그룹은 처리 속도가 프로듀서 속도를 따라가지 못하는 것이므로 컨슈머 스케일아웃(파티션 수 이하로 인스턴스 추가), 처리 로직 최적화, 또는 배치 크기 조정이 필요합니다.</p>
+                <div class='exp2'><p>Consumer Lag는 <code class='ic'>LOG-END-OFFSET - CURRENT-OFFSET</code>으로 계산됩니다. 컨슈머가 멈춰 있는 동안 프로듀서가 메시지 5개를 써서 <code class='ic'>LOG-END-OFFSET</code>이 5가 됐지만 <code class='ic'>CURRENT-OFFSET</code>은 0 그대로이므로 <code class='ic'>LAG=5</code>가 됩니다. 컨슈머를 다시 실행해 5개를 모두 읽으면 <code class='ic'>CURRENT-OFFSET=5</code>, <code class='ic'>LOG-END-OFFSET=5</code>가 되어 <code class='ic'>LAG=0</code>입니다. 운영에서 LAG이 지속적으로 증가하는 그룹은 처리 속도가 프로듀서 속도를 따라가지 못하는 것이므로 컨슈머 스케일아웃(파티션 수 이하로 인스턴스 추가), 처리 로직 최적화, 또는 배치 크기 조정이 필요합니다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. 앞서 만든 `employee-salary` 토픽에서 직원 2의 데이터를 완전히 삭제하세요. Kafka 압축 토픽에서 키를 삭제하는 방법은 value가 null인 tombstone 메시지를 보내는 것입니다.
-
-구체적인 단계:
-1. 콘솔 프로듀서에서 `null-marker` 옵션을 활성화해 직원 2에게 tombstone을 전송
-2. 30초 대기 후 처음부터 소비해 키 2가 보이지 않는지 확인
-3. 왜 tombstone을 즉시 삭제하지 않고 `delete.retention.ms` 동안 보관하는지 설명하세요 (서술형)</p>
+              <div class='q'><p>실습 4. 앞서 만든 <code class='ic'>employee-salary</code> 토픽에서 직원 2의 데이터를 완전히 삭제하세요. Kafka 압축 토픽에서 키를 삭제하는 방법은 value가 null인 tombstone 메시지를 보내는 것입니다.</p>
+<p>구체적인 단계:</p>
+<p>1. 콘솔 프로듀서에서 <code class='ic'>null-marker</code> 옵션을 활성화해 직원 2에게 tombstone을 전송</p>
+<p>2. 30초 대기 후 처음부터 소비해 키 2가 보이지 않는지 확인</p>
+<p>3. 왜 tombstone을 즉시 삭제하지 않고 <code class='ic'>delete.retention.ms</code> 동안 보관하는지 설명하세요 (서술형)</p></div>
               <pre class='starter'><code># 1단계: tombstone 메시지 전송
 # --property null.marker=NULL 설정 시,
 # 값 자리에 NULL 문자열을 입력하면 value=null 레코드가 전송됩니다
@@ -2583,7 +2573,7 @@ kafka-configs.sh --describe --topic employee-salary \
 # 뒤늦게 복구된 컨슈머는 키 2가 삭제됐다는 사실을 영영 알 수 없고
 # 자신의 로컬 상태(예: KTable)에 키 2가 남아 있는 채로 운영된다.
 # 따라서 묘비를 충분히 오랫동안 보관해 모든 컨슈머가 반드시 삭제 신호를 받도록 한다.</code></pre>
-                <p class='exp2'>압축 토픽에서 키 삭제는 두 단계를 거칩니다. 첫째, value=null인 tombstone 메시지를 전송합니다. 콘솔 프로듀서에서 `--property null.marker=NULL`을 지정하면 값이 NULL 문자열인 경우 null 바이트로 변환해 전송합니다. 둘째, 압축기가 실행될 때 tombstone을 확인하고 해당 키의 모든 이전 레코드와 tombstone 자체를 제거합니다. 단, tombstone을 바로 지우지 않고 `delete.retention.ms`(기본 86,400,000ms = 24시간) 동안 유지합니다. 이는 오프라인이었다가 복구된 컨슈머나 CDC 파이프라인이 &#x27;이 키가 삭제됐다&#x27;는 사실을 놓치지 않도록 보장하기 위함입니다. delete.retention.ms가 지난 뒤에야 tombstone도 최종 삭제됩니다.</p>
+                <div class='exp2'><p>압축 토픽에서 키 삭제는 두 단계를 거칩니다. 첫째, value=null인 tombstone 메시지를 전송합니다. 콘솔 프로듀서에서 <code class='ic'>--property null.marker=NULL</code>을 지정하면 값이 NULL 문자열인 경우 null 바이트로 변환해 전송합니다. 둘째, 압축기가 실행될 때 tombstone을 확인하고 해당 키의 모든 이전 레코드와 tombstone 자체를 제거합니다. 단, tombstone을 바로 지우지 않고 <code class='ic'>delete.retention.ms</code>(기본 86,400,000ms = 24시간) 동안 유지합니다. 이는 오프라인이었다가 복구된 컨슈머나 CDC 파이프라인이 &#x27;이 키가 삭제됐다&#x27;는 사실을 놓치지 않도록 보장하기 위함입니다. delete.retention.ms가 지난 뒤에야 tombstone도 최종 삭제됩니다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=VAkhYxu1qII' target='_blank'>Apache Kafka Topic Compaction</a></li><li><a href='https://www.youtube.com/watch?v=NlIHCP65xzg' target='_blank'>In-depth intuition on Topic Log Compaction in Apache Kafka</a></li><li><a href='https://www.youtube.com/watch?v=XXLe0KNEbR4' target='_blank'>Which Metrics to Monitor in Kafka?</a></li></ul></div>
         </article></main>

@@ -21,7 +21,7 @@
 <li><a href='#lec7'>07. Introduction to Service Mesh — Traffic Management, mTLS, and Observability with Istio</a></li></ul>
 </nav>
 <main><article id='lec1' class='lecture'>
-          <h2>01. CRDs and Custom Resources — Extending the Kubernetes API <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h2>01. CRDs and Custom Resources — Extending the Kubernetes API </h2>
           <h3>Learning Objectives</h3>
 <ul>
 <li>Understand the structure of a CustomResourceDefinition (CRD) and its OpenAPI v3 schema validation, and be able to define one from scratch</li>
@@ -75,6 +75,7 @@ spec:
                   type: integer
                   minimum: 1
                   maximum: 90
+                  default: 30        # API server injects this value if the field is omitted
               required: [&quot;commonName&quot;]
             status:                  # The actual state recorded by the controller
               type: object
@@ -91,7 +92,7 @@ spec:
 <li><strong>group / names</strong>: The resource&#x27;s identity. The <code class='ic'>name</code> field must be in the <code class='ic'>&lt;plural&gt;.&lt;group&gt;</code> format for registration to succeed.</li>
 <li><strong>scope</strong>: <code class='ic'>Namespaced</code> means the resource belongs to a namespace (like a Pod); <code class='ic'>Cluster</code> means it is cluster-scoped (like a Node or ClusterRole).</li>
 <li><strong>versions</strong>: You can define multiple versions of the same resource (<code class='ic'>v1alpha1</code>, <code class='ic'>v1beta1</code>, <code class='ic'>v1</code>) simultaneously. <code class='ic'>served</code> controls whether the API server responds to requests for that version; <code class='ic'>storage</code> designates the canonical version stored in etcd. <strong>Exactly one version may have <code class='ic'>storage: true</code>.</strong></li>
-<li><strong>schema.openAPIV3Schema</strong>: Declares field types, required constraints, and validation rules in OpenAPI v3 format. This is the heart of schema validation.</li>
+<li><strong>schema.openAPIV3Schema</strong>: Declares field types, required constraints, and validation rules in OpenAPI v3 format. This is the heart of schema validation. When a <code class='ic'>default</code> value is provided — as with <code class='ic'>renewBefore</code> above — the API server automatically injects it when the field is omitted.</li>
 </ul>
 <h4>spec and status — The Real Core of the CRD Pattern</h4>
 <p>The fact that the schema above places <code class='ic'>spec</code> and <code class='ic'>status</code> side by side is the most important thing to notice. Every core Kubernetes resource is split into these two sections:</p>
@@ -113,6 +114,54 @@ The Certificate is invalid: spec.renewBefore: Invalid value: 100:
 spec.renewBefore in body should be less than or equal to 90
 </code></pre>
 <p>This validation is performed <strong>by the API server at the admission stage</strong>, not by the controller. Invalid data is blocked before it ever reaches etcd. Using <code class='ic'>required</code>, <code class='ic'>enum</code>, <code class='ic'>pattern</code> (regex), and <code class='ic'>default</code> (injecting default values) significantly reduces the chance of user error.</p>
+<h4>CEL Validation — Enforcing Cross-Field Constraints Declaratively</h4>
+<p>OpenAPI v3 schema validation is powerful, but it has a fundamental limitation: it validates each field in isolation. It cannot express constraints like &quot;if field A is set, field B must also be set&quot; or &quot;the end date must be later than the start date.&quot; In the past, enforcing these cross-field relationships required building and running a separate validating admission webhook — a non-trivial operational burden involving deployment, TLS certificates, and availability management.</p>
+<p><strong>CEL (Common Expression Language) validation rules</strong>, promoted to stable in Kubernetes 1.25, eliminate that burden. By embedding <code class='ic'>x-kubernetes-validations</code> expressions directly in the schema, the <strong>API server itself</strong> enforces cross-field constraints — no external webhook server required.</p>
+<pre><code>
+schema:
+  openAPIV3Schema:
+    type: object
+    properties:
+      spec:
+        type: object
+        properties:
+          autoRenew:
+            type: boolean
+          renewBefore:
+            type: integer
+        # Apply cross-field constraints at the spec object level
+        x-kubernetes-validations:
+          # If autoRenew is true, renewBefore must be specified
+          - rule: &quot;!self.autoRenew || has(self.renewBefore)&quot;
+            message: &quot;renewBefore is required when autoRenew is true&quot;
+</code></pre>
+<p>The <code class='ic'>rule</code> field is a CEL expression that must evaluate to a boolean; <code class='ic'>self</code> refers to the object the rule is attached to (here, <code class='ic'>spec</code>). The rule above reads: &quot;autoRenew must be false, or renewBefore must be present.&quot; If the constraint is violated, the API server returns the <code class='ic'>message</code> and rejects the request. You can also write numeric comparisons like <code class='ic'>self.endDate &gt; self.startDate</code>, or validate list length and uniqueness — all in a single expression.</p>
+<blockquote class='callout'>
+<p>The guiding principle: use OpenAPI schema for single-field constraints (type, range, regex), and use CEL (<code class='ic'>x-kubernetes-validations</code>) for cross-field relationships. This is the modern Kubernetes best practice. Reserve admission webhooks only for genuinely complex logic that CEL cannot express — such as lookups against external systems. Keeping webhooks to a minimum reduces operational overhead significantly.</p>
+</blockquote>
+<h4>CRD Evolution — Versioning and Conversion</h4>
+<p>CRDs evolve just like software. You might start with <code class='ic'>v1alpha1</code> for experimentation and graduate to <code class='ic'>v1</code> as the API stabilizes. The challenge is doing this without breaking existing resources already stored in the cluster or the clients that depend on them. That is why <code class='ic'>versions</code> can hold multiple entries simultaneously.</p>
+<pre><code>
+versions:
+  - name: v1alpha1
+    served: true       # Keep serving old clients
+    storage: false     # No longer the stored version
+  - name: v1
+    served: true
+    storage: true      # All objects are now stored in this form in etcd
+</code></pre>
+<ul>
+<li><strong><code class='ic'>served</code></strong>: Whether the API server accepts and responds to requests for this version. Multiple versions can be <code class='ic'>served: true</code> at the same time, allowing old and new clients to coexist.</li>
+<li><strong><code class='ic'>storage</code></strong>: The canonical version written to etcd. <strong>Exactly one version may be <code class='ic'>true</code>.</strong> Every object is ultimately stored in this form.</li>
+</ul>
+<p>This raises an obvious question: if a client sends a request in <code class='ic'>v1alpha1</code> but the storage version is <code class='ic'>v1</code>, who handles the format mismatch between them? This is called <strong>version conversion</strong>.</p>
+<ul>
+<li><strong><code class='ic'>strategy: None</code></strong> — For simple changes like adding or removing fields, the API server passes the object through without conversion (this is the default).</li>
+<li><strong><code class='ic'>strategy: Webhook</code> (Conversion Webhook)</strong> — When field names change or the structure is restructured in a way that cannot be mapped automatically, you register a conversion webhook. Whenever the API server needs to convert between versions, it calls your webhook and delegates the transformation — for example, &quot;convert this object from <code class='ic'>v1alpha1</code> to <code class='ic'>v1</code>.&quot; Regardless of which version a client requests, the webhook translates the stored object into that version on the fly, making it appear as though the requested version has always existed.</li>
+</ul>
+<blockquote class='callout'>
+<p>Operational guidance: once you expose a version as <code class='ic'>served: true</code>, clients will start depending on it, so you cannot remove it without warning. The safe evolution sequence is: (1) add the new version as <code class='ic'>served</code> → (2) add a conversion webhook if needed → (3) move <code class='ic'>storage</code> to the new version → (4) after a sufficient deprecation window, set the old version to <code class='ic'>served: false</code> → (5) remove it entirely. This mirrors the process Kubernetes itself uses to deprecate built-in APIs — for example, keeping <code class='ic'>v1beta1</code> around for an extended period before removing it.</p>
+</blockquote>
 <h4>Creating and Working with Custom Resources</h4>
 <p>Once you apply the CRD, the new endpoint is immediately live.</p>
 <pre><code>
@@ -139,7 +188,7 @@ kubectl explain certificates.training.example.com.spec
 </code></pre>
 <p>The fact that <code class='ic'>kubectl explain</code> works is significant. It does so because the API server <strong>exposes your OpenAPI schema as documentation</strong> — proof that custom resources participate in the same discovery mechanism as built-in resources.</p>
 <blockquote class='callout'>
-<p>Pro tip: Short names like <code class='ic'>kubectl explain certificate.spec</code> can collide when multiple groups share the same alias. Using the full resource name — <code class='ic'>kubectl explain certificates.training.example.com.spec</code> — unambiguously targets your CRD&#x27;s schema in any environment. Make it a habit.</p>
+<p>Pro tip: Short names like <code class='ic'>kubectl explain certificate.spec</code> can collide when multiple groups share the same alias. Using the full resource name — <code class='ic'>kubectl explain certificates.training.example.com.spec</code> — unambiguously targets your CRD&#x27;s schema in any environment. For the same reason, when multiple CRDs share the same <code class='ic'>kind</code>, always use the full resource name with <code class='ic'>kubectl describe</code> to eliminate ambiguity. Make it a habit.</p>
 </blockquote>
 <h4>Why CRDs Behave Identically to Built-in Resources</h4>
 <p>What actually happens internally when you run <code class='ic'>kubectl get certificates</code>? kubectl first queries the API server&#x27;s <strong>discovery endpoint</strong> to ask &quot;what groups, versions, and resources exist?&quot; The moment you registered the CRD, <code class='ic'>certificates</code> under <code class='ic'>training.example.com/v1</code> was added to that list, so kubectl treats it no differently from any built-in resource. Requests go through the same API server, data is stored in the same etcd, and RBAC grants permissions using the same syntax — just with <code class='ic'>apiGroups: [&quot;training.example.com&quot;]</code>.</p>
@@ -167,13 +216,14 @@ kubectl explain certificates.training.example.com.spec
 <h3>Key Takeaways</h3>
 <ul>
 <li>A CRD registers a new resource type with the Kubernetes API server; a CR is an instance of that type — the same relationship as a class and an object.</li>
-<li>A CRD defines its identity via <code class='ic'>group</code>, <code class='ic'>names</code>, <code class='ic'>scope</code>, and <code class='ic'>versions</code>, and its validation rules via <code class='ic'>openAPIV3Schema</code>. Exactly one version may have <code class='ic'>storage: true</code>.</li>
+<li>A CRD defines its identity via <code class='ic'>group</code>, <code class='ic'>names</code>, <code class='ic'>scope</code>, and <code class='ic'>versions</code>, and its validation rules via <code class='ic'>openAPIV3Schema</code>. Exactly one version may have <code class='ic'>storage: true</code>. When a <code class='ic'>default</code> value is declared, the API server automatically injects it on admission.</li>
 <li>CRs are split into <code class='ic'>spec</code> (desired state, written by users) and <code class='ic'>status</code> (actual state, written by the controller). Enabling <code class='ic'>subresources.status: {}</code> separates authority and prevents conflicts, and provides the foundation for observing a resource&#x27;s current condition (Ready, Expired, etc.).</li>
-<li>Schema validation is performed by the API server at the admission stage, so non-conforming CRs are rejected before they reach etcd.</li>
+<li>Validation operates at two layers. Single-field constraints — type, range, <code class='ic'>enum</code>, <code class='ic'>pattern</code>, <code class='ic'>default</code> — belong in the OpenAPI schema. Cross-field relationships belong in CEL (<code class='ic'>x-kubernetes-validations</code>). Both are enforced by the API server at admission, so non-conforming CRs are rejected before reaching etcd.</li>
+<li>CRDs support multiple simultaneous versions (<code class='ic'>served</code> / <code class='ic'>storage</code>). When versions differ structurally, conversion handles the translation — either the default pass-through (<code class='ic'>None</code>) or a Conversion Webhook for complex remapping. The safe upgrade path is: add the new version → move <code class='ic'>storage</code> → deprecate the old version gradually.</li>
 <li>Registered CRs participate fully in discovery, <code class='ic'>kubectl</code>, RBAC, watches, and etcd storage — identical to built-in resources. Translating spec into reality and recording the outcome in status is the controller&#x27;s job, which is the subject of the next lecture.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Run kubectl api-resources to list all resource types registered in your cluster. Read the NAMESPACED, KIND, and APIVERSION columns in the output, then filter to show only resources that belong to the &#x27;apps&#x27; API group.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Run kubectl api-resources to list all resource types registered in your cluster. Read the NAMESPACED, KIND, and APIVERSION columns in the output, then filter to show only resources that belong to the &#x27;apps&#x27; API group.</p></div>
               <pre class='starter'><code># List all API resources
 kubectl api-resources
 
@@ -205,9 +255,9 @@ kubectl api-resources --api-group=apps
 # List CRDs (results vary by cluster)
 kubectl get crd
 # If nothing is installed: No resources found</code></pre>
-                <p class='exp2'>kubectl api-resources lists all resource types registered in the cluster. APIVERSION takes the form group/version (e.g., apps/v1); core-group resources (v1, etc.) show only the version without a group name. Adding a CRD inserts a new entry into this list, and from that point the custom resource is treated exactly like a built-in resource. The --api-group flag lets you filter by group.</p>
+                <div class='exp2'><p>kubectl api-resources lists all resource types registered in the cluster. APIVERSION takes the form group/version (e.g., apps/v1); core-group resources (v1, etc.) show only the version without a group name. Adding a CRD inserts a new entry into this list, and from that point the custom resource is treated exactly like a built-in resource. The --api-group flag lets you filter by group.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Write and register a CRD named &#x27;databases.myapp.example.com&#x27; with the following schema: name (string, required), engine (string, default &#x27;postgresql&#x27;), and replicas (integer, range 1–5). After registering, confirm it with kubectl get crd, then attempt to create an invalid custom resource with replicas set to 10 to verify that schema validation rejects it.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Write and register a CRD named &#x27;databases.myapp.example.com&#x27; with the following schema: name (string, required), engine (string, default &#x27;postgresql&#x27;), and replicas (integer, range 1–5). After registering, confirm it with kubectl get crd, then attempt to create an invalid custom resource with replicas set to 10 to verify that schema validation rejects it.</p></div>
               <pre class='starter'><code># Start writing database-crd.yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -306,9 +356,9 @@ EOF
 # Error example:
 # The Database &quot;bad-db&quot; is invalid:
 #   spec.replicas: Invalid value: 10: spec.replicas in body should be less than or equal to 5</code></pre>
-                <p class='exp2'>The spec.versions[].schema.openAPIV3Schema section of a CRD defines the field types and constraints for custom resources. Listing a field name in the required array causes the API server to reject creation attempts that omit it. minimum/maximum validates integer ranges, and default automatically fills in a value when the field is not specified. All of this validation happens at the API server level, so invalid resources are blocked even without a controller.</p>
+                <div class='exp2'><p>The spec.versions[].schema.openAPIV3Schema section of a CRD defines the field types and constraints for custom resources. Listing a field name in the required array causes the API server to reject creation attempts that omit it. minimum/maximum validates integer ranges, and default automatically fills in a value when the field is not specified. All of this validation happens at the API server level, so invalid resources are blocked even without a controller.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Practice] Using the Database CRD you registered in the previous step, create two custom resources. The first should have name=&#x27;prod-db&#x27;, engine=&#x27;mysql&#x27;, and replicas=3. The second should specify only name=&#x27;dev-db&#x27; so you can confirm that the engine default is automatically applied. After creation, query the resources with kubectl get db, kubectl describe db prod-db, and kubectl get db -o yaml.</p>
+              <div class='q'><p>Practice 3. [Core Practice] Using the Database CRD you registered in the previous step, create two custom resources. The first should have name=&#x27;prod-db&#x27;, engine=&#x27;mysql&#x27;, and replicas=3. The second should specify only name=&#x27;dev-db&#x27; so you can confirm that the engine default is automatically applied. After creation, query the resources with kubectl get db, kubectl describe db prod-db, and kubectl get db -o yaml.</p></div>
               <pre class='starter'><code># prod-db custom resource
 apiVersion: myapp.example.com/v1
 kind: Database
@@ -378,9 +428,9 @@ kubectl get db dev-db -o yaml
 # spec:
 #   engine: postgresql   &lt;-- default was automatically applied
 #   name: dev-db</code></pre>
-                <p class='exp2'>Once a CRD is registered, custom resources can be managed with the same kubectl get/describe/delete/apply commands as built-in resources (Pod, Deployment, etc.). Defining shortNames (e.g., db) enables abbreviated commands like kubectl get db. The API server persists custom resources to etcd, but this alone does not create an actual database. Reacting to the custom resource and performing real work is the role of a controller (Operator), which is covered in the next lecture.</p>
+                <div class='exp2'><p>Once a CRD is registered, custom resources can be managed with the same kubectl get/describe/delete/apply commands as built-in resources (Pod, Deployment, etc.). Defining shortNames (e.g., db) enables abbreviated commands like kubectl get db. The API server persists custom resources to etcd, but this alone does not create an actual database. Reacting to the custom resource and performing real work is the role of a controller (Operator), which is covered in the next lecture.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Application] Clean up the custom resources you created and delete the CRD. Observe whether deleting the CRD also removes all custom resources that belonged to it. Then confirm that the Database kind has disappeared from kubectl api-resources output.</p>
+              <div class='q'><p>Practice 4. [Application] Clean up the custom resources you created and delete the CRD. Observe whether deleting the CRD also removes all custom resources that belonged to it. Then confirm that the Database kind has disappeared from kubectl api-resources output.</p></div>
               <pre class='starter'><code># 1. Optionally delete the custom resources first
 kubectl delete db prod-db dev-db
 
@@ -414,7 +464,7 @@ kubectl api-resources | grep databases
 # Note: deleting the CRD first cascades and removes all custom resources belonging to it
 # kubectl delete crd databases.myapp.example.com
 # (prod-db and dev-db are also deleted)</code></pre>
-                <p class='exp2'>Deleting a CRD cascades and removes all custom resources belonging to that group/version/kind. After deletion, kubectl queries for those resources return an error because the API server no longer recognizes the resource type. Since a CRD is an API extension mechanism, registering a CRD = adding a new API endpoint, and deleting a CRD = removing that endpoint.</p>
+                <div class='exp2'><p>Deleting a CRD cascades and removes all custom resources belonging to that group/version/kind. After deletion, kubectl queries for those resources return an error because the API server no longer recognizes the resource type. Since a CRD is an API extension mechanism, registering a CRD = adding a new API endpoint, and deleting a CRD = removing that endpoint.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=u1X5Rf7fWwM' target='_blank'>Kubernetes Custom Resource Definition (CRD) Explained with Demo</a></li><li><a href='https://www.youtube.com/watch?v=TScDYMym7LA' target='_blank'>What are Custom Resource Definitions (CRDs) in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=3huz7lRzUQo' target='_blank'>Day 49 - Custom Resource Definition (CRD, CR) Kubernetes (explained with Demo)</a></li></ul></div>
         </article>
@@ -511,7 +561,7 @@ kubectl get secret               # the TLS Secret created by the controller appe
 <li>The maturity model (5 levels from Basic Install to Auto Pilot) provides a measure of an Operator&#x27;s automation depth. Operators are best suited for stateful, operationally intensive applications.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Install cert-manager via Helm and verify the installation. cert-manager is a prime example of the Operator pattern — it automatically issues and renews TLS certificates. After installation, confirm the controller Pods created in the cert-manager namespace and list the CRDs it registered.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Install cert-manager via Helm and verify the installation. cert-manager is a prime example of the Operator pattern — it automatically issues and renews TLS certificates. After installation, confirm the controller Pods created in the cert-manager namespace and list the CRDs it registered.</p></div>
               <pre class='starter'><code># 1. Add the cert-manager Helm repository
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
@@ -548,9 +598,9 @@ kubectl get crd | grep cert-manager
 # clusterissuers.cert-manager.io                   ...
 # issuers.cert-manager.io                          ...
 # orders.acme.cert-manager.io                      ...</code></pre>
-                <p class='exp2'>cert-manager is a textbook example of the Operator pattern. Installing it via Helm creates three controller Pods: cert-manager (core controller), cainjector (CA injector), and webhook (validation webhook). It also registers several CRDs including Certificate, Issuer, and ClusterIssuer. These CRDs serve as the Operator&#x27;s domain-specific API.</p>
+                <div class='exp2'><p>cert-manager is a textbook example of the Operator pattern. Installing it via Helm creates three controller Pods: cert-manager (core controller), cainjector (CA injector), and webhook (validation webhook). It also registers several CRDs including Certificate, Issuer, and ClusterIssuer. These CRDs serve as the Operator&#x27;s domain-specific API.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Create a SelfSigned Issuer and a Certificate custom resource for cert-manager, then observe the reconciliation loop as the controller automatically generates an actual TLS certificate (Secret). Once Certificate status shows Ready: True, inspect the tls.crt and tls.key fields of the created Secret.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Create a SelfSigned Issuer and a Certificate custom resource for cert-manager, then observe the reconciliation loop as the controller automatically generates an actual TLS certificate (Secret). Once Certificate status shows Ready: True, inspect the tls.crt and tls.key fields of the created Secret.</p></div>
               <pre class='starter'><code># 1. Create a SelfSigned Issuer
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -612,9 +662,9 @@ kubectl describe secret my-tls-secret
 
 # Inspect certificate contents (base64 decode)
 kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep -E &#x27;Subject:|DNS:&#x27;</code></pre>
-                <p class='exp2'>When a Certificate custom resource is created, the cert-manager controller runs the reconciliation loop. It compares the current state (no Secret, Ready: False) against the desired state (a valid TLS Secret, Ready: True) and issues a certificate and creates the Secret accordingly. This is the core of the Operator pattern: the user only describes *what* they want (the Certificate declaration), while the controller handles *how* to produce it (generating the CSR, signing it, and storing it as a Secret).</p>
+                <div class='exp2'><p>When a Certificate custom resource is created, the cert-manager controller runs the reconciliation loop. It compares the current state (no Secret, Ready: False) against the desired state (a valid TLS Secret, Ready: True) and issues a certificate and creates the Secret accordingly. This is the core of the Operator pattern: the user only describes <em>what</em> they want (the Certificate declaration), while the controller handles <em>how</em> to produce it (generating the CSR, signing it, and storing it as a Secret).</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Application] Edit the existing Certificate to add &#x27;api.example.com&#x27; to its dnsNames. After applying the change with kubectl edit or kubectl apply, observe the controller automatically re-issuing the certificate and updating the Secret. Compare the Subject Alternative Names (SANs) in tls.crt before and after the update.</p>
+              <div class='q'><p>Practice 3. [Application] Edit the existing Certificate to add &#x27;api.example.com&#x27; to its dnsNames. After applying the change with kubectl edit or kubectl apply, observe the controller automatically re-issuing the certificate and updating the Secret. Compare the Subject Alternative Names (SANs) in tls.crt before and after the update.</p></div>
               <pre class='starter'><code># Option 1: edit directly with kubectl edit
 kubectl edit certificate my-tls-cert
 # Add &#x27;api.example.com&#x27; to dnsNames and save
@@ -652,7 +702,7 @@ kubectl get certificate my-tls-cert -w
 # Verify the renewed certificate&#x27;s SANs
 kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep DNS
 # DNS:example.com, DNS:www.example.com, DNS:api.example.com  &lt;-- now 3 SANs</code></pre>
-                <p class='exp2'>In the Operator pattern, the controller watches for changes to custom resources and automatically reconciles whenever the desired state diverges from the actual state. Detecting the dnsNames change, the cert-manager controller revokes the old certificate and re-issues a new one with the updated SANs. With a single YAML change, a complex PKI re-issuance process is fully automated. This is the core value of the Operator pattern — encoding operational knowledge in code.</p>
+                <div class='exp2'><p>In the Operator pattern, the controller watches for changes to custom resources and automatically reconciles whenever the desired state diverges from the actual state. Detecting the dnsNames change, the cert-manager controller revokes the old certificate and re-issues a new one with the updated SANs. With a single YAML change, a complex PKI re-issuance process is fully automated. This is the core value of the Operator pattern — encoding operational knowledge in code.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=ha3LjlD6g7g' target='_blank'>Kubernetes Operator explained in 10 minutes</a></li><li><a href='https://www.youtube.com/watch?v=i9V4oCa5f9I' target='_blank'>Kubernetes Operators Explained</a></li><li><a href='https://www.youtube.com/watch?v=q7b23612pSc' target='_blank'>Writing Kubernetes Controllers</a></li></ul></div>
         </article>
@@ -809,7 +859,7 @@ kubectl label namespace payments \
 <li>Pod Security Admission is a built-in feature that enforces security standards via namespace labels (privileged/baseline/restricted × enforce/audit/warn) without any additional components.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Use Pod Security Admission to create a &#x27;psa-test&#x27; namespace and apply the &#x27;restricted&#x27; standard in warn mode. Then attempt to create a Pod with a privileged container (privileged: true) in that namespace and observe the warning message.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Use Pod Security Admission to create a &#x27;psa-test&#x27; namespace and apply the &#x27;restricted&#x27; standard in warn mode. Then attempt to create a Pod with a privileged container (privileged: true) in that namespace and observe the warning message.</p></div>
               <pre class='starter'><code># 1. Create the namespace
 kubectl create namespace psa-test
 
@@ -859,9 +909,9 @@ kubectl apply -n psa-test -f priv-pod.yaml
 
 # 5. Delete the Pod
 kubectl delete pod priv-pod -n psa-test</code></pre>
-                <p class='exp2'>Pod Security Admission (PSA) is the built-in admission controller that replaced PodSecurityPolicy in Kubernetes 1.25+. It combines three standards (privileged/baseline/restricted) with three modes (enforce/audit/warn), applied via namespace labels. In warn mode, violations produce a warning but the resource is still created. Starting with warn to understand the blast radius is the recommended approach when gradually tightening policies.</p>
+                <div class='exp2'><p>Pod Security Admission (PSA) is the built-in admission controller that replaced PodSecurityPolicy in Kubernetes 1.25+. It combines three standards (privileged/baseline/restricted) with three modes (enforce/audit/warn), applied via namespace labels. In warn mode, violations produce a warning but the resource is still created. Starting with warn to understand the blast radius is the recommended approach when gradually tightening policies.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Install Kyverno via Helm and create a ClusterPolicy in enforce mode that requires all Pods to have an &#x27;app&#x27; label. Verify that Pods without the label are blocked and Pods with it are allowed.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Install Kyverno via Helm and create a ClusterPolicy in enforce mode that requires all Pods to have an &#x27;app&#x27; label. Verify that Pods without the label are blocked and Pods with it are allowed.</p></div>
               <pre class='starter'><code># 1. Install Kyverno
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
@@ -939,9 +989,9 @@ kubectl run labeled-pod --image=nginx -l app=web
 kubectl get pod labeled-pod --show-labels
 # NAME          READY   STATUS    RESTARTS   AGE   LABELS
 # labeled-pod   1/1     Running   0          10s   app=web</code></pre>
-                <p class='exp2'>Kyverno is a Kubernetes-native policy engine that declares policies as CRD-based YAML. With validationFailureAction: Enforce, the Validating Admission Webhook rejects violating requests directly at the API server. With Audit, violations are recorded but creation is allowed, which is useful for incrementally rolling out policies. Unlike OPA Gatekeeper, Kyverno requires no Rego — policies are written as YAML patterns, lowering the barrier to entry.</p>
+                <div class='exp2'><p>Kyverno is a Kubernetes-native policy engine that declares policies as CRD-based YAML. With validationFailureAction: Enforce, the Validating Admission Webhook rejects violating requests directly at the API server. With Audit, violations are recorded but creation is allowed, which is useful for incrementally rolling out policies. Unlike OPA Gatekeeper, Kyverno requires no Rego — policies are written as YAML patterns, lowering the barrier to entry.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Practice] Write a Kyverno mutate policy that automatically injects an &#x27;app&#x27; label into Pods that are created without one. Apply the policy, create a Pod without a label, and confirm the label was injected automatically.</p>
+              <div class='q'><p>Practice 3. [Core Practice] Write a Kyverno mutate policy that automatically injects an &#x27;app&#x27; label into Pods that are created without one. Apply the policy, create a Pod without a label, and confirm the label was injected automatically.</p></div>
               <pre class='starter'><code># Mutate policy: auto-inject app label
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -1010,9 +1060,9 @@ kubectl get pod auto-labeled --show-labels
 # 5. Clean up
 kubectl delete pod labeled-pod auto-labeled
 kubectl delete clusterpolicy add-default-app-label</code></pre>
-                <p class='exp2'>A Mutating Admission Webhook can modify the request body before a resource is persisted to etcd. Kyverno&#x27;s +(field) syntax is a conditional patch that adds a value only when the field is absent — it does not overwrite an existing value. Pods that already have an app label are left untouched; the default is injected only when the label is missing. While a Validating Webhook allows or denies requests, a Mutating Webhook transforms them to automatically satisfy policies. In production this is used for sidecar injection, setting default resource values, and adding common labels.</p>
+                <div class='exp2'><p>A Mutating Admission Webhook can modify the request body before a resource is persisted to etcd. Kyverno&#x27;s +(field) syntax is a conditional patch that adds a value only when the field is absent — it does not overwrite an existing value. Pods that already have an app label are left untouched; the default is injected only when the label is missing. While a Validating Webhook allows or denies requests, a Mutating Webhook transforms them to automatically satisfy policies. In production this is used for sidecar injection, setting default resource values, and adding common labels.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Application] Apply the &#x27;restricted&#x27; Pod Security Admission standard in enforce mode to the psa-test namespace. Then write a security-hardened Pod that fully complies with the restricted standard (non-root, capabilities drop ALL, seccompProfile RuntimeDefault) and verify it is created successfully.</p>
+              <div class='q'><p>Practice 4. [Application] Apply the &#x27;restricted&#x27; Pod Security Admission standard in enforce mode to the psa-test namespace. Then write a security-hardened Pod that fully complies with the restricted standard (non-root, capabilities drop ALL, seccompProfile RuntimeDefault) and verify it is created successfully.</p></div>
               <pre class='starter'><code># 1. Add enforce mode to the existing psa-test namespace
 kubectl label namespace psa-test \
   pod-security.kubernetes.io/enforce=restricted \
@@ -1090,7 +1140,7 @@ kubectl run blocked-pod --image=nginx -n psa-test
 # 4. Clean up
 kubectl delete pod secure-pod -n psa-test
 kubectl delete namespace psa-test</code></pre>
-                <p class='exp2'>The restricted standard is the most stringent security level in Kubernetes PSA. Its key requirements are: runAsNonRoot: true (forbid root execution), allowPrivilegeEscalation: false (block privilege escalation), capabilities.drop: [ALL] (remove all Linux capabilities), and seccompProfile.type: RuntimeDefault or Localhost (restrict syscalls). Setting all four fields minimizes the container&#x27;s blast radius on the host kernel. Unlike warn/audit, enforce mode completely blocks non-compliant Pod creation.</p>
+                <div class='exp2'><p>The restricted standard is the most stringent security level in Kubernetes PSA. Its key requirements are: runAsNonRoot: true (forbid root execution), allowPrivilegeEscalation: false (block privilege escalation), capabilities.drop: [ALL] (remove all Linux capabilities), and seccompProfile.type: RuntimeDefault or Localhost (restrict syscalls). Setting all four fields minimizes the container&#x27;s blast radius on the host kernel. Unlike warn/audit, enforce mode completely blocks non-compliant Pod creation.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=urvSPmlU69k' target='_blank'>Kubernetes Policy using OPA Gatekeeper</a></li><li><a href='https://www.youtube.com/watch?v=ocSgbSCX34M' target='_blank'>Kubernetes Security - Open Policy Agent - OPA Gatekeeper</a></li><li><a href='https://www.youtube.com/watch?v=iZTQv4F7Djk' target='_blank'>Day 38: Admission Controllers in Kubernetes | Mutating &amp; Validating | CKA Course 2025</a></li></ul></div>
         </article>
@@ -1213,7 +1263,7 @@ spec:
 <li>KEDA uses external events such as queue length and message count as scaling signals and supports scale-to-zero (0↔N). Internally it creates HPA-compatible external metrics.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Install Vertical Pod Autoscaler (VPA) and query recommended resource values for a Deployment in recommender mode. Create a Deployment with intentionally low requests/limits, then create a VPA object in &#x27;Off&#x27; mode (recommend only, no automatic changes) and inspect the recommended CPU and memory values.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Install Vertical Pod Autoscaler (VPA) and query recommended resource values for a Deployment in recommender mode. Create a Deployment with intentionally low requests/limits, then create a VPA object in &#x27;Off&#x27; mode (recommend only, no automatic changes) and inspect the recommended CPU and memory values.</p></div>
               <pre class='starter'><code># 1. Install VPA (metrics-server must be running first)
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-v1-crd-gen.yaml
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-rbac.yaml
@@ -1305,9 +1355,9 @@ kubectl patch vpa vpa-demo-vpa --type=&#x27;json&#x27; -p=&#x27;[{&quot;op&quot;
 
 # After a moment Pods are recreated with the new requests
 kubectl get pods -l app=vpa-demo -o custom-columns=&#x27;NAME:.metadata.name,CPU-REQ:.spec.containers[0].resources.requests.cpu,MEM-REQ:.spec.containers[0].resources.requests.memory&#x27;</code></pre>
-                <p class='exp2'>Unlike HPA, VPA adjusts the CPU/memory requests size of each Pod rather than the number of Pods. updateMode: Off computes recommendations without modifying any Pods. Switching to Auto mode causes VPA to evict and recreate Pods with the new requests applied. HPA is suited for scale-out (horizontal scaling); VPA is suited for scale-up (vertical scaling). Using both on the same Deployment at the same time causes conflicts.</p>
+                <div class='exp2'><p>Unlike HPA, VPA adjusts the CPU/memory requests size of each Pod rather than the number of Pods. updateMode: Off computes recommendations without modifying any Pods. Switching to Auto mode causes VPA to evict and recreate Pods with the new requests applied. HPA is suited for scale-out (horizontal scaling); VPA is suited for scale-up (vertical scaling). Using both on the same Deployment at the same time causes conflicts.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Install KEDA (Kubernetes Event-Driven Autoscaling) and create a CPU-based ScaledObject to observe scale-out and scale-in as load changes. Monitor Pod count changes and ScaledObject status before and after generating load.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Install KEDA (Kubernetes Event-Driven Autoscaling) and create a CPU-based ScaledObject to observe scale-out and scale-in as load changes. Monitor Pod count changes and ScaledObject status before and after generating load.</p></div>
               <pre class='starter'><code># 1. Install KEDA
 helm repo add kedacore https://kedacore.github.io/charts
 helm repo update
@@ -1393,9 +1443,9 @@ kubectl get pods -l app=keda-demo -w
 
 # After stopping load, check ScaledObject status
 kubectl describe scaledobject keda-demo-scaler | grep -A10 &#x27;Conditions:&#x27;</code></pre>
-                <p class='exp2'>KEDA extends HPA to support scaling based on external event sources (Kafka message count, Redis queue length, Prometheus metrics, etc.) in addition to CPU and memory. A ScaledObject automatically creates and manages an HPA object. Setting minReplicaCount: 0 enables scale-to-zero, reducing Pods to none when there are no events and saving cost. cooldownPeriod is the wait time before scaling in, preventing unnecessary oscillation.</p>
+                <div class='exp2'><p>KEDA extends HPA to support scaling based on external event sources (Kafka message count, Redis queue length, Prometheus metrics, etc.) in addition to CPU and memory. A ScaledObject automatically creates and manages an HPA object. Setting minReplicaCount: 0 enables scale-to-zero, reducing Pods to none when there are no events and saving cost. cooldownPeriod is the wait time before scaling in, preventing unnecessary oscillation.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Application] Use KEDA&#x27;s ScaledJob to set up event-driven scaling that creates a Job for each message in a Redis List queue. Deploy Redis, push messages to the queue, and simulate a scenario where a Job is created and processed for each message.</p>
+              <div class='q'><p>Practice 3. [Application] Use KEDA&#x27;s ScaledJob to set up event-driven scaling that creates a Job for each message in a Redis List queue. Deploy Redis, push messages to the queue, and simulate a scenario where a Job is created and processed for each message.</p></div>
               <pre class='starter'><code># 1. Deploy Redis
 kubectl run redis --image=redis --port=6379
 kubectl expose pod redis --port=6379 --name=redis-service
@@ -1487,63 +1537,73 @@ kubectl delete scaledobject keda-demo-scaler
 kubectl delete deploy keda-demo
 kubectl delete pod redis
 kubectl delete service redis-service</code></pre>
-                <p class='exp2'>ScaledJob creates Jobs to process a work queue rather than scaling a Deployment. When messages accumulate in the Redis List, Jobs are created in proportion to listLength, and they are destroyed upon completion. This pattern is ideal for batch processing, image conversion, email sending, and other queue-based tasks. KEDA makes it easy to integrate with diverse event sources such as Kafka, RabbitMQ, Azure Service Bus, and AWS SQS.</p>
+                <div class='exp2'><p>ScaledJob creates Jobs to process a work queue rather than scaling a Deployment. When messages accumulate in the Redis List, Jobs are created in proportion to listLength, and they are destroyed upon completion. This pattern is ideal for batch processing, image conversion, email sending, and other queue-based tasks. KEDA makes it easy to integrate with diverse event sources such as Kafka, RabbitMQ, Azure Service Bus, and AWS SQS.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hsJ2qtwoWZw' target='_blank'>Kubernetes Autoscaling: HPA vs. VPA vs. Keda vs. CA vs. Karpenter vs. Fargate</a></li><li><a href='https://www.youtube.com/watch?v=3lcaawKAv6s' target='_blank'>KEDA: Kubernetes Event-Driven Autoscaling</a></li><li><a href='https://www.youtube.com/watch?v=jM36M39MA3I' target='_blank'>Kubernetes cluster autoscaling for beginners</a></li></ul></div>
         </article>
 <article id='lec5' class='lecture'>
-          <h2>05. GitOps and ArgoCD — Declarative Continuous Delivery <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h2>05. GitOps and ArgoCD — Declarative Continuous Delivery </h2>
           <h3>Learning Objectives</h3>
 <ul>
-<li>Understand GitOps principles and the concept of Git as the single source of truth</li>
+<li>Understand GitOps principles and the concept of &quot;Git as the single source of truth&quot;</li>
 <li>Configure an ArgoCD Application to synchronize a Git repository with cluster state</li>
-<li>Observe drift detection, self-healing, and automated sync behavior in action</li>
+<li>Observe drift detection, self-heal, and automated sync behavior in action</li>
 </ul>
-<h3>Content</h3>
+<h3>Overview</h3>
 <h4>From Push to Pull — What GitOps Changes</h4>
-<p>Think about a traditional CI/CD pipeline. After a build, the pipeline <strong>pushes</strong> a <code class='ic'>kubectl apply</code> or <code class='ic'>helm upgrade</code> into the cluster. This approach has structural problems: the CI system must hold cluster admin credentials (a security risk), the true current state of the cluster lives only in some pipeline log, and any manual <code class='ic'>kubectl edit</code> is invisible — it goes unrecorded anywhere.</p>
-<p>GitOps reverses the flow. Its core principles are:</p>
+<p>Think about a traditional CI/CD pipeline. After a build succeeds, the pipeline pushes the result directly into the cluster via <code class='ic'>kubectl apply</code> or <code class='ic'>helm upgrade</code>. This push-based approach has structural problems: the CI system must hold cluster admin credentials (a security risk), the true current state of the cluster lives only in some pipeline log, and any change made with <code class='ic'>kubectl edit</code> goes completely unrecorded.</p>
+<p>GitOps inverts this flow. The core principles are:</p>
 <p>1. <strong>Declarative</strong> — The entire desired state of the system is expressed as declarative manifests.</p>
-<p>2. <strong>Git as the Single Source of Truth</strong> — Those manifests are stored in Git, which becomes the sole authoritative record of the desired state.</p>
-<p>3. <strong>Automatic Pull</strong> — An agent running inside the cluster continuously monitors Git and aligns cluster state with it. The cluster <em>pulls</em> the desired state rather than the CI pipeline <em>pushing</em> it.</p>
-<p>4. <strong>Continuous Reconciliation</strong> — The agent endlessly compares &quot;current == Git?&quot; and closes any gap it finds.</p>
-<p>Principles 3 and 4 should sound familiar — they are the <strong>reconciliation loop</strong> from the previous lectures. GitOps is simply that controller pattern extended to cover the entire deployment lifecycle. The only difference is that the desired state lives in a Git repository rather than in an in-cluster CR.</p>
-<h4>CI Does Not Disappear — Its Responsibility Shifts</h4>
-<p>Here is the most common misconception to address head-on. <strong>&quot;The cluster pulls from Git&quot; does not mean CI goes away.</strong> In a GitOps workflow, CI is still essential. What changes is only the <em>final step</em> of what CI does.</p>
+<p>2. <strong>Git as the single source of truth</strong> — Those manifests live in Git, which becomes the one authoritative record of desired state.</p>
+<p>3. <strong>Automated pull</strong> — An agent running inside the cluster watches Git for changes and reconciles cluster state to match. The cluster pulls from Git; CI no longer pushes into the cluster.</p>
+<p>4. <strong>Continuous reconciliation</strong> — The agent continuously compares &quot;actual state&quot; against &quot;declared state in Git&quot; and automatically closes any gap it finds.</p>
+<p>Principles 3 and 4 should sound familiar — they are exactly the <strong>reconciliation loop</strong> from the previous lecture. GitOps extends the controller pattern to cover deployments as a whole. The only difference is that the desired state lives in a Git repository rather than a Custom Resource in etcd.</p>
+<h4>CI Doesn&#x27;t Go Away — Its Responsibility Shifts</h4>
+<p>A common misconception is worth addressing head-on: <strong>&quot;the cluster pulls from Git&quot; does not mean CI disappears.</strong> CI remains essential in a GitOps workflow; what changes is the <em>final step</em> of what CI does.</p>
 <ul>
-<li><strong>Build and test stay with CI</strong> — CI still compiles code, runs tests, builds container images, and pushes them to a registry.</li>
-<li><strong>What changes is &quot;what comes next.&quot;</strong> In the past, CI finished by <strong>deploying directly to the cluster (push)</strong>. In GitOps, CI finishes by <strong>updating the image tag in a Git manifest (commit/PR)</strong>. The actual cluster update is handled by ArgoCD, which detects that commit and applies it via a pull.</li>
+<li><strong>Build and test remain CI&#x27;s job</strong> — compile sources, run tests, build container images, and push them to a registry.</li>
+<li><strong>What changes is &quot;what comes next.&quot;</strong> In the old model, CI deployed the artifact directly to the cluster (push). In GitOps, CI&#x27;s job ends when it commits the new image tag (e.g., <code class='ic'>web:v1.4.2</code>) back to the <strong>Git manifest repository</strong>. ArgoCD then detects that commit and applies it to the cluster via pull.</li>
 </ul>
-<p>In other words, CI&#x27;s responsibility shifts <strong>from &quot;issue commands to the cluster (push to cluster)&quot; to &quot;propose a state change in Git (push to Git).&quot;</strong> As a result, CI no longer needs to hold cluster admin credentials (a security improvement), and every deployment flows through a single, auditable path: a Git commit. The separation of concerns becomes clean — CI (build/test/push image) → Git (update manifest) → CD (ArgoCD pulls and applies).</p>
-<p>The sequence diagram below shows the pull-based flow: CI pushes a new image tag to Git, and the in-cluster agent detects that change, pulls it, and applies it to the cluster.</p>
+<p>In other words, CI&#x27;s responsibility shifts <strong>from &quot;push to cluster&quot; to &quot;push to Git.&quot;</strong> As a result, CI no longer needs cluster admin credentials (a security win), and every deployment passes through a single, auditable path: CI (build / test / image push) → Git (manifest update) → CD (ArgoCD pulls and applies).</p>
+<p>The sequence below shows this flow: CI pushes a new image tag to Git, Git notifies ArgoCD via webhook, and the in-cluster agent pulls the updated manifests and applies them.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant Dev as Developer / CI
-    participant Git as Git Repository (source of truth)
-    participant Agent as ArgoCD Agent
-    participant Cluster as Cluster
-    Dev-&gt;&gt;Git: Merge PR updating manifest/image tag
-    loop Continuous Reconciliation
-        Agent-&gt;&gt;Git: Poll desired state
-        Git--&gt;&gt;Agent: Latest manifests
-        Agent-&gt;&gt;Cluster: Query current state
-        Cluster--&gt;&gt;Agent: Actual state
-        Agent-&gt;&gt;Agent: Compute diff (Sync status)
-        Agent-&gt;&gt;Cluster: Apply diff to match Git state
-    end</div><figcaption>GitOps Pull-Based Synchronization Flow</figcaption></figure>
+    participant Dev as 개발자/CI
+    participant Git as &quot;Git 저장소 (정본)&quot;
+    participant Agent as ArgoCD 에이전트
+    participant Cluster as 클러스터
+    Dev-&gt;&gt;Git: 매니페스트/이미지 태그 변경 PR 머지
+    Git-&gt;&gt;Agent: webhook 알림 (변경 발생, 권장 기본)
+    Note over Git,Agent: webhook 유실 대비 약 3분 주기 폴링이 보조로 함께 동작
+    Agent-&gt;&gt;Git: 최신 매니페스트 가져오기
+    Git--&gt;&gt;Agent: 원하는 상태
+    Agent-&gt;&gt;Cluster: 현재 상태 조회
+    Cluster--&gt;&gt;Agent: 실제 상태
+    Agent-&gt;&gt;Agent: 차이 비교 (Sync 상태)
+    Agent-&gt;&gt;Cluster: 차이를 Git 상태로 적용</div><figcaption>GitOps webhook-based sync flow</figcaption></figure>
 <blockquote class='callout'>
-<p>The biggest practical benefit of GitOps is <strong>auditability and rollback</strong>. Every change is recorded as a Git commit, so &quot;who changed what, when, and why&quot; is permanently preserved in PR history. When an incident occurs, a <code class='ic'>git revert</code> restores the previous state in a single step. Treating cluster state as version-controlled code rather than a by-product of human habits — that is the essence of GitOps.</p>
+<p>The most practical benefit of GitOps is <strong>auditability and rollback</strong>. Every change is a Git commit, so &quot;who changed what, when, and why&quot; is preserved in the PR history. When something goes wrong, a single <code class='ic'>git revert</code> restores the previous state. Managing cluster state as version-controlled code rather than ad-hoc manual changes — that is the essence of GitOps.</p>
 </blockquote>
+<h4>How ArgoCD Detects Changes — Webhook First, Polling as Fallback</h4>
+<p>In the diagram above, synchronization is triggered by a Git webhook notification. <strong>In production, this webhook-based approach is the recommended default.</strong> It is worth understanding the difference clearly.</p>
+<ul>
+<li><strong>Git webhook (recommended)</strong> — You register ArgoCD&#x27;s endpoint as a webhook on GitHub, GitLab, or your Git host of choice. The moment a commit is pushed, the Git server sends ArgoCD an immediate notification. ArgoCD starts syncing that Application right away, making propagation nearly instantaneous. This is the standard setup for production.</li>
+<li><strong>Periodic polling (fallback / safety net)</strong> — ArgoCD also polls Git roughly every three minutes by default. This serves as a <strong>safety net</strong> for cases where a webhook event is missed or webhooks have not been configured. Relying on polling alone means changes can take up to a full poll interval to be reflected.</li>
+</ul>
+<blockquote class='callout'>
+<p>In short: a webhook is &quot;notify me the moment something changes (event-driven),&quot; while polling is &quot;I&#x27;ll check periodically on my own.&quot; The recommended configuration is to use webhooks for fast propagation and keep polling as a backup in case a webhook event is dropped. That is why the sequence diagram above shows the webhook as the primary path and polling as the secondary.</p>
+</blockquote>
+<p>Regardless of what triggers a sync, the reconciliation logic is the same: compare the declared state in Git against the actual state in the cluster, and close any gap.</p>
 <h4>Installing ArgoCD and Configuring an Application</h4>
-<p>ArgoCD is the leading tool for implementing GitOps. It runs as an in-cluster controller that monitors designated Git repositories and applies the desired state to the cluster. The fastest way to get started is to apply the official <code class='ic'>install.yaml</code> directly.</p>
+<p>ArgoCD is the leading GitOps implementation. It runs as a controller inside your cluster, watches a designated Git repository, and continuously applies the desired state. The quickest way to get started is to apply the official <code class='ic'>install.yaml</code> directly.</p>
 <pre><code>
 kubectl create namespace argocd
 kubectl apply -n argocd -f \
   https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 </code></pre>
 <blockquote class='callout'>
-<p>Applying <code class='ic'>install.yaml</code> directly is convenient for learning and experimentation, but for production deployments the <strong>official ArgoCD Helm chart or a Kustomize-based installation</strong> is preferred because it is easier to version-control and customize. Interestingly, running ArgoCD in a &quot;self-managed&quot; pattern (app-of-apps) — where ArgoCD manages its own configuration through GitOps — is common in practice.</p>
+<p>Applying <code class='ic'>install.yaml</code> directly is fine for learning and experimentation, but in production the preferred approach is the <strong>official ArgoCD Helm chart or a Kustomize-based installation</strong>, which makes it easy to version-control and customize the configuration. A common pattern is &quot;self-managed&quot; ArgoCD (app-of-apps), where the ArgoCD installation itself is tracked in Git and managed by ArgoCD — GitOps all the way down.</p>
 </blockquote>
-<p>The central concept in ArgoCD is the <strong>Application</strong> CRD. It declares &quot;which Git repository / which path / to which cluster / to which namespace / how to synchronize.&quot;</p>
+<p>The central concept in ArgoCD is the <strong>Application</strong> CRD. It declares &quot;which path in which Git repository to sync, into which cluster and namespace, and how.&quot;</p>
 <pre><code>
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -1554,47 +1614,55 @@ spec:
   project: default
   source:
     repoURL: https://github.com/our-org/k8s-manifests.git
-    targetRevision: main          # branch/tag to track
-    path: apps/web                # path to manifests (Helm/Kustomize/plain YAML)
+    targetRevision: main          # branch or tag to track
+    path: apps/web                # path to manifests (Helm / Kustomize / plain YAML)
   destination:
     server: https://kubernetes.default.svc
     namespace: web
   syncPolicy:
     automated:
       prune: true                 # remove resources deleted from Git
-      selfHeal: true              # auto-recover drift
+      selfHeal: true              # auto-correct any drift
     syncOptions:
       - CreateNamespace=true
 </code></pre>
-<p>Once you <code class='ic'>kubectl apply</code> this Application, ArgoCD immediately reads Git and deploys to the cluster. Check that the ArgoCD UI or <code class='ic'>argocd app get web-app</code> shows a status of <strong>Synced / Healthy</strong>. ArgoCD accepts plain YAML, Helm charts, and Kustomize as source formats, so existing assets can be reused directly.</p>
+<p>Once you <code class='ic'>kubectl apply</code> this Application, ArgoCD immediately reads the Git repository and deploys to the cluster. Verify that the Application shows <strong>Synced / Healthy</strong> in the ArgoCD UI or with <code class='ic'>argocd app get web-app</code>. ArgoCD accepts plain YAML, Helm charts, and Kustomize overlays as sources, so you can reuse existing assets.</p>
 <blockquote class='callout'>
-<p>The example above tracks the <code class='ic'>main</code> branch directly for simplicity. In a real organization, changes are <strong>promoted</strong> across environments. A common pattern is to have separate paths or overlays per environment (e.g., Kustomize <code class='ic'>overlays/dev</code>, <code class='ic'>overlays/staging</code>, <code class='ic'>overlays/prod</code>) and separate ArgoCD Applications per environment, with CI promoting a validated image tag from dev → staging → prod via PRs. In GitOps terms, &quot;promoting this image to production&quot; means &quot;merging a PR that updates the image tag in the production manifest.&quot; This image promotion pipeline is what GitOps actually looks like day-to-day.</p>
+<p>The example above uses <code class='ic'>spec.project: default</code> for simplicity, but in production you should create separate <strong>AppProjects</strong> per team or purpose. AppProjects let you restrict which Git repositories, clusters, and namespaces each Application can target, giving you fine-grained access control and a bounded blast radius.</p>
 </blockquote>
-<h4>Drift, Self-Healing, and Prune</h4>
-<p>ArgoCD tracks two distinct states: <strong>Sync status</strong> (does the cluster match Git?) and <strong>Health status</strong> (is the resource operating correctly?). The most important concept here is <strong>drift</strong>.</p>
-<p>Drift occurs when the actual cluster state diverges from what is declared in Git. If someone ran <code class='ic'>kubectl edit deployment web</code> and changed replicas to 5, but the Git manifest says 3, ArgoCD marks the Application as <strong>OutOfSync</strong>.</p>
-<p>With <code class='ic'>selfHeal: true</code> enabled, ArgoCD automatically <strong>reverts</strong> the cluster to the Git state (replicas: 3). In effect, manual changes that bypass Git are rejected. Try this yourself:</p>
+<blockquote class='callout'>
+<p>The example also tracks the <code class='ic'>main</code> branch directly for simplicity. Real-world organizations, however, <strong>promote</strong> changes through environments. A common pattern is to give each environment its own path or overlay (e.g., Kustomize <code class='ic'>overlays/dev</code>, <code class='ic'>overlays/staging</code>, <code class='ic'>overlays/prod</code>) or a separate Application, and have CI promote a validated image tag from dev → staging → prod through pull requests. &quot;Deploy this image to production&quot; becomes &quot;merge the PR that bumps the tag in the production manifest.&quot; This image promotion pipeline is what GitOps looks like in day-to-day operations.</p>
+</blockquote>
+<blockquote class='callout'>
+<p><strong>Having a production Application track a development branch like <code class='ic'>main</code> is dangerous.</strong> With <code class='ic'>targetRevision: main</code>, every commit a developer pushes to <code class='ic'>main</code> instantly becomes a production deployment candidate. Unvalidated changes can flow all the way to production on a single webhook event, making it hard to control &quot;what goes out and when&quot; and widening the blast radius of any incident. In practice: (1) pin the production Application&#x27;s <code class='ic'>targetRevision</code> to an <strong>environment-specific branch (<code class='ic'>release/prod</code>) or an immutable version tag (<code class='ic'>v1.4.2</code>)</strong> to isolate the development and production flows, or (2) ensure that production manifests can only be updated via a <strong>dedicated promotion PR</strong> that requires review and approval. Either way, the key is to align your branching strategy (Git-flow, trunk-based, etc.) consistently with each Application&#x27;s <code class='ic'>targetRevision</code>, so that &quot;goes to production&quot; always means a deliberate, intentional promotion.</p>
+</blockquote>
+<h4>Drift, Self-Heal, and Prune</h4>
+<p>ArgoCD tracks two kinds of state: <strong>Sync status</strong> (does the cluster match Git?) and <strong>Health status</strong> (are the resources operating correctly?). The most important concept here is <strong>drift</strong>.</p>
+<p>Drift occurs when the actual cluster state diverges from what is declared in Git. If someone runs <code class='ic'>kubectl edit deployment web</code> and sets <code class='ic'>replicas</code> to 5, but Git says 3, ArgoCD marks that Application as <strong>OutOfSync</strong>.</p>
+<p>With <code class='ic'>selfHeal: true</code> enabled, ArgoCD automatically reconciles the cluster back to the Git state (replicas: 3). Any manual change made outside of Git is effectively rejected. Let&#x27;s observe this directly.</p>
 <pre><code>
-# Git has replicas: 3, but manually change it to 5
+# Git declares replicas: 3 — let&#x27;s manually scale to 5
 kubectl scale deployment web -n web --replicas=5
-# After a moment, ArgoCD reverts it back to 3
+# A moment later, ArgoCD rolls it back to 3
 kubectl get deployment web -n web -w
 </code></pre>
-<p><code class='ic'>prune: true</code> handles the opposite direction. When a resource is <strong>deleted</strong> from Git, ArgoCD removes it from the cluster as well. Leaving prune disabled means deleted-from-Git resources linger in the cluster as orphans. To maintain GitOps consistency, prune is typically enabled — though it is wise to start with manual prune to assess the impact before enabling full automation in production.</p>
-<p>To summarize, the day-to-day operational workflow becomes this simple under GitOps: to change a deployment, don&#x27;t touch the cluster directly — <strong>open a Git PR</strong>. When the PR is merged, ArgoCD detects the change and applies it. If something goes wrong, revert the PR. No direct cluster access required means no need to hand admin credentials to CI.</p>
+<p><code class='ic'>prune: true</code> handles the opposite direction: when a resource is <strong>deleted</strong> from Git, ArgoCD removes it from the cluster as well. Without pruning, removed resources linger in the cluster as orphans. You generally want pruning on to maintain GitOps consistency — though it is prudent to start with manual pruning in production so you can review the impact before enabling full automation.</p>
+<p>The day-to-day workflow in a GitOps setup is straightforward: to change a deployment, you open a <strong>PR against Git</strong> rather than touching the cluster directly. When the PR merges, ArgoCD detects the change (via webhook) and applies it. If something breaks, you revert the PR. Because you never directly touch the cluster, you never need to hand CI admin credentials.</p>
 <blockquote class='callout'>
-<p>self-heal is powerful, but a common stumbling block is doing a quick <code class='ic'>kubectl edit</code> during debugging only to have ArgoCD immediately revert it, causing confusion. During urgent investigations, temporarily disable auto-sync for the Application — or better yet, <strong>always make changes through Git</strong>, which is exactly what GitOps intends.</p>
+<p>Self-heal is powerful, but a common gotcha is making a quick <code class='ic'>kubectl edit</code> for debugging and watching ArgoCD immediately undo it. During incident investigation, you can temporarily disable automated sync for the affected Application — but the better long-term habit is to <strong>always make changes through Git</strong>, which is what GitOps intends.</p>
 </blockquote>
 <h3>Key Takeaways</h3>
 <ul>
-<li>GitOps inverts deployments from push to pull. An in-cluster agent monitors Git and autonomously pulls and applies the desired state.</li>
-<li>CI does not disappear. It still handles build, test, and image push — but its final step changes from &quot;deploy directly to the cluster&quot; to &quot;update the image tag in a Git manifest (PR).&quot; The actual cluster update is performed by ArgoCD via pull.</li>
-<li>The four principles: declarative, Git as single source of truth, automatic pull application, and continuous reconciliation. It is the controller reconciliation loop extended to the full deployment lifecycle.</li>
-<li>ArgoCD&#x27;s Application CRD declares &quot;which Git path to synchronize to which cluster/namespace.&quot; It supports Helm, Kustomize, and plain YAML. In production, per-environment overlays enable a dev → staging → prod promotion workflow.</li>
-<li>Drift is the OutOfSync condition where the cluster diverges from Git. <code class='ic'>selfHeal</code> auto-recovers manual changes back to Git state; <code class='ic'>prune</code> removes from the cluster resources that were deleted from Git.</li>
+<li>GitOps flips deployment from push to pull. An agent inside the cluster watches Git and reconciles desired state on its own.</li>
+<li>CI does not disappear. It still handles build, test, and image push — but its final step changes from &quot;deploy directly to the cluster&quot; to &quot;commit the new image tag to the Git manifest repository.&quot; ArgoCD handles the actual application via pull.</li>
+<li>The four principles: declarative, Git as single source of truth, automated pull, continuous reconciliation (auto-closing the gap between desired and actual state). This extends the controller reconciliation loop to cover the entire deployment lifecycle.</li>
+<li>ArgoCD change detection: <strong>Git webhooks are the recommended default</strong> — syncing fires immediately on push. <strong>Periodic polling (roughly every 3 minutes) is the fallback safety net</strong> for missed or unconfigured webhooks.</li>
+<li>The ArgoCD Application CRD declares &quot;which Git path to sync into which cluster/namespace.&quot; It supports Helm, Kustomize, and plain YAML. In production, use AppProjects for access isolation and environment-specific overlays to implement a dev → staging → prod promotion pipeline.</li>
+<li><strong>Having a production Application track a development branch like <code class='ic'>main</code> is risky</strong> — every commit becomes an immediate production deployment candidate. Pin production to an environment-specific branch (<code class='ic'>release/prod</code>) or an immutable version tag, or gate production manifest changes behind a promotion PR with required review. Keep your branching strategy and <code class='ic'>targetRevision</code> consistently aligned.</li>
+<li>Drift is the OutOfSync state where the cluster diverges from Git. <code class='ic'>selfHeal</code> automatically restores manual changes back to the Git state; <code class='ic'>prune</code> removes resources from the cluster when they are deleted from Git.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Install ArgoCD in your cluster and access the UI. After installation, verify the Pod status in the argocd namespace, then expose argocd-server via NodePort or port-forward and log in with the initial admin password.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Install ArgoCD in your cluster and access the UI. After installation, verify the Pod status in the argocd namespace, then expose argocd-server via NodePort or port-forward and log in with the initial admin password.</p></div>
               <pre class='starter'><code># 1. Install ArgoCD
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
@@ -1633,9 +1701,9 @@ argocd login localhost:8080 --username admin --password $(kubectl -n argocd get 
 argocd cluster list
 # SERVER                                  NAME        STATUS
 # https://kubernetes.default.svc          in-cluster  Successful</code></pre>
-                <p class='exp2'>ArgoCD is a Kubernetes-native GitOps tool that uses a Git repository as the single source of truth for cluster state. Installation creates several components: argocd-server (API/UI), argocd-repo-server (Git integration), argocd-application-controller (sync controller), and argocd-dex-server (authentication). Port-forward is a quick way to access a service in a local development environment. In production, use an Ingress or LoadBalancer Service instead.</p>
+                <div class='exp2'><p>ArgoCD is a Kubernetes-native GitOps tool that uses a Git repository as the single source of truth for cluster state. Installation creates several components: argocd-server (API/UI), argocd-repo-server (Git integration), argocd-application-controller (sync controller), and argocd-dex-server (authentication). Port-forward is a quick way to access a service in a local development environment. In production, use an Ingress or LoadBalancer Service instead.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Create an ArgoCD Application pointing to Kubernetes manifests in a public GitHub repository (or a local Git server). Set the sync policy to &#x27;manual&#x27; and perform the first manual sync to verify the application is deployed to the cluster.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Create an ArgoCD Application pointing to Kubernetes manifests in a public GitHub repository (or a local Git server). Set the sync policy to &#x27;manual&#x27; and perform the first manual sync to verify the application is deployed to the cluster.</p></div>
               <pre class='starter'><code># Using the official ArgoCD example repository
 # https://github.com/argoproj/argocd-example-apps
 # Path: guestbook/ (Deployment + Service)
@@ -1709,9 +1777,9 @@ kubectl get applications -n argocd
 
 # Verify deployed resources
 kubectl get all -n guestbook</code></pre>
-                <p class='exp2'>An ArgoCD Application declares which path in a Git repository to deploy to which namespace in the cluster. Without syncPolicy.automated, the Application operates in manual sync mode. OutOfSync means the Git source and cluster state differ; Synced means they match. Health status reflects whether the actual resources (Deployment, Pods, etc.) are operating normally. In GitOps, a Git commit — not a kubectl apply — is the trigger for deployment.</p>
+                <div class='exp2'><p>An ArgoCD Application declares which path in a Git repository to deploy to which namespace in the cluster. Without syncPolicy.automated, the Application operates in manual sync mode. OutOfSync means the Git source and cluster state differ; Synced means they match. Health status reflects whether the actual resources (Deployment, Pods, etc.) are operating normally. In GitOps, a Git commit — not a kubectl apply — is the trigger for deployment.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Practice] Practice ArgoCD self-healing and drift detection. Enable automated syncPolicy (selfHeal: true, prune: true) on the Application, then manually change a resource in the cluster to introduce drift. Observe ArgoCD automatically reverting the cluster back to the Git state.</p>
+              <div class='q'><p>Practice 3. [Core Practice] Practice ArgoCD self-healing and drift detection. Enable automated syncPolicy (selfHeal: true, prune: true) on the Application, then manually change a resource in the cluster to introduce drift. Observe ArgoCD automatically reverting the cluster back to the Git state.</p></div>
               <pre class='starter'><code># 1. Enable automated syncPolicy
 kubectl patch application guestbook -n argocd \
   --type=merge \
@@ -1765,9 +1833,9 @@ argocd app history guestbook
 kubectl create configmap extra-config -n guestbook --from-literal=key=val
 # After a few seconds ArgoCD auto-deletes it (not in Git)
 kubectl get configmap -n guestbook</code></pre>
-                <p class='exp2'>With selfHeal: true, ArgoCD compares cluster state against Git state every 3 minutes (default) and automatically synchronizes any drift it finds. Changing replicas via kubectl scale is reverted by ArgoCD back to the Git value. prune: true removes resources from the cluster that no longer exist in Git. Together these two settings implement the GitOps guarantee that &#x27;Git is the sole source of truth for the cluster.&#x27; All changes must now flow through a Git commit.</p>
+                <div class='exp2'><p>With selfHeal: true, ArgoCD compares cluster state against Git state every 3 minutes (default) and automatically synchronizes any drift it finds. Changing replicas via kubectl scale is reverted by ArgoCD back to the Git value. prune: true removes resources from the cluster that no longer exist in Git. Together these two settings implement the GitOps guarantee that &#x27;Git is the sole source of truth for the cluster.&#x27; All changes must now flow through a Git commit.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Application] Practice deploying an ArgoCD Application across multiple environments (dev/prod). Create two Applications pointing to different paths (or branches) in the same Git repository. After pushing a manifest change to the dev path in Git, confirm that only the dev Application becomes OutOfSync.</p>
+              <div class='q'><p>Practice 4. [Application] Practice deploying an ArgoCD Application across multiple environments (dev/prod). Create two Applications pointing to different paths (or branches) in the same Git repository. After pushing a manifest change to the dev path in Git, confirm that only the dev Application becomes OutOfSync.</p></div>
               <pre class='starter'><code># Prerequisite: fork argocd-example-apps or use a local Git server
 # Here we simulate with different paths
 
@@ -1881,7 +1949,7 @@ kubectl get applications -n argocd
 # Clean up
 argocd app delete guestbook guestbook-dev guestbook-prod
 kubectl delete namespace guestbook guestbook-dev guestbook-prod</code></pre>
-                <p class='exp2'>In a multi-environment (dev/prod) GitOps pattern, dev typically uses automated selfHeal for rapid feedback, while prod uses manual sync to require a review and approval step before any change takes effect. Using ArgoCD&#x27;s App of Apps pattern or ApplicationSet allows you to manage dozens of environments and clusters as code. Separating environments by directory structure (or branch) in a Git repository enables declarative management of multiple environments from a single ArgoCD instance.</p>
+                <div class='exp2'><p>In a multi-environment (dev/prod) GitOps pattern, dev typically uses automated selfHeal for rapid feedback, while prod uses manual sync to require a review and approval step before any change takes effect. Using ArgoCD&#x27;s App of Apps pattern or ApplicationSet allows you to manage dozens of environments and clusters as code. Separating environments by directory structure (or branch) in a Git repository enables declarative management of multiple environments from a single ArgoCD instance.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=f5EpcWp0THw' target='_blank'>What is GitOps, How GitOps works and Why it&#x27;s so useful</a></li><li><a href='https://www.youtube.com/watch?v=MeU5_k9ssrs' target='_blank'>ArgoCD Tutorial for Beginners | GitOps CD for Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=Yb3_4PZX0B0' target='_blank'>Let&#x27;s do GitOps in Kubernetes! ArgoCD Tutorial</a></li></ul></div>
         </article>
@@ -2013,7 +2081,7 @@ spec:
 <li>A PodDisruptionBudget guarantees a minimum number of available Pods during voluntary disruptions such as node drains and autoscaler scale-down. It does not protect against involuntary failures, and being too restrictive can block maintenance operations.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Create a PodDisruptionBudget (PDB) and observe how it restricts Pod eviction when you run kubectl drain. Create a Deployment, set PDB with minAvailable: 2, then on a single-node cluster try a drain and observe the resulting message.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Create a PodDisruptionBudget (PDB) and observe how it restricts Pod eviction when you run kubectl drain. Create a Deployment, set PDB with minAvailable: 2, then on a single-node cluster try a drain and observe the resulting message.</p></div>
               <pre class='starter'><code># 1. Test Deployment (replicas: 3)
 kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
 apiVersion: apps/v1
@@ -2096,9 +2164,9 @@ kubectl uncordon minikube
 # Clean up
 kubectl delete deploy pdb-demo
 kubectl delete pdb pdb-demo-pdb</code></pre>
-                <p class='exp2'>A PodDisruptionBudget guarantees a minimum number of available Pods during voluntary disruptions such as drain operations and rolling updates. With minAvailable: 2, only 1 of the 3 Pods may be evicted at once. The ALLOWED DISRUPTIONS column reflects this. PDB does not apply to involuntary disruptions (node failures). During rolling updates, PDB also applies alongside maxUnavailable to ensure zero-downtime deployments.</p>
+                <div class='exp2'><p>A PodDisruptionBudget guarantees a minimum number of available Pods during voluntary disruptions such as drain operations and rolling updates. With minAvailable: 2, only 1 of the 3 Pods may be evicted at once. The ALLOWED DISRUPTIONS column reflects this. PDB does not apply to involuntary disruptions (node failures). During rolling updates, PDB also applies alongside maxUnavailable to ensure zero-downtime deployments.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Install Argo Rollouts and create a Rollout object using the Canary deployment strategy. Define canary steps that progressively shift traffic from 20% to 50% to 100%, pausing at each stage for manual approval before proceeding.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Install Argo Rollouts and create a Rollout object using the Canary deployment strategy. Define canary steps that progressively shift traffic from 20% to 50% to 100%, pausing at each stage for manual approval before proceeding.</p></div>
               <pre class='starter'><code># 1. Install Argo Rollouts
 kubectl create namespace argo-rollouts
 kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
@@ -2200,9 +2268,9 @@ kubectl argo rollouts promote canary-demo
 # Second promote
 kubectl argo rollouts promote canary-demo
 # 100% cutover complete</code></pre>
-                <p class='exp2'>Argo Rollouts&#x27; Canary strategy executes the steps defined in the steps list in order. setWeight controls the percentage of traffic routed to canary Pods; with 5 replicas and setWeight: 20, 1 canary Pod is created (20%). pause: {} waits indefinitely until a promote command is issued. pause: {duration: 30} auto-advances after 30 seconds. This staged traffic shifting is the core of progressive delivery — at each step metrics can be reviewed and an abort command can roll back if issues are found.</p>
+                <div class='exp2'><p>Argo Rollouts&#x27; Canary strategy executes the steps defined in the steps list in order. setWeight controls the percentage of traffic routed to canary Pods; with 5 replicas and setWeight: 20, 1 canary Pod is created (20%). pause: {} waits indefinitely until a promote command is issued. pause: {duration: 30} auto-advances after 30 seconds. This staged traffic shifting is the core of progressive delivery — at each step metrics can be reviewed and an abort command can roll back if issues are found.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Application] Combine a Rollout with a PDB to guarantee a minimum number of available Pods even during a Canary deployment. Create a PDB with minAvailable: 4 for a Rollout with 5 replicas. During a Canary deployment, attempt a kubectl drain to observe how the PDB constrains both the deployment and the drain simultaneously.</p>
+              <div class='q'><p>Practice 3. [Application] Combine a Rollout with a PDB to guarantee a minimum number of available Pods even during a Canary deployment. Create a PDB with minAvailable: 4 for a Rollout with 5 replicas. During a Canary deployment, attempt a kubectl drain to observe how the PDB constrains both the deployment and the drain simultaneously.</p></div>
               <pre class='starter'><code># 1. Create a PDB linked to the Rollout
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -2273,7 +2341,7 @@ kubectl argo rollouts undo canary-demo
 kubectl delete rollout canary-demo
 kubectl delete pdb canary-demo-pdb
 kubectl delete service canary-demo-svc</code></pre>
-                <p class='exp2'>Using PDB together with a Canary deployment provides double protection for service availability. When both a canary Pod replacement (voluntary disruption) and a node drain (also voluntary) happen simultaneously, the PDB&#x27;s ALLOWED DISRUPTIONS reaches 0 and both operations are blocked. In practice, schedule drain operations during a maintenance window, or set minAvailable low enough relative to replicas to allow both deployment and infrastructure maintenance to proceed concurrently.</p>
+                <div class='exp2'><p>Using PDB together with a Canary deployment provides double protection for service availability. When both a canary Pod replacement (voluntary disruption) and a node drain (also voluntary) happen simultaneously, the PDB&#x27;s ALLOWED DISRUPTIONS reaches 0 and both operations are blocked. In practice, schedule drain operations during a maintenance window, or set minAvailable low enough relative to replicas to allow both deployment and infrastructure maintenance to proceed concurrently.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hIL0E2gLkf8' target='_blank'>Argo Rollouts Demo</a></li><li><a href='https://www.youtube.com/watch?v=84Ky0aPbHvY' target='_blank'>Argo Rollouts - Canary Deployments Made Easy In Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=6zWfVqkKuyI' target='_blank'>Kubernetes Deployment strategies | Canary Deployment | Argo rollout</a></li></ul></div>
         </article>
@@ -2419,7 +2487,7 @@ istioctl dashboard kiali
 <li>Metrics and service topology (Kiali) are obtained almost automatically. <strong>Distributed tracing is the exception</strong> — the application must propagate tracing headers between service calls, or traces will be fragmented and unusable.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. [Warm-up] Install Istio using istioctl and enable automatic sidecar injection. Label the default namespace with istio-injection, deploy a test application, and verify that each Pod has an Envoy sidecar container injected automatically.</p>
+              <div class='q'><p>Practice 1. [Warm-up] Install Istio using istioctl and enable automatic sidecar injection. Label the default namespace with istio-injection, deploy a test application, and verify that each Pod has an Envoy sidecar container injected automatically.</p></div>
               <pre class='starter'><code># 1. Download and install Istio
 curl -L https://istio.io/downloadIstio | sh -
 cd istio-*/bin
@@ -2479,9 +2547,9 @@ kubectl get pods
 
 # List containers in a specific Pod (verify istio-proxy container)
 kubectl describe pod productpage-v1-xxx | grep &#x27;Container ID&#x27; -A3</code></pre>
-                <p class='exp2'>Installing Istio creates istiod (the control plane) along with istio-ingressgateway and istio-egressgateway (data plane gateways). Adding the istio-injection=enabled label to a namespace causes all Pods created there afterward to have an Envoy proxy container (istio-proxy) injected automatically. READY 2/2 means both the application container and the Envoy sidecar are ready. Existing Pods are not auto-injected — use kubectl rollout restart to recreate them.</p>
+                <div class='exp2'><p>Installing Istio creates istiod (the control plane) along with istio-ingressgateway and istio-egressgateway (data plane gateways). Adding the istio-injection=enabled label to a namespace causes all Pods created there afterward to have an Envoy proxy container (istio-proxy) injected automatically. READY 2/2 means both the application container and the Envoy sidecar are ready. Existing Pods are not auto-injected — use kubectl rollout restart to recreate them.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. [Core Practice] Use VirtualService and DestinationRule to split traffic across three versions of the Bookinfo reviews service (v1/v2/v3). Configure weight-based routing that sends 70% to v1 and 30% to v3. Validate the actual traffic distribution with repeated curl requests.</p>
+              <div class='q'><p>Practice 2. [Core Practice] Use VirtualService and DestinationRule to split traffic across three versions of the Bookinfo reviews service (v1/v2/v3). Configure weight-based routing that sends 70% to v1 and 30% to v3. Validate the actual traffic distribution with repeated curl requests.</p></div>
               <pre class='starter'><code># 1. DestinationRule: define subsets (Pod groups by version)
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
@@ -2580,9 +2648,9 @@ done
 # Check VirtualService status
 kubectl get virtualservice reviews-vs
 kubectl get destinationrule reviews-dr</code></pre>
-                <p class='exp2'>DestinationRule groups a service&#x27;s Pods into subsets by version label. VirtualService then distributes traffic across those subsets using weights. The sum of weight values must equal 100. This mechanism is how Istio enables Canary deployments without Argo Rollouts. The Envoy sidecar intercepts all traffic and routes it according to the VirtualService rules, applying the traffic policy without any changes to application code.</p>
+                <div class='exp2'><p>DestinationRule groups a service&#x27;s Pods into subsets by version label. VirtualService then distributes traffic across those subsets using weights. The sum of weight values must equal 100. This mechanism is how Istio enables Canary deployments without Argo Rollouts. The Envoy sidecar intercepts all traffic and routes it according to the VirtualService rules, applying the traffic policy without any changes to application code.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. [Core Practice] Apply PeerAuthentication to enforce mTLS in STRICT mode across the entire namespace. Verify that plain-text requests from a Pod without a sidecar are rejected after the change, and use istioctl to confirm the mTLS authentication state.</p>
+              <div class='q'><p>Practice 3. [Core Practice] Apply PeerAuthentication to enforce mTLS in STRICT mode across the entire namespace. Verify that plain-text requests from a Pod without a sidecar are rejected after the change, and use istioctl to confirm the mTLS authentication state.</p></div>
               <pre class='starter'><code># 1. Check current mTLS state (PERMISSIVE by default)
 istioctl x describe pod $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)
 
@@ -2647,9 +2715,9 @@ curl -s http://$(minikube ip):$INGRESS_PORT/productpage | head -20
 istioctl authn tls-check $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;) reviews
 # HOST:PORT            STATUS    SERVER    CLIENT    AUTHN POLICY        DESTINATION RULE
 # reviews:9080         OK        STRICT    STRICT    default-mtls/...    reviews-dr/...</code></pre>
-                <p class='exp2'>PeerAuthentication STRICT mode enforces mTLS for all inter-service communication in the namespace. Pods with Istio sidecars automatically negotiate an encrypted mTLS channel by exchanging certificates via Envoy. Plain-text traffic from Pods without sidecars is rejected in STRICT mode. PERMISSIVE mode allows both mTLS and plaintext for use during incremental migration. The istioctl authn tls-check command shows the actual mTLS negotiation result between two services.</p>
+                <div class='exp2'><p>PeerAuthentication STRICT mode enforces mTLS for all inter-service communication in the namespace. Pods with Istio sidecars automatically negotiate an encrypted mTLS channel by exchanging certificates via Envoy. Plain-text traffic from Pods without sidecars is rejected in STRICT mode. PERMISSIVE mode allows both mTLS and plaintext for use during incremental migration. The istioctl authn tls-check command shows the actual mTLS negotiation result between two services.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. [Application] Install Istio&#x27;s observability add-ons (Kiali, Jaeger) and experience service mesh visualization and distributed tracing. Generate traffic to Bookinfo, then view the service dependency graph in Kiali and inspect distributed trace spans for an HTTP request in Jaeger.</p>
+              <div class='q'><p>Practice 4. [Application] Install Istio&#x27;s observability add-ons (Kiali, Jaeger) and experience service mesh visualization and distributed tracing. Generate traffic to Bookinfo, then view the service dependency graph in Kiali and inspect distributed trace spans for an HTTP request in Jaeger.</p></div>
               <pre class='starter'><code># 1. Install Kiali, Jaeger, Prometheus, and Grafana (Istio sample add-ons)
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/kiali.yaml
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/jaeger.yaml
@@ -2714,7 +2782,7 @@ kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.20/sam
 kubectl delete peerauthentication default-mtls
 kubectl delete virtualservice reviews-vs
 kubectl delete destinationrule reviews-dr</code></pre>
-                <p class='exp2'>Istio provides three observability capabilities without any application code changes. First, metrics (Prometheus/Grafana): request rate, error rate, and P99 latency are collected automatically. Second, distributed tracing (Jaeger/Zipkin): the latency of each service hop and the full request path are recorded as spans. Third, a service graph (Kiali): real-time traffic flows and service dependencies are visualized. Together these three form the three pillars of observability for a service mesh: metrics, traces, and logs.</p>
+                <div class='exp2'><p>Istio provides three observability capabilities without any application code changes. First, metrics (Prometheus/Grafana): request rate, error rate, and P99 latency are collected automatically. Second, distributed tracing (Jaeger/Zipkin): the latency of each service hop and the full request path are recorded as spans. Third, a service graph (Kiali): real-time traffic flows and service dependencies are visualized. Together these three form the three pillars of observability for a service mesh: metrics, traces, and logs.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=16fgzklcF7Y' target='_blank'>Istio &amp; Service Mesh - simply explained in 15 mins</a></li><li><a href='https://www.youtube.com/watch?v=H4YIKwAQMKk' target='_blank'>Istio Tutorial (Service Mesh - Ingress Gateway - Virtual Service - Gateway - Ingress - mTLS)</a></li><li><a href='https://www.youtube.com/watch?v=0w23AQ-hrF4' target='_blank'>[ Kube 57 ] Istio demo with Kiali and traffic management</a></li></ul></div>
         </article></main>

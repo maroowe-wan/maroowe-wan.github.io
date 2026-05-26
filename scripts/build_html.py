@@ -166,9 +166,9 @@ def render_exercise(ex, S):
                 f"<li class='opt' onclick='pick(this,{i},{j})'>{html.escape(o)}</li>"
                 for j, o in enumerate(q.get("options", [])))
             items.append(f"""<div class='quiz' data-ans='{q.get("answer_index",0)}'>
-              <p class='q'>Q{i+1}. {html.escape(q.get("question",""))}</p>
+              <div class='q'>{md_to_html(f"Q{i+1}. " + q.get("question",""))}</div>
               <ul class='opts'>{opts}</ul>
-              <div class='exp'>{html.escape(q.get("explanation",""))}</div></div>""")
+              <div class='exp'>{md_to_html(q.get("explanation",""))}</div></div>""")
         return f"<section class='ex'><h3>{S['quiz_heading']}</h3>{''.join(items)}</section>"
     else:  # practical
         items = []
@@ -176,12 +176,12 @@ def render_exercise(ex, S):
             starter = f"<pre class='starter'><code>{html.escape(t.get('starter',''))}</code></pre>" if t.get("starter") else ""
             hints = "".join(f"<li>{html.escape(h)}</li>" for h in t.get("hints", []))
             items.append(f"""<div class='task'>
-              <p class='q'>{S['task_label']} {i+1}. {html.escape(t.get('prompt',''))}</p>
+              <div class='q'>{md_to_html(f"{S['task_label']} {i+1}. " + t.get('prompt',''))}</div>
               {starter}
               <details><summary>{S['hint']}</summary><ul>{hints}</ul></details>
               <details><summary>{S['show_answer']}</summary>
                 <pre class='sol'><code>{html.escape(t.get('solution',''))}</code></pre>
-                <p class='exp2'>{html.escape(t.get('explanation',''))}</p>
+                <div class='exp2'>{md_to_html(t.get('explanation',''))}</div>
               </details></div>""")
         return f"<section class='ex'><h3>{S['practical_heading']}</h3>{''.join(items)}</section>"
 
@@ -255,6 +255,21 @@ def _pick_lang_file(ldir, base, ext, lang):
             return cand
     return os.path.join(ldir, f"{base}.{ext}")
 
+_STALE_TOL = 2  # 초. 원본 생성 시 ko/en이 거의 동시에 써져 생기는 1초 미만 오차를 무시한다.
+
+def _check_staleness(ldir, lang):
+    """영문 산출물이 한국어 원본보다 (의미 있게) 오래됐는지 검사해 경고 문자열을 돌려준다.
+    mtime 비교라 git checkout/파일복사로 흔들릴 수 있어 '하드 실패'가 아니라 소프트 경고용이며,
+    _STALE_TOL 초 이내 차이는 동시 작성으로 보고 무시한다(오탐 방지).
+    한국어 content.md 를 보강한 뒤 content.en.md 재번역을 깜빡한 경우를 빌드 로그에서 잡아낸다."""
+    if lang == "ko":
+        return None
+    ko = os.path.join(ldir, "content.md")
+    en = os.path.join(ldir, f"content.{lang}.md")
+    if os.path.exists(ko) and os.path.exists(en) and os.path.getmtime(en) + _STALE_TOL < os.path.getmtime(ko):
+        return f"{lang} translation older than content.md - content.{lang}.md may need re-translation"
+    return None
+
 def _filter_sources(selected, lang):
     """영문 페이지(ko 외)는 영어 자막 영상만 노출. 한글 페이지는 전체 노출."""
     if lang == "ko":
@@ -275,13 +290,17 @@ def render_course(course_dir, lang, S):
             review = read_json(os.path.join(ldir, "review.json"), {})
             ex = read_json(_pick_lang_file(ldir, "exercise", "json", lang), {})
             sources = read_json(os.path.join(ldir, "sources.json"), {})
+            stale = _check_staleness(ldir, lang)
+            if stale:
+                slug = os.path.basename(os.path.normpath(course_dir))
+                print(f"[STALE][{lang}] {slug} lec{no}: {stale}")
         else:
             meta, body, review, ex, sources = {}, "", {}, {}, {}
 
         # 강의 제목: 영문 본문 frontmatter에 title이 있으면 그것을, 없으면 커리큘럼 제목.
         lec_title = meta.get("title") if (lang != "ko" and meta.get("title")) else lec["title"]
 
-        badge = f"<span class='badge warn'>{S['escalate']}</span>" if review.get("escalate") else ""
+        badge = ""  # escalate 는 내부 추적용 플래그일 뿐, HTML 에는 표시하지 않는다.
         src_links = "".join(
             f"<li><a href='{html.escape(s.get('url',''))}' target='_blank'>{html.escape(s.get('title', S['src_default']))}</a></li>"
             for s in _filter_sources(sources.get("selected", []), lang))

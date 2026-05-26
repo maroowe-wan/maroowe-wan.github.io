@@ -21,7 +21,7 @@
 <li><a href='#lec7'>07. 서비스 메시 입문 — Istio로 트래픽 관리·mTLS·관측성</a></li></ul>
 </nav>
 <main><article id='lec1' class='lecture'>
-          <h2>01. CRD와 커스텀 리소스 — 쿠버네티스 API 확장하기 <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h2>01. CRD와 커스텀 리소스 — 쿠버네티스 API 확장하기 </h2>
           <h3>학습 목표</h3>
 <ul>
 <li>CustomResourceDefinition(CRD)의 구조와 OpenAPI v3 스키마 검증을 이해하고 직접 정의할 수 있다</li>
@@ -75,6 +75,7 @@ spec:
                   type: integer
                   minimum: 1
                   maximum: 90
+                  default: 30         # 미지정 시 API 서버가 자동 주입
               required: [&quot;commonName&quot;]
             status:                   # 컨트롤러가 채우는 &#x27;실제 상태&#x27;
               type: object
@@ -91,7 +92,7 @@ spec:
 <li><strong>group / names</strong>: 리소스의 정체성. <code class='ic'>name</code>은 반드시 <code class='ic'>복수형.그룹</code> 조합이어야 등록된다.</li>
 <li><strong>scope</strong>: <code class='ic'>Namespaced</code>면 네임스페이스에 속한 리소스(Pod처럼), <code class='ic'>Cluster</code>면 클러스터 전역 리소스(Node·ClusterRole처럼).</li>
 <li><strong>versions</strong>: 같은 리소스의 여러 버전(<code class='ic'>v1alpha1</code>, <code class='ic'>v1beta1</code>, <code class='ic'>v1</code>)을 동시에 정의할 수 있다. <code class='ic'>served</code>는 클라이언트에게 그 버전을 응답할지, <code class='ic'>storage</code>는 etcd에 저장할 정본(canonical) 버전인지 결정한다. <strong>storage가 true인 버전은 정확히 하나</strong>여야 한다.</li>
-<li><strong>schema.openAPIV3Schema</strong>: OpenAPI v3 형식으로 필드의 타입·필수 여부·제약을 선언한다. 이 부분이 검증의 핵심이다.</li>
+<li><strong>schema.openAPIV3Schema</strong>: OpenAPI v3 형식으로 필드의 타입·필수 여부·제약을 선언한다. 이 부분이 검증의 핵심이다. 위 <code class='ic'>renewBefore</code>처럼 <code class='ic'>default</code>를 주면, 사용자가 값을 생략했을 때 API 서버가 기본값을 자동으로 채워 넣는다.</li>
 </ul>
 <h4>spec과 status — CRD 패턴의 진짜 핵심</h4>
 <p>위 스키마에서 <code class='ic'>spec</code>과 <code class='ic'>status</code>를 나란히 둔 것이 가장 중요하다. 쿠버네티스의 모든 핵심 리소스는 이 두 부분으로 나뉜다.</p>
@@ -113,6 +114,54 @@ The Certificate is invalid: spec.renewBefore: Invalid value: 100:
 spec.renewBefore in body should be less than or equal to 90
 </code></pre>
 <p>이 검증은 컨트롤러가 아니라 <strong>API 서버가 admission 단계에서</strong> 수행한다. 즉 잘못된 데이터는 etcd에 저장되기 전에 차단된다. <code class='ic'>required</code>, <code class='ic'>enum</code>, <code class='ic'>pattern</code>(정규식), <code class='ic'>default</code>(기본값 주입) 등을 활용하면 사용자가 잘못 쓸 여지를 크게 줄일 수 있다.</p>
+<h4>CEL 검증 — 필드 간 관계까지 선언적으로 거는 법</h4>
+<p>OpenAPI v3 스키마는 강력하지만 한계가 있다. <strong>각 필드를 독립적으로</strong> 검사할 뿐, &quot;A 필드가 있으면 B 필드도 반드시 있어야 한다&quot;거나 &quot;종료일이 시작일보다 늦어야 한다&quot;처럼 <strong>여러 필드의 관계</strong>를 검증하지 못한다. 과거에는 이런 교차 검증을 위해 별도의 validating admission webhook(외부 검증 서버)을 직접 만들어 운영해야 했다 — 배포·인증서·가용성을 책임져야 하는 부담스러운 작업이다.</p>
+<p>쿠버네티스 1.25부터 정식 기능이 된 <strong>CEL(Common Expression Language) 기반 validation rules</strong>가 이 부담을 없앤다. 스키마 안에 <code class='ic'>x-kubernetes-validations</code>로 검증 규칙을 표현식으로 써 두면, 별도 서버 없이 <strong>API 서버가 직접</strong> 교차 검증을 수행한다.</p>
+<pre><code>
+schema:
+  openAPIV3Schema:
+    type: object
+    properties:
+      spec:
+        type: object
+        properties:
+          autoRenew:
+            type: boolean
+          renewBefore:
+            type: integer
+        # 이 spec 객체 수준에서 필드 간 제약을 건다
+        x-kubernetes-validations:
+          # autoRenew가 true면 renewBefore는 반드시 지정되어야 한다
+          - rule: &quot;!self.autoRenew || has(self.renewBefore)&quot;
+            message: &quot;autoRenew가 true이면 renewBefore가 필요합니다&quot;
+</code></pre>
+<p><code class='ic'>rule</code>은 불리언으로 평가되는 CEL 표현식이고, <code class='ic'>self</code>는 그 규칙이 걸린 객체(여기선 <code class='ic'>spec</code>)를 가리킨다. 위 규칙은 &quot;autoRenew가 false이거나, 아니면 renewBefore가 존재해야 한다&quot;는 의미다. 이를 어기면 API 서버가 <code class='ic'>message</code>를 그대로 돌려주며 요청을 거부한다. <code class='ic'>self.endDate &gt; self.startDate</code> 같은 대소 비교, 리스트 길이·중복 검사 등도 표현식 하나로 처리된다.</p>
+<blockquote class='callout'>
+<p>핵심 판단 기준: 단일 필드의 타입·범위·정규식은 OpenAPI 스키마로, <strong>여러 필드의 관계</strong>는 CEL(<code class='ic'>x-kubernetes-validations</code>)로 거는 것이 현대 쿠버네티스의 모범 사례다. CEL로 표현되지 않는 진짜 복잡한 로직(외부 시스템 조회 등)만 남겨 webhook으로 처리하면, 운영해야 할 webhook 수를 크게 줄일 수 있다.</p>
+</blockquote>
+<h4>CRD의 진화 — 버전 관리와 변환(Conversion)</h4>
+<p>CRD도 소프트웨어처럼 진화한다. 처음엔 <code class='ic'>v1alpha1</code>로 실험하다가 안정화되면 <code class='ic'>v1</code>로 승격하는데, 이때 <strong>이미 클러스터에 저장된 기존 리소스와 그것을 사용하는 클라이언트를 깨뜨리지 않는 것</strong>이 고급 운영의 핵심이다. 그래서 <code class='ic'>versions</code>에 여러 버전을 동시에 둔다.</p>
+<pre><code>
+versions:
+  - name: v1alpha1
+    served: true       # 구버전 클라이언트를 위해 계속 응답
+    storage: false     # 더 이상 이 버전으로 저장하지 않음
+  - name: v1
+    served: true
+    storage: true      # etcd에는 항상 이 한 버전으로만 저장
+</code></pre>
+<ul>
+<li><strong><code class='ic'>served</code></strong>: API 서버가 이 버전으로 요청을 받아 줄지. 여러 버전을 동시에 <code class='ic'>served: true</code>로 두면 구버전·신버전 클라이언트가 공존할 수 있다.</li>
+<li><strong><code class='ic'>storage</code></strong>: etcd에 저장하는 정본 버전. <strong>딱 하나만 true</strong>다. 모든 객체는 결국 이 버전 형태로 etcd에 들어간다.</li>
+</ul>
+<p>여기서 자연스러운 질문이 생긴다. 사용자가 <code class='ic'>v1alpha1</code>로 요청을 보냈는데 저장 버전은 <code class='ic'>v1</code>이라면, 그 사이의 형식 차이는 누가 맞춰 줄까? 이것을 <strong>버전 변환(conversion)</strong>이라 한다.</p>
+<ul>
+<li><strong><code class='ic'>strategy: None</code></strong> — 필드 추가/삭제 정도의 단순한 변화라면 변환 없이 그대로 통과시킨다(기본값).</li>
+<li><strong><code class='ic'>strategy: Webhook</code> (Conversion Webhook)</strong> — 필드 이름이 바뀌거나 구조가 달라져 자동으로 매핑할 수 없을 때 사용한다. API 서버가 버전 변환이 필요한 순간마다 <strong>여러분이 등록한 변환 webhook을 호출</strong>해 &quot;이 객체를 v1alpha1에서 v1 형태로 바꿔 달라&quot;고 위임한다. 사용자가 어떤 버전으로 읽든, webhook이 그 버전 형태로 변환해 돌려주므로 클라이언트는 마치 그 버전이 그대로 있는 것처럼 동작한다.</li>
+</ul>
+<blockquote class='callout'>
+<p>운영 포인트: 한번 <code class='ic'>served: true</code>로 노출한 버전은 사용자가 그것에 의존하기 시작하므로 함부로 제거할 수 없다. 안전한 진화 순서는 (1) 새 버전을 <code class='ic'>served</code>로 추가 → (2) 필요하면 conversion webhook으로 변환 보장 → (3) <code class='ic'>storage</code>를 신버전으로 옮김 → (4) 충분한 유예 후 구버전 <code class='ic'>served: false</code> → (5) 최종 제거다. 빌트인 API가 <code class='ic'>v1beta1</code>을 오랜 기간 deprecated로 유지하다 제거하는 것과 같은 절차다.</p>
+</blockquote>
 <h4>커스텀 리소스 생성과 조작</h4>
 <p>CRD를 적용하면 즉시 새 엔드포인트가 살아난다.</p>
 <pre><code>
@@ -139,7 +188,7 @@ kubectl explain certificates.training.example.com.spec
 </code></pre>
 <p><code class='ic'>kubectl explain</code>이 동작한다는 점이 중요하다. 이는 우리가 정의한 OpenAPI 스키마를 API 서버가 <strong>문서로 노출</strong>하기 때문이며, 커스텀 리소스가 빌트인과 동일한 디스커버리 메커니즘 위에 올라가 있다는 증거다.</p>
 <blockquote class='callout'>
-<p>실무 팁: <code class='ic'>kubectl explain certificate.spec</code>처럼 짧은 이름은 같은 약칭이 여러 그룹에 있으면 충돌할 수 있다. <code class='ic'>kubectl explain certificates.training.example.com.spec</code>처럼 <strong>전체 리소스 이름(plural.group)</strong>을 쓰면 어떤 환경에서도 정확히 우리 CRD의 스키마를 조회한다. 모범 사례로 몸에 익혀 두자.</p>
+<p>실무 팁: <code class='ic'>kubectl explain certificate.spec</code>처럼 짧은 이름은 같은 약칭이 여러 그룹에 있으면 충돌할 수 있다. <code class='ic'>kubectl explain certificates.training.example.com.spec</code>처럼 <strong>전체 리소스 이름(plural.group)</strong>을 쓰면 어떤 환경에서도 정확히 우리 CRD의 스키마를 조회한다. 같은 이유로 여러 CRD가 같은 <code class='ic'>kind</code>를 공유할 때는 <code class='ic'>kubectl describe</code>에도 전체 리소스 이름을 써 모호성을 없애는 것이 안전하다. 모범 사례로 몸에 익혀 두자.</p>
 </blockquote>
 <h4>CRD가 빌트인과 동일하게 동작하는 원리</h4>
 <p><code class='ic'>kubectl get certificates</code>를 실행하면 내부적으로 무슨 일이 벌어질까. kubectl은 먼저 API 서버의 <strong>디스커버리 엔드포인트</strong>에 &quot;어떤 그룹/버전/리소스가 있나&quot;를 묻는다. CRD를 등록한 순간 <code class='ic'>training.example.com/v1</code>의 <code class='ic'>certificates</code>가 이 목록에 등재되므로, kubectl은 이를 표준 리소스와 구분 없이 취급한다. 요청은 같은 API 서버를 통해 처리되고, 데이터는 같은 etcd에 저장되며, RBAC도 <code class='ic'>apiGroups: [&quot;training.example.com&quot;]</code>처럼 동일한 문법으로 권한을 부여한다.</p>
@@ -169,11 +218,12 @@ kubectl explain certificates.training.example.com.spec
 <li>CRD는 쿠버네티스 API에 새로운 리소스 타입을 등록하는 메커니즘이며, CR은 그 타입의 인스턴스다(클래스와 객체의 관계).</li>
 <li>CRD는 <code class='ic'>group</code>/<code class='ic'>names</code>/<code class='ic'>scope</code>/<code class='ic'>versions</code>로 정체성을, <code class='ic'>openAPIV3Schema</code>로 필드 검증 규칙을 정의한다. <code class='ic'>storage: true</code> 버전은 단 하나.</li>
 <li>CR은 <code class='ic'>spec</code>(사용자가 선언하는 원하는 상태)과 <code class='ic'>status</code>(컨트롤러가 기록하는 실제 상태)로 나뉜다. <code class='ic'>subresources.status: {}</code>로 활성화하면 권한·충돌이 분리되며, 이 status가 리소스의 현재 상태(Ready/Expired 등)를 관찰하는 기반이다.</li>
-<li>스키마 검증은 API 서버가 admission 단계에서 수행하므로, 규격 위반 CR은 etcd 저장 전에 차단된다.</li>
+<li>검증은 두 층이다. 단일 필드는 OpenAPI 스키마(타입·범위·<code class='ic'>enum</code>·<code class='ic'>pattern</code>·<code class='ic'>default</code>)로, 필드 간 관계는 CEL(<code class='ic'>x-kubernetes-validations</code>)로 건다. 둘 다 API 서버가 admission 단계에서 수행하므로 규격 위반 CR은 etcd 저장 전에 차단된다.</li>
+<li>CRD는 여러 버전을 동시에 둘 수 있다(<code class='ic'>served</code>/<code class='ic'>storage</code>). 버전 간 형식이 다르면 conversion(기본 <code class='ic'>None</code>, 복잡하면 Webhook)으로 변환하며, 안전한 진화는 새 버전 추가→storage 이동→구버전 단계적 제거 순으로 진행한다.</li>
 <li>등록된 CR은 디스커버리·<code class='ic'>kubectl</code>·RBAC·watch·etcd 저장까지 빌트인 리소스와 완전히 동일하게 동작한다. 실제 동작(spec→현실 반영, status 기록)은 컨트롤러/Operator의 몫이며, 이것이 다음 강의의 주제다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] kubectl api-resources 명령을 실행해 현재 클러스터에 등록된 리소스 종류를 확인하라. 출력에서 NAMESPACED, KIND, APIVERSION 컬럼을 읽고, &#x27;apps&#x27; API 그룹에 속한 리소스 목록만 따로 필터링하라.</p>
+              <div class='q'><p>실습 1. [워밍업] kubectl api-resources 명령을 실행해 현재 클러스터에 등록된 리소스 종류를 확인하라. 출력에서 NAMESPACED, KIND, APIVERSION 컬럼을 읽고, &#x27;apps&#x27; API 그룹에 속한 리소스 목록만 따로 필터링하라.</p></div>
               <pre class='starter'><code># 전체 API 리소스 조회
 kubectl api-resources
 
@@ -205,9 +255,9 @@ kubectl api-resources --api-group=apps
 # CRD 목록 확인 (클러스터에 따라 결과 다름)
 kubectl get crd
 # 아무것도 설치되지 않은 경우: No resources found</code></pre>
-                <p class='exp2'>kubectl api-resources는 클러스터에 등록된 모든 리소스 종류를 나열한다. APIVERSION은 그룹/버전 형태(예: apps/v1)이며, 코어 그룹(v1 등)은 그룹명 없이 버전만 표시된다. CRD를 추가하면 이 목록에 새 항목이 추가되어 빌트인 리소스와 동일하게 취급된다. --api-group 플래그로 그룹별 필터링이 가능하다.</p>
+                <div class='exp2'><p>kubectl api-resources는 클러스터에 등록된 모든 리소스 종류를 나열한다. APIVERSION은 그룹/버전 형태(예: apps/v1)이며, 코어 그룹(v1 등)은 그룹명 없이 버전만 표시된다. CRD를 추가하면 이 목록에 새 항목이 추가되어 빌트인 리소스와 동일하게 취급된다. --api-group 플래그로 그룹별 필터링이 가능하다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] 아래 스키마를 갖는 CRD &#x27;databases.myapp.example.com&#x27;을 작성해 클러스터에 등록하라. 필드는 name(string, 필수), engine(string, 기본값 &#x27;postgresql&#x27;), replicas(integer, 1~5 범위)를 가진다. 등록 후 kubectl get crd로 확인하고, 스키마 검증이 동작하는지 확인하기 위해 replicas를 10으로 설정한 잘못된 커스텀 리소스 생성을 시도해 오류 메시지를 확인하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] 아래 스키마를 갖는 CRD &#x27;databases.myapp.example.com&#x27;을 작성해 클러스터에 등록하라. 필드는 name(string, 필수), engine(string, 기본값 &#x27;postgresql&#x27;), replicas(integer, 1~5 범위)를 가진다. 등록 후 kubectl get crd로 확인하고, 스키마 검증이 동작하는지 확인하기 위해 replicas를 10으로 설정한 잘못된 커스텀 리소스 생성을 시도해 오류 메시지를 확인하라.</p></div>
               <pre class='starter'><code># database-crd.yaml 작성 시작
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -306,9 +356,9 @@ EOF
 # 오류 예시:
 # The Database &quot;bad-db&quot; is invalid:
 #   spec.replicas: Invalid value: 10: spec.replicas in body should be less than or equal to 5</code></pre>
-                <p class='exp2'>CRD의 spec.versions[].schema.openAPIV3Schema는 커스텀 리소스의 필드 타입과 제약을 정의한다. required 배열에 필드명을 넣으면 해당 필드 없이 생성 시 API Server가 거부한다. minimum/maximum은 정수 범위 검증에 사용되며, default는 필드 미지정 시 자동으로 채워준다. 이 모든 검증이 API Server 단계에서 일어나므로 컨트롤러 없이도 잘못된 리소스 생성이 차단된다.</p>
+                <div class='exp2'><p>CRD의 spec.versions[].schema.openAPIV3Schema는 커스텀 리소스의 필드 타입과 제약을 정의한다. required 배열에 필드명을 넣으면 해당 필드 없이 생성 시 API Server가 거부한다. minimum/maximum은 정수 범위 검증에 사용되며, default는 필드 미지정 시 자동으로 채워준다. 이 모든 검증이 API Server 단계에서 일어나므로 컨트롤러 없이도 잘못된 리소스 생성이 차단된다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습] 이전 단계에서 등록한 Database CRD를 이용해 커스텀 리소스 2개를 생성하라. 첫 번째는 name=&#x27;prod-db&#x27;, engine=&#x27;mysql&#x27;, replicas=3이고, 두 번째는 name=&#x27;dev-db&#x27;만 지정해 engine 기본값이 자동으로 채워지는지 확인하라. 생성 후 kubectl get db, kubectl describe db prod-db, kubectl get db -o yaml 명령으로 리소스를 빌트인 리소스처럼 조회하라.</p>
+              <div class='q'><p>실습 3. [핵심 실습] 이전 단계에서 등록한 Database CRD를 이용해 커스텀 리소스 2개를 생성하라. 첫 번째는 name=&#x27;prod-db&#x27;, engine=&#x27;mysql&#x27;, replicas=3이고, 두 번째는 name=&#x27;dev-db&#x27;만 지정해 engine 기본값이 자동으로 채워지는지 확인하라. 생성 후 kubectl get db, kubectl describe db prod-db, kubectl get db -o yaml 명령으로 리소스를 빌트인 리소스처럼 조회하라.</p></div>
               <pre class='starter'><code># prod-db 커스텀 리소스
 apiVersion: myapp.example.com/v1
 kind: Database
@@ -378,9 +428,9 @@ kubectl get db dev-db -o yaml
 # spec:
 #   engine: postgresql   &lt;-- default가 자동으로 채워짐
 #   name: dev-db</code></pre>
-                <p class='exp2'>커스텀 리소스는 CRD를 등록하면 빌트인 리소스(Pod, Deployment 등)와 동일하게 kubectl get/describe/delete/apply 명령으로 다룰 수 있다. shortNames(예: db)를 정의하면 kubectl get db 처럼 축약 명령이 가능하다. API Server는 커스텀 리소스를 etcd에 저장하지만, 이것만으로는 실제 DB가 만들어지지 않는다. 커스텀 리소스에 반응해 실제 작업을 수행하는 것은 다음 강의에서 배울 컨트롤러(Operator)의 역할이다.</p>
+                <div class='exp2'><p>커스텀 리소스는 CRD를 등록하면 빌트인 리소스(Pod, Deployment 등)와 동일하게 kubectl get/describe/delete/apply 명령으로 다룰 수 있다. shortNames(예: db)를 정의하면 kubectl get db 처럼 축약 명령이 가능하다. API Server는 커스텀 리소스를 etcd에 저장하지만, 이것만으로는 실제 DB가 만들어지지 않는다. 커스텀 리소스에 반응해 실제 작업을 수행하는 것은 다음 강의에서 배울 컨트롤러(Operator)의 역할이다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] 앞서 만든 커스텀 리소스를 정리하고 CRD를 삭제하라. CRD 삭제 시 해당 CRD로 만든 커스텀 리소스들도 함께 삭제되는지 관찰하라. 그리고 kubectl api-resources 출력에서도 Database 종류가 사라졌는지 확인하라.</p>
+              <div class='q'><p>실습 4. [응용] 앞서 만든 커스텀 리소스를 정리하고 CRD를 삭제하라. CRD 삭제 시 해당 CRD로 만든 커스텀 리소스들도 함께 삭제되는지 관찰하라. 그리고 kubectl api-resources 출력에서도 Database 종류가 사라졌는지 확인하라.</p></div>
               <pre class='starter'><code># 1. 커스텀 리소스 먼저 삭제 (선택)
 kubectl delete db prod-db dev-db
 
@@ -414,7 +464,7 @@ kubectl api-resources | grep databases
 # 참고: CRD를 먼저 삭제하면 해당 CRD의 커스텀 리소스도 cascade 삭제된다
 # kubectl delete crd databases.myapp.example.com
 # (prod-db, dev-db도 함께 삭제됨)</code></pre>
-                <p class='exp2'>CRD를 삭제하면 해당 그룹/버전/Kind에 속한 모든 커스텀 리소스가 cascade 방식으로 함께 삭제된다. 이후 kubectl get으로 조회하면 API Server가 해당 리소스 타입 자체를 모르는 상태가 되어 에러가 반환된다. CRD는 API 확장 메커니즘이므로 CRD 등록 = 새 API 엔드포인트 추가, CRD 삭제 = 해당 API 엔드포인트 제거로 이해하면 된다.</p>
+                <div class='exp2'><p>CRD를 삭제하면 해당 그룹/버전/Kind에 속한 모든 커스텀 리소스가 cascade 방식으로 함께 삭제된다. 이후 kubectl get으로 조회하면 API Server가 해당 리소스 타입 자체를 모르는 상태가 되어 에러가 반환된다. CRD는 API 확장 메커니즘이므로 CRD 등록 = 새 API 엔드포인트 추가, CRD 삭제 = 해당 API 엔드포인트 제거로 이해하면 된다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=u1X5Rf7fWwM' target='_blank'>Kubernetes Custom Resource Definition (CRD) Explained with Demo</a></li><li><a href='https://www.youtube.com/watch?v=TScDYMym7LA' target='_blank'>What are Custom Resource Definitions (CRDs) in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=3huz7lRzUQo' target='_blank'>Day 49 - Custom Resource Definition (CRD, CR) Kubernetes (explained with Demo)</a></li></ul></div>
         </article>
@@ -511,7 +561,7 @@ kubectl get secret               # 컨트롤러가 만든 TLS Secret 등장
 <li>성숙도 모델(Basic Install → Auto Pilot 5단계)로 Operator의 자동화 수준을 가늠한다. 스테이트풀·운영 집약 애플리케이션에 가장 적합하다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] cert-manager를 Helm으로 설치하고 설치 결과를 확인하라. cert-manager는 TLS 인증서를 자동 발급·갱신하는 Operator의 대표적 예다. 설치 후 cert-manager 네임스페이스에 생성된 컨트롤러 Pod를 확인하고, cert-manager가 등록한 CRD 목록을 조회하라.</p>
+              <div class='q'><p>실습 1. [워밍업] cert-manager를 Helm으로 설치하고 설치 결과를 확인하라. cert-manager는 TLS 인증서를 자동 발급·갱신하는 Operator의 대표적 예다. 설치 후 cert-manager 네임스페이스에 생성된 컨트롤러 Pod를 확인하고, cert-manager가 등록한 CRD 목록을 조회하라.</p></div>
               <pre class='starter'><code># 1. cert-manager Helm 리포지토리 추가
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
@@ -548,9 +598,9 @@ kubectl get crd | grep cert-manager
 # clusterissuers.cert-manager.io                   ...
 # issuers.cert-manager.io                          ...
 # orders.acme.cert-manager.io                      ...</code></pre>
-                <p class='exp2'>cert-manager는 Operator 패턴의 교과서적 예다. Helm으로 설치하면 세 가지 컨트롤러 Pod가 생성된다. cert-manager(핵심 컨트롤러), cainjector(CA 인젝터), webhook(검증 웹훅)이다. 또한 Certificate, Issuer, ClusterIssuer 등 여러 CRD가 등록된다. 이 CRD들이 Operator의 &#x27;도메인 특화 API&#x27; 역할을 한다.</p>
+                <div class='exp2'><p>cert-manager는 Operator 패턴의 교과서적 예다. Helm으로 설치하면 세 가지 컨트롤러 Pod가 생성된다. cert-manager(핵심 컨트롤러), cainjector(CA 인젝터), webhook(검증 웹훅)이다. 또한 Certificate, Issuer, ClusterIssuer 등 여러 CRD가 등록된다. 이 CRD들이 Operator의 &#x27;도메인 특화 API&#x27; 역할을 한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] cert-manager의 SelfSigned Issuer와 Certificate 커스텀 리소스를 생성해 컨트롤러가 실제 TLS 인증서(Secret)를 자동으로 생성하는 조정 루프를 관찰하라. Certificate 상태가 Ready: True가 되면 생성된 Secret의 tls.crt, tls.key 내용을 확인하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] cert-manager의 SelfSigned Issuer와 Certificate 커스텀 리소스를 생성해 컨트롤러가 실제 TLS 인증서(Secret)를 자동으로 생성하는 조정 루프를 관찰하라. Certificate 상태가 Ready: True가 되면 생성된 Secret의 tls.crt, tls.key 내용을 확인하라.</p></div>
               <pre class='starter'><code># 1. SelfSigned Issuer 생성
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -612,9 +662,9 @@ kubectl describe secret my-tls-secret
 
 # 인증서 내용 확인 (base64 디코딩)
 kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep -E &#x27;Subject:|DNS:&#x27;</code></pre>
-                <p class='exp2'>Certificate 커스텀 리소스를 생성하면 cert-manager 컨트롤러가 조정 루프(reconciliation loop)를 실행한다. 현재 상태(Secret 없음, Ready: False)와 원하는 상태(유효한 TLS Secret, Ready: True)를 비교해 인증서를 발급하고 Secret을 생성한다. 이것이 Operator 패턴의 핵심이다. 사용자는 &#x27;무엇을 원하는지(Certificate 선언)&#x27;만 기술하고, 컨트롤러가 &#x27;어떻게 만들지(CSR 생성, 서명, Secret 저장)&#x27;를 자동으로 처리한다.</p>
+                <div class='exp2'><p>Certificate 커스텀 리소스를 생성하면 cert-manager 컨트롤러가 조정 루프(reconciliation loop)를 실행한다. 현재 상태(Secret 없음, Ready: False)와 원하는 상태(유효한 TLS Secret, Ready: True)를 비교해 인증서를 발급하고 Secret을 생성한다. 이것이 Operator 패턴의 핵심이다. 사용자는 &#x27;무엇을 원하는지(Certificate 선언)&#x27;만 기술하고, 컨트롤러가 &#x27;어떻게 만들지(CSR 생성, 서명, Secret 저장)&#x27;를 자동으로 처리한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [응용] 이미 생성된 Certificate의 dnsNames에 &#x27;api.example.com&#x27;을 추가 수정하라. kubectl edit 또는 kubectl apply로 변경 후, 컨트롤러가 인증서를 자동으로 재발급해 Secret이 갱신되는 조정 루프를 관찰하라. 갱신 전후 tls.crt 의 Subject Alternative Names(SAN)을 비교하라.</p>
+              <div class='q'><p>실습 3. [응용] 이미 생성된 Certificate의 dnsNames에 &#x27;api.example.com&#x27;을 추가 수정하라. kubectl edit 또는 kubectl apply로 변경 후, 컨트롤러가 인증서를 자동으로 재발급해 Secret이 갱신되는 조정 루프를 관찰하라. 갱신 전후 tls.crt 의 Subject Alternative Names(SAN)을 비교하라.</p></div>
               <pre class='starter'><code># 방법 1: kubectl edit으로 직접 편집
 kubectl edit certificate my-tls-cert
 # dnsNames에 &#x27;api.example.com&#x27; 추가 후 저장
@@ -652,7 +702,7 @@ kubectl get certificate my-tls-cert -w
 # 갱신된 인증서의 SAN 확인
 kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep DNS
 # DNS:example.com, DNS:www.example.com, DNS:api.example.com  &lt;-- 3개로 늘어남</code></pre>
-                <p class='exp2'>Operator 패턴에서 컨트롤러는 커스텀 리소스의 변경을 watch하다가 desired state와 actual state가 달라지면 자동으로 조정을 수행한다. dnsNames 변경을 감지한 cert-manager 컨트롤러는 기존 인증서를 폐기하고 새 SAN이 포함된 인증서를 재발급한다. 사용자는 YAML 한 줄을 고치는 것만으로 복잡한 PKI 재발급 과정을 자동화할 수 있다. 이것이 &#x27;운영 지식을 코드로&#x27; 표현하는 Operator 패턴의 핵심 가치다.</p>
+                <div class='exp2'><p>Operator 패턴에서 컨트롤러는 커스텀 리소스의 변경을 watch하다가 desired state와 actual state가 달라지면 자동으로 조정을 수행한다. dnsNames 변경을 감지한 cert-manager 컨트롤러는 기존 인증서를 폐기하고 새 SAN이 포함된 인증서를 재발급한다. 사용자는 YAML 한 줄을 고치는 것만으로 복잡한 PKI 재발급 과정을 자동화할 수 있다. 이것이 &#x27;운영 지식을 코드로&#x27; 표현하는 Operator 패턴의 핵심 가치다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=ha3LjlD6g7g' target='_blank'>Kubernetes Operator explained in 10 minutes</a></li><li><a href='https://www.youtube.com/watch?v=i9V4oCa5f9I' target='_blank'>Kubernetes Operators Explained</a></li><li><a href='https://www.youtube.com/watch?v=q7b23612pSc' target='_blank'>Writing Kubernetes Controllers</a></li></ul></div>
         </article>
@@ -809,7 +859,7 @@ kubectl label namespace payments \
 <li>Pod Security Admission은 빌트인 기능으로, 네임스페이스 라벨(privileged/baseline/restricted × enforce/audit/warn)만으로 보안 표준을 강제한다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] Pod Security Admission을 이용해 &#x27;restricted&#x27; 네임스페이스를 생성하고, warn 모드로 restricted 표준을 적용하라. 그 다음 권한 있는 컨테이너(privileged: true)를 포함한 Pod를 해당 네임스페이스에 생성 시도해 경고 메시지를 확인하라.</p>
+              <div class='q'><p>실습 1. [워밍업] Pod Security Admission을 이용해 &#x27;restricted&#x27; 네임스페이스를 생성하고, warn 모드로 restricted 표준을 적용하라. 그 다음 권한 있는 컨테이너(privileged: true)를 포함한 Pod를 해당 네임스페이스에 생성 시도해 경고 메시지를 확인하라.</p></div>
               <pre class='starter'><code># 1. restricted 레이블이 붙은 네임스페이스 생성
 kubectl create namespace psa-test
 
@@ -859,9 +909,9 @@ kubectl apply -n psa-test -f priv-pod.yaml
 
 # 5. Pod 삭제
 kubectl delete pod priv-pod -n psa-test</code></pre>
-                <p class='exp2'>Pod Security Admission(PSA)은 쿠버네티스 1.25+에서 PodSecurityPolicy를 대체하는 내장 admission controller다. 세 가지 표준(privileged/baseline/restricted)과 세 가지 모드(enforce/audit/warn)를 조합해 네임스페이스 레이블로 적용한다. warn 모드는 위반 시 경고를 출력하지만 생성은 허용한다. 정책을 점진적으로 강화할 때 먼저 warn으로 영향 범위를 파악하는 것이 권장 패턴이다.</p>
+                <div class='exp2'><p>Pod Security Admission(PSA)은 쿠버네티스 1.25+에서 PodSecurityPolicy를 대체하는 내장 admission controller다. 세 가지 표준(privileged/baseline/restricted)과 세 가지 모드(enforce/audit/warn)를 조합해 네임스페이스 레이블로 적용한다. warn 모드는 위반 시 경고를 출력하지만 생성은 허용한다. 정책을 점진적으로 강화할 때 먼저 warn으로 영향 범위를 파악하는 것이 권장 패턴이다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] Kyverno를 Helm으로 설치하고, 모든 Pod에 반드시 &#x27;app&#x27; 레이블이 있어야 한다는 ClusterPolicy를 enforce 모드로 생성하라. 레이블 없는 Pod 생성은 차단되고 레이블 있는 Pod는 허용되는지 검증하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] Kyverno를 Helm으로 설치하고, 모든 Pod에 반드시 &#x27;app&#x27; 레이블이 있어야 한다는 ClusterPolicy를 enforce 모드로 생성하라. 레이블 없는 Pod 생성은 차단되고 레이블 있는 Pod는 허용되는지 검증하라.</p></div>
               <pre class='starter'><code># 1. Kyverno 설치
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
@@ -939,9 +989,9 @@ kubectl run labeled-pod --image=nginx -l app=web
 kubectl get pod labeled-pod --show-labels
 # NAME          READY   STATUS    RESTARTS   AGE   LABELS
 # labeled-pod   1/1     Running   0          10s   app=web</code></pre>
-                <p class='exp2'>Kyverno는 쿠버네티스 네이티브 정책 엔진으로, CRD 기반의 정책을 YAML로 선언한다. validationFailureAction: Enforce이면 Validating Admission Webhook이 위반 요청을 API Server에서 즉시 거부한다. 반면 Audit이면 정책 위반을 기록하지만 생성은 허용해 점진적 정책 적용에 유용하다. OPA Gatekeeper와 달리 Rego 언어 없이 YAML 패턴으로 정책을 작성할 수 있어 진입 장벽이 낮다.</p>
+                <div class='exp2'><p>Kyverno는 쿠버네티스 네이티브 정책 엔진으로, CRD 기반의 정책을 YAML로 선언한다. validationFailureAction: Enforce이면 Validating Admission Webhook이 위반 요청을 API Server에서 즉시 거부한다. 반면 Audit이면 정책 위반을 기록하지만 생성은 허용해 점진적 정책 적용에 유용하다. OPA Gatekeeper와 달리 Rego 언어 없이 YAML 패턴으로 정책을 작성할 수 있어 진입 장벽이 낮다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습] Kyverno MutatingPolicy를 이용해, &#x27;app&#x27; 레이블이 없는 Pod가 생성될 때 자동으로 레이블을 주입하는 변형(mutate) 정책을 작성하라. 변형 정책 적용 후 레이블 없는 Pod를 생성해 레이블이 자동으로 삽입됐는지 확인하라.</p>
+              <div class='q'><p>실습 3. [핵심 실습] Kyverno MutatingPolicy를 이용해, &#x27;app&#x27; 레이블이 없는 Pod가 생성될 때 자동으로 레이블을 주입하는 변형(mutate) 정책을 작성하라. 변형 정책 적용 후 레이블 없는 Pod를 생성해 레이블이 자동으로 삽입됐는지 확인하라.</p></div>
               <pre class='starter'><code># Mutate 정책: app 레이블 자동 주입
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -1010,9 +1060,9 @@ kubectl get pod auto-labeled --show-labels
 # 5. 정리
 kubectl delete pod labeled-pod auto-labeled
 kubectl delete clusterpolicy add-default-app-label</code></pre>
-                <p class='exp2'>Mutating Admission Webhook은 리소스가 etcd에 저장되기 전 요청 본문을 수정할 수 있다. Kyverno의 +(field) 문법은 해당 필드가 없을 때만 값을 추가하는 conditional patch다. 이미 app 레이블이 있는 Pod는 덮어쓰지 않고, 없는 Pod에만 기본값을 주입한다. Validating Webhook이 요청을 허용/거부한다면, Mutating Webhook은 요청을 변형해 정책을 자동으로 충족시킨다. 실무에서는 sidecar 자동 주입, 리소스 기본값 설정, 공통 레이블 추가 등에 활용된다.</p>
+                <div class='exp2'><p>Mutating Admission Webhook은 리소스가 etcd에 저장되기 전 요청 본문을 수정할 수 있다. Kyverno의 +(field) 문법은 해당 필드가 없을 때만 값을 추가하는 conditional patch다. 이미 app 레이블이 있는 Pod는 덮어쓰지 않고, 없는 Pod에만 기본값을 주입한다. Validating Webhook이 요청을 허용/거부한다면, Mutating Webhook은 요청을 변형해 정책을 자동으로 충족시킨다. 실무에서는 sidecar 자동 주입, 리소스 기본값 설정, 공통 레이블 추가 등에 활용된다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] Pod Security Admission의 enforce 모드로 네임스페이스에 &#x27;restricted&#x27; 표준을 적용하라. 그 다음 restricted 표준을 완전히 준수하는 보안 강화 Pod(non-root, capabilities drop ALL, seccompProfile RuntimeDefault)를 작성해 정상 생성되는지 확인하라.</p>
+              <div class='q'><p>실습 4. [응용] Pod Security Admission의 enforce 모드로 네임스페이스에 &#x27;restricted&#x27; 표준을 적용하라. 그 다음 restricted 표준을 완전히 준수하는 보안 강화 Pod(non-root, capabilities drop ALL, seccompProfile RuntimeDefault)를 작성해 정상 생성되는지 확인하라.</p></div>
               <pre class='starter'><code># 1. 기존 psa-test 네임스페이스에 enforce 모드 추가
 kubectl label namespace psa-test \
   pod-security.kubernetes.io/enforce=restricted \
@@ -1090,7 +1140,7 @@ kubectl run blocked-pod --image=nginx -n psa-test
 # 4. 정리
 kubectl delete pod secure-pod -n psa-test
 kubectl delete namespace psa-test</code></pre>
-                <p class='exp2'>restricted 표준은 쿠버네티스 PSA에서 가장 엄격한 보안 수준이다. 주요 요구사항은 다음과 같다. runAsNonRoot: true(root 실행 금지), allowPrivilegeEscalation: false(권한 상승 금지), capabilities.drop: [ALL](모든 Linux capability 제거), seccompProfile.type: RuntimeDefault 또는 Localhost(시스템 콜 제한)다. 이 네 가지 필드를 모두 설정하면 컨테이너가 호스트 커널에 미치는 영향을 최소화할 수 있다. enforce 모드는 warn/audit과 달리 위반 Pod 생성을 완전히 차단한다.</p>
+                <div class='exp2'><p>restricted 표준은 쿠버네티스 PSA에서 가장 엄격한 보안 수준이다. 주요 요구사항은 다음과 같다. runAsNonRoot: true(root 실행 금지), allowPrivilegeEscalation: false(권한 상승 금지), capabilities.drop: [ALL](모든 Linux capability 제거), seccompProfile.type: RuntimeDefault 또는 Localhost(시스템 콜 제한)다. 이 네 가지 필드를 모두 설정하면 컨테이너가 호스트 커널에 미치는 영향을 최소화할 수 있다. enforce 모드는 warn/audit과 달리 위반 Pod 생성을 완전히 차단한다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=urvSPmlU69k' target='_blank'>Kubernetes Policy using OPA Gatekeeper</a></li><li><a href='https://www.youtube.com/watch?v=ocSgbSCX34M' target='_blank'>Kubernetes Security - Open Policy Agent - OPA Gatekeeper</a></li><li><a href='https://www.youtube.com/watch?v=iZTQv4F7Djk' target='_blank'>Day 38: Admission Controllers in Kubernetes | Mutating &amp; Validating | CKA Course 2025</a></li></ul></div>
         </article>
@@ -1213,7 +1263,7 @@ spec:
 <li>KEDA는 큐 길이·메시지 수 등 외부 이벤트를 스케일 신호로 삼고, scale-to-zero(0↔N)를 지원한다. 내부적으로 HPA용 외부 메트릭을 만들어 동작한다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] VPA(Vertical Pod Autoscaler)를 설치하고, recommender 모드로 한 Deployment에 대한 리소스 권장값을 조회하라. 먼저 임의의 requests/limits가 설정된 Deployment를 만들고, VPA 오브젝트를 &#x27;Off&#x27; 모드(추천만, 자동 적용 안 함)로 생성해 권장 CPU/메모리를 확인하라.</p>
+              <div class='q'><p>실습 1. [워밍업] VPA(Vertical Pod Autoscaler)를 설치하고, recommender 모드로 한 Deployment에 대한 리소스 권장값을 조회하라. 먼저 임의의 requests/limits가 설정된 Deployment를 만들고, VPA 오브젝트를 &#x27;Off&#x27; 모드(추천만, 자동 적용 안 함)로 생성해 권장 CPU/메모리를 확인하라.</p></div>
               <pre class='starter'><code># 1. VPA 설치 (metrics-server 먼저 필요)
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-v1-crd-gen.yaml
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-rbac.yaml
@@ -1305,9 +1355,9 @@ kubectl patch vpa vpa-demo-vpa --type=&#x27;json&#x27; -p=&#x27;[{&quot;op&quot;
 
 # 잠시 후 Pod가 재생성되며 새 requests로 업데이트됨
 kubectl get pods -l app=vpa-demo -o custom-columns=&#x27;NAME:.metadata.name,CPU-REQ:.spec.containers[0].resources.requests.cpu,MEM-REQ:.spec.containers[0].resources.requests.memory&#x27;</code></pre>
-                <p class='exp2'>VPA는 HPA와 달리 Pod의 수가 아닌 각 Pod의 CPU/메모리 requests 크기를 자동 조정한다. updateMode: Off는 권장값만 계산하고 실제 Pod를 변경하지 않는다. Auto 모드로 전환하면 VPA가 Pod를 재생성(evict &amp; recreate)하면서 새로운 requests를 적용한다. HPA는 Out 스케일(수평 확장)에, VPA는 Up 스케일(수직 확장)에 적합하다. 두 가지를 동시에 같은 Deployment에 사용하면 충돌이 발생하므로 주의해야 한다.</p>
+                <div class='exp2'><p>VPA는 HPA와 달리 Pod의 수가 아닌 각 Pod의 CPU/메모리 requests 크기를 자동 조정한다. updateMode: Off는 권장값만 계산하고 실제 Pod를 변경하지 않는다. Auto 모드로 전환하면 VPA가 Pod를 재생성(evict &amp; recreate)하면서 새로운 requests를 적용한다. HPA는 Out 스케일(수평 확장)에, VPA는 Up 스케일(수직 확장)에 적합하다. 두 가지를 동시에 같은 Deployment에 사용하면 충돌이 발생하므로 주의해야 한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] KEDA(Kubernetes Event-Driven Autoscaling)를 설치하고, CPU 사용률 기반 ScaledObject를 생성해 부하에 따른 스케일아웃/인을 확인하라. 부하 생성 전후 Pod 수 변화와 ScaledObject 상태를 관찰하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] KEDA(Kubernetes Event-Driven Autoscaling)를 설치하고, CPU 사용률 기반 ScaledObject를 생성해 부하에 따른 스케일아웃/인을 확인하라. 부하 생성 전후 Pod 수 변화와 ScaledObject 상태를 관찰하라.</p></div>
               <pre class='starter'><code># 1. KEDA 설치
 helm repo add kedacore https://kedacore.github.io/charts
 helm repo update
@@ -1393,9 +1443,9 @@ kubectl get pods -l app=keda-demo -w
 
 # 부하 중단 후 ScaledObject 상태
 kubectl describe scaledobject keda-demo-scaler | grep -A10 &#x27;Conditions:&#x27;</code></pre>
-                <p class='exp2'>KEDA는 HPA를 확장해 CPU/메모리 외의 외부 이벤트 소스(Kafka 메시지 수, Redis 큐 길이, Prometheus 메트릭 등)로도 스케일링할 수 있다. ScaledObject가 HPA를 자동으로 생성하고 관리한다. minReplicaCount: 0을 설정하면 이벤트가 없을 때 Pod를 완전히 0으로 축소(scale-to-zero)해 비용을 절감할 수 있다. cooldownPeriod는 스케일인 전 대기 시간으로 불필요한 요동을 방지한다.</p>
+                <div class='exp2'><p>KEDA는 HPA를 확장해 CPU/메모리 외의 외부 이벤트 소스(Kafka 메시지 수, Redis 큐 길이, Prometheus 메트릭 등)로도 스케일링할 수 있다. ScaledObject가 HPA를 자동으로 생성하고 관리한다. minReplicaCount: 0을 설정하면 이벤트가 없을 때 Pod를 완전히 0으로 축소(scale-to-zero)해 비용을 절감할 수 있다. cooldownPeriod는 스케일인 전 대기 시간으로 불필요한 요동을 방지한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [응용] KEDA의 ScaledJob을 이용해 큐(Redis List) 길이에 따라 Job을 자동 생성하는 이벤트 기반 스케일링을 구성하라. Redis를 배포하고, 큐에 메시지를 push할 때마다 Job이 생성되어 처리하는 시나리오를 시뮬레이션하라.</p>
+              <div class='q'><p>실습 3. [응용] KEDA의 ScaledJob을 이용해 큐(Redis List) 길이에 따라 Job을 자동 생성하는 이벤트 기반 스케일링을 구성하라. Redis를 배포하고, 큐에 메시지를 push할 때마다 Job이 생성되어 처리하는 시나리오를 시뮬레이션하라.</p></div>
               <pre class='starter'><code># 1. Redis 설치
 kubectl run redis --image=redis --port=6379
 kubectl expose pod redis --port=6379 --name=redis-service
@@ -1487,12 +1537,12 @@ kubectl delete scaledobject keda-demo-scaler
 kubectl delete deploy keda-demo
 kubectl delete pod redis
 kubectl delete service redis-service</code></pre>
-                <p class='exp2'>ScaledJob은 ScaledObject와 달리 Deployment를 스케일하는 대신 Job을 생성해 작업 큐를 처리한다. Redis List에 메시지가 쌓이면 listLength 단위로 Job이 생성되고, Job이 완료되면 다시 소멸한다. 이 패턴은 배치 처리, 이미지 변환, 이메일 발송 등 큐 기반 작업에 이상적이다. KEDA를 사용하면 Kafka, RabbitMQ, Azure Service Bus, AWS SQS 등 다양한 이벤트 소스와 쉽게 연동할 수 있다.</p>
+                <div class='exp2'><p>ScaledJob은 ScaledObject와 달리 Deployment를 스케일하는 대신 Job을 생성해 작업 큐를 처리한다. Redis List에 메시지가 쌓이면 listLength 단위로 Job이 생성되고, Job이 완료되면 다시 소멸한다. 이 패턴은 배치 처리, 이미지 변환, 이메일 발송 등 큐 기반 작업에 이상적이다. KEDA를 사용하면 Kafka, RabbitMQ, Azure Service Bus, AWS SQS 등 다양한 이벤트 소스와 쉽게 연동할 수 있다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=hsJ2qtwoWZw' target='_blank'>Kubernetes Autoscaling: HPA vs. VPA vs. Keda vs. CA vs. Karpenter vs. Fargate</a></li><li><a href='https://www.youtube.com/watch?v=3lcaawKAv6s' target='_blank'>KEDA: Kubernetes Event-Driven Autoscaling</a></li><li><a href='https://www.youtube.com/watch?v=jM36M39MA3I' target='_blank'>Kubernetes cluster autoscaling for beginners</a></li></ul></div>
         </article>
 <article id='lec5' class='lecture'>
-          <h2>05. GitOps와 ArgoCD — 선언형 지속적 배포 <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h2>05. GitOps와 ArgoCD — 선언형 지속적 배포 </h2>
           <h3>학습 목표</h3>
 <ul>
 <li>GitOps 원칙과 &quot;Git as single source of truth&quot; 개념을 이해한다</li>
@@ -1505,8 +1555,8 @@ kubectl delete service redis-service</code></pre>
 <p>GitOps는 흐름을 뒤집는다. 핵심 원칙은 다음과 같다.</p>
 <p>1. <strong>선언형(Declarative)</strong> — 시스템의 원하는 상태 전체를 선언형 매니페스트로 표현한다.</p>
 <p>2. <strong>Git이 단일 진실 공급원(Single Source of Truth)</strong> — 그 매니페스트를 Git에 저장하고, Git이 &quot;원하는 상태&quot;의 유일한 정본이 된다.</p>
-<p>3. <strong>자동 적용(Pull)</strong> — 클러스터 안의 에이전트가 Git을 지속 감시하다가, 클러스터 상태를 Git에 맞춘다. CI가 클러스터에 직접 미는 게 아니라 클러스터(에이전트)가 Git에서 당겨 온다.</p>
-<p>4. <strong>지속적 조정(Reconcile)</strong> — 에이전트가 끊임없이 &quot;현재 == Git인가&quot;를 비교하고 차이를 메운다.</p>
+<p>3. <strong>자동 적용(Pull)</strong> — 클러스터 안의 에이전트가 Git의 변경을 받아, 클러스터 상태를 Git에 맞춘다. CI가 클러스터에 직접 미는 게 아니라 클러스터(에이전트)가 Git에서 당겨 온다.</p>
+<p>4. <strong>지속적 조정(Reconcile)</strong> — 에이전트가 끊임없이 &quot;현재 상태 == Git의 선언 상태&quot;인지 비교하고, 어긋나면 <strong>선언 상태와 실제 상태의 차이를 자동으로 맞춘다(조정한다)</strong>.</p>
 <p>3·4번이 익숙하지 않은가. 바로 앞 강의의 <strong>조정 루프</strong>다. GitOps는 컨트롤러 패턴을 배포 전체로 확장한 것이다. desired state가 etcd 안의 CR이 아니라 Git 저장소라는 점만 다르다.</p>
 <h4>CI는 사라지지 않는다 — 책임이 바뀔 뿐</h4>
 <p>여기서 가장 흔히 생기는 오해를 짚자. <strong>&quot;클러스터가 Git을 당겨 온다&quot;는 말은 CI가 없어진다는 뜻이 아니다.</strong> GitOps에서도 CI는 여전히 필수다. 다만 CI가 하던 일의 <em>마지막 단계</em>가 바뀐다.</p>
@@ -1515,26 +1565,36 @@ kubectl delete service redis-service</code></pre>
 <li><strong>달라진 것은 &quot;그다음&quot;이다.</strong> 과거엔 CI가 그 결과물을 <strong>클러스터에 직접 배포(push)</strong>했다. GitOps에서는 CI가 새 이미지 태그(예: <code class='ic'>web:v1.4.2</code>)를 <strong>Git 매니페스트에 반영(commit/PR)</strong>하는 것으로 끝난다. 실제 클러스터 적용은 ArgoCD가 그 커밋을 감지해 pull 방식으로 수행한다.</li>
 </ul>
 <p>즉 CI의 책임이 <strong>&quot;클러스터에 직접 명령(push to cluster)&quot;에서 &quot;Git에 상태 변경을 요청(push to Git)&quot;으로 이동</strong>한 것이다. 그 결과 CI는 더 이상 클러스터 admin 자격증명을 들 필요가 없고(보안 향상), 모든 배포가 Git 커밋이라는 단일 경로를 통과한다. CI(빌드/테스트/이미지 푸시) → Git(매니페스트 갱신) → CD(ArgoCD가 pull 적용)로 역할이 깔끔히 분리된다.</p>
-<p>아래 시퀀스는 CI가 새 이미지 태그를 Git에 올리고, 클러스터 안의 에이전트가 그것을 당겨 와 클러스터에 적용하는 pull 기반 흐름을 보여 준다.</p>
+<p>아래 시퀀스는 CI가 새 이미지 태그를 Git에 올리면, Git이 webhook으로 ArgoCD에 변경을 알리고, 클러스터 안의 에이전트가 매니페스트를 당겨 와 클러스터에 적용하는 흐름을 보여 준다.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
     participant Dev as 개발자/CI
-    participant Git as Git 저장소 (정본)
+    participant Git as &quot;Git 저장소 (정본)&quot;
     participant Agent as ArgoCD 에이전트
     participant Cluster as 클러스터
     Dev-&gt;&gt;Git: 매니페스트/이미지 태그 변경 PR 머지
-    loop 지속적 조정
-        Agent-&gt;&gt;Git: 원하는 상태 polling
-        Git--&gt;&gt;Agent: 최신 매니페스트
-        Agent-&gt;&gt;Cluster: 현재 상태 조회
-        Cluster--&gt;&gt;Agent: 실제 상태
-        Agent-&gt;&gt;Agent: 차이 비교 (Sync 상태)
-        Agent-&gt;&gt;Cluster: 차이를 Git 상태로 적용
-    end</div><figcaption>GitOps pull 기반 동기화 흐름</figcaption></figure>
+    Git-&gt;&gt;Agent: webhook 알림 (변경 발생, 권장 기본)
+    Note over Git,Agent: webhook 유실 대비 약 3분 주기 폴링이 보조로 함께 동작
+    Agent-&gt;&gt;Git: 최신 매니페스트 가져오기
+    Git--&gt;&gt;Agent: 원하는 상태
+    Agent-&gt;&gt;Cluster: 현재 상태 조회
+    Cluster--&gt;&gt;Agent: 실제 상태
+    Agent-&gt;&gt;Agent: 차이 비교 (Sync 상태)
+    Agent-&gt;&gt;Cluster: 차이를 Git 상태로 적용</div><figcaption>GitOps webhook 기반 동기화 흐름</figcaption></figure>
 <blockquote class='callout'>
 <p>GitOps의 가장 큰 실용적 이득은 <strong>감사(audit)와 롤백</strong>이다. 모든 변경이 Git 커밋으로 남으므로 &quot;누가, 언제, 무엇을, 왜&quot; 바꿨는지 PR 이력에 그대로 보존된다. 장애가 나면 <code class='ic'>git revert</code> 한 번으로 이전 상태로 되돌릴 수 있다. 클러스터 상태를 사람의 손버릇이 아니라 버전 관리된 코드로 다루는 것 — 이것이 GitOps의 본질이다.</p>
 </blockquote>
+<h4>ArgoCD는 변경을 어떻게 감지하는가 — webhook이 기본, 폴링은 대체</h4>
+<p>위 다이어그램에서 동기화를 촉발한 것은 Git의 webhook 알림이었다. <strong>실무에서 권장되는 기본 방식이 바로 이 Git 저장소 webhook</strong>이다. 폴링과의 차이를 정확히 알아 두자.</p>
+<ul>
+<li><strong>Git webhook (권장)</strong> — GitHub·GitLab 등에 ArgoCD 주소로 webhook을 걸어 두면, 커밋이 push되는 <strong>즉시</strong> Git 서버가 ArgoCD에 &quot;변경됐다&quot;고 알려 준다. ArgoCD는 그 알림을 받자마자 해당 Application의 동기화를 시작하므로 반영이 거의 실시간이다. 운영 환경에서는 이 방식을 기본으로 구성한다.</li>
+<li><strong>주기적 폴링 (대체/안전망)</strong> — ArgoCD는 기본적으로 약 3분 간격으로도 Git을 폴링한다. webhook이 어떤 이유로 누락되거나 설정되지 않았을 때를 위한 <strong>안전망</strong>이다. 폴링만 의존하면 최대 그 주기만큼 반영이 늦어진다.</li>
+</ul>
+<blockquote class='callout'>
+<p>정리하면, webhook은 &quot;변경되면 즉시 알림(push)&quot;이고 폴링은 &quot;주기적으로 직접 확인(pull)&quot;이다. 권장 구성은 webhook으로 빠른 반영을 얻고, 폴링은 webhook 유실에 대비한 백업으로 함께 두는 것이다. 위 시퀀스에서 webhook 알림을 주 경로로, 폴링을 보조 경로로 그린 것도 같은 이유다.</p>
+</blockquote>
+<p>어느 쪽으로 촉발되든, 촉발 이후의 동작 — 즉 Git의 선언 상태와 클러스터의 실제 상태를 비교해 차이를 맞추는 <strong>조정</strong> — 은 동일하다.</p>
 <h4>ArgoCD 설치와 Application 구성</h4>
-<p>ArgoCD는 GitOps를 구현하는 대표적인 도구다. 클러스터 안에서 동작하는 컨트롤러로서, 지정한 Git 저장소를 감시하며 desired state를 클러스터에 적용한다. 가장 빠른 시작은 공식 <code class='ic'>install.yaml</code>을 그대로 적용하는 것이다.</p>
+<p>ArgoCD는 GitOps를 구현하는 대표적인 도구다. 클러스터 안에서 동작하는 컨트롤러로서, 지정한 Git 저장소를 추적하며 desired state를 클러스터에 적용한다. 가장 빠른 시작은 공식 <code class='ic'>install.yaml</code>을 그대로 적용하는 것이다.</p>
 <pre><code>
 kubectl create namespace argocd
 kubectl apply -n argocd -f \
@@ -1568,7 +1628,13 @@ spec:
 </code></pre>
 <p>이 Application을 <code class='ic'>kubectl apply</code>하면 ArgoCD가 즉시 Git을 읽어 클러스터에 배포한다. ArgoCD UI나 <code class='ic'>argocd app get web-app</code>에서 상태가 <strong>Synced / Healthy</strong>로 표시되는지 확인한다. ArgoCD는 plain YAML뿐 아니라 Helm 차트, Kustomize도 그대로 소스로 받아들이므로 기존 자산을 재활용할 수 있다.</p>
 <blockquote class='callout'>
+<p>위 예제는 단순화를 위해 <code class='ic'>spec.project</code>를 <code class='ic'>default</code>로 뒀지만, 실제 운영에서는 팀·목적별로 별도 <strong>AppProject</strong>를 만들어 격리하는 것이 모범 사례다. Project 단위로 &quot;어느 Git 저장소·어느 클러스터·어느 네임스페이스에만 배포 가능한지&quot;를 제한해 권한과 폭발 반경(blast radius)을 통제할 수 있다.</p>
+</blockquote>
+<blockquote class='callout'>
 <p>위 예제는 단순화를 위해 <code class='ic'>main</code> 브랜치를 직접 추적한다. 하지만 실제 조직에서는 환경별로 변경을 <strong>승격(promotion)</strong>한다. 흔한 패턴은 환경마다 별도 경로/오버레이(예: Kustomize <code class='ic'>overlays/dev</code>, <code class='ic'>overlays/staging</code>, <code class='ic'>overlays/prod</code>)나 별도 Application을 두고, CI가 검증을 마친 이미지 태그를 dev → staging → prod 순서로 PR을 통해 끌어올리는 것이다. 즉 &quot;이 이미지를 운영에 올린다&quot;가 곧 &quot;운영 매니페스트의 태그를 바꾸는 PR을 머지한다&quot;가 된다. 이 이미지 프로모션 파이프라인이 GitOps의 실제 운영 모습이다.</p>
+</blockquote>
+<blockquote class='callout'>
+<p><strong>운영 Application이 <code class='ic'>main</code> 같은 개발 브랜치를 직접 추적하면 위험하다.</strong> <code class='ic'>targetRevision: main</code>으로 운영을 묶어 두면, 개발자가 <code class='ic'>main</code>에 올리는 <strong>모든 커밋이 곧바로 운영 배포 후보</strong>가 된다. 검증되지 않은 변경이 webhook 알림 한 번에 운영까지 흘러가므로 &quot;무엇이 언제 운영에 올라가는가&quot;를 통제하기 어렵고, 사고 시 폭발 반경도 커진다. 그래서 실무에서는 (1) 운영 Application의 <code class='ic'>targetRevision</code>을 <strong>환경별 브랜치(<code class='ic'>release/prod</code>)나 불변 버전 태그(<code class='ic'>v1.4.2</code>)로 고정</strong>해 개발 흐름과 운영 흐름을 분리하거나, (2) 운영 매니페스트는 <strong>승격용 PR로만 바뀌도록</strong> 하고 그 PR에 리뷰·승인 게이트를 둔다. 어느 쪽이든 Git-flow나 Trunk-based development 같은 브랜칭 전략과 ArgoCD의 추적 대상(<code class='ic'>targetRevision</code>)을 일관되게 맞춰, &quot;운영에 반영&quot;이 항상 의도된 승격 행위가 되도록 설계하는 것이 핵심이다.</p>
 </blockquote>
 <h4>드리프트, self-heal, 그리고 prune</h4>
 <p>ArgoCD가 추적하는 두 가지 상태가 있다. <strong>Sync 상태</strong>(클러스터가 Git과 일치하는가)와 <strong>Health 상태</strong>(리소스가 정상 동작하는가)다. 여기서 가장 중요한 개념이 <strong>드리프트(drift)</strong>다.</p>
@@ -1581,20 +1647,22 @@ kubectl scale deployment web -n web --replicas=5
 kubectl get deployment web -n web -w
 </code></pre>
 <p><code class='ic'>prune: true</code>는 반대 방향을 처리한다. Git에서 리소스를 <strong>삭제</strong>하면 ArgoCD가 클러스터에서도 그 리소스를 제거한다. prune을 끄면 Git에서 지워도 클러스터에는 고아 리소스로 남으니, GitOps의 일관성을 유지하려면 보통 켠다(단, 운영 안전을 위해 처음엔 수동 prune으로 영향도를 확인한 뒤 자동화하는 것을 권한다).</p>
-<p>정리하면 GitOps 운영의 실제 작업 흐름은 이렇게 단순해진다. 배포를 바꾸려면 클러스터를 직접 만지지 않고 <strong>Git에 PR을 올린다</strong>. PR이 머지되면 ArgoCD가 변경을 감지해 클러스터에 적용한다. 잘못됐으면 PR을 revert한다. 클러스터를 만질 일이 없으니 admin 자격증명도 CI에 줄 필요가 없다.</p>
+<p>정리하면 GitOps 운영의 실제 작업 흐름은 이렇게 단순해진다. 배포를 바꾸려면 클러스터를 직접 만지지 않고 <strong>Git에 PR을 올린다</strong>. PR이 머지되면 ArgoCD가 (webhook 알림으로) 변경을 감지해 클러스터에 적용한다. 잘못됐으면 PR을 revert한다. 클러스터를 만질 일이 없으니 admin 자격증명도 CI에 줄 필요가 없다.</p>
 <blockquote class='callout'>
 <p>self-heal은 강력하지만, 디버깅 중 임시로 <code class='ic'>kubectl edit</code>을 했다가 ArgoCD가 즉시 되돌려 혼란을 겪는 일이 흔하다. 긴급 조사 시에는 해당 Application의 자동 동기화를 잠시 비활성화하거나, 더 나은 방법으로 <strong>항상 Git을 통해 변경하는 습관</strong>을 들이는 것이 GitOps의 의도에 맞다.</p>
 </blockquote>
 <h3>핵심 요약</h3>
 <ul>
-<li>GitOps는 배포를 push에서 pull로 뒤집는다. 클러스터 안의 에이전트가 Git을 감시해 desired state를 스스로 당겨 적용한다.</li>
+<li>GitOps는 배포를 push에서 pull로 뒤집는다. 클러스터 안의 에이전트가 Git의 변경을 받아 desired state를 스스로 당겨 적용한다.</li>
 <li>CI는 사라지지 않는다. 여전히 빌드·테스트·이미지 푸시를 담당하되, 마지막 단계가 &quot;클러스터에 직접 배포&quot;에서 &quot;새 이미지 태그를 Git 매니페스트에 반영(PR)&quot;으로 바뀐다. 실제 적용은 ArgoCD가 pull로 수행한다.</li>
-<li>4대 원칙: 선언형, Git as single source of truth, 자동 pull 적용, 지속적 조정. 컨트롤러 조정 루프를 배포 전체로 확장한 개념이다.</li>
-<li>ArgoCD의 Application CRD는 &quot;어느 Git 경로를 어느 클러스터/네임스페이스에 동기화할지&quot;를 선언한다. Helm·Kustomize·plain YAML 모두 지원하며, 운영에서는 환경별 오버레이로 dev→staging→prod 프로모션을 구성한다.</li>
+<li>4대 원칙: 선언형, Git as single source of truth, 자동 pull 적용, 지속적 조정(선언 상태와 실제 상태의 차이를 자동으로 맞춤). 컨트롤러 조정 루프를 배포 전체로 확장한 개념이다.</li>
+<li>ArgoCD의 변경 감지는 <strong>Git webhook이 기본(권장)</strong>으로 push되는 즉시 동기화하고, 약 3분 주기의 <strong>폴링은 webhook 유실에 대비한 대체·안전망</strong>이다.</li>
+<li>ArgoCD의 Application CRD는 &quot;어느 Git 경로를 어느 클러스터/네임스페이스에 동기화할지&quot;를 선언한다. Helm·Kustomize·plain YAML 모두 지원하며, 운영에서는 AppProject로 권한을 격리하고 환경별 오버레이로 dev→staging→prod 프로모션을 구성한다.</li>
+<li>운영 Application이 <code class='ic'>main</code> 같은 개발 브랜치를 직접 추적하면 모든 커밋이 즉시 운영 배포 후보가 되어 위험하다. 운영은 환경별 브랜치(<code class='ic'>release/prod</code>)나 버전 태그를 추적하거나 승격용 PR로만 바뀌게 하고, 브랜칭 전략(Git-flow/Trunk-based)과 <code class='ic'>targetRevision</code>을 일관되게 맞춘다.</li>
 <li>드리프트는 클러스터가 Git과 어긋난 상태(OutOfSync)다. <code class='ic'>selfHeal</code>은 수동 변경을 Git 상태로 자동 복구하고, <code class='ic'>prune</code>은 Git에서 삭제된 리소스를 클러스터에서도 제거한다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] ArgoCD를 클러스터에 설치하고 UI에 접근하라. 설치 후 argocd 네임스페이스의 Pod 상태를 확인하고, argocd-server를 NodePort 또는 port-forward로 노출해 초기 admin 비밀번호로 로그인하라.</p>
+              <div class='q'><p>실습 1. [워밍업] ArgoCD를 클러스터에 설치하고 UI에 접근하라. 설치 후 argocd 네임스페이스의 Pod 상태를 확인하고, argocd-server를 NodePort 또는 port-forward로 노출해 초기 admin 비밀번호로 로그인하라.</p></div>
               <pre class='starter'><code># 1. ArgoCD 설치
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
@@ -1633,9 +1701,9 @@ argocd login localhost:8080 --username admin --password $(kubectl -n argocd get 
 argocd cluster list
 # SERVER                                  NAME        STATUS
 # https://kubernetes.default.svc          in-cluster  Successful</code></pre>
-                <p class='exp2'>ArgoCD는 쿠버네티스 네이티브 GitOps 도구로, Git 저장소를 클러스터 상태의 단일 진실 공급원(single source of truth)으로 삼는다. 설치하면 argocd-server(API/UI), argocd-repo-server(Git 연동), argocd-application-controller(동기화 컨트롤러), argocd-dex-server(인증) 등 여러 컴포넌트가 생성된다. port-forward는 로컬 개발 환경에서 서비스에 접근하는 빠른 방법이다. 운영 환경에서는 Ingress나 LoadBalancer Service를 사용한다.</p>
+                <div class='exp2'><p>ArgoCD는 쿠버네티스 네이티브 GitOps 도구로, Git 저장소를 클러스터 상태의 단일 진실 공급원(single source of truth)으로 삼는다. 설치하면 argocd-server(API/UI), argocd-repo-server(Git 연동), argocd-application-controller(동기화 컨트롤러), argocd-dex-server(인증) 등 여러 컴포넌트가 생성된다. port-forward는 로컬 개발 환경에서 서비스에 접근하는 빠른 방법이다. 운영 환경에서는 Ingress나 LoadBalancer Service를 사용한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] GitHub의 공개 Git 저장소(또는 로컬 Git 서버)에서 Kubernetes 매니페스트를 가리키는 ArgoCD Application을 생성하라. 동기화 정책을 &#x27;수동(manual)&#x27;으로 설정하고, 첫 번째 수동 동기화를 실행해 클러스터에 애플리케이션이 배포되는 것을 확인하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] GitHub의 공개 Git 저장소(또는 로컬 Git 서버)에서 Kubernetes 매니페스트를 가리키는 ArgoCD Application을 생성하라. 동기화 정책을 &#x27;수동(manual)&#x27;으로 설정하고, 첫 번째 수동 동기화를 실행해 클러스터에 애플리케이션이 배포되는 것을 확인하라.</p></div>
               <pre class='starter'><code># ArgoCD 공식 예제 저장소 사용
 # https://github.com/argoproj/argocd-example-apps
 # 경로: guestbook/ (Deployment + Service)
@@ -1709,9 +1777,9 @@ kubectl get applications -n argocd
 
 # 배포된 리소스 확인
 kubectl get all -n guestbook</code></pre>
-                <p class='exp2'>ArgoCD Application은 &#x27;Git 저장소의 어느 경로&#x27;를 &#x27;클러스터의 어느 네임스페이스&#x27;에 배포할지 선언한다. syncPolicy.automated가 없으면 수동 동기화 모드다. Application이 OutOfSync 상태는 Git 소스와 클러스터 상태가 다름을 의미하며, Synced는 일치한다는 뜻이다. Health 상태는 실제 리소스(Deployment, Pod 등)가 정상인지를 나타낸다. GitOps에서는 kubectl apply 대신 Git 커밋이 배포의 트리거다.</p>
+                <div class='exp2'><p>ArgoCD Application은 &#x27;Git 저장소의 어느 경로&#x27;를 &#x27;클러스터의 어느 네임스페이스&#x27;에 배포할지 선언한다. syncPolicy.automated가 없으면 수동 동기화 모드다. Application이 OutOfSync 상태는 Git 소스와 클러스터 상태가 다름을 의미하며, Synced는 일치한다는 뜻이다. Health 상태는 실제 리소스(Deployment, Pod 등)가 정상인지를 나타낸다. GitOps에서는 kubectl apply 대신 Git 커밋이 배포의 트리거다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습] ArgoCD의 self-heal(자동 복구)와 drift 감지를 실습하라. Application에 automated syncPolicy(selfHeal: true, prune: true)를 활성화하고, 클러스터에서 직접 리소스를 변경(drift 유발)한 뒤 ArgoCD가 자동으로 Git 상태로 되돌리는 것을 관찰하라.</p>
+              <div class='q'><p>실습 3. [핵심 실습] ArgoCD의 self-heal(자동 복구)와 drift 감지를 실습하라. Application에 automated syncPolicy(selfHeal: true, prune: true)를 활성화하고, 클러스터에서 직접 리소스를 변경(drift 유발)한 뒤 ArgoCD가 자동으로 Git 상태로 되돌리는 것을 관찰하라.</p></div>
               <pre class='starter'><code># 1. automated syncPolicy 활성화
 kubectl patch application guestbook -n argocd \
   --type=merge \
@@ -1765,9 +1833,9 @@ argocd app history guestbook
 kubectl create configmap extra-config -n guestbook --from-literal=key=val
 # 수 초 후 ArgoCD가 자동 삭제 (Git에 없는 리소스)
 kubectl get configmap -n guestbook</code></pre>
-                <p class='exp2'>selfHeal: true를 설정하면 ArgoCD가 3분마다(기본값) 클러스터 상태와 Git 상태를 비교해 차이(drift)가 있으면 자동으로 동기화한다. kubectl scale로 replicas를 바꿔도 ArgoCD가 Git의 값으로 되돌린다. prune: true는 Git에 없는 리소스를 클러스터에서 삭제한다. 이 두 설정이 GitOps의 핵심인 &#x27;Git이 클러스터의 유일한 진실&#x27;을 구현한다. 이제 클러스터를 변경하려면 반드시 Git 커밋을 통해야 한다.</p>
+                <div class='exp2'><p>selfHeal: true를 설정하면 ArgoCD가 3분마다(기본값) 클러스터 상태와 Git 상태를 비교해 차이(drift)가 있으면 자동으로 동기화한다. kubectl scale로 replicas를 바꿔도 ArgoCD가 Git의 값으로 되돌린다. prune: true는 Git에 없는 리소스를 클러스터에서 삭제한다. 이 두 설정이 GitOps의 핵심인 &#x27;Git이 클러스터의 유일한 진실&#x27;을 구현한다. 이제 클러스터를 변경하려면 반드시 Git 커밋을 통해야 한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] ArgoCD Application을 여러 환경(dev/prod)에 배포하는 패턴을 실습하라. 같은 Git 저장소의 다른 경로(또는 다른 브랜치)를 가리키는 Application 두 개를 만들고, Git에서 dev 경로의 매니페스트를 변경 후 push했을 때 dev Application만 OutOfSync가 되는 것을 확인하라.</p>
+              <div class='q'><p>실습 4. [응용] ArgoCD Application을 여러 환경(dev/prod)에 배포하는 패턴을 실습하라. 같은 Git 저장소의 다른 경로(또는 다른 브랜치)를 가리키는 Application 두 개를 만들고, Git에서 dev 경로의 매니페스트를 변경 후 push했을 때 dev Application만 OutOfSync가 되는 것을 확인하라.</p></div>
               <pre class='starter'><code># 전제: argocd-example-apps 저장소를 fork하거나 로컬 Git 서버 사용
 # 여기서는 path를 다르게 해서 시뮬레이션
 
@@ -1881,7 +1949,7 @@ kubectl get applications -n argocd
 # 정리
 argocd app delete guestbook guestbook-dev guestbook-prod
 kubectl delete namespace guestbook guestbook-dev guestbook-prod</code></pre>
-                <p class='exp2'>다중 환경(dev/prod) GitOps 패턴에서 dev는 automated selfHeal로 빠르게 반영하고, prod는 수동 동기화로 변경 전 검토와 승인 단계를 두는 것이 일반적이다. ArgoCD App of Apps 패턴이나 ApplicationSet을 사용하면 수십 개의 환경/클러스터에 대한 Application을 코드로 관리할 수 있다. Git 저장소의 디렉터리 구조(또는 브랜치)로 환경을 분리하면 동일한 ArgoCD에서 다수의 환경을 선언적으로 관리할 수 있다.</p>
+                <div class='exp2'><p>다중 환경(dev/prod) GitOps 패턴에서 dev는 automated selfHeal로 빠르게 반영하고, prod는 수동 동기화로 변경 전 검토와 승인 단계를 두는 것이 일반적이다. ArgoCD App of Apps 패턴이나 ApplicationSet을 사용하면 수십 개의 환경/클러스터에 대한 Application을 코드로 관리할 수 있다. Git 저장소의 디렉터리 구조(또는 브랜치)로 환경을 분리하면 동일한 ArgoCD에서 다수의 환경을 선언적으로 관리할 수 있다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=f5EpcWp0THw' target='_blank'>What is GitOps, How GitOps works and Why it&#x27;s so useful</a></li><li><a href='https://www.youtube.com/watch?v=MeU5_k9ssrs' target='_blank'>ArgoCD Tutorial for Beginners | GitOps CD for Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=Yb3_4PZX0B0' target='_blank'>Let&#x27;s do GitOps in Kubernetes! ArgoCD Tutorial</a></li></ul></div>
         </article>
@@ -2013,7 +2081,7 @@ spec:
 <li>PodDisruptionBudget은 노드 드레인·오토스케일 축소 등 자발적 중단 중 최소 가용 Pod 수를 보장한다. 비자발적 장애는 막지 못하며, 너무 빡빡하면 유지보수가 막힌다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] PodDisruptionBudget(PDB)을 생성하고 kubectl drain으로 노드를 비울 때 PDB가 어떻게 Pod 축출을 제한하는지 관찰하라. 먼저 Deployment를 만들고 PDB를 minAvailable: 2로 설정한 뒤, 단일 노드 클러스터에서 drain 시도 시 어떤 메시지가 나오는지 확인하라.</p>
+              <div class='q'><p>실습 1. [워밍업] PodDisruptionBudget(PDB)을 생성하고 kubectl drain으로 노드를 비울 때 PDB가 어떻게 Pod 축출을 제한하는지 관찰하라. 먼저 Deployment를 만들고 PDB를 minAvailable: 2로 설정한 뒤, 단일 노드 클러스터에서 drain 시도 시 어떤 메시지가 나오는지 확인하라.</p></div>
               <pre class='starter'><code># 1. 테스트 Deployment (replicas: 3)
 kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
 apiVersion: apps/v1
@@ -2096,9 +2164,9 @@ kubectl uncordon minikube
 # 정리
 kubectl delete deploy pdb-demo
 kubectl delete pdb pdb-demo-pdb</code></pre>
-                <p class='exp2'>PodDisruptionBudget은 자발적 중단(drain, 롤링 업데이트 등) 시 최소 가용 Pod 수를 보장한다. minAvailable: 2이면 3개 중 1개만 동시에 축출 허용된다. ALLOWED DISRUPTIONS 컬럼이 이 값을 보여준다. 비자발적 중단(노드 고장)에는 PDB가 적용되지 않는다. 롤링 업데이트 중에도 PDB가 동작해, maxUnavailable 설정과 함께 무중단 배포를 보장한다.</p>
+                <div class='exp2'><p>PodDisruptionBudget은 자발적 중단(drain, 롤링 업데이트 등) 시 최소 가용 Pod 수를 보장한다. minAvailable: 2이면 3개 중 1개만 동시에 축출 허용된다. ALLOWED DISRUPTIONS 컬럼이 이 값을 보여준다. 비자발적 중단(노드 고장)에는 PDB가 적용되지 않는다. 롤링 업데이트 중에도 PDB가 동작해, maxUnavailable 설정과 함께 무중단 배포를 보장한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] Argo Rollouts를 설치하고 Canary 배포 전략으로 Rollout 오브젝트를 생성하라. 트래픽을 20% → 50% → 100% 단계로 점진적으로 전환하는 canary steps를 정의하고, 각 단계에서 pause로 수동 승인 대기 후 다음 단계로 진행하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] Argo Rollouts를 설치하고 Canary 배포 전략으로 Rollout 오브젝트를 생성하라. 트래픽을 20% → 50% → 100% 단계로 점진적으로 전환하는 canary steps를 정의하고, 각 단계에서 pause로 수동 승인 대기 후 다음 단계로 진행하라.</p></div>
               <pre class='starter'><code># 1. Argo Rollouts 설치
 kubectl create namespace argo-rollouts
 kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
@@ -2200,9 +2268,9 @@ kubectl argo rollouts promote canary-demo
 # 두 번째 promote
 kubectl argo rollouts promote canary-demo
 # 100% 전환 완료</code></pre>
-                <p class='exp2'>Argo Rollouts의 Canary 전략은 steps에 정의된 단계를 순서대로 실행한다. setWeight는 카나리 Pod의 트래픽 비율을 제어하며, replicas 5에서 setWeight: 20이면 카나리 Pod 1개(20%)가 생성된다. pause: {}는 수동으로 promote 명령을 줄 때까지 대기한다. pause: {duration: 30}은 30초 자동 대기 후 진행한다. 이 단계적 트래픽 전환이 프로그레시브 딜리버리의 핵심으로, 각 단계에서 메트릭을 확인하며 문제 시 abort로 롤백할 수 있다.</p>
+                <div class='exp2'><p>Argo Rollouts의 Canary 전략은 steps에 정의된 단계를 순서대로 실행한다. setWeight는 카나리 Pod의 트래픽 비율을 제어하며, replicas 5에서 setWeight: 20이면 카나리 Pod 1개(20%)가 생성된다. pause: {}는 수동으로 promote 명령을 줄 때까지 대기한다. pause: {duration: 30}은 30초 자동 대기 후 진행한다. 이 단계적 트래픽 전환이 프로그레시브 딜리버리의 핵심으로, 각 단계에서 메트릭을 확인하며 문제 시 abort로 롤백할 수 있다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [응용] Rollout에 PDB를 결합해, Canary 배포 중에도 최소 가용 Pod 수를 보장하라. Rollout replicas 5, minAvailable 4인 PDB를 생성하고, Canary 배포 중 kubectl drain 시도 시 PDB가 배포와 drain을 동시에 제한하는 상황을 관찰하라.</p>
+              <div class='q'><p>실습 3. [응용] Rollout에 PDB를 결합해, Canary 배포 중에도 최소 가용 Pod 수를 보장하라. Rollout replicas 5, minAvailable 4인 PDB를 생성하고, Canary 배포 중 kubectl drain 시도 시 PDB가 배포와 drain을 동시에 제한하는 상황을 관찰하라.</p></div>
               <pre class='starter'><code># 1. Rollout에 연결된 PDB 생성
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -2274,7 +2342,7 @@ kubectl argo rollouts undo canary-demo
 kubectl delete rollout canary-demo
 kubectl delete pdb canary-demo-pdb
 kubectl delete service canary-demo-svc</code></pre>
-                <p class='exp2'>PDB와 Canary 배포를 함께 사용하면 배포 중에도 서비스 가용성을 이중으로 보호할 수 있다. Canary 교체(이전 버전 Pod 축출)와 노드 drain 두 가지 자발적 중단이 동시에 일어날 때, PDB의 ALLOWED DISRUPTIONS가 0이면 두 작업 모두 블로킹된다. 실무에서는 배포 창(maintenance window) 중에 drain을 수행하거나, PDB의 minAvailable을 replicas보다 충분히 낮게 설정해 배포와 인프라 유지보수가 동시에 가능하도록 균형을 맞춘다.</p>
+                <div class='exp2'><p>PDB와 Canary 배포를 함께 사용하면 배포 중에도 서비스 가용성을 이중으로 보호할 수 있다. Canary 교체(이전 버전 Pod 축출)와 노드 drain 두 가지 자발적 중단이 동시에 일어날 때, PDB의 ALLOWED DISRUPTIONS가 0이면 두 작업 모두 블로킹된다. 실무에서는 배포 창(maintenance window) 중에 drain을 수행하거나, PDB의 minAvailable을 replicas보다 충분히 낮게 설정해 배포와 인프라 유지보수가 동시에 가능하도록 균형을 맞춘다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=hIL0E2gLkf8' target='_blank'>Argo Rollouts Demo</a></li><li><a href='https://www.youtube.com/watch?v=84Ky0aPbHvY' target='_blank'>Argo Rollouts - Canary Deployments Made Easy In Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=6zWfVqkKuyI' target='_blank'>Kubernetes Deployment strategies | Canary Deployment | Argo rollout</a></li></ul></div>
         </article>
@@ -2420,7 +2488,7 @@ istioctl dashboard kiali
 <li>메트릭·토폴로지(Kiali)는 거의 자동으로 얻어지지만, <strong>분산 추적만은 앱이 추적 헤더를 전파해야 하는 무코드의 예외</strong>다. 이를 챙기지 않으면 트레이스가 끊긴다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
-              <p class='q'>실습 1. [워밍업] Istio를 istioctl로 설치하고 사이드카 자동 주입을 활성화하라. default 네임스페이스에 istio-injection 레이블을 달고, 테스트 애플리케이션을 배포해 각 Pod에 Envoy 사이드카 컨테이너가 자동으로 주입됐는지 확인하라.</p>
+              <div class='q'><p>실습 1. [워밍업] Istio를 istioctl로 설치하고 사이드카 자동 주입을 활성화하라. default 네임스페이스에 istio-injection 레이블을 달고, 테스트 애플리케이션을 배포해 각 Pod에 Envoy 사이드카 컨테이너가 자동으로 주입됐는지 확인하라.</p></div>
               <pre class='starter'><code># 1. Istio 다운로드 및 설치
 curl -L https://istio.io/downloadIstio | sh -
 cd istio-*/bin
@@ -2480,9 +2548,9 @@ kubectl get pods
 
 # 특정 Pod의 컨테이너 목록 확인 (istio-proxy 컨테이너 확인)
 kubectl describe pod productpage-v1-xxx | grep &#x27;Container ID&#x27; -A3</code></pre>
-                <p class='exp2'>Istio를 설치하면 istiod(컨트롤 플레인)와 istio-ingressgateway, istio-egressgateway(데이터 플레인 게이트웨이)가 생성된다. 네임스페이스에 istio-injection=enabled 레이블을 달면, 이후 해당 네임스페이스에 배포되는 모든 Pod에 Envoy 프록시 컨테이너(istio-proxy)가 자동으로 주입된다. READY 2/2는 앱 컨테이너 1개 + Envoy 사이드카 1개가 모두 준비된 상태다. 기존 Pod는 자동 주입이 안 되므로 kubectl rollout restart로 재생성해야 한다.</p>
+                <div class='exp2'><p>Istio를 설치하면 istiod(컨트롤 플레인)와 istio-ingressgateway, istio-egressgateway(데이터 플레인 게이트웨이)가 생성된다. 네임스페이스에 istio-injection=enabled 레이블을 달면, 이후 해당 네임스페이스에 배포되는 모든 Pod에 Envoy 프록시 컨테이너(istio-proxy)가 자동으로 주입된다. READY 2/2는 앱 컨테이너 1개 + Envoy 사이드카 1개가 모두 준비된 상태다. 기존 Pod는 자동 주입이 안 되므로 kubectl rollout restart로 재생성해야 한다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 2. [핵심 실습] VirtualService와 DestinationRule로 트래픽을 분할하라. Bookinfo의 reviews 서비스에 세 버전(v1/v2/v3)이 있을 때, v1에 70%, v3에 30% 트래픽을 보내는 가중치 기반 라우팅을 구성하라. curl 반복 요청으로 실제 트래픽 분포를 검증하라.</p>
+              <div class='q'><p>실습 2. [핵심 실습] VirtualService와 DestinationRule로 트래픽을 분할하라. Bookinfo의 reviews 서비스에 세 버전(v1/v2/v3)이 있을 때, v1에 70%, v3에 30% 트래픽을 보내는 가중치 기반 라우팅을 구성하라. curl 반복 요청으로 실제 트래픽 분포를 검증하라.</p></div>
               <pre class='starter'><code># 1. DestinationRule: 서브셋(버전별 Pod 그룹) 정의
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
@@ -2581,9 +2649,9 @@ done
 # VirtualService 상태 확인
 kubectl get virtualservice reviews-vs
 kubectl get destinationrule reviews-dr</code></pre>
-                <p class='exp2'>DestinationRule은 서비스의 Pod를 version 레이블 기준으로 서브셋으로 나눈다. VirtualService는 이 서브셋에 가중치 트래픽을 배분한다. weight: 70과 weight: 30의 합은 100이어야 한다. 이 메커니즘이 Istio가 Argo Rollouts 없이도 카나리 배포를 가능하게 하는 핵심이다. Envoy 사이드카가 모든 트래픽을 가로채 VirtualService 규칙에 따라 라우팅하므로, 애플리케이션 코드 변경 없이 트래픽 정책을 적용할 수 있다.</p>
+                <div class='exp2'><p>DestinationRule은 서비스의 Pod를 version 레이블 기준으로 서브셋으로 나눈다. VirtualService는 이 서브셋에 가중치 트래픽을 배분한다. weight: 70과 weight: 30의 합은 100이어야 한다. 이 메커니즘이 Istio가 Argo Rollouts 없이도 카나리 배포를 가능하게 하는 핵심이다. Envoy 사이드카가 모든 트래픽을 가로채 VirtualService 규칙에 따라 라우팅하므로, 애플리케이션 코드 변경 없이 트래픽 정책을 적용할 수 있다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 3. [핵심 실습] PeerAuthentication으로 네임스페이스 전체에 mTLS STRICT 모드를 적용하라. 적용 전후로 사이드카가 없는 외부 curl 요청이 거부되는지 확인하고, istioctl을 통해 mTLS 인증 상태를 검증하라.</p>
+              <div class='q'><p>실습 3. [핵심 실습] PeerAuthentication으로 네임스페이스 전체에 mTLS STRICT 모드를 적용하라. 적용 전후로 사이드카가 없는 외부 curl 요청이 거부되는지 확인하고, istioctl을 통해 mTLS 인증 상태를 검증하라.</p></div>
               <pre class='starter'><code># 1. 현재 mTLS 상태 확인 (PERMISSIVE 기본값)
 istioctl x describe pod $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)
 
@@ -2648,9 +2716,9 @@ curl -s http://$(minikube ip):$INGRESS_PORT/productpage | head -20
 istioctl authn tls-check $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;) reviews
 # HOST:PORT            STATUS    SERVER    CLIENT    AUTHN POLICY        DESTINATION RULE
 # reviews:9080         OK        STRICT    STRICT    default-mtls/...    reviews-dr/...</code></pre>
-                <p class='exp2'>PeerAuthentication STRICT 모드는 해당 네임스페이스의 모든 서비스 간 통신에 mTLS를 강제한다. Istio 사이드카가 있는 Pod끼리는 Envoy가 자동으로 인증서를 교환해 암호화된 mTLS 채널을 형성한다. 사이드카가 없는 Pod에서 오는 평문 트래픽은 STRICT 모드에서 거부된다. PERMISSIVE 모드는 mTLS와 평문을 모두 허용해 점진적 마이그레이션에 사용한다. istioctl authn tls-check 명령으로 두 서비스 간 실제 mTLS 협상 결과를 확인할 수 있다.</p>
+                <div class='exp2'><p>PeerAuthentication STRICT 모드는 해당 네임스페이스의 모든 서비스 간 통신에 mTLS를 강제한다. Istio 사이드카가 있는 Pod끼리는 Envoy가 자동으로 인증서를 교환해 암호화된 mTLS 채널을 형성한다. 사이드카가 없는 Pod에서 오는 평문 트래픽은 STRICT 모드에서 거부된다. PERMISSIVE 모드는 mTLS와 평문을 모두 허용해 점진적 마이그레이션에 사용한다. istioctl authn tls-check 명령으로 두 서비스 간 실제 mTLS 협상 결과를 확인할 수 있다.</p></div>
               </details></div><div class='task'>
-              <p class='q'>실습 4. [응용] Istio의 관측성 도구(Kiali, Jaeger)를 설치하고 서비스 메시 시각화와 분산 추적을 체험하라. Bookinfo에 트래픽을 발생시킨 후 Kiali에서 서비스 간 의존성 그래프를 확인하고, Jaeger에서 HTTP 요청의 분산 추적 스팬을 조회하라.</p>
+              <div class='q'><p>실습 4. [응용] Istio의 관측성 도구(Kiali, Jaeger)를 설치하고 서비스 메시 시각화와 분산 추적을 체험하라. Bookinfo에 트래픽을 발생시킨 후 Kiali에서 서비스 간 의존성 그래프를 확인하고, Jaeger에서 HTTP 요청의 분산 추적 스팬을 조회하라.</p></div>
               <pre class='starter'><code># 1. Kiali, Jaeger, Prometheus, Grafana 설치 (Istio 샘플 애드온)
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/kiali.yaml
 kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/jaeger.yaml
@@ -2715,7 +2783,7 @@ kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.20/sam
 kubectl delete peerauthentication default-mtls
 kubectl delete virtualservice reviews-vs
 kubectl delete destinationrule reviews-dr</code></pre>
-                <p class='exp2'>Istio는 애플리케이션 코드 변경 없이 세 가지 관측성을 제공한다. 첫째, 메트릭(Prometheus/Grafana): 요청 수, 오류율, P99 지연시간 등이 자동 수집된다. 둘째, 분산 추적(Jaeger/Zipkin): 각 서비스 hop의 지연시간과 전체 요청 경로가 스팬으로 기록된다. 셋째, 서비스 그래프(Kiali): 실시간 트래픽 흐름과 서비스 간 의존성이 시각화된다. 이 세 가지가 서비스 메시의 핵심 관측성 기둥(Three pillars of observability: metrics, traces, logs)을 구성한다.</p>
+                <div class='exp2'><p>Istio는 애플리케이션 코드 변경 없이 세 가지 관측성을 제공한다. 첫째, 메트릭(Prometheus/Grafana): 요청 수, 오류율, P99 지연시간 등이 자동 수집된다. 둘째, 분산 추적(Jaeger/Zipkin): 각 서비스 hop의 지연시간과 전체 요청 경로가 스팬으로 기록된다. 셋째, 서비스 그래프(Kiali): 실시간 트래픽 흐름과 서비스 간 의존성이 시각화된다. 이 세 가지가 서비스 메시의 핵심 관측성 기둥(Three pillars of observability: metrics, traces, logs)을 구성한다.</p></div>
               </details></div></section>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=16fgzklcF7Y' target='_blank'>Istio &amp; Service Mesh - simply explained in 15 mins</a></li><li><a href='https://www.youtube.com/watch?v=H4YIKwAQMKk' target='_blank'>Istio Tutorial (Service Mesh - Ingress Gateway - Virtual Service - Gateway - Ingress - mTLS)</a></li><li><a href='https://www.youtube.com/watch?v=0w23AQ-hrF4' target='_blank'>[ Kube 57 ] Istio demo with Kiali and traffic management</a></li></ul></div>
         </article></main>

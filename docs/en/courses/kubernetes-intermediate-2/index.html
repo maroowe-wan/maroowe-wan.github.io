@@ -196,12 +196,10 @@ kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt   # Still &quot;I am web-
 <li>Google Cloud Tech, &quot;What are stateful workloads?&quot; — https://www.youtube.com/watch?v=yROFvZiV5cU</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. Create the following two Services.
-
-Service A (regular): name=nginx-normal, selector=app:nginx, port 80, type omitted (ClusterIP default)
-Service B (Headless): name=nginx-headless, selector=app:nginx, port 80, clusterIP: None
-
-After creating both, compare the CLUSTER-IP column in kubectl get svc and explain the difference between the two Services.</p>
+              <div class='q'><p>Practice 1. Create the following two Services.</p>
+<p>Service A (regular): name=nginx-normal, selector=app:nginx, port 80, type omitted (ClusterIP default)</p>
+<p>Service B (Headless): name=nginx-headless, selector=app:nginx, port 80, clusterIP: None</p>
+<p>After creating both, compare the CLUSTER-IP column in kubectl get svc and explain the difference between the two Services.</p></div>
               <pre class='starter'><code># nginx-normal-svc.yaml
 apiVersion: v1
 kind: Service
@@ -264,16 +262,17 @@ kubectl get svc nginx-normal nginx-headless
 # NAME             TYPE        CLUSTER-IP      PORT(S)   AGE
 # nginx-normal     ClusterIP   10.96.xxx.xxx   80/TCP    10s
 # nginx-headless   ClusterIP   None            80/TCP    8s</code></pre>
-                <p class='exp2'>Setting clusterIP: None is all it takes to create a Headless Service. A regular Service receives a virtual IP (ClusterIP) backed by iptables/IPVS rules and acts as a load balancer. A Headless Service skips the virtual IP entirely and instead registers individual A records for each backing Pod in DNS. When a StatefulSet references this Service, each Pod gets a stable DNS address in the form web-0.nginx-headless.default.svc.cluster.local, allowing clients to target a specific Pod directly.</p>
+                <div class='exp2'><p>Setting clusterIP: None is all it takes to create a Headless Service. A regular Service receives a virtual IP (ClusterIP) backed by iptables/IPVS rules and acts as a load balancer. A Headless Service skips the virtual IP entirely and instead registers individual A records for each backing Pod in DNS. When a StatefulSet references this Service, each Pod gets a stable DNS address in the form web-0.nginx-headless.default.svc.cluster.local, allowing clients to target a specific Pod directly.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. Write a StatefulSet manifest (web-statefulset.yaml) that uses the nginx-headless Service created in Step 1.
-- name: web, replicas: 3, serviceName: nginx-headless
-- Container: nginx:1.25, port 80, mount the data volume at /usr/share/nginx/html
-- volumeClaimTemplates: name=data, accessModes=ReadWriteOnce, storage=1Gi
-
-After applying, verify the following two things.
-(a) Run kubectl get pods -l app=nginx -w and observe that Pods are created strictly in order.
-(b) Run kubectl get pvc and confirm that three PVCs — data-web-0, data-web-1, data-web-2 — were automatically provisioned.</p>
+              <div class='q'><p>Practice 2. Write a StatefulSet manifest (web-statefulset.yaml) that uses the nginx-headless Service created in Step 1.</p>
+<ul>
+<li>name: web, replicas: 3, serviceName: nginx-headless</li>
+<li>Container: nginx:1.25, port 80, mount the data volume at /usr/share/nginx/html</li>
+<li>volumeClaimTemplates: name=data, accessModes=ReadWriteOnce, storage=1Gi</li>
+</ul>
+<p>After applying, verify the following two things.</p>
+<p>(a) Run kubectl get pods -l app=nginx -w and observe that Pods are created strictly in order.</p>
+<p>(b) Run kubectl get pvc and confirm that three PVCs — data-web-0, data-web-1, data-web-2 — were automatically provisioned.</p></div>
               <pre class='starter'><code># web-statefulset.yaml (fill in the blanks)
 apiVersion: apps/v1
 kind: StatefulSet
@@ -364,14 +363,16 @@ kubectl get pvc
 # data-web-0  Bound    pvc-xxxxxxx  1Gi        RWO
 # data-web-1  Bound    pvc-xxxxxxx  1Gi        RWO
 # data-web-2  Bound    pvc-xxxxxxx  1Gi        RWO</code></pre>
-                <p class='exp2'>In a StatefulSet spec, volumeClaimTemplates is a blueprint, not a volumes entry. Each time Kubernetes creates a Pod, it uses this blueprint to provision a PVC named &lt;template-name&gt;-&lt;pod-name&gt;. As you can see in the watch output, web-1 is not created until web-0 reaches Running and Ready — this is the Ordered (sequential) behavior that sets StatefulSet apart from Deployment. The serviceName field must exactly match an existing Headless Service name so that DNS records are created correctly for each Pod.</p>
+                <div class='exp2'><p>In a StatefulSet spec, volumeClaimTemplates is a blueprint, not a volumes entry. Each time Kubernetes creates a Pod, it uses this blueprint to provision a PVC named &lt;template-name&gt;-&lt;pod-name&gt;. As you can see in the watch output, web-1 is not created until web-0 reaches Running and Ready — this is the Ordered (sequential) behavior that sets StatefulSet apart from Deployment. The serviceName field must exactly match an existing Headless Service name so that DNS records are created correctly for each Pod.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. 1. Use kubectl exec to create a file inside the web-1 container.
-   - Write &#x27;I am web-1&#x27; to /usr/share/nginx/html/id.txt.
-2. Delete the Pod with kubectl delete pod web-1.
-3. Watch with kubectl get pods -l app=nginx -w until web-1 is recreated and Running again.
-4. Use kubectl exec to read /usr/share/nginx/html/id.txt on the recreated web-1 and confirm the content is preserved.
-5. Use the same command to read /usr/share/nginx/html/id.txt on web-0 and confirm the file does not exist there (nothing was written to web-0).</p>
+              <div class='q'><p>Practice 3. 1. Use kubectl exec to create a file inside the web-1 container.</p>
+<ul>
+<li>Write &#x27;I am web-1&#x27; to /usr/share/nginx/html/id.txt.</li>
+</ul>
+<p>2. Delete the Pod with kubectl delete pod web-1.</p>
+<p>3. Watch with kubectl get pods -l app=nginx -w until web-1 is recreated and Running again.</p>
+<p>4. Use kubectl exec to read /usr/share/nginx/html/id.txt on the recreated web-1 and confirm the content is preserved.</p>
+<p>5. Use the same command to read /usr/share/nginx/html/id.txt on web-0 and confirm the file does not exist there (nothing was written to web-0).</p></div>
               <pre class='starter'><code># 1. Write a marker file to web-1
 kubectl exec web-1 -- sh -c &#x27;____&#x27;
 
@@ -418,16 +419,18 @@ kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
 kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt
 # Expected output: cat: can&#x27;t open &#x27;/usr/share/nginx/html/id.txt&#x27;: No such file or directory
 # -&gt; The data-web-0 volume is completely separate, so the file is absent — this is expected</code></pre>
-                <p class='exp2'>When the StatefulSet recreates web-1, it always reattaches the data-web-1 PVC. Files stored on the volume outlive the Pod, so id.txt is preserved. By contrast, web-0 never had the file written to its data-web-0 volume, so id.txt is absent there. Verifying both results together proves that per-Pod volumes are fully isolated from each other. With a Deployment, a recreated Pod is not guaranteed to reattach the same volume, so data persistence of this kind cannot be relied upon.</p>
+                <div class='exp2'><p>When the StatefulSet recreates web-1, it always reattaches the data-web-1 PVC. Files stored on the volume outlive the Pod, so id.txt is preserved. By contrast, web-0 never had the file written to its data-web-0 volume, so id.txt is absent there. Verifying both results together proves that per-Pod volumes are fully isolated from each other. With a Deployment, a recreated Pod is not guaranteed to reattach the same volume, so data persistence of this kind cannot be relied upon.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. 1. Write a distinct marker file to each of web-0, web-1, and web-2.
-   - web-0: echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt
-   - web-1: echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt
-   - web-2: echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt
-2. Run kubectl scale statefulset web --replicas=1 to scale down. Watch with kubectl get pods -l app=nginx -w and confirm that web-2 terminates before web-1.
-3. Run kubectl get pvc and confirm that all three PVCs remain after the scale-down.
-4. Run kubectl scale statefulset web --replicas=3 to scale back up.
-5. Read id.txt from the recreated web-1 and web-2 and confirm that the values pod1 and pod2 written before the scale-down have been recovered.</p>
+              <div class='q'><p>Practice 4. 1. Write a distinct marker file to each of web-0, web-1, and web-2.</p>
+<ul>
+<li>web-0: echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt</li>
+<li>web-1: echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt</li>
+<li>web-2: echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt</li>
+</ul>
+<p>2. Run kubectl scale statefulset web --replicas=1 to scale down. Watch with kubectl get pods -l app=nginx -w and confirm that web-2 terminates before web-1.</p>
+<p>3. Run kubectl get pvc and confirm that all three PVCs remain after the scale-down.</p>
+<p>4. Run kubectl scale statefulset web --replicas=3 to scale back up.</p>
+<p>5. Read id.txt from the recreated web-1 and web-2 and confirm that the values pod1 and pod2 written before the scale-down have been recovered.</p></div>
               <pre class='starter'><code># 1. Write marker files to each Pod
 kubectl exec web-0 -- sh -c &#x27;echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
 kubectl exec web-1 -- sh -c &#x27;echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
@@ -487,7 +490,7 @@ kubectl exec web-2 -- cat /usr/share/nginx/html/id.txt
 # Verify web-0 as well
 kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt
 # Expected output: pod0</code></pre>
-                <p class='exp2'>StatefulSet scale-down terminates Pods from the highest ordinal (web-2) downward, one at a time. This ordering is designed to protect the Pod with ordinal 0 — typically the master — until the very end. PVCs created from volumeClaimTemplates are intentionally not deleted when the StatefulSet is scaled down or deleted, in order to protect the data they hold. When you scale back up, web-1 and web-2 reattach their existing data-web-1 and data-web-2 PVCs and recover the previous data. To fully clean up the PVCs, you must delete them explicitly with kubectl delete pvc data-web-0 data-web-1 data-web-2 — this permanently destroys the data, so proceed with caution.</p>
+                <div class='exp2'><p>StatefulSet scale-down terminates Pods from the highest ordinal (web-2) downward, one at a time. This ordering is designed to protect the Pod with ordinal 0 — typically the master — until the very end. PVCs created from volumeClaimTemplates are intentionally not deleted when the StatefulSet is scaled down or deleted, in order to protect the data they hold. When you scale back up, web-1 and web-2 reattach their existing data-web-1 and data-web-2 PVCs and recover the previous data. To fully clean up the PVCs, you must delete them explicitly with kubectl delete pvc data-web-0 data-web-1 data-web-2 — this permanently destroys the data, so proceed with caution.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=UDXnyh0vtXw' target='_blank'>Deploy a production Database in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=yROFvZiV5cU' target='_blank'>What are stateful workloads?</a></li></ul></div>
         </article>
@@ -767,18 +770,18 @@ kubectl get pods -o wide              # check the NODE column to confirm each Po
 <li>Anton Putra, &quot;Kubernetes Deployment vs. StatefulSet vs. DaemonSet&quot; — https://www.youtube.com/watch?v=30KAInyvY_o</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. Write a Job manifest (hello-job.yaml) that satisfies the following requirements and apply it.
-
-Requirements:
-- Job name: hello-job
-- Image: busybox:1.36
-- Command: sh -c &#x27;echo &quot;Job started: $(date)&quot;; sleep 5; echo &quot;Job done&quot;&#x27;
-- restartPolicy: Never
-
-After applying, verify the state in the following order:
-1. Run kubectl get jobs repeatedly and confirm COMPLETIONS changes from 0/1 to 1/1.
-2. Run kubectl get pods and confirm the Pod is in Completed status.
-3. Run kubectl logs job/hello-job and confirm the container output.</p>
+              <div class='q'><p>Practice 1. Write a Job manifest (hello-job.yaml) that satisfies the following requirements and apply it.</p>
+<p>Requirements:</p>
+<ul>
+<li>Job name: hello-job</li>
+<li>Image: busybox:1.36</li>
+<li>Command: sh -c &#x27;echo &quot;Job started: $(date)&quot;; sleep 5; echo &quot;Job done&quot;&#x27;</li>
+<li>restartPolicy: Never</li>
+</ul>
+<p>After applying, verify the state in the following order:</p>
+<p>1. Run kubectl get jobs repeatedly and confirm COMPLETIONS changes from 0/1 to 1/1.</p>
+<p>2. Run kubectl get pods and confirm the Pod is in Completed status.</p>
+<p>3. Run kubectl logs job/hello-job and confirm the container output.</p></div>
               <pre class='starter'><code># hello-job.yaml (fill in the blanks)
 apiVersion: batch/v1
 kind: ____
@@ -825,29 +828,30 @@ kubectl logs job/hello-job
 # Expected output:
 # Job started: Mon May 25 ...
 # Job done</code></pre>
-                <p class='exp2'>Jobs belong to the batch/v1 API group, so the manifest must specify apiVersion: batch/v1. Setting restartPolicy to Always is rejected immediately by the API server (it is only valid for Deployments). With Never, the controller creates a new Pod to retry when the container fails; with OnFailure, only the container is restarted within the same Pod. Completed Pods are not deleted automatically — they remain in Completed state so their output can be retrieved with kubectl logs. This is fundamentally different from a Deployment Pod, which would be restarted.</p>
+                <div class='exp2'><p>Jobs belong to the batch/v1 API group, so the manifest must specify apiVersion: batch/v1. Setting restartPolicy to Always is rejected immediately by the API server (it is only valid for Deployments). With Never, the controller creates a new Pod to retry when the container fails; with OnFailure, only the container is restarted within the same Pod. Completed Pods are not deleted automatically — they remain in Completed state so their output can be retrieved with kubectl logs. This is fundamentally different from a Deployment Pod, which would be restarted.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. Part A — Parallel Job observation:
-Write a Job manifest (parallel-job.yaml) with the following requirements:
-- Job name: parallel-job
-- completions: 4  (4 successful completions required)
-- parallelism: 2  (run 2 Pods at a time)
-- Image: busybox:1.36
-- Command: sh -c &#x27;echo &quot;Pod $(hostname) processing&quot;; sleep 8&#x27;
-- restartPolicy: Never
-
-After applying, use kubectl get pods -w to watch Pods execute in batches of two in real time.
-After completion, confirm COMPLETIONS shows 4/4 in kubectl get jobs.
-
-Part B — backoffLimit behavior:
-Write a Job (fail-job.yaml) with the following requirements:
-- Job name: fail-job
-- backoffLimit: 2  (Job is marked Failed after 2 retries)
-- Image: busybox:1.36
-- Command: sh -c &#x27;echo &quot;simulating failure&quot;; exit 1&#x27;  (always fails)
-- restartPolicy: Never
-
-After applying, use kubectl get jobs -w to observe the state, and confirm the Job ends as Failed with COMPLETIONS still at 0/1.</p>
+              <div class='q'><p>Practice 2. Part A — Parallel Job observation:</p>
+<p>Write a Job manifest (parallel-job.yaml) with the following requirements:</p>
+<ul>
+<li>Job name: parallel-job</li>
+<li>completions: 4  (4 successful completions required)</li>
+<li>parallelism: 2  (run 2 Pods at a time)</li>
+<li>Image: busybox:1.36</li>
+<li>Command: sh -c &#x27;echo &quot;Pod $(hostname) processing&quot;; sleep 8&#x27;</li>
+<li>restartPolicy: Never</li>
+</ul>
+<p>After applying, use kubectl get pods -w to watch Pods execute in batches of two in real time.</p>
+<p>After completion, confirm COMPLETIONS shows 4/4 in kubectl get jobs.</p>
+<p>Part B — backoffLimit behavior:</p>
+<p>Write a Job (fail-job.yaml) with the following requirements:</p>
+<ul>
+<li>Job name: fail-job</li>
+<li>backoffLimit: 2  (Job is marked Failed after 2 retries)</li>
+<li>Image: busybox:1.36</li>
+<li>Command: sh -c &#x27;echo &quot;simulating failure&quot;; exit 1&#x27;  (always fails)</li>
+<li>restartPolicy: Never</li>
+</ul>
+<p>After applying, use kubectl get jobs -w to observe the state, and confirm the Job ends as Failed with COMPLETIONS still at 0/1.</p></div>
               <pre class='starter'><code># parallel-job.yaml (fill in the blanks)
 apiVersion: batch/v1
 kind: Job
@@ -939,30 +943,28 @@ kubectl describe job fail-job
 # List the failed Pods
 kubectl get pods -l job-name=fail-job
 # 3 Pods all in Error state (backoffLimit 2 → 3 total attempts: 1 initial + 2 retries)</code></pre>
-                <p class='exp2'>Understanding the relationship between completions and parallelism is the heart of this exercise. completions is &#x27;how many successes are needed in total&#x27;; parallelism is &#x27;how many Pods run at the same time&#x27;. With completions: 4 and parallelism: 2, execution proceeds as (2 concurrent Pods complete) × 2 batches. The kubectl get pods -w output lets you see both Pods reach Completed state before the next pair starts.
-
-For backoffLimit: the Job controller creates a new Pod for each failure and retries until the attempt count reaches backoffLimit, at which point it marks the Job as Failed and stops creating new Pods. With backoffLimit: 2, the total number of Pods created is 3 (1 initial attempt + 2 retries). The BackoffLimitExceeded reason is visible in the Conditions field of kubectl describe job fail-job.</p>
+                <div class='exp2'><p>Understanding the relationship between completions and parallelism is the heart of this exercise. completions is &#x27;how many successes are needed in total&#x27;; parallelism is &#x27;how many Pods run at the same time&#x27;. With completions: 4 and parallelism: 2, execution proceeds as (2 concurrent Pods complete) × 2 batches. The kubectl get pods -w output lets you see both Pods reach Completed state before the next pair starts.</p>
+<p>For backoffLimit: the Job controller creates a new Pod for each failure and retries until the attempt count reaches backoffLimit, at which point it marks the Job as Failed and stops creating new Pods. With backoffLimit: 2, the total number of Pods created is 3 (1 initial attempt + 2 retries). The BackoffLimitExceeded reason is visible in the Conditions field of kubectl describe job fail-job.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. Write a CronJob manifest (heartbeat-cj.yaml) that meets the following requirements and apply it.
-
-Requirements:
-- CronJob name: heartbeat-cj
-- schedule: &#x27;*/1 * * * *&#x27;  (every 1 minute)
-- concurrencyPolicy: Forbid  (skip new Job if previous one is still running)
-- successfulJobsHistoryLimit: 3
-- failedJobsHistoryLimit: 1
-- Image: busybox:1.36
-- Command: sh -c &#x27;echo &quot;heartbeat $(date)&quot;&#x27;
-- restartPolicy: OnFailure
-
-After applying, perform the following steps in order:
-
-1. Wait 1-2 minutes, then use kubectl get cronjob and kubectl get jobs to confirm Jobs are being created automatically.
-2. Run kubectl create job --from=cronjob/heartbeat-cj manual-run-1 to trigger an immediate one-time run without waiting for the schedule.
-3. Run kubectl logs job/manual-run-1 to confirm the output.
-4. Run kubectl patch cronjob heartbeat-cj -p &#x27;{&quot;spec&quot;:{&quot;suspend&quot;:true}}&#x27; to pause the CronJob.
-5. Confirm the SUSPEND column shows True in kubectl get cronjob heartbeat-cj.
-6. Run kubectl patch cronjob heartbeat-cj -p &#x27;{&quot;spec&quot;:{&quot;suspend&quot;:false}}&#x27; to resume.</p>
+              <div class='q'><p>Practice 3. Write a CronJob manifest (heartbeat-cj.yaml) that meets the following requirements and apply it.</p>
+<p>Requirements:</p>
+<ul>
+<li>CronJob name: heartbeat-cj</li>
+<li>schedule: &#x27;<em>/1 </em> <em> </em> *&#x27;  (every 1 minute)</li>
+<li>concurrencyPolicy: Forbid  (skip new Job if previous one is still running)</li>
+<li>successfulJobsHistoryLimit: 3</li>
+<li>failedJobsHistoryLimit: 1</li>
+<li>Image: busybox:1.36</li>
+<li>Command: sh -c &#x27;echo &quot;heartbeat $(date)&quot;&#x27;</li>
+<li>restartPolicy: OnFailure</li>
+</ul>
+<p>After applying, perform the following steps in order:</p>
+<p>1. Wait 1-2 minutes, then use kubectl get cronjob and kubectl get jobs to confirm Jobs are being created automatically.</p>
+<p>2. Run kubectl create job --from=cronjob/heartbeat-cj manual-run-1 to trigger an immediate one-time run without waiting for the schedule.</p>
+<p>3. Run kubectl logs job/manual-run-1 to confirm the output.</p>
+<p>4. Run kubectl patch cronjob heartbeat-cj -p &#x27;{&quot;spec&quot;:{&quot;suspend&quot;:true}}&#x27; to pause the CronJob.</p>
+<p>5. Confirm the SUSPEND column shows True in kubectl get cronjob heartbeat-cj.</p>
+<p>6. Run kubectl patch cronjob heartbeat-cj -p &#x27;{&quot;spec&quot;:{&quot;suspend&quot;:false}}&#x27; to resume.</p></div>
               <pre class='starter'><code># heartbeat-cj.yaml (fill in the blanks)
 apiVersion: batch/v1
 kind: CronJob
@@ -1035,32 +1037,31 @@ kubectl get cronjob heartbeat-cj
 kubectl patch cronjob heartbeat-cj -p &#x27;{&quot;spec&quot;:{&quot;suspend&quot;:false}}&#x27;
 kubectl get cronjob heartbeat-cj
 # Confirm SUSPEND column has returned to False</code></pre>
-                <p class='exp2'>A CronJob is a wrapper that contains a complete Job spec under jobTemplate. The CronJob itself does nothing — its sole role is to create a new Job at each scheduled time. In kubectl get jobs output, you can see Jobs named in the pattern &#x27;heartbeat-cj-28xxxxxx&#x27;, showing that the CronJob automatically assigned names and created them.
-
-concurrencyPolicy: Forbid skips creating a new Job when the previous one is still running at the next scheduled time. This must be set for workloads like database backups where two concurrent processes touching the same resource would cause corruption.
-
-kubectl create job --from=cronjob is the essential operational command for triggering an immediate test run without waiting for the next scheduled time. The suspend true/false patch pauses and resumes Job creation without deleting the CronJob — useful for temporarily halting a CronJob during emergency maintenance.</p>
+                <div class='exp2'><p>A CronJob is a wrapper that contains a complete Job spec under jobTemplate. The CronJob itself does nothing — its sole role is to create a new Job at each scheduled time. In kubectl get jobs output, you can see Jobs named in the pattern &#x27;heartbeat-cj-28xxxxxx&#x27;, showing that the CronJob automatically assigned names and created them.</p>
+<p>concurrencyPolicy: Forbid skips creating a new Job when the previous one is still running at the next scheduled time. This must be set for workloads like database backups where two concurrent processes touching the same resource would cause corruption.</p>
+<p>kubectl create job --from=cronjob is the essential operational command for triggering an immediate test run without waiting for the next scheduled time. The suspend true/false patch pauses and resumes Job creation without deleting the CronJob — useful for temporarily halting a CronJob during emergency maintenance.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Part A — Basic DaemonSet deployment:
-Write a DaemonSet manifest (node-checker.yaml) with the following requirements and apply it.
-- DaemonSet name: node-checker
-- selector.matchLabels: app: node-checker
-- Image: busybox:1.36
-- Command: sh -c &#x27;while true; do echo &quot;$(hostname -f) running $(date)&quot;; sleep 30; done&#x27;
-- hostPath volume: mount the node&#x27;s /etc/os-release to /host/os-release in the container as readOnly
-
-After applying:
-1. Run kubectl get daemonset and check the DESIRED/CURRENT/READY values.
-2. Run kubectl get pods -o wide and confirm each Pod is on a different node (NODE column).
-3. Run kubectl exec &lt;pod-name&gt; -- cat /host/os-release to verify the node OS information is accessible.
-
-Part B — Add toleration:
-Add the following toleration to node-checker.yaml and re-apply with kubectl apply:
-- key: node-role.kubernetes.io/control-plane
-- operator: Exists
-- effect: NoSchedule
-
-After re-applying, confirm that the DESIRED count in kubectl get daemonset has increased (now includes the control-plane node).</p>
+              <div class='q'><p>Practice 4. Part A — Basic DaemonSet deployment:</p>
+<p>Write a DaemonSet manifest (node-checker.yaml) with the following requirements and apply it.</p>
+<ul>
+<li>DaemonSet name: node-checker</li>
+<li>selector.matchLabels: app: node-checker</li>
+<li>Image: busybox:1.36</li>
+<li>Command: sh -c &#x27;while true; do echo &quot;$(hostname -f) running $(date)&quot;; sleep 30; done&#x27;</li>
+<li>hostPath volume: mount the node&#x27;s /etc/os-release to /host/os-release in the container as readOnly</li>
+</ul>
+<p>After applying:</p>
+<p>1. Run kubectl get daemonset and check the DESIRED/CURRENT/READY values.</p>
+<p>2. Run kubectl get pods -o wide and confirm each Pod is on a different node (NODE column).</p>
+<p>3. Run kubectl exec &lt;pod-name&gt; -- cat /host/os-release to verify the node OS information is accessible.</p>
+<p>Part B — Add toleration:</p>
+<p>Add the following toleration to node-checker.yaml and re-apply with kubectl apply:</p>
+<ul>
+<li>key: node-role.kubernetes.io/control-plane</li>
+<li>operator: Exists</li>
+<li>effect: NoSchedule</li>
+</ul>
+<p>After re-applying, confirm that the DESIRED count in kubectl get daemonset has increased (now includes the control-plane node).</p></div>
               <pre class='starter'><code># node-checker.yaml (fill in the blanks)
 apiVersion: apps/v1
 kind: DaemonSet
@@ -1181,11 +1182,9 @@ kubectl get daemonset
 
 kubectl get pods -o wide
 # NODE column now includes the control-plane node name</code></pre>
-                <p class='exp2'>DaemonSet has no replica field. Instead, the number of nodes in the cluster determines the desired Pod count (DESIRED). When kubectl get daemonset shows DESIRED equal to the number of nodes, the DaemonSet is healthy. Adding a node automatically increments DESIRED; removing a node removes the Pod on it automatically.
-
-The hostPath volume mounts the node&#x27;s actual filesystem path directly into the container. Log agents and metrics collectors use this pattern to access node-level files such as /var/log or /proc.
-
-Control-plane nodes carry a NoSchedule taint by default, which prevents ordinary Pods from being scheduled there. Adding a toleration declares that the DaemonSet is willing to &#x27;tolerate&#x27; that taint, allowing it to cover every node without exception. After applying Part B, if DESIRED increases by 1, the Pod has been scheduled on the control-plane node. On a single-node minikube cluster (where the node acts as both control-plane and worker), DESIRED is always 1 regardless of the toleration.</p>
+                <div class='exp2'><p>DaemonSet has no replica field. Instead, the number of nodes in the cluster determines the desired Pod count (DESIRED). When kubectl get daemonset shows DESIRED equal to the number of nodes, the DaemonSet is healthy. Adding a node automatically increments DESIRED; removing a node removes the Pod on it automatically.</p>
+<p>The hostPath volume mounts the node&#x27;s actual filesystem path directly into the container. Log agents and metrics collectors use this pattern to access node-level files such as /var/log or /proc.</p>
+<p>Control-plane nodes carry a NoSchedule taint by default, which prevents ordinary Pods from being scheduled there. Adding a toleration declares that the DaemonSet is willing to &#x27;tolerate&#x27; that taint, allowing it to cover every node without exception. After applying Part B, if DESIRED increases by 1, the Pod has been scheduled on the control-plane node. On a single-node minikube cluster (where the node acts as both control-plane and worker), DESIRED is always 1 regardless of the toleration.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=KwyrHDEJ8LM' target='_blank'>Kubernetes CronJobs in 8 Minutes! Schedule and Automate Like a Pro</a></li><li><a href='https://www.youtube.com/watch?v=4yu2o3bpRHk' target='_blank'>Kubernetes jobs for batch workload</a></li></ul></div>
         </article>
@@ -1407,13 +1406,13 @@ kubectl describe quota dev-quota -n dev   # monitor usage in operation
 <li>Techi Nik, &quot;What Happens When You Don&#x27;t Use Kubernetes Resource Quotas?&quot; — https://www.youtube.com/watch?v=dYLRW0DZVGk</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. 1. Create the team-a namespace imperatively.
-2. Write a YAML manifest (ns-team-b.yaml) and create the team-b namespace declaratively.
-3. Run kubectl get ns to confirm both namespaces are listed.
-4. Create a Pod named web-pod using the nginx image inside team-a. (Use kubectl run with the -n flag.)
-5. Run kubectl get pods -n team-a to confirm the Pod is in the Running state.
-6. Change the default namespace to team-a with kubectl config set-context --current --namespace=team-a, then run kubectl get pods without -n and confirm you see the same result.
-7. When finished, restore the default namespace to default.</p>
+              <div class='q'><p>Practice 1. 1. Create the team-a namespace imperatively.</p>
+<p>2. Write a YAML manifest (ns-team-b.yaml) and create the team-b namespace declaratively.</p>
+<p>3. Run kubectl get ns to confirm both namespaces are listed.</p>
+<p>4. Create a Pod named web-pod using the nginx image inside team-a. (Use kubectl run with the -n flag.)</p>
+<p>5. Run kubectl get pods -n team-a to confirm the Pod is in the Running state.</p>
+<p>6. Change the default namespace to team-a with kubectl config set-context --current --namespace=team-a, then run kubectl get pods without -n and confirm you see the same result.</p>
+<p>7. When finished, restore the default namespace to default.</p></div>
               <pre class='starter'><code># 1. Create team-a imperatively
 kubectl create namespace ____
 
@@ -1471,18 +1470,20 @@ kubectl get pods
 
 # 7. Restore default namespace
 kubectl config set-context --current --namespace=default</code></pre>
-                <p class='exp2'>Namespace is a top-level v1 API object and can be created with kubectl create namespace or a YAML manifest. Objects with the same name can coexist without conflict as long as they are in different namespaces. The -n flag targets a specific namespace for a single command, while set-context --namespace changes the default namespace for the current context so it applies to all subsequent commands automatically. Always restore to default when done to avoid confusion in later steps.</p>
+                <div class='exp2'><p>Namespace is a top-level v1 API object and can be created with kubectl create namespace or a YAML manifest. Objects with the same name can coexist without conflict as long as they are in different namespaces. The -n flag targets a specific namespace for a single command, while set-context --namespace changes the default namespace for the current context so it applies to all subsequent commands automatically. Always restore to default when done to avoid confusion in later steps.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. 1. Write limit-range.yaml with the following spec and apply it to team-a.
-   - type: Container
-   - defaultRequest: cpu=100m, memory=128Mi
-   - default (limits): cpu=300m, memory=256Mi
-   - min: cpu=50m, memory=64Mi
-   - max: cpu=500m, memory=512Mi
-2. Run kubectl describe limitrange dev-limits -n team-a to confirm the settings.
-3. Create a Pod named no-resources-pod in team-a without a resources block. (Image: nginx)
-4. Check the Limits / Requests section of kubectl describe pod no-resources-pod -n team-a and confirm the LimitRange defaults were injected automatically.
-5. Write a Pod manifest (over-limit-pod.yaml) with CPU limit set to 600m and try to create it with kubectl apply to observe the rejection error.</p>
+              <div class='q'><p>Practice 2. 1. Write limit-range.yaml with the following spec and apply it to team-a.</p>
+<ul>
+<li>type: Container</li>
+<li>defaultRequest: cpu=100m, memory=128Mi</li>
+<li>default (limits): cpu=300m, memory=256Mi</li>
+<li>min: cpu=50m, memory=64Mi</li>
+<li>max: cpu=500m, memory=512Mi</li>
+</ul>
+<p>2. Run kubectl describe limitrange dev-limits -n team-a to confirm the settings.</p>
+<p>3. Create a Pod named no-resources-pod in team-a without a resources block. (Image: nginx)</p>
+<p>4. Check the Limits / Requests section of kubectl describe pod no-resources-pod -n team-a and confirm the LimitRange defaults were injected automatically.</p>
+<p>5. Write a Pod manifest (over-limit-pod.yaml) with CPU limit set to 600m and try to create it with kubectl apply to observe the rejection error.</p></div>
               <pre class='starter'><code># 1. limit-range.yaml (fill in the blanks)
 apiVersion: v1
 kind: LimitRange
@@ -1608,18 +1609,20 @@ kubectl apply -f over-limit-pod.yaml
 # Expected error:
 # Error from server (Forbidden): error when creating &quot;over-limit-pod.yaml&quot;: pods &quot;over-limit-pod&quot; is forbidden:
 # [maximum cpu usage per Container is 500m, but limit is 600m]</code></pre>
-                <p class='exp2'>LimitRange acts as an admission rule applied to the namespace. When a Pod is created without any resources block, the kube-apiserver injects the LimitRange&#x27;s defaultRequest and default values automatically at the admission stage. This is why requests/limits you never specified appear in kubectl describe pod — that behavior is expected. A container that exceeds max is immediately rejected at the same admission stage, and the Pod object itself is never created. These two behaviors — automatic injection and upper-bound enforcement — are the core function of LimitRange.</p>
+                <div class='exp2'><p>LimitRange acts as an admission rule applied to the namespace. When a Pod is created without any resources block, the kube-apiserver injects the LimitRange&#x27;s defaultRequest and default values automatically at the admission stage. This is why requests/limits you never specified appear in kubectl describe pod — that behavior is expected. A container that exceeds max is immediately rejected at the same admission stage, and the Pod object itself is never created. These two behaviors — automatic injection and upper-bound enforcement — are the core function of LimitRange.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. 1. Write resource-quota.yaml with the following spec and apply it to team-a.
-   - requests.cpu: 500m
-   - requests.memory: 512Mi
-   - limits.cpu: 1 (1 core)
-   - limits.memory: 1Gi
-   - pods: 3
-2. Run kubectl describe quota team-quota -n team-a to verify usage vs. limits.
-3. Write a Pod manifest (big-cpu-pod.yaml) requesting 600m CPU and try to create it with kubectl apply to observe the exceeded quota error. (Specify requests.cpu=600m in the resources block.)
-4. The no-resources-pod from Step 2 already has LimitRange defaults applied (requests.cpu=100m). Confirm with describe quota that the current requests.cpu Used shows 100m.
-5. Create two more Pods within normal bounds (small-pod-1, small-pod-2) to reach the pods limit of 3, then confirm that a 4th Pod is rejected.</p>
+              <div class='q'><p>Practice 3. 1. Write resource-quota.yaml with the following spec and apply it to team-a.</p>
+<ul>
+<li>requests.cpu: 500m</li>
+<li>requests.memory: 512Mi</li>
+<li>limits.cpu: 1 (1 core)</li>
+<li>limits.memory: 1Gi</li>
+<li>pods: 3</li>
+</ul>
+<p>2. Run kubectl describe quota team-quota -n team-a to verify usage vs. limits.</p>
+<p>3. Write a Pod manifest (big-cpu-pod.yaml) requesting 600m CPU and try to create it with kubectl apply to observe the exceeded quota error. (Specify requests.cpu=600m in the resources block.)</p>
+<p>4. The no-resources-pod from Step 2 already has LimitRange defaults applied (requests.cpu=100m). Confirm with describe quota that the current requests.cpu Used shows 100m.</p>
+<p>5. Create two more Pods within normal bounds (small-pod-1, small-pod-2) to reach the pods limit of 3, then confirm that a 4th Pod is rejected.</p></div>
               <pre class='starter'><code># 1. resource-quota.yaml (fill in the blanks)
 apiVersion: v1
 kind: ResourceQuota
@@ -1769,34 +1772,35 @@ kubectl run extra-pod --image=nginx -n team-a
 
 # Re-check usage
 kubectl describe quota team-quota -n team-a</code></pre>
-                <p class='exp2'>The hard field in a ResourceQuota sets a ceiling on the aggregate requests/limits across all Pods in a namespace, as well as on object counts. A key insight is that the LimitRange-injected defaults on no-resources-pod (requests.cpu=100m) are also counted toward the quota&#x27;s Used total. The exceeded quota error message helpfully shows all three values — requested, used, and limited — so you can immediately see how much is in use. When a compute resource quota such as requests.cpu is set on a namespace, every container in that namespace must explicitly declare requests/limits; LimitRange&#x27;s default values satisfy this requirement automatically. This is the reason the two objects are always used together.</p>
+                <div class='exp2'><p>The hard field in a ResourceQuota sets a ceiling on the aggregate requests/limits across all Pods in a namespace, as well as on object counts. A key insight is that the LimitRange-injected defaults on no-resources-pod (requests.cpu=100m) are also counted toward the quota&#x27;s Used total. The exceeded quota error message helpfully shows all three values — requested, used, and limited — so you can immediately see how much is in use. When a compute resource quota such as requests.cpu is set on a namespace, every container in that namespace must explicitly declare requests/limits; LimitRange&#x27;s default values satisfy this requirement automatically. This is the reason the two objects are always used together.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Build a complete multi-tenant environment in the team-b namespace in the following order.
-
-1. Apply LimitRange (tb-limits)
-   - defaultRequest: cpu=200m, memory=256Mi
-   - default (limits): cpu=400m, memory=512Mi
-   - max: cpu=800m, memory=1Gi
-   - min: cpu=100m, memory=128Mi
-
-2. Apply ResourceQuota (tb-quota)
-   - requests.cpu: 800m
-   - requests.memory: 1Gi
-   - limits.cpu: 2 (2 cores)
-   - limits.memory: 2Gi
-   - pods: 4
-
-3. Create 3 Pods (app-1, app-2, app-3) in team-b without a resources block. (Image: nginx)
-
-4. Run kubectl describe quota tb-quota -n team-b to check current usage.
-   - Confirm that requests.cpu Used is close to 200m * 3 = 600m (the result of LimitRange defaults being injected automatically).
-
-5. Try to create a 4th Pod (app-4) without a resources block. Since the 3 existing Pods are already consuming 600m via the LimitRange default (requests.cpu=200m), adding app-4&#x27;s 200m brings the total to exactly 800m — the limit.
-   - The total exactly equals the limit, so app-4 should be allowed. After creating it, confirm Used is 800m.
-
-6. Try to create a 5th Pod (app-5) and confirm the exceeded quota error (either the pods limit of 4 or the requests.cpu limit of 800m is hit first).
-
-7. Capture the final output of kubectl describe quota tb-quota -n team-b and note the Used/Hard values.</p>
+              <div class='q'><p>Practice 4. Build a complete multi-tenant environment in the team-b namespace in the following order.</p>
+<p>1. Apply LimitRange (tb-limits)</p>
+<ul>
+<li>defaultRequest: cpu=200m, memory=256Mi</li>
+<li>default (limits): cpu=400m, memory=512Mi</li>
+<li>max: cpu=800m, memory=1Gi</li>
+<li>min: cpu=100m, memory=128Mi</li>
+</ul>
+<p>2. Apply ResourceQuota (tb-quota)</p>
+<ul>
+<li>requests.cpu: 800m</li>
+<li>requests.memory: 1Gi</li>
+<li>limits.cpu: 2 (2 cores)</li>
+<li>limits.memory: 2Gi</li>
+<li>pods: 4</li>
+</ul>
+<p>3. Create 3 Pods (app-1, app-2, app-3) in team-b without a resources block. (Image: nginx)</p>
+<p>4. Run kubectl describe quota tb-quota -n team-b to check current usage.</p>
+<ul>
+<li>Confirm that requests.cpu Used is close to 200m * 3 = 600m (the result of LimitRange defaults being injected automatically).</li>
+</ul>
+<p>5. Try to create a 4th Pod (app-4) without a resources block. Since the 3 existing Pods are already consuming 600m via the LimitRange default (requests.cpu=200m), adding app-4&#x27;s 200m brings the total to exactly 800m — the limit.</p>
+<ul>
+<li>The total exactly equals the limit, so app-4 should be allowed. After creating it, confirm Used is 800m.</li>
+</ul>
+<p>6. Try to create a 5th Pod (app-5) and confirm the exceeded quota error (either the pods limit of 4 or the requests.cpu limit of 800m is hit first).</p>
+<p>7. Capture the final output of kubectl describe quota tb-quota -n team-b and note the Used/Hard values.</p></div>
               <pre class='starter'><code># 1. tb-limits.yaml
 apiVersion: v1
 kind: LimitRange
@@ -1937,12 +1941,12 @@ kubectl apply -f app-5.yaml
 
 # 7. Final usage check
 kubectl describe quota tb-quota -n team-b</code></pre>
-                <p class='exp2'>This advanced exercise is designed to walk through the full production workflow end-to-end: namespace creation → LimitRange → ResourceQuota → workload deployment → usage monitoring. There are two key observations. First, 3 Pods without a resources block are created without any error — this is because LimitRange transparently fills in the defaultRequest (cpu=200m) to satisfy ResourceQuota&#x27;s requirement that compute resources be explicitly declared. Second, when the limit is reached, exactly the one Pod that would exceed it is rejected — this is the mechanism that guarantees fair resource distribution across teams. In production, this configuration is typically packaged in a Helm chart or Kustomize overlay and applied consistently to every new team or environment.</p>
+                <div class='exp2'><p>This advanced exercise is designed to walk through the full production workflow end-to-end: namespace creation → LimitRange → ResourceQuota → workload deployment → usage monitoring. There are two key observations. First, 3 Pods without a resources block are created without any error — this is because LimitRange transparently fills in the defaultRequest (cpu=200m) to satisfy ResourceQuota&#x27;s requirement that compute resources be explicitly declared. Second, when the limit is reached, exactly the one Pod that would exceed it is rejected — this is the mechanism that guarantees fair resource distribution across teams. In production, this configuration is typically packaged in a Helm chart or Kustomize overlay and applied consistently to every new team or environment.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=plB3kyZLHe8' target='_blank'>Namespaces in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=tyoaLuaVyuQ' target='_blank'>Kubernetes LimitRange Explained | Default Resource Limits &amp; Requests + Resource Quota Demo</a></li><li><a href='https://www.youtube.com/watch?v=dYLRW0DZVGk' target='_blank'>What Happens When You Don&#x27;t Use Kubernetes Resource Quotas?</a></li></ul></div>
         </article>
 <article id='lec4' class='lecture'>
-          <h2>04. RBAC and ServiceAccount - Who Can Do What <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h2>04. RBAC and ServiceAccount - Who Can Do What </h2>
           <h3>Learning Objectives</h3>
 <ul>
 <li>Understand the difference between Authentication and Authorization, and grasp the concept of Role-Based Access Control (RBAC)</li>
@@ -2073,13 +2077,13 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: qa
-    namespace: staging          # can be omitted when it matches the RoleBinding&#x27;s namespace
+    # namespace can be omitted when it matches the RoleBinding&#x27;s namespace (staging)
 roleRef:
   kind: Role
   name: qa-read
   apiGroup: rbac.authorization.k8s.io
 </code></pre>
-<p>In the example above, <code class='ic'>namespace: staging</code> in <code class='ic'>subjects</code> matches the namespace where the RoleBinding itself lives (<code class='ic'>staging</code>). When the subject&#x27;s namespace and the RoleBinding&#x27;s namespace are the same, <strong>this field can be omitted</strong>, and omitting it is more common in practice. You only need to specify it explicitly when pointing to a ServiceAccount in a different namespace.</p>
+<p>In the example above, the <code class='ic'>namespace</code> field is intentionally left out of <code class='ic'>subjects</code>. Because the <code class='ic'>qa</code> SA lives in the same namespace as the RoleBinding (<code class='ic'>staging</code>), <strong>the field can be omitted</strong>, and omitting it is more common in practice. You only need to specify it explicitly when pointing to a ServiceAccount in a different namespace.</p>
 <p>The moment this RoleBinding is applied, the <code class='ic'>qa</code> SA can read Pods and Services and access Pod logs within <code class='ic'>staging</code>. <strong>Deleting the binding removes the permission immediately, but the Role itself remains</strong> and can be reused by other bindings. Once again, the separation between defining a permission and granting it is clear.</p>
 <p>Understanding the rules for Binding combinations prevents a lot of confusion:</p>
 <p>| Combination | Scope of permissions |</p>
@@ -2141,9 +2145,17 @@ kubectl auth can-i --list --namespace staging               # list my permission
 <h4>Exploring Kubernetes Built-in Roles</h4>
 <p>Kubernetes ships with several useful ClusterRoles out of the box. The most notable are <code class='ic'>cluster-admin</code> (full access), <code class='ic'>admin</code>, <code class='ic'>edit</code>, and <code class='ic'>view</code> (read-only). Roles managed by the control plane typically carry the <code class='ic'>system:</code> prefix.</p>
 <pre><code>
+# Linux/macOS (bash) — filter with grep
 kubectl get clusterroles | grep -E &quot;cluster-admin|^edit|^view&quot;
-kubectl describe clusterrole view      # inspect what permissions the view role contains
+
+# Windows (PowerShell / CMD) — use findstr instead of grep
+kubectl get clusterroles | findstr /R /C:&quot;cluster-admin&quot; /C:&quot;^edit&quot; /C:&quot;^view&quot;
+
+kubectl describe clusterrole view      # inspect what permissions the view role contains (all OS)
 </code></pre>
+<blockquote class='callout'>
+<p>OS compatibility note: <code class='ic'>grep</code> is a Linux/macOS shell utility and is not built into Windows PowerShell or CMD. On Windows, use <code class='ic'>findstr</code> (regex with <code class='ic'>/R</code>, search terms with <code class='ic'>/C:&quot;pattern&quot;</code>) or, in PowerShell, <code class='ic'>kubectl get clusterroles | Select-String &quot;cluster-admin|edit|view&quot;</code>. kubectl commands that do not involve a pipe — such as <code class='ic'>get</code> or <code class='ic'>describe</code> — work identically on all operating systems.</p>
+</blockquote>
 <p>Before writing a custom Role, check whether one of these built-in roles already covers your needs — it can save you from unnecessary definitions. That said, never casually bind <code class='ic'>cluster-admin</code> to a user or application with a ClusterRoleBinding; it grants unrestricted access to the entire cluster.</p>
 <h4>Least-Privilege Design Checklist</h4>
 <p>When applying RBAC in production, keep the following principles in mind:</p>
@@ -2167,10 +2179,10 @@ kubectl describe clusterrole view      # inspect what permissions the view role 
 <li>Google Cloud Tech, &quot;What are Service Accounts?&quot; — https://www.youtube.com/watch?v=xXk1YlkKW_k</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. 1. Create the staging and production namespaces imperatively.
-2. Declare a ServiceAccount named qa in the staging namespace using a YAML manifest (qa-sa.yaml) and apply it.
-3. Run kubectl get serviceaccount -n staging to verify that both the default SA and the qa SA appear.
-4. Run kubectl describe serviceaccount qa -n staging and inspect the Mountable secrets and Tokens fields.</p>
+              <div class='q'><p>Practice 1. 1. Create the staging and production namespaces imperatively.</p>
+<p>2. Declare a ServiceAccount named qa in the staging namespace using a YAML manifest (qa-sa.yaml) and apply it.</p>
+<p>3. Run kubectl get serviceaccount -n staging to verify that both the default SA and the qa SA appear.</p>
+<p>4. Run kubectl describe serviceaccount qa -n staging and inspect the Mountable secrets and Tokens fields.</p></div>
               <pre class='starter'><code># 1. Create namespaces (imperative)
 kubectl create namespace ____
 kubectl create namespace ____
@@ -2206,18 +2218,20 @@ kubectl get serviceaccount -n staging
 
 # 4. Detailed inspection
 kubectl describe serviceaccount qa -n staging</code></pre>
-                <p class='exp2'>When a namespace is created, Kubernetes automatically creates a default ServiceAccount inside it. This default SA is the identity used by any Pod that does not specify a serviceAccountName. The reason we create a separate qa SA in this exercise is to isolate the permissions needed specifically by QA team Pods, in keeping with the principle of least privilege. Because ServiceAccounts are Kubernetes-native objects, they can be created and updated with kubectl apply -f just like any other resource.</p>
+                <div class='exp2'><p>When a namespace is created, Kubernetes automatically creates a default ServiceAccount inside it. This default SA is the identity used by any Pod that does not specify a serviceAccountName. The reason we create a separate qa SA in this exercise is to isolate the permissions needed specifically by QA team Pods, in keeping with the principle of least privilege. Because ServiceAccounts are Kubernetes-native objects, they can be created and updated with kubectl apply -f just like any other resource.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. 1. Write a Role named qa-read in the staging namespace (qa-role.yaml).
-   - Allow get and list on pods and services
-   - Allow get on pods/log
-   - Do not grant any other verbs (create, delete, etc.).
-2. Write a RoleBinding (qa-binding.yaml) that connects the qa SA to the qa-read Role and apply it.
-3. Use kubectl auth can-i to check all four of the following cases, predict the expected output (yes/no) before running, then compare with the actual result.
-   a. Can the qa SA get pods in staging?
-   b. Can the qa SA delete pods in staging?
-   c. Can the qa SA get pods/log in staging?
-   d. Can the qa SA get pods in production?</p>
+              <div class='q'><p>Practice 2. 1. Write a Role named qa-read in the staging namespace (qa-role.yaml).</p>
+<ul>
+<li>Allow get and list on pods and services</li>
+<li>Allow get on pods/log</li>
+<li>Do not grant any other verbs (create, delete, etc.).</li>
+</ul>
+<p>2. Write a RoleBinding (qa-binding.yaml) that connects the qa SA to the qa-read Role and apply it.</p>
+<p>3. Use kubectl auth can-i to check all four of the following cases, predict the expected output (yes/no) before running, then compare with the actual result.</p>
+<p>   a. Can the qa SA get pods in staging?</p>
+<p>   b. Can the qa SA delete pods in staging?</p>
+<p>   c. Can the qa SA get pods/log in staging?</p>
+<p>   d. Can the qa SA get pods in production?</p></div>
               <pre class='starter'><code># 1. qa-role.yaml (fill in the blanks)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -2322,18 +2336,18 @@ kubectl auth can-i get pods \
   --namespace production \
   --as system:serviceaccount:staging:qa
 # Output: no</code></pre>
-                <p class='exp2'>RBAC is a &#x27;deny by default&#x27; model. Only the verb and resource combinations explicitly listed in rules are allowed; everything else is denied. Because delete was not added to the rules in this exercise, (b) returns no. The reason (d) returns no is that the RoleBinding itself lives in the staging namespace — a RoleBinding grants permissions only within the namespace it belongs to. The --as system:serviceaccount:&lt;namespace&gt;:&lt;name&gt; format tells kubectl to impersonate the given SA and ask the API server for an authorization decision upfront. This allows you to verify permissions instantly without launching an actual Pod, making it extremely useful in practice.</p>
+                <div class='exp2'><p>RBAC is a &#x27;deny by default&#x27; model. Only the verb and resource combinations explicitly listed in rules are allowed; everything else is denied. Because delete was not added to the rules in this exercise, (b) returns no. The reason (d) returns no is that the RoleBinding itself lives in the staging namespace — a RoleBinding grants permissions only within the namespace it belongs to. The --as system:serviceaccount:&lt;namespace&gt;:&lt;name&gt; format tells kubectl to impersonate the given SA and ask the API server for an authorization decision upfront. This allows you to verify permissions instantly without launching an actual Pod, making it extremely useful in practice.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. 1. Write a ClusterRole named pod-reader (pod-reader-cr.yaml) that allows get and list on pods and services.
-2. Create a ServiceAccount named dev in the staging namespace.
-3. Write a RoleBinding (dev-rb.yaml) in the staging namespace that connects the dev SA to the pod-reader ClusterRole.
-4. Create a ServiceAccount named ops in the staging namespace.
-5. Write a ClusterRoleBinding (ops-crb.yaml) that connects the ops SA to the pod-reader ClusterRole.
-6. Verify the following four cases with can-i and explain the difference.
-   a. Can the dev SA get pods in staging?
-   b. Can the dev SA get pods in production?
-   c. Can the ops SA get pods in staging?
-   d. Can the ops SA get pods in production?</p>
+              <div class='q'><p>Practice 3. 1. Write a ClusterRole named pod-reader (pod-reader-cr.yaml) that allows get and list on pods and services.</p>
+<p>2. Create a ServiceAccount named dev in the staging namespace.</p>
+<p>3. Write a RoleBinding (dev-rb.yaml) in the staging namespace that connects the dev SA to the pod-reader ClusterRole.</p>
+<p>4. Create a ServiceAccount named ops in the staging namespace.</p>
+<p>5. Write a ClusterRoleBinding (ops-crb.yaml) that connects the ops SA to the pod-reader ClusterRole.</p>
+<p>6. Verify the following four cases with can-i and explain the difference.</p>
+<p>   a. Can the dev SA get pods in staging?</p>
+<p>   b. Can the dev SA get pods in production?</p>
+<p>   c. Can the ops SA get pods in staging?</p>
+<p>   d. Can the ops SA get pods in production?</p></div>
               <pre class='starter'><code># 1. pod-reader-cr.yaml (fill in the blanks)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ____
@@ -2457,18 +2471,20 @@ kubectl auth can-i get pods \
   --namespace production \
   --as system:serviceaccount:staging:ops
 # Output: yes</code></pre>
-                <p class='exp2'>The dev SA and ops SA both reference the same ClusterRole (pod-reader), but the type of Binding gives them completely different permission scopes. Because dev SA is connected via a RoleBinding, permissions are valid only within staging — the namespace the RoleBinding belongs to. Even though the ClusterRole is cluster-wide, the RoleBinding narrows the scope to staging. The ops SA, on the other hand, is connected via a ClusterRoleBinding, so permissions apply cluster-wide regardless of namespace. This difference is exactly why you can define a single common ClusterRole and let each team attach their own RoleBinding in their own namespace — granting equivalent permissions without ever duplicating the permission definition.</p>
+                <div class='exp2'><p>The dev SA and ops SA both reference the same ClusterRole (pod-reader), but the type of Binding gives them completely different permission scopes. Because dev SA is connected via a RoleBinding, permissions are valid only within staging — the namespace the RoleBinding belongs to. Even though the ClusterRole is cluster-wide, the RoleBinding narrows the scope to staging. The ops SA, on the other hand, is connected via a ClusterRoleBinding, so permissions apply cluster-wide regardless of namespace. This difference is exactly why you can define a single common ClusterRole and let each team attach their own RoleBinding in their own namespace — granting equivalent permissions without ever duplicating the permission definition.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. 1. Write a Pod manifest (qa-pod.yaml) in the staging namespace that specifies qa as the serviceAccountName and apply it.
-   - Image: bitnami/kubectl:latest (a kubectl-equipped image)
-   - Command: sleep 3600
-2. Use kubectl exec to enter the Pod and perform the following:
-   a. Run ls /var/run/secrets/kubernetes.io/serviceaccount/ to confirm the token file is mounted.
-   b. Run kubectl get pods -n staging to query the Pod list under the qa SA&#x27;s permissions.
-   c. Run kubectl delete pod qa-pod -n staging to verify the delete request is denied.
-3. Write a second Pod manifest (no-token-pod.yaml) that adds automountServiceAccountToken: false and apply it.
-4. Use kubectl exec inside no-token-pod to run ls /var/run/secrets/kubernetes.io/serviceaccount/ and confirm the token is not mounted.
-5. Use can-i to make a final verification that the delete pods permission is no for the SA attached to both Pods.</p>
+              <div class='q'><p>Practice 4. 1. Write a Pod manifest (qa-pod.yaml) in the staging namespace that specifies qa as the serviceAccountName and apply it.</p>
+<ul>
+<li>Image: bitnami/kubectl:latest (a kubectl-equipped image)</li>
+<li>Command: sleep 3600</li>
+</ul>
+<p>2. Use kubectl exec to enter the Pod and perform the following:</p>
+<p>   a. Run ls /var/run/secrets/kubernetes.io/serviceaccount/ to confirm the token file is mounted.</p>
+<p>   b. Run kubectl get pods -n staging to query the Pod list under the qa SA&#x27;s permissions.</p>
+<p>   c. Run kubectl delete pod qa-pod -n staging to verify the delete request is denied.</p>
+<p>3. Write a second Pod manifest (no-token-pod.yaml) that adds automountServiceAccountToken: false and apply it.</p>
+<p>4. Use kubectl exec inside no-token-pod to run ls /var/run/secrets/kubernetes.io/serviceaccount/ and confirm the token is not mounted.</p>
+<p>5. Use can-i to make a final verification that the delete pods permission is no for the SA attached to both Pods.</p></div>
               <pre class='starter'><code># 1. qa-pod.yaml (fill in the blanks)
 apiVersion: v1
 kind: Pod
@@ -2552,7 +2568,7 @@ kubectl auth can-i delete pods \
   --namespace staging \
   --as system:serviceaccount:staging:qa
 # Output: no</code></pre>
-                <p class='exp2'>When serviceAccountName is specified in a Pod, Kubernetes automatically mounts the SA&#x27;s token at /var/run/secrets/kubernetes.io/serviceaccount/token. Code running inside the container can include this token in an HTTP Authorization: Bearer &lt;token&gt; header to call kube-apiserver within the permission bounds granted to that SA. In step 2b, get pods succeeds; in step 2c, delete pods returns Forbidden — because the qa-read Role includes only get and list, not delete. Setting automountServiceAccountToken: false prevents the token file from being mounted at all. If the container is ever compromised, an attacker cannot obtain the kube-apiserver token. For applications that never need to call the Kubernetes API (simple web servers, batch jobs, etc.), applying this setting as a default is a security best practice.</p>
+                <div class='exp2'><p>When serviceAccountName is specified in a Pod, Kubernetes automatically mounts the SA&#x27;s token at /var/run/secrets/kubernetes.io/serviceaccount/token. Code running inside the container can include this token in an HTTP Authorization: Bearer &lt;token&gt; header to call kube-apiserver within the permission bounds granted to that SA. In step 2b, get pods succeeds; in step 2c, delete pods returns Forbidden — because the qa-read Role includes only get and list, not delete. Setting automountServiceAccountToken: false prevents the token file from being mounted at all. If the container is ever compromised, an attacker cannot obtain the kube-apiserver token. For applications that never need to call the Kubernetes API (simple web servers, batch jobs, etc.), applying this setting as a default is a security best practice.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=iE9Qb8dHqWI' target='_blank'>Kubernetes RBAC Explained</a></li><li><a href='https://www.youtube.com/watch?v=xXk1YlkKW_k' target='_blank'>What are Service Accounts?</a></li></ul></div>
         </article>
@@ -2777,13 +2793,15 @@ spec:
 <li>Microsoft Azure, &quot;How the Kubernetes scheduler works&quot; — https://www.youtube.com/watch?v=rDCWxkvPlAw</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. 1. List all nodes in the cluster and inspect their current labels.
-2. Choose one node and attach the label disktype=ssd to it.
-3. Write a Pod manifest (nodeselector-pod.yaml) with a nodeSelector targeting disktype=ssd nodes, then deploy it.
-   - Image: nginx:1.25
-4. Run kubectl get pod -o wide to confirm the Pod is running on the labeled node.
-5. Deliberately change the label to one that does not exist (disktype=nvme), create a second Pod, and confirm it enters Pending state. Use kubectl describe pod to find the event message.
-6. After the exercise, remove the disktype label from the first node.</p>
+              <div class='q'><p>Practice 1. 1. List all nodes in the cluster and inspect their current labels.</p>
+<p>2. Choose one node and attach the label disktype=ssd to it.</p>
+<p>3. Write a Pod manifest (nodeselector-pod.yaml) with a nodeSelector targeting disktype=ssd nodes, then deploy it.</p>
+<ul>
+<li>Image: nginx:1.25</li>
+</ul>
+<p>4. Run kubectl get pod -o wide to confirm the Pod is running on the labeled node.</p>
+<p>5. Deliberately change the label to one that does not exist (disktype=nvme), create a second Pod, and confirm it enters Pending state. Use kubectl describe pod to find the event message.</p>
+<p>6. After the exercise, remove the disktype label from the first node.</p></div>
               <pre class='starter'><code># 1. List nodes and their labels
 kubectl get nodes --show-labels
 
@@ -2865,19 +2883,23 @@ kubectl describe pod nvme-pod
 # 6. Clean up
 kubectl delete pod ssd-pod nvme-pod
 kubectl label nodes minikube disktype-   # remove label: append a hyphen after the key</code></pre>
-                <p class='exp2'>nodeSelector is the simplest node-selection mechanism available in a PodSpec. Only nodes that carry every specified key=value label are considered candidates; if no node satisfies the constraint, the Pod cannot leave Pending state. The &#x27;didn&#x27;t match Pod&#x27;s node affinity/selector&#x27; message in the Events section of kubectl describe pod tells you the scheduler found zero feasible nodes during the filtering phase. The rule for removing a label is to append a hyphen (-) after the key: kubectl label nodes &lt;node&gt; disktype-.</p>
+                <div class='exp2'><p>nodeSelector is the simplest node-selection mechanism available in a PodSpec. Only nodes that carry every specified key=value label are considered candidates; if no node satisfies the constraint, the Pod cannot leave Pending state. The &#x27;didn&#x27;t match Pod&#x27;s node affinity/selector&#x27; message in the Events section of kubectl describe pod tells you the scheduler found zero feasible nodes during the filtering phase. The rule for removing a label is to append a hyphen (-) after the key: kubectl label nodes &lt;node&gt; disktype-.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. 1. Attach the label environment=production to a node.
-2. Write a hard Node Affinity Pod manifest (node-affinity-hard.yaml).
-   - operator: In, values: [&quot;production&quot;]
-   - Image: nginx:1.25
-   - Deploy and verify which node the Pod was placed on.
-3. Remove the environment label from the node.
-4. Write a soft Node Affinity Pod manifest (node-affinity-soft.yaml).
-   - preferredDuringSchedulingIgnoredDuringExecution, weight: 80
-   - Same environment=production preference condition
-   - Deploy and confirm the Pod reaches Running even without the label present.
-5. Compare the placement results of both Pods using kubectl get pod -o wide.</p>
+              <div class='q'><p>Practice 2. 1. Attach the label environment=production to a node.</p>
+<p>2. Write a hard Node Affinity Pod manifest (node-affinity-hard.yaml).</p>
+<ul>
+<li>operator: In, values: [&quot;production&quot;]</li>
+<li>Image: nginx:1.25</li>
+<li>Deploy and verify which node the Pod was placed on.</li>
+</ul>
+<p>3. Remove the environment label from the node.</p>
+<p>4. Write a soft Node Affinity Pod manifest (node-affinity-soft.yaml).</p>
+<ul>
+<li>preferredDuringSchedulingIgnoredDuringExecution, weight: 80</li>
+<li>Same environment=production preference condition</li>
+<li>Deploy and confirm the Pod reaches Running even without the label present.</li>
+</ul>
+<p>5. Compare the placement results of both Pods using kubectl get pod -o wide.</p></div>
               <pre class='starter'><code># 1. Attach the label
 kubectl label nodes &lt;node-name&gt; environment=production
 
@@ -2980,16 +3002,20 @@ kubectl get pod affinity-hard-pod affinity-soft-pod -o wide
 
 # Clean up
 kubectl delete pod affinity-hard-pod affinity-soft-pod</code></pre>
-                <p class='exp2'>requiredDuringSchedulingIgnoredDuringExecution participates in the scheduler&#x27;s filtering phase (hard constraint). If no node satisfies the condition, the Pod stays Pending. preferredDuringSchedulingIgnoredDuringExecution participates in the scoring phase (soft preference) and uses weight to express preference strength. When the preferred node is unavailable, the Pod is placed on another node and reaches Running. The IgnoredDuringExecution suffix means &#x27;do not re-apply this rule to Pods that are already running.&#x27; Removing the label after scheduling therefore does not evict an already-running Pod. In production, use preferred as the default for better availability, and reserve required for workloads that must be isolated to a specific node group (e.g., GPU-only, compliance requirements).</p>
+                <div class='exp2'><p>requiredDuringSchedulingIgnoredDuringExecution participates in the scheduler&#x27;s filtering phase (hard constraint). If no node satisfies the condition, the Pod stays Pending. preferredDuringSchedulingIgnoredDuringExecution participates in the scoring phase (soft preference) and uses weight to express preference strength. When the preferred node is unavailable, the Pod is placed on another node and reaches Running. The IgnoredDuringExecution suffix means &#x27;do not re-apply this rule to Pods that are already running.&#x27; Removing the label after scheduling therefore does not evict an already-running Pod. In production, use preferred as the default for better availability, and reserve required for workloads that must be isolated to a specific node group (e.g., GPU-only, compliance requirements).</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. 1. Write a Deployment manifest (anti-affinity-deploy.yaml) with replicas: 2 and a required podAntiAffinity condition.
-   - Selector/labels: app=web-ha
-   - topologyKey: kubernetes.io/hostname
-   - Image: nginx:1.25
-2. After applying, use kubectl get pod -o wide to check the placement status of both Pods.
-   - In a single-node environment, observe that the second Pod goes Pending.
-3. Run kubectl describe pod &lt;Pending-Pod&gt; to find the Anti-Affinity violation message.
-4. Change required to preferred (weight: 100), update the Deployment, and confirm the previously Pending Pod becomes Running.</p>
+              <div class='q'><p>Practice 3. 1. Write a Deployment manifest (anti-affinity-deploy.yaml) with replicas: 2 and a required podAntiAffinity condition.</p>
+<ul>
+<li>Selector/labels: app=web-ha</li>
+<li>topologyKey: kubernetes.io/hostname</li>
+<li>Image: nginx:1.25</li>
+</ul>
+<p>2. After applying, use kubectl get pod -o wide to check the placement status of both Pods.</p>
+<ul>
+<li>In a single-node environment, observe that the second Pod goes Pending.</li>
+</ul>
+<p>3. Run kubectl describe pod &lt;Pending-Pod&gt; to find the Anti-Affinity violation message.</p>
+<p>4. Change required to preferred (weight: 100), update the Deployment, and confirm the previously Pending Pod becomes Running.</p></div>
               <pre class='starter'><code># anti-affinity-deploy.yaml (fill in the blanks)
 apiVersion: apps/v1
 kind: Deployment
@@ -3099,17 +3125,21 @@ kubectl get pod -o wide
 
 # Clean up
 kubectl delete deployment web-ha</code></pre>
-                <p class='exp2'>The labelSelector in podAntiAffinity means &#x27;avoid any node that already has a Pod with this label.&#x27; topologyKey: kubernetes.io/hostname interprets &#x27;same&#x27; as &#x27;same node (hostname).&#x27; Switching topologyKey to topology.kubernetes.io/zone spreads Pods across availability zones instead. With required, if the cluster has fewer nodes than replicas, the extra Pods get stuck in Pending. With preferred, the rule becomes &#x27;place on a different node if possible, but co-locate if no other option exists,&#x27; which resolves the Pending state. When node failure resilience is the goal, use required on a multi-node cluster. For local development environments with a single node, use preferred.</p>
+                <div class='exp2'><p>The labelSelector in podAntiAffinity means &#x27;avoid any node that already has a Pod with this label.&#x27; topologyKey: kubernetes.io/hostname interprets &#x27;same&#x27; as &#x27;same node (hostname).&#x27; Switching topologyKey to topology.kubernetes.io/zone spreads Pods across availability zones instead. With required, if the cluster has fewer nodes than replicas, the extra Pods get stuck in Pending. With preferred, the rule becomes &#x27;place on a different node if possible, but co-locate if no other option exists,&#x27; which resolves the Pending state. When node failure resilience is the goal, use required on a multi-node cluster. For local development environments with a single node, use preferred.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. 1. Apply both a dedicated=gpu label and a dedicated=gpu:NoSchedule Taint to a node simultaneously.
-2. Deploy a plain Pod (no-toleration-pod.yaml) onto the tainted node and confirm it is rejected.
-3. Deploy a Pod with only a Toleration (toleration-only-pod.yaml).
-   - Toleration: key=dedicated, operator=Equal, value=gpu, effect=NoSchedule
-   - On a multi-node cluster, observe that the scheduler may still place it on a non-GPU node.
-4. Write a Pod (gpu-pod.yaml) that combines a Toleration with Node Affinity (required, targeting the dedicated=gpu label).
-   - key: dedicated, operator: In, values: [&quot;gpu&quot;]
-   - After deploying, confirm it runs exclusively on the node with the GPU label.
-5. Remove the Taint and clean up.</p>
+              <div class='q'><p>Practice 4. 1. Apply both a dedicated=gpu label and a dedicated=gpu:NoSchedule Taint to a node simultaneously.</p>
+<p>2. Deploy a plain Pod (no-toleration-pod.yaml) onto the tainted node and confirm it is rejected.</p>
+<p>3. Deploy a Pod with only a Toleration (toleration-only-pod.yaml).</p>
+<ul>
+<li>Toleration: key=dedicated, operator=Equal, value=gpu, effect=NoSchedule</li>
+<li>On a multi-node cluster, observe that the scheduler may still place it on a non-GPU node.</li>
+</ul>
+<p>4. Write a Pod (gpu-pod.yaml) that combines a Toleration with Node Affinity (required, targeting the dedicated=gpu label).</p>
+<ul>
+<li>key: dedicated, operator: In, values: [&quot;gpu&quot;]</li>
+<li>After deploying, confirm it runs exclusively on the node with the GPU label.</li>
+</ul>
+<p>5. Remove the Taint and clean up.</p></div>
               <pre class='starter'><code># 1. Prepare the node (replace &lt;node-name&gt; with your actual node name)
 kubectl label nodes &lt;node-name&gt; dedicated=gpu
 kubectl taint nodes &lt;node-name&gt; dedicated=gpu:NoSchedule
@@ -3234,12 +3264,12 @@ kubectl get pod gpu-pod -o wide
 kubectl delete pod no-toleration-pod toleration-only-pod gpu-pod
 kubectl taint nodes minikube dedicated=gpu:NoSchedule-   # remove Taint: append hyphen
 kubectl label nodes minikube dedicated-                   # remove label</code></pre>
-                <p class='exp2'>The Taint (lock) and Toleration (key) relationship: a NoSchedule Taint on a node completely blocks any Pod that lacks a matching Toleration during the filtering phase. To remove a Taint, run kubectl taint nodes &lt;name&gt; &lt;key&gt;=&lt;value&gt;:&lt;effect&gt;- with a trailing hyphen. An important misconception to avoid: a Toleration grants permission — &#x27;this Pod may run on this node&#x27; — but does not force it there. A Pod with only a Toleration is free to land on any ordinary node that has no Taint. To create a truly dedicated node for expensive resources like GPUs, you need both Taint (to block outside Pods) and Node Affinity (to actively pull your Pods onto that node). Using the NoExecute effect adds another dimension: it also evicts existing Pods on the node that lack a Toleration, so check the impact carefully before applying it to a running node.</p>
+                <div class='exp2'><p>The Taint (lock) and Toleration (key) relationship: a NoSchedule Taint on a node completely blocks any Pod that lacks a matching Toleration during the filtering phase. To remove a Taint, run kubectl taint nodes &lt;name&gt; &lt;key&gt;=&lt;value&gt;:&lt;effect&gt;- with a trailing hyphen. An important misconception to avoid: a Toleration grants permission — &#x27;this Pod may run on this node&#x27; — but does not force it there. A Pod with only a Toleration is free to land on any ordinary node that has no Taint. To create a truly dedicated node for expensive resources like GPUs, you need both Taint (to block outside Pods) and Node Affinity (to actively pull your Pods onto that node). Using the NoExecute effect adds another dimension: it also evicts existing Pods on the node that lack a Toleration, so check the impact carefully before applying it to a running node.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=rX4v_L0k4Hc' target='_blank'>Kubernetes Node Selector vs Node Affinity vs Pod Affinity vs Tains &amp; Tolerations</a></li><li><a href='https://www.youtube.com/watch?v=DKLMzDD3xqA' target='_blank'>Kubernetes Affinity and Anti Affinity vs NodeSelector (Examples)</a></li><li><a href='https://www.youtube.com/watch?v=rDCWxkvPlAw' target='_blank'>How the Kubernetes scheduler works</a></li></ul></div>
         </article>
 <article id='lec6' class='lecture'>
-          <h2>06. NetworkPolicy - Controlling Pod-to-Pod Traffic and Default Deny <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h2>06. NetworkPolicy - Controlling Pod-to-Pod Traffic and Default Deny </h2>
           <h3>Learning Objectives</h3>
 <ul>
 <li>Understand the flat network model that allows all traffic by default, and why controlling it is necessary</li>
@@ -3277,22 +3307,56 @@ minikube start --cni=calico
 kubectl get pods -n kube-system | grep calico
 </code></pre>
 <h4>Setting Up the Lab — Creating the Test Targets</h4>
-<p>Let&#x27;s create the &quot;protected target&quot; first. We will spin up an nginx Pod and a client Pod that will attempt to connect to it. All work takes place in a dedicated namespace.</p>
+<p>Let&#x27;s create the &quot;protected target&quot; first. In production, workloads are managed as <strong>Deployments rather than standalone Pods.</strong> A Deployment keeps the desired number of replicas running, reschedules Pods if they crash, and supports rolling updates and rollbacks. We will follow that recommended practice here and create the backend as a Deployment. All work takes place in a dedicated namespace.</p>
 <pre><code>
 kubectl create namespace demo
 </code></pre>
-<p>Deploy the backend as an nginx Pod and expose it as a Service. In the past, <code class='ic'>kubectl run ... --expose</code> handled Pod creation and Service exposure in one step, but <strong>the <code class='ic'>--expose</code> flag has been deprecated and removed in recent Kubernetes versions</strong>, so these must now be done as two separate commands.</p>
+<p>Create the backend as an nginx Deployment and expose it as a Service. Because NetworkPolicy selects targets by <strong>label</strong>, the key detail is ensuring the Pod carries the <code class='ic'>app=nginx</code> label.</p>
+<p>Option 1 — Imperative approach (<code class='ic'>kubectl create deployment</code> + <code class='ic'>kubectl expose</code>):</p>
 <pre><code>
-# 1) Create the backend Pod (labeled app=nginx)
-kubectl run backend --image=nginx --labels=&quot;app=nginx&quot; --port=80 -n demo
+# 1) Create the backend Deployment
+kubectl create deployment backend --image=nginx -n demo
 
-# 2) Expose that Pod as a Service named backend (separate command)
-kubectl expose pod backend --name=backend --port=80 -n demo
+# 2) Add the app=nginx label to the Deployment (to match the policy selector)
+#    kubectl create deployment sets app=backend by default, so we override it explicitly
+kubectl label deployment backend app=nginx --overwrite -n demo
+kubectl rollout restart deployment backend -n demo   # propagate the new label to the Pod
+
+# 3) Expose the Deployment as a Service named backend
+kubectl expose deployment backend --name=backend --port=80 -n demo
+</code></pre>
+<p>Option 2 — YAML manifest (lets you set labels correctly from the start — cleaner):</p>
+<pre><code>
+# backend-deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx         # ← the label NetworkPolicy will select
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
+          ports:
+            - containerPort: 80
+</code></pre>
+<pre><code>
+kubectl apply -f backend-deploy.yaml
+kubectl expose deployment backend --name=backend --port=80 -n demo
 </code></pre>
 <blockquote class='callout'>
-<p>Note: If you prefer to use a Deployment instead, run <code class='ic'>kubectl create deployment backend --image=nginx -n demo</code> followed by <code class='ic'>kubectl expose deployment backend --port=80 -n demo</code>. Always run creation and exposure as separate commands — that is the current recommended practice.</p>
+<p>A standalone Pod (<code class='ic'>kubectl run</code>) is fine for quickly spinning up a single instance to verify a concept in a learning context, but in practice it is rarely used — no controller manages its lifecycle, restarts, or scaling. This lecture uses a Deployment for the protected target. The short-lived client Pods used for testing, on the other hand, are single Pods launched with <code class='ic'>--rm</code>; that is appropriate for one-off tests.</p>
 </blockquote>
-<p>Now spin up a client Pod to attempt connections.</p>
+<p>Now spin up a client Pod to attempt connections. Since it is only needed for a brief test, a standalone Pod is sufficient.</p>
 <pre><code>
 # A client Pod with curl available
 kubectl run client --image=curlimages/curl -n demo -it --rm -- sh
@@ -3364,7 +3428,7 @@ kubectl run bad --image=curlimages/curl \
   -n demo -it --rm -- curl --max-time 5 backend
 # → No response, times out
 </code></pre>
-<p>The <code class='ic'>access=granted</code> label acts as an <strong>access badge</strong>. Because policy rules match on labels rather than IP addresses or Pod names, the rule remains valid even when a Pod dies and is rescheduled with a new IP — as long as the label is present. This is why label selector-based control is so powerful in the dynamic world of Kubernetes. As the flow below shows, once default deny is in place, only traffic from matching labels passes through; everything else is dropped.</p>
+<p>The <code class='ic'>access=granted</code> label acts as an <strong>access badge</strong>. Because policy rules match on labels rather than IP addresses or Pod names, the rule remains valid even when a Pod dies and is rescheduled with a new IP — as long as the label is present. This is why label selector-based control is so powerful in the dynamic world of Kubernetes. Running the backend as a Deployment makes this especially clear: every time a Pod is replaced, its IP changes, but the <code class='ic'>app=nginx</code> label defined in the Pod template stays constant, so the policy applies without interruption. As the flow below shows, once default deny is in place, only traffic from matching labels passes through; everything else is dropped.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TD
     A[&quot;client Pod attempts to connect to backend (app=nginx)&quot;] --&gt; B{&quot;Is there a policy applied&lt;br/&gt;to the app=nginx Pod?&quot;}
     B --&gt;|&quot;No&quot;| C[&quot;Default allow&lt;br/&gt;(flat network)&quot;]
@@ -3384,7 +3448,10 @@ kubectl run bad --image=curlimages/curl \
 <h4>Step 3: Controlling Egress (Outbound Traffic)</h4>
 <p>So far we have dealt with &quot;who is allowed in (ingress).&quot; To tighten security further, you also need to restrict &quot;where this Pod is allowed to go (egress).&quot; This is useful, for example, to prevent application Pods from exfiltrating data to unknown external destinations.</p>
 <p>The most common trap in egress control is <strong>DNS</strong>. If egress is locked down, Pods can no longer perform DNS lookups to resolve domain names — Kubernetes uses CoreDNS on port 53 — and the result is that &quot;nothing reachable by name works anymore.&quot; When locking down egress, <strong>always open DNS (UDP/TCP port 53) at the same time.</strong></p>
-<p>A common security mistake here is opening port 53 with <code class='ic'>to: - namespaceSelector: {}</code> — which allows port 53 to every Pod in every namespace. That is effectively opening cluster-wide 53 traffic, violating the principle of least privilege. DNS queries only need to reach the <strong>CoreDNS Pods in the <code class='ic'>kube-system</code> namespace</strong>, so the destination should be narrowed to exactly that. CoreDNS Pods typically carry the <code class='ic'>k8s-app: kube-dns</code> label, and to identify the <code class='ic'>kube-system</code> namespace you need a label on it (for example, <code class='ic'>kubernetes.io/metadata.name: kube-system</code>, which recent versions of Kubernetes add automatically).</p>
+<p>A common security mistake here is opening port 53 with <code class='ic'>to: - namespaceSelector: {}</code> — which allows port 53 to every Pod in every namespace. That is effectively opening cluster-wide port 53 traffic, violating the principle of least privilege. DNS queries only need to reach the <strong>CoreDNS Pods in the <code class='ic'>kube-system</code> namespace</strong>, so the destination should be narrowed to exactly that. CoreDNS Pods typically carry the <code class='ic'>k8s-app: kube-dns</code> label, and to identify the <code class='ic'>kube-system</code> namespace in a selector, you need a label on it (for example, <code class='ic'>kubernetes.io/metadata.name: kube-system</code>).</p>
+<blockquote class='callout'>
+<p>Version and distribution compatibility note: The example below assumes the <code class='ic'>kube-system</code> namespace carries the <code class='ic'>kubernetes.io/metadata.name: kube-system</code> label and that CoreDNS Pods carry the <code class='ic'>k8s-app: kube-dns</code> label. The <code class='ic'>kubernetes.io/metadata.name</code> label is <strong>automatically applied to all namespaces starting from Kubernetes 1.21 (beta) / 1.22 (GA)</strong>, but it may be absent on older versions or certain custom distributions, and the DNS Pod label may also vary by distribution. Before applying this policy, verify the actual labels in your environment with <code class='ic'>kubectl get ns kube-system --show-labels</code> and <code class='ic'>kubectl get pods -n kube-system --show-labels | findstr dns</code> (use <code class='ic'>grep dns</code> on Linux/macOS). If the label is missing, add it manually with <code class='ic'>kubectl label namespace kube-system kubernetes.io/metadata.name=kube-system</code>, or adjust the selector in the example to match your actual labels.</p>
+</blockquote>
 <pre><code>
 # allow-egress.yaml — backend may only reach CoreDNS and a specific DB (e.g., port 5432)
 apiVersion: networking.k8s.io/v1
@@ -3448,7 +3515,7 @@ spec:
 <li><strong>Policies are namespace-scoped.</strong> A NetworkPolicy applies only to Pods in the namespace specified in its metadata. To restrict Pods in another namespace, create a separate policy in that namespace or reference it with <code class='ic'>namespaceSelector</code>.</li>
 <li><strong>Multiple policies are unioned (OR/additive).</strong> When multiple NetworkPolicies apply to a single Pod, the <strong>union</strong> of all their allowed traffic is permitted. There are no &quot;deny&quot; rules — NetworkPolicy is purely additive. The only way to block traffic is to never add an allow rule for it, using default deny as the baseline.</li>
 <li><strong>Each direction is independent.</strong> Blocking ingress leaves egress wide open, and vice versa. To control both directions, specify both in <code class='ic'>policyTypes</code>.</li>
-<li><strong>Do not over-broaden the DNS egress destination.</strong> Opening port 53 with <code class='ic'>namespaceSelector: {}</code> allows it to every Pod in the cluster — a security risk. Narrow the destination to the CoreDNS Pods in <code class='ic'>kube-system</code> (<code class='ic'>k8s-app: kube-dns</code>) as shown above.</li>
+<li><strong>Do not over-broaden the DNS egress destination.</strong> Opening port 53 with <code class='ic'>namespaceSelector: {}</code> allows it to every Pod in the cluster — a security risk. Narrow the destination to the CoreDNS Pods in <code class='ic'>kube-system</code> (<code class='ic'>k8s-app: kube-dns</code>) as shown above. Keep in mind that the namespace and Pod labels used in the selector may differ across environments — verify actual labels before applying.</li>
 <li><strong>Omitting ports opens all ports.</strong> If you write a <code class='ic'>from</code>/<code class='ic'>to</code> clause without a <code class='ic'>ports</code> block, all ports to or from that source are allowed. Always specify only the ports you need.</li>
 </ul>
 <h3>Key Takeaways</h3>
@@ -3456,8 +3523,9 @@ spec:
 <li>Kubernetes uses a <strong>flat network model where all Pods can communicate freely by default.</strong> Zero-trust control is required for security, and the tool for it is <strong>NetworkPolicy (L3/L4)</strong>. It operates at a different layer from Ingress (L7, external routing).</li>
 <li>NetworkPolicy only works if the <strong>CNI plugin (Calico, Cilium, Weave Net, etc.) supports and enforces it.</strong> On an unsupported CNI, policies are silently ignored — always verify CNI support before relying on policies.</li>
 <li>Policies follow a <strong>whitelist</strong> model. Use <code class='ic'>podSelector</code> to select target Pods, <code class='ic'>policyTypes</code> to choose a direction, and leave the rules block empty to block all traffic in that direction (default deny).</li>
+<li>In production, manage protected workloads as <strong>Deployments with a label (<code class='ic'>app=nginx</code>) that the policy selects.</strong> A standalone Pod (<code class='ic'>kubectl run</code>) is suitable only for learning or one-off tests. Because the label is defined in the Pod template, it persists across restarts and rescheduling — policies apply regardless of IP changes.</li>
 <li>Allow rules are defined using <strong>label selectors</strong> (<code class='ic'>podSelector</code> / <code class='ic'>namespaceSelector</code>), <code class='ic'>ipBlock</code>, and ports. Because rules match labels rather than IPs, they survive Pod rescheduling.</li>
-<li>When locking down egress, <strong>always open DNS (port 53) as well</strong> — but narrow the destination to the CoreDNS Pods in <code class='ic'>kube-system</code> (<code class='ic'>k8s-app: kube-dns</code>). Using <code class='ic'>namespaceSelector: {}</code> to open port 53 to everyone is a security risk. Multiple policies are applied as the union of all their allow rules.</li>
+<li>When locking down egress, <strong>always open DNS (port 53) as well</strong> — but narrow the destination to the CoreDNS Pods in <code class='ic'>kube-system</code> (<code class='ic'>k8s-app: kube-dns</code>). Using <code class='ic'>namespaceSelector: {}</code> to open port 53 to everyone is a security risk. The <code class='ic'>kubernetes.io/metadata.name</code> label is automatically added to namespaces from Kubernetes 1.21 onward — verify labels in older or custom environments before applying. Multiple policies are applied as the union of all their allow rules.</li>
 </ul>
 <h3>Sources</h3>
 <ul>
@@ -3465,12 +3533,11 @@ spec:
 <li>Microsoft Azure, &quot;Securing traffic between pods using policies in Azure Kubernetes Service | Azure Tips and Tricks&quot; — https://www.youtube.com/watch?v=knnn2fPEL0M</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. 1. Start minikube with the Calico CNI and verify that the Calico Pods in the kube-system namespace are in the Running state.
-2. Create the demo namespace.
-3. Inside the demo namespace, create a backend Pod labeled app=nginx along with a Service on port 80.
-4. Launch a temporary client Pod using the curlimages/curl image, send a curl request to the backend Service, and confirm that the nginx response HTML is returned.
-
-Note: NetworkPolicy enforcement requires a CNI plugin that supports it. This entire lab assumes Calico CNI. If minikube is started without the --cni=calico option (default kindnet), policies are silently ignored — make sure to start with --cni=calico.</p>
+              <div class='q'><p>Practice 1. 1. Start minikube with the Calico CNI and verify that the Calico Pods in the kube-system namespace are in the Running state.</p>
+<p>2. Create the demo namespace.</p>
+<p>3. Inside the demo namespace, create a backend Pod labeled app=nginx along with a Service on port 80.</p>
+<p>4. Launch a temporary client Pod using the curlimages/curl image, send a curl request to the backend Service, and confirm that the nginx response HTML is returned.</p>
+<p>Note: NetworkPolicy enforcement requires a CNI plugin that supports it. This entire lab assumes Calico CNI. If minikube is started without the --cni=calico option (default kindnet), policies are silently ignored — make sure to start with --cni=calico.</p></div>
               <pre class='starter'><code># 1. Start minikube with Calico CNI
 minikube start --cni=calico
 
@@ -3511,18 +3578,18 @@ kubectl run client --image=curlimages/curl -n demo \
   --rm -it -- curl --max-time 5 backend
 # Expected result: &lt;!DOCTYPE html&gt; ... nginx default HTML is printed
 # → Confirms that all Pod-to-Pod communication is allowed by default in the flat network</code></pre>
-                <p class='exp2'>Kubernetes adopts a &#x27;flat network model&#x27; by default. All Pods can communicate freely with each other regardless of namespace or node. In this state, with no NetworkPolicy objects present, there are no blocking rules either. The nginx response returned by curl is proof of the &#x27;default-allow&#x27; state. NetworkPolicy enforcement is performed not by the Kubernetes API server but by the CNI plugin. If an unsupported CNI is used (e.g., minikube&#x27;s default kindnet), even correctly written NetworkPolicy objects are silently ignored and all traffic continues to flow without any error. Calico, Cilium, and Weave Net are among the CNIs that do enforce NetworkPolicy.</p>
+                <div class='exp2'><p>Kubernetes adopts a &#x27;flat network model&#x27; by default. All Pods can communicate freely with each other regardless of namespace or node. In this state, with no NetworkPolicy objects present, there are no blocking rules either. The nginx response returned by curl is proof of the &#x27;default-allow&#x27; state. NetworkPolicy enforcement is performed not by the Kubernetes API server but by the CNI plugin. If an unsupported CNI is used (e.g., minikube&#x27;s default kindnet), even correctly written NetworkPolicy objects are silently ignored and all traffic continues to flow without any error. Calico, Cilium, and Weave Net are among the CNIs that do enforce NetworkPolicy.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. Write a default deny NetworkPolicy (YAML filename: default-deny.yaml) that blocks all inbound traffic for every Pod in the demo namespace, then apply it.
-
-Requirements:
-- kind: NetworkPolicy, namespace: demo
-- Apply to all Pods: set podSelector to an empty value ({})
-- List only Ingress in policyTypes
-- Writing no ingress rules at all means all incoming traffic is blocked
-
-After applying, launch the curl client Pod again, attempt to connect to backend, and confirm the request times out with no response.
-Also verify the policy was created with kubectl get networkpolicy -n demo.</p>
+              <div class='q'><p>Practice 2. Write a default deny NetworkPolicy (YAML filename: default-deny.yaml) that blocks all inbound traffic for every Pod in the demo namespace, then apply it.</p>
+<p>Requirements:</p>
+<ul>
+<li>kind: NetworkPolicy, namespace: demo</li>
+<li>Apply to all Pods: set podSelector to an empty value ({})</li>
+<li>List only Ingress in policyTypes</li>
+<li>Writing no ingress rules at all means all incoming traffic is blocked</li>
+</ul>
+<p>After applying, launch the curl client Pod again, attempt to connect to backend, and confirm the request times out with no response.</p>
+<p>Also verify the policy was created with kubectl get networkpolicy -n demo.</p></div>
               <pre class='starter'><code># default-deny.yaml (fill in the blanks)
 apiVersion: networking.k8s.io/v1
 kind: ____
@@ -3572,19 +3639,19 @@ kubectl run client --image=curlimages/curl -n demo \
   --rm -it -- curl --max-time 5 backend
 # Expected result: curl: (28) Connection timed out after 5000 milliseconds
 # → NetworkPolicy is active and inbound traffic is being blocked</code></pre>
-                <p class='exp2'>NetworkPolicy uses a whitelist (allow-list) model. The moment a policy is applied to a Pod, the rule becomes &#x27;only explicitly allowed traffic passes; everything else is blocked.&#x27; podSelector: {} means &#x27;no label condition = select all Pods,&#x27; and listing Ingress in policyTypes without writing any ingress rules means &#x27;zero allow rules = block everything.&#x27; The timeout on curl is evidence that the policy is actively working. Note the distinction: an immediate &#x27;Connection refused&#x27; means the service itself is unavailable, whereas a timeout means the packet reached the network layer but was dropped by the CNI.</p>
+                <div class='exp2'><p>NetworkPolicy uses a whitelist (allow-list) model. The moment a policy is applied to a Pod, the rule becomes &#x27;only explicitly allowed traffic passes; everything else is blocked.&#x27; podSelector: {} means &#x27;no label condition = select all Pods,&#x27; and listing Ingress in policyTypes without writing any ingress rules means &#x27;zero allow rules = block everything.&#x27; The timeout on curl is evidence that the policy is actively working. Note the distinction: an immediate &#x27;Connection refused&#x27; means the service itself is unavailable, whereas a timeout means the packet reached the network layer but was dropped by the CNI.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. Write and apply a NetworkPolicy (allow-frontend.yaml) satisfying the following conditions.
-
-Requirements:
-- Protected target: Pods labeled app=nginx (podSelector)
-- Allowed source: Pods labeled access=granted (from.podSelector)
-- Allowed port: TCP 80
-- policyTypes: Ingress
-
-After applying, test with two different clients and compare results.
-(a) A Pod with the access=granted label → curl to backend, confirm the nginx HTML response
-(b) A Pod without the label → curl to backend, confirm the request is blocked (timeout)</p>
+              <div class='q'><p>Practice 3. Write and apply a NetworkPolicy (allow-frontend.yaml) satisfying the following conditions.</p>
+<p>Requirements:</p>
+<ul>
+<li>Protected target: Pods labeled app=nginx (podSelector)</li>
+<li>Allowed source: Pods labeled access=granted (from.podSelector)</li>
+<li>Allowed port: TCP 80</li>
+<li>policyTypes: Ingress</li>
+</ul>
+<p>After applying, test with two different clients and compare results.</p>
+<p>(a) A Pod with the access=granted label → curl to backend, confirm the nginx HTML response</p>
+<p>(b) A Pod without the label → curl to backend, confirm the request is blocked (timeout)</p></div>
               <pre class='starter'><code># allow-frontend.yaml (fill in the blanks)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -3657,18 +3724,17 @@ kubectl run good --image=curlimages/curl --labels=&quot;access=granted&quot; \
 kubectl run bad --image=curlimages/curl \
   -n demo --rm -it -- curl --max-time 5 backend
 # Expected result: curl: (28) Connection timed out after 5000 milliseconds</code></pre>
-                <p class='exp2'>NetworkPolicy allow rules are label-based. Because the condition is a label (access=granted) rather than an IP address or Pod name, the rule remains valid even after a Pod is rescheduled to a new IP — as long as the label matches. When default-deny-ingress and allow-to-nginx are both present, Kubernetes evaluates them as a union (OR). default-deny contributes &#x27;no allow rules&#x27;; allow-to-nginx contributes &#x27;allow TCP 80 from access=granted.&#x27; The union is &#x27;allow TCP 80 from access=granted only.&#x27; The bad Pod in test (b) times out because it carries no access=granted label and therefore matches no allow rule.</p>
+                <div class='exp2'><p>NetworkPolicy allow rules are label-based. Because the condition is a label (access=granted) rather than an IP address or Pod name, the rule remains valid even after a Pod is rescheduled to a new IP — as long as the label matches. When default-deny-ingress and allow-to-nginx are both present, Kubernetes evaluates them as a union (OR). default-deny contributes &#x27;no allow rules&#x27;; allow-to-nginx contributes &#x27;allow TCP 80 from access=granted.&#x27; The union is &#x27;allow TCP 80 from access=granted only.&#x27; The bad Pod in test (b) times out because it carries no access=granted label and therefore matches no allow rule.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Step 1: Apply a deliberately broken egress policy (bad-egress.yaml) that omits the DNS port, then confirm that name resolution fails inside the backend Pod.
-
-Requirements (bad-egress.yaml):
-- Target: Pods labeled app=nginx
-- policyTypes: Egress
-- Egress rules: allow only TCP 5432 to Pods labeled app=postgres (no DNS rule)
-
-Step 2: Delete bad-egress.yaml and apply a correct policy (allow-egress.yaml) that also allows DNS (UDP+TCP 53). Run the name resolution check again to confirm it now succeeds.
-
-Hint: To run commands inside the backend Pod, use the form `kubectl exec -n demo backend -- &lt;command&gt;`.</p>
+              <div class='q'><p>Practice 4. Step 1: Apply a deliberately broken egress policy (bad-egress.yaml) that omits the DNS port, then confirm that name resolution fails inside the backend Pod.</p>
+<p>Requirements (bad-egress.yaml):</p>
+<ul>
+<li>Target: Pods labeled app=nginx</li>
+<li>policyTypes: Egress</li>
+<li>Egress rules: allow only TCP 5432 to Pods labeled app=postgres (no DNS rule)</li>
+</ul>
+<p>Step 2: Delete bad-egress.yaml and apply a correct policy (allow-egress.yaml) that also allows DNS (UDP+TCP 53). Run the name resolution check again to confirm it now succeeds.</p>
+<p>Hint: To run commands inside the backend Pod, use the form <code class='ic'>kubectl exec -n demo backend -- &lt;command&gt;</code>.</p></div>
               <pre class='starter'><code># bad-egress.yaml — broken example with no DNS rule (fill in the blanks)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -3798,7 +3864,7 @@ kubectl get networkpolicy -n demo
 # allow-egress           app=nginx      10s
 # allow-to-nginx         app=nginx      5m
 # default-deny-ingress   &lt;none&gt;         8m</code></pre>
-                <p class='exp2'>Adding Egress to policyTypes switches that Pod&#x27;s outbound traffic to whitelist mode as well. The most common mistake is forgetting DNS. Name resolution inside a Kubernetes cluster goes through the CoreDNS Pod in the kube-system namespace on UDP/TCP port 53. If port 53 is missing from the egress rules, the Pod cannot resolve any domain names and produces a &#x27;Could not resolve host&#x27; error. The reason `namespaceSelector: {}` is used for DNS is that CoreDNS lives in kube-system, not in the same namespace as the backend Pod. An empty namespaceSelector means &#x27;all Pods in all namespaces,&#x27; which includes kube-system&#x27;s CoreDNS. In production, it is recommended to narrow the scope to `namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}`.</p>
+                <div class='exp2'><p>Adding Egress to policyTypes switches that Pod&#x27;s outbound traffic to whitelist mode as well. The most common mistake is forgetting DNS. Name resolution inside a Kubernetes cluster goes through the CoreDNS Pod in the kube-system namespace on UDP/TCP port 53. If port 53 is missing from the egress rules, the Pod cannot resolve any domain names and produces a &#x27;Could not resolve host&#x27; error. The reason <code class='ic'>namespaceSelector: {}</code> is used for DNS is that CoreDNS lives in kube-system, not in the same namespace as the backend Pod. An empty namespaceSelector means &#x27;all Pods in all namespaces,&#x27; which includes kube-system&#x27;s CoreDNS. In production, it is recommended to narrow the scope to <code class='ic'>namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}</code>.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=IYB7fpBjXgA' target='_blank'>Navigating Kubernetes Networking: Tips and Tricks for Developers</a></li><li><a href='https://www.youtube.com/watch?v=knnn2fPEL0M' target='_blank'>Securing traffic between pods using policies in Azure Kubernetes Service | Azure Tips and Tricks</a></li></ul></div>
         </article>
@@ -3995,12 +4061,14 @@ helm install web bitnami/nginx         # install the chart you found
 <li>Docker, &quot;Hands-On Helm&quot; — https://www.youtube.com/watch?v=6d6L4-ADF-M</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. 1. Run helm create myapp to scaffold the Chart skeleton.
-2. Open the following files in order and review their contents.
-   - myapp/Chart.yaml — locate the name, version, and appVersion fields.
-   - myapp/values.yaml — locate the replicaCount, image.repository, image.tag, service.type, and service.port fields.
-   - myapp/templates/deployment.yaml — find at least three places that reference .Values using the {{ .Values.&lt;path&gt; }} syntax.
-3. Run helm template myapp ./myapp to render the substituted output (the completed manifests), and verify that the replicas value in the Deployment matches the replicaCount in values.yaml.</p>
+              <div class='q'><p>Practice 1. 1. Run helm create myapp to scaffold the Chart skeleton.</p>
+<p>2. Open the following files in order and review their contents.</p>
+<ul>
+<li>myapp/Chart.yaml — locate the name, version, and appVersion fields.</li>
+<li>myapp/values.yaml — locate the replicaCount, image.repository, image.tag, service.type, and service.port fields.</li>
+<li>myapp/templates/deployment.yaml — find at least three places that reference .Values using the {{ .Values.&lt;path&gt; }} syntax.</li>
+</ul>
+<p>3. Run helm template myapp ./myapp to render the substituted output (the completed manifests), and verify that the replicas value in the Deployment matches the replicaCount in values.yaml.</p></div>
               <pre class='starter'><code># 1. Scaffold the Chart
 helm create myapp
 
@@ -4050,17 +4118,21 @@ cat myapp/values.yaml
 helm template myapp ./myapp
 # Confirm replicas: 1 in the rendered Deployment output
 # (matches replicaCount: 1 in values.yaml)</code></pre>
-                <p class='exp2'>helm create generates a ready-to-use skeleton containing Deployment, Service, HPA, and ServiceAccount templates. Chart.yaml is the package&#x27;s identity card, holding the chart name and version. values.yaml is the central location for all default configuration. The files in templates/ contain {{ .Values.&lt;path&gt; }} placeholders that are left blank until helm install or helm template fills them in with the actual values, producing complete Kubernetes manifests. helm template is a safe debug tool — it renders the output without deploying anything to the cluster.</p>
+                <div class='exp2'><p>helm create generates a ready-to-use skeleton containing Deployment, Service, HPA, and ServiceAccount templates. Chart.yaml is the package&#x27;s identity card, holding the chart name and version. values.yaml is the central location for all default configuration. The files in templates/ contain {{ .Values.&lt;path&gt; }} placeholders that are left blank until helm install or helm template fills them in with the actual values, producing complete Kubernetes manifests. helm template is a safe debug tool — it renders the output without deploying anything to the cluster.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. 1. Edit myapp/values.yaml and change the following values.
-   - replicaCount: 1 → 2
-   - service.type: ClusterIP → NodePort
-2. Deploy the release by running helm install myshop ./myapp.
-3. Verify the deployment with the following commands.
-   - helm list — check the release name, chart, revision, and status.
-   - kubectl get pods — confirm that 2 Pods are in the Running state.
-   - kubectl get service — confirm that the service type is NodePort.
-4. Run helm install myshop ./myapp a second time and observe what error occurs. Explain why.</p>
+              <div class='q'><p>Practice 2. 1. Edit myapp/values.yaml and change the following values.</p>
+<ul>
+<li>replicaCount: 1 → 2</li>
+<li>service.type: ClusterIP → NodePort</li>
+</ul>
+<p>2. Deploy the release by running helm install myshop ./myapp.</p>
+<p>3. Verify the deployment with the following commands.</p>
+<ul>
+<li>helm list — check the release name, chart, revision, and status.</li>
+<li>kubectl get pods — confirm that 2 Pods are in the Running state.</li>
+<li>kubectl get service — confirm that the service type is NodePort.</li>
+</ul>
+<p>4. Run helm install myshop ./myapp a second time and observe what error occurs. Explain why.</p></div>
               <pre class='starter'><code># 1. Edit values.yaml (use vi, nano, or your preferred editor)
 vi myapp/values.yaml
 # Change replicaCount to 2 and service.type to NodePort, then save
@@ -4120,13 +4192,13 @@ helm install myshop ./myapp
 # Error: INSTALLATION FAILED: cannot re-use a name that is still in use
 # Reason: a release named &#x27;myshop&#x27; already exists in this namespace.
 # An existing release must be updated with upgrade, not re-installed.</code></pre>
-                <p class='exp2'>Editing values.yaml changes the result of every {{ .Values.&lt;path&gt; }} substitution in templates/. Setting replicaCount: 2 sets spec.replicas to 2 in the Deployment, causing 2 Pods to be created. Setting service.type: NodePort is reflected in the type field of the Service object. helm install fails with an error if a release with the same name already exists. In that case, use upgrade to update the release, or uninstall it first and reinstall. In automation scripts where you do not want to distinguish between the two cases, use the helm upgrade --install idiom.</p>
+                <div class='exp2'><p>Editing values.yaml changes the result of every {{ .Values.&lt;path&gt; }} substitution in templates/. Setting replicaCount: 2 sets spec.replicas to 2 in the Deployment, causing 2 Pods to be created. Setting service.type: NodePort is reflected in the type field of the Service object. helm install fails with an error if a release with the same name already exists. In that case, use upgrade to update the release, or uninstall it first and reinstall. In automation scripts where you do not want to distinguish between the two cases, use the helm upgrade --install idiom.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. 1. Use helm upgrade --set to reduce the replicaCount of the myshop release to 1.
-2. Use kubectl get pods to confirm the Pod count drops to 1.
-3. Run helm history myshop to view the revision history and describe the difference between revision 1 and revision 2.
-4. Run another upgrade using --set to raise replicaCount to 3.
-5. Run helm history myshop again and confirm that revision 3 has been added.</p>
+              <div class='q'><p>Practice 3. 1. Use helm upgrade --set to reduce the replicaCount of the myshop release to 1.</p>
+<p>2. Use kubectl get pods to confirm the Pod count drops to 1.</p>
+<p>3. Run helm history myshop to view the revision history and describe the difference between revision 1 and revision 2.</p>
+<p>4. Run another upgrade using --set to raise replicaCount to 3.</p>
+<p>5. Run helm history myshop again and confirm that revision 3 has been added.</p></div>
               <pre class='starter'><code># 1. Upgrade to reduce replicaCount to 1 (fill in the blanks)
 helm upgrade myshop ./myapp --set ____=____
 
@@ -4176,14 +4248,16 @@ helm history myshop
 
 kubectl get pods
 # Confirm 3 Pods are in the Running state</code></pre>
-                <p class='exp2'>helm upgrade --set KEY=VALUE is the fastest way to override a specific key in values.yaml directly from the command line. You can specify values inline without editing any file, which is why this pattern is common in CI/CD pipelines. The revision number increments by 1 with each upgrade, and the previous revision is retained in the history with a superseded status. This revision history in helm history is exactly what makes rollback possible. Note that values not explicitly passed with --set do not carry over from the previous upgrade — they revert to the chart&#x27;s values.yaml defaults. For managing multiple values together, using -f values-override.yaml is safer.</p>
+                <div class='exp2'><p>helm upgrade --set KEY=VALUE is the fastest way to override a specific key in values.yaml directly from the command line. You can specify values inline without editing any file, which is why this pattern is common in CI/CD pipelines. The revision number increments by 1 with each upgrade, and the previous revision is retained in the history with a superseded status. This revision history in helm history is exactly what makes rollback possible. Note that values not explicitly passed with --set do not carry over from the previous upgrade — they revert to the chart&#x27;s values.yaml defaults. For managing multiple values together, using -f values-override.yaml is safer.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. 1. Simulate a &#x27;bad upgrade&#x27;. Run helm upgrade --set replicaCount=10 --set image.tag=broken-9.9.9 to upgrade myshop.
-   - Use kubectl get pods to check whether any Pods enter a Pending or ImagePullBackOff state. (In a real cluster, a non-existent image tag will trigger ImagePullBackOff.)
-2. Run helm history myshop to review the current history and identify the &#x27;last known-good revision number&#x27;.
-3. Run helm rollback myshop &lt;revision-number&gt; to restore the last healthy revision.
-4. Use kubectl get pods to confirm the Pods have recovered, and check helm history myshop to confirm that the rollback itself was recorded as a new revision.
-5. Run helm uninstall myshop to delete the release, then use kubectl get pods and kubectl get service to confirm all objects have been removed.</p>
+              <div class='q'><p>Practice 4. 1. Simulate a &#x27;bad upgrade&#x27;. Run helm upgrade --set replicaCount=10 --set image.tag=broken-9.9.9 to upgrade myshop.</p>
+<ul>
+<li>Use kubectl get pods to check whether any Pods enter a Pending or ImagePullBackOff state. (In a real cluster, a non-existent image tag will trigger ImagePullBackOff.)</li>
+</ul>
+<p>2. Run helm history myshop to review the current history and identify the &#x27;last known-good revision number&#x27;.</p>
+<p>3. Run helm rollback myshop &lt;revision-number&gt; to restore the last healthy revision.</p>
+<p>4. Use kubectl get pods to confirm the Pods have recovered, and check helm history myshop to confirm that the rollback itself was recorded as a new revision.</p>
+<p>5. Run helm uninstall myshop to delete the release, then use kubectl get pods and kubectl get service to confirm all objects have been removed.</p></div>
               <pre class='starter'><code># 1. Upgrade with a bad configuration (fill in the blanks)
 helm upgrade myshop ./myapp \
   --set replicaCount=____ \
@@ -4262,7 +4336,7 @@ kubectl get service
 # NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
 # kubernetes   ClusterIP   10.96.0.1    &lt;none&gt;        443/TCP   ...
 # (all myshop-related Services have been removed)</code></pre>
-                <p class='exp2'>This exercise covers the complete Helm release lifecycle — install → upgrade → failure → rollback → uninstall — in a single session. The key insight behind helm rollback is that Helm stores the state of every revision as Secrets in the namespace, allowing you to restore the cluster to any revision&#x27;s manifests with a single command. The rollback itself is recorded as a new revision (revision 5), so &#x27;when the rollback happened&#x27; is also part of the permanent history. helm uninstall removes all Kubernetes objects created by the release — Deployment, Service, ServiceAccount, and so on — in one shot. By default, the history Secrets are also deleted; add --keep-history if you want to preserve them.</p>
+                <div class='exp2'><p>This exercise covers the complete Helm release lifecycle — install → upgrade → failure → rollback → uninstall — in a single session. The key insight behind helm rollback is that Helm stores the state of every revision as Secrets in the namespace, allowing you to restore the cluster to any revision&#x27;s manifests with a single command. The rollback itself is recorded as a new revision (revision 5), so &#x27;when the rollback happened&#x27; is also part of the permanent history. helm uninstall removes all Kubernetes objects created by the release — Deployment, Service, ServiceAccount, and so on — in one shot. By default, the history Secrets are also deleted; add --keep-history if you want to preserve them.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=fy8SHvNZGeE' target='_blank'>What is Helm?</a></li><li><a href='https://www.youtube.com/watch?v=6d6L4-ADF-M' target='_blank'>Hands-On Helm</a></li></ul></div>
         </article>
@@ -4483,10 +4557,10 @@ kubectl delete pod logtest -n monitoring
 <li>PromLabs (Julius Volz), &quot;Creating Grafana Dashboards for Prometheus | Grafana Setup &amp; Simple Dashboard&quot; — https://www.youtube.com/watch?v=EGgtJUjky8w</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
-              <p class='q'>Practice 1. 1. Add the prometheus-community Helm repository and update it to the latest index.
-2. Install the kube-prometheus-stack chart as a release named prometheus into the monitoring namespace. Include the option to create the namespace automatically if it does not exist.
-3. Run kubectl get pods -n monitoring to list the Pods, and identify which Pod names correspond to each of the four core components (Prometheus, Grafana, Node Exporter, kube-state-metrics). Record the names.
-4. Run the command to list installed Helm releases and confirm that the prometheus release shows a DEPLOYED status.</p>
+              <div class='q'><p>Practice 1. 1. Add the prometheus-community Helm repository and update it to the latest index.</p>
+<p>2. Install the kube-prometheus-stack chart as a release named prometheus into the monitoring namespace. Include the option to create the namespace automatically if it does not exist.</p>
+<p>3. Run kubectl get pods -n monitoring to list the Pods, and identify which Pod names correspond to each of the four core components (Prometheus, Grafana, Node Exporter, kube-state-metrics). Record the names.</p>
+<p>4. Run the command to list installed Helm releases and confirm that the prometheus release shows a DEPLOYED status.</p></div>
               <pre class='starter'><code># 1. Add the Helm repository (fill in the blanks)
 helm repo add prometheus-community ____
 helm repo ____
@@ -4524,16 +4598,20 @@ kubectl get pods -n monitoring
 # 4. List Helm releases
 helm list -n monitoring
 # Expected output: prometheus release shown with STATUS=deployed</code></pre>
-                <p class='exp2'>helm repo add registers a chart repository URL under a local alias (prometheus-community), and helm repo update downloads the latest chart index from that repository. The first argument to helm install is the release name (prometheus); the second is the chart address (alias/chart-name). Without the --create-namespace flag, the monitoring namespace must already exist, so including it is the safer approach. A single installation of kube-prometheus-stack deploys the Prometheus Operator, Prometheus instance, Alertmanager, Grafana, Node Exporter, and kube-state-metrics all at once — this is the core value of a Helm chart: managing multiple components as a single unit.</p>
+                <div class='exp2'><p>helm repo add registers a chart repository URL under a local alias (prometheus-community), and helm repo update downloads the latest chart index from that repository. The first argument to helm install is the release name (prometheus); the second is the chart address (alias/chart-name). Without the --create-namespace flag, the monitoring namespace must already exist, so including it is the safer approach. A single installation of kube-prometheus-stack deploys the Prometheus Operator, Prometheus instance, Alertmanager, Grafana, Node Exporter, and kube-state-metrics all at once — this is the core value of a Helm chart: managing multiple components as a single unit.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 2. 1. Use kubectl port-forward to expose the Prometheus service in the monitoring namespace on local port 9090.
-   - Service name: prometheus-kube-prometheus-prometheus
-   - Service port: 9090
-2. Open localhost:9090 in a browser, go to the Graph tab, and run the following two PromQL queries one at a time. Observe the results.
-   - Query A: The number of running Pods per namespace across the entire cluster
-   - Query B: The number of available CPU cores on the current node
-3. Navigate to Status &gt; Targets and confirm that the node-exporter and kube-state-metrics targets show a state of UP.
-4. Return to the terminal and stop the port-forward (Ctrl+C).</p>
+              <div class='q'><p>Practice 2. 1. Use kubectl port-forward to expose the Prometheus service in the monitoring namespace on local port 9090.</p>
+<ul>
+<li>Service name: prometheus-kube-prometheus-prometheus</li>
+<li>Service port: 9090</li>
+</ul>
+<p>2. Open localhost:9090 in a browser, go to the Graph tab, and run the following two PromQL queries one at a time. Observe the results.</p>
+<ul>
+<li>Query A: The number of running Pods per namespace across the entire cluster</li>
+<li>Query B: The number of available CPU cores on the current node</li>
+</ul>
+<p>3. Navigate to Status &gt; Targets and confirm that the node-exporter and kube-state-metrics targets show a state of UP.</p>
+<p>4. Return to the terminal and stop the port-forward (Ctrl+C).</p></div>
               <pre class='starter'><code># 1. Prometheus UI port-forward (fill in the blanks)
 kubectl port-forward -n ____ svc/____ ____:____
 
@@ -4569,16 +4647,20 @@ count(node_cpu_seconds_total{mode=&quot;idle&quot;}) by (instance)
 
 # 4. Stop port-forward
 # Ctrl+C (or if running in background: kill %1)</code></pre>
-                <p class='exp2'>kubectl port-forward svc/&lt;service-name&gt; &lt;local-port&gt;:&lt;service-port&gt; creates a temporary tunnel to a cluster service. This lets you access internal services from a local browser without needing a LoadBalancer or Ingress — indispensable for debugging and validation. In PromQL, sum by (namespace) is an aggregation function that sums values grouped by the specified label dimension. The kube_pod_container_status_running metric is collected by the kube-state-metrics exporter; a value of 1 means the container is running. The UP/DOWN status on the Targets page indicates whether Prometheus can actually reach and scrape the exporter — if a target is DOWN, the first things to check are the ServiceMonitor configuration and any network policies.</p>
+                <div class='exp2'><p>kubectl port-forward svc/&lt;service-name&gt; &lt;local-port&gt;:&lt;service-port&gt; creates a temporary tunnel to a cluster service. This lets you access internal services from a local browser without needing a LoadBalancer or Ingress — indispensable for debugging and validation. In PromQL, sum by (namespace) is an aggregation function that sums values grouped by the specified label dimension. The kube_pod_container_status_running metric is collected by the kube-state-metrics exporter; a value of 1 means the container is running. The UP/DOWN status on the Targets page indicates whether Prometheus can actually reach and scrape the exporter — if a target is DOWN, the first things to check are the ServiceMonitor configuration and any network policies.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 3. 1. Use kubectl port-forward to expose the Grafana service in the monitoring namespace on local port 3000.
-   - Service name: prometheus-grafana
-   - Internal service port: 80 (mapped to local port 3000)
-2. Before logging in, decode the Grafana admin password from a Secret.
-   - Secret name: prometheus-grafana (monitoring namespace)
-   - Extract the admin-password field using jsonpath and base64-decode it.
-3. Log in to localhost:3000 with the username admin and the decoded password.
-4. Open the &#x27;Kubernetes / Compute Resources / Node (Pods)&#x27; dashboard from the left-side Dashboards menu, click Edit on one of the CPU Usage panels, and record the PromQL query shown in the Metrics browser.</p>
+              <div class='q'><p>Practice 3. 1. Use kubectl port-forward to expose the Grafana service in the monitoring namespace on local port 3000.</p>
+<ul>
+<li>Service name: prometheus-grafana</li>
+<li>Internal service port: 80 (mapped to local port 3000)</li>
+</ul>
+<p>2. Before logging in, decode the Grafana admin password from a Secret.</p>
+<ul>
+<li>Secret name: prometheus-grafana (monitoring namespace)</li>
+<li>Extract the admin-password field using jsonpath and base64-decode it.</li>
+</ul>
+<p>3. Log in to localhost:3000 with the username admin and the decoded password.</p>
+<p>4. Open the &#x27;Kubernetes / Compute Resources / Node (Pods)&#x27; dashboard from the left-side Dashboards menu, click Edit on one of the CPU Usage panels, and record the PromQL query shown in the Metrics browser.</p></div>
               <pre class='starter'><code># 1. Grafana port-forward (fill in the blanks)
 kubectl port-forward -n ____ svc/____ ____:____
 
@@ -4611,21 +4693,24 @@ kubectl get secret -n monitoring prometheus-grafana \
 # Example PromQL shown in the Metrics browser:
 # sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{node=&quot;$node&quot;})
 #   by (pod)</code></pre>
-                <p class='exp2'>Each panel in Grafana is a PromQL query (or multiple queries) sent to Prometheus under the hood. Viewing a query in the Edit view makes it clear that a dashboard is not magic — it is PromQL results rendered visually. The reason this exercise has you decode the Secret directly is to reinforce two things: the practical use of base64 --decode covered in an earlier lecture, and the operational habit of reading credentials from cluster Secrets rather than looking for hardcoded defaults in documentation. Note that when a field name under data contains a hyphen (-) in a jsonpath expression, it must be wrapped in quotes.</p>
+                <div class='exp2'><p>Each panel in Grafana is a PromQL query (or multiple queries) sent to Prometheus under the hood. Viewing a query in the Edit view makes it clear that a dashboard is not magic — it is PromQL results rendered visually. The reason this exercise has you decode the Secret directly is to reinforce two things: the practical use of base64 --decode covered in an earlier lecture, and the operational habit of reading credentials from cluster Secrets rather than looking for hardcoded defaults in documentation. Note that when a field name under data contains a hyphen (-) in a jsonpath expression, it must be wrapped in quotes.</p></div>
               </details></div><div class='task'>
-              <p class='q'>Practice 4. Part A — kubectl logs practice
-1. Find and record the name of the Prometheus Pod in the monitoring namespace.
-   - Pod name pattern: prometheus-prometheus-kube-prometheus-prometheus-0
-2. Print the last 20 lines of that Pod&#x27;s logs using the --tail option.
-3. Stream live logs from the prometheus container in the same Pod for 5 seconds using the -f option, then stop with Ctrl+C.
-4. Print only the logs from the last 2 minutes using the --since option.
-
-Part B — Write a ServiceMonitor YAML
-Complete the ServiceMonitor manifest (myapp-monitor.yaml) with no blanks remaining, satisfying the following requirements:
-- Name: myapp-monitor / Namespace: default
-- Label release: prometheus so Prometheus can discover it
-- Target Service label: app=myapp
-- Scrape port: web (port name), path: /metrics, interval: 30s</p>
+              <div class='q'><p>Practice 4. Part A — kubectl logs practice</p>
+<p>1. Find and record the name of the Prometheus Pod in the monitoring namespace.</p>
+<ul>
+<li>Pod name pattern: prometheus-prometheus-kube-prometheus-prometheus-0</li>
+</ul>
+<p>2. Print the last 20 lines of that Pod&#x27;s logs using the --tail option.</p>
+<p>3. Stream live logs from the prometheus container in the same Pod for 5 seconds using the -f option, then stop with Ctrl+C.</p>
+<p>4. Print only the logs from the last 2 minutes using the --since option.</p>
+<p>Part B — Write a ServiceMonitor YAML</p>
+<p>Complete the ServiceMonitor manifest (myapp-monitor.yaml) with no blanks remaining, satisfying the following requirements:</p>
+<ul>
+<li>Name: myapp-monitor / Namespace: default</li>
+<li>Label release: prometheus so Prometheus can discover it</li>
+<li>Target Service label: app=myapp</li>
+<li>Scrape port: web (port name), path: /metrics, interval: 30s</li>
+</ul></div>
               <pre class='starter'><code># Part A
 # 1. Find the Prometheus Pod name
 kubectl get pods -n monitoring | grep prometheus-prometheus
@@ -4692,7 +4777,7 @@ spec:
 
 # Apply (YAML syntax can be validated even without an actual myapp Service)
 # kubectl apply -f myapp-monitor.yaml</code></pre>
-                <p class='exp2'>Quick reference for key kubectl logs options: --tail=N prints only the last N lines; -f streams logs in real time; --previous (-p) shows logs from the container before its last restart; --since=&lt;duration&gt; filters to logs within a recent window (e.g., 1h, 30m, 2m). When a Pod has multiple containers, specify the target with -c &lt;container-name&gt;. The two most important things in a ServiceMonitor are: first, the release: prometheus label in metadata.labels — kube-prometheus-stack is configured to discover only ServiceMonitors carrying this label, so leaving it out means the resource is defined but never actually scrapes anything. Second, spec.selector.matchLabels must match the labels on the actual Service, and spec.endpoints.port must match the port name (not the port number) defined in that Service&#x27;s ports[].name field.</p>
+                <div class='exp2'><p>Quick reference for key kubectl logs options: --tail=N prints only the last N lines; -f streams logs in real time; --previous (-p) shows logs from the container before its last restart; --since=&lt;duration&gt; filters to logs within a recent window (e.g., 1h, 30m, 2m). When a Pod has multiple containers, specify the target with -c &lt;container-name&gt;. The two most important things in a ServiceMonitor are: first, the release: prometheus label in metadata.labels — kube-prometheus-stack is configured to discover only ServiceMonitors carrying this label, so leaving it out means the resource is defined but never actually scrapes anything. Second, spec.selector.matchLabels must match the labels on the actual Service, and spec.endpoints.port must match the port name (not the port number) defined in that Service&#x27;s ports[].name field.</p></div>
               </details></div></section>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=r45DkTMMouc' target='_blank'>Prometheus, Grafana &amp; Kubernetes: Installation + Monitoring</a></li><li><a href='https://www.youtube.com/watch?v=STVMGrYIlfg' target='_blank'>Introduction to the Prometheus Monitoring System | Key Concepts and Features</a></li><li><a href='https://www.youtube.com/watch?v=EGgtJUjky8w' target='_blank'>Creating Grafana Dashboards for Prometheus | Grafana Setup &amp; Simple Dashboard (Chart, Gauge, Table)</a></li></ul></div>
         </article></main>
