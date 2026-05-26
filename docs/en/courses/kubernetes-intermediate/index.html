@@ -20,8 +20,7 @@
 </nav>
 <main><article id='lec1' class='lecture'>
           <h2>01. Separating Configuration with ConfigMap and Secret - Decoupling Code from Config </h2>
-          <h2>Separating Configuration with ConfigMap and Secret - Decoupling Code from Config</h2>
-<h3>Learning Objectives</h3>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Understand why environment variables and configuration files must be separated from the container image (12-factor app)</li>
 <li>Distinguish the difference between ConfigMap and Secret and know when to use each</li>
@@ -51,13 +50,13 @@
 </blockquote>
 <p>The decision rule is simple: <strong>&quot;Would this value leaking cause a security incident?&quot;</strong> If yes, use a Secret; otherwise, use a ConfigMap. Also keep in mind that neither object can hold large data exceeding 1 MB — that belongs in the volumes and storage domain covered in the next lecture. The decision flowchart below shows that a single question is all it takes to choose between the two.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TD
-    A[&quot;Config value to store&quot;] --&gt; B{&quot;Is a leak a security incident?&quot;}
-    B --&gt;|&quot;Yes&quot;| C[&quot;Use Secret&quot;]
-    B --&gt;|&quot;No&quot;| D[&quot;Use ConfigMap&quot;]
-    C --&gt; E{&quot;Larger than 1MB?&quot;}
+    A[Configuration value to store] --&gt; B{Would a leak be a security incident?}
+    B --&gt;|Yes| C[Use Secret]
+    B --&gt;|No| D[Use ConfigMap]
+    C --&gt; E{Exceeds 1 MB?}
     D --&gt; E
-    E --&gt;|&quot;Yes&quot;| F[&quot;Volume / storage domain&quot;]
-    E --&gt;|&quot;No&quot;| G[&quot;Handle with ConfigMap / Secret&quot;]</div><figcaption>Choosing Between ConfigMap and Secret</figcaption></figure>
+    E --&gt;|Yes| F[Volume / Storage domain]
+    E --&gt;|No| G[Handle with ConfigMap / Secret]</div><figcaption>Choosing Between ConfigMap and Secret</figcaption></figure>
 <h4>Creating a ConfigMap — Three Methods</h4>
 <p>There are three ways to create a ConfigMap. The examples below assume a local cluster (e.g., minikube) is running.</p>
 <p><strong>1) Specify values directly on the command line (<code class='ic'>--from-literal</code>)</strong></p>
@@ -74,7 +73,8 @@ kubectl create configmap app-config-file --from-file=app.properties
 # --from-env-file splits each line in the file into individual key-value pairs
 kubectl create configmap app-config-env --from-env-file=app.properties
 </code></pre>
-<p><code class='ic'>--from-file</code> stores the whole file as a single key (filename = content), whereas <code class='ic'>--from-env-file</code> parses each <code class='ic'>KEY=VALUE</code> line as a separate key. This distinction is a common source of confusion, so keep it in mind.</p>
+<p>With <code class='ic'>--from-file=app.properties</code>, the <strong>filename becomes the key</strong> and the <strong>entire file content becomes the value</strong> — there is exactly one key (<code class='ic'>app.properties</code>) whose value is the whole file. This is useful when you want to mount the file as a single unit. To specify a custom key name, use the <code class='ic'>key=path</code> form: <code class='ic'>--from-file=myconfig=app.properties</code>.</p>
+<p>With <code class='ic'>--from-env-file=app.properties</code>, each <code class='ic'>KEY=VALUE</code> line in the file is parsed into a <strong>separate key-value pair</strong>. If the file contains <code class='ic'>LOG_LEVEL=info</code> and <code class='ic'>APP_REGION=ap-northeast-2</code> on two lines, the resulting ConfigMap will have two distinct keys: <code class='ic'>LOG_LEVEL</code> and <code class='ic'>APP_REGION</code>. The core distinction is &quot;load the whole file as one blob (<code class='ic'>--from-file</code>)&quot; versus &quot;split the file into individual entries (<code class='ic'>--from-env-file</code>).&quot; This is a common source of confusion, so keep it in mind.</p>
 <p><strong>3) Declare via a YAML manifest (recommended for production)</strong></p>
 <p>In production, it is best practice to manage manifests declaratively in version control (Git) rather than using imperative commands.</p>
 <pre><code>
@@ -187,7 +187,7 @@ spec:
 <pre><code>
 kubectl apply -f pod.yaml
 kubectl get pods
-kubectl exec -it &lt;pod-name&gt; -- printenv | grep LOG_LEVEL   # verify environment variable
+kubectl exec -it &lt;pod-name&gt; -- printenv | grep LOG_LEVEL      # verify environment variable
 kubectl exec -it &lt;pod-name&gt; -- cat /etc/app/config/LOG_LEVEL  # verify volume file
 </code></pre>
 <h4>Production Gotchas</h4>
@@ -201,7 +201,7 @@ kubectl exec -it &lt;pod-name&gt; -- cat /etc/app/config/LOG_LEVEL  # verify vol
 <ul>
 <li>Separating configuration and secrets from the image allows the same image to be reused across all environments (12-factor). This prevents image divergence, secret leakage, and unnecessary rebuilds.</li>
 <li><strong>ConfigMap = non-sensitive configuration</strong>, <strong>Secret = sensitive secrets</strong>. Both are key-value collections with a 1 MB size limit. The base64 in a Secret is encoding, not encryption.</li>
-<li>Creation options: <code class='ic'>--from-literal</code>, <code class='ic'>--from-file</code>, <code class='ic'>--from-env-file</code>, or a YAML manifest (recommended).</li>
+<li>Creation options: <code class='ic'>--from-literal</code>, <code class='ic'>--from-file</code> (filename as key, entire file content as value), <code class='ic'>--from-env-file</code> (each line as a separate key-value pair), or a YAML manifest (recommended).</li>
 <li>Injection methods: environment variables (<code class='ic'>valueFrom</code> with <code class='ic'>configMapKeyRef</code>/<code class='ic'>secretKeyRef</code>, or <code class='ic'>envFrom</code>) and volume mounts. Volume mounts create one file per key and update automatically when the ConfigMap changes.</li>
 <li>Security is enforced through etcd encryption, RBAC, Git exclusion, and in-app protection — not base64.</li>
 </ul>
@@ -449,8 +449,7 @@ kubectl exec volume-pod -- cat /etc/app/config/LOG_LEVEL
         </article>
 <article id='lec2' class='lecture'>
           <h2>02. Persistent Volumes (PV/PVC) and Storage - How to Keep Your Data Safe </h2>
-          <h2>Persistent Volumes (PV/PVC) and Storage - How to Keep Your Data Safe</h2>
-<h3>Learning Objectives</h3>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Understand why data disappears when a Pod restarts, and why persistent storage is necessary</li>
 <li>Explain the relationship between PersistentVolume (PV), PersistentVolumeClaim (PVC), and StorageClass</li>
@@ -948,9 +947,8 @@ kubectl delete pv demo-pv</code></pre>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=inJ7YJ-jt8I' target='_blank'>How volumes and storage work in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=OKBTg2hMnw4' target='_blank'>Day 52 - Storage Classes in Kubernetes | Static vs Dynamic Volume Provisioning</a></li><li><a href='https://www.youtube.com/watch?v=YW3BFbXIB9U' target='_blank'>Kubernetes Storage Explained in 30 Minutes | PV, PVC, Static vs Dynamic Provisioning | Chapter 9</a></li></ul></div>
         </article>
 <article id='lec3' class='lecture'>
-          <h2>03. Health Checks (Probes) and Zero-Downtime Deployment — Rolling Updates &amp; Rollback Strategies </h2>
-          <h2>Health Checks (Probes) and Zero-Downtime Deployment — Rolling Updates &amp; Rollback Strategies</h2>
-<h3>Learning Objectives</h3>
+          <h2>03. Health Checks (Probes) and Zero-Downtime Deployment — Rolling Updates &amp; Rollback Strategies <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Distinguish the role and differences among Liveness, Readiness, and Startup Probes</li>
 <li>Understand how maxSurge and maxUnavailable control rolling update behavior</li>
@@ -967,8 +965,12 @@ kubectl delete pv demo-pv</code></pre>
 <ul>
 <li>If a container enters a deadlock or becomes unresponsive, the Liveness Probe <strong>restarts the container</strong>.</li>
 <li>The goal is self-healing: recovering from transient errors or hangs through a restart.</li>
-<li>If failures accumulate, the Pod enters <code class='ic'>CrashLoopBackOff</code>, signaling to operators that a restart alone cannot fix the problem.</li>
+<li>A Liveness Probe does exactly <strong>one thing: trigger a restart</strong>. When failures accumulate beyond <code class='ic'>failureThreshold</code>, kubelet kills the container and starts a new one.</li>
 </ul>
+<p>A common point of confusion is the relationship between Liveness Probe failures and <code class='ic'>CrashLoopBackOff</code>. Let&#x27;s be precise about this.</p>
+<blockquote class='callout'>
+<p><strong>Liveness Probe failure ≠ CrashLoopBackOff.</strong> A Liveness Probe failure simply triggers a container <strong>restart</strong>. <code class='ic'>CrashLoopBackOff</code> is a separate state that occurs when a container exits abnormally right after starting, repeatedly — at which point kubelet progressively increases the delay between restart attempts (back-off), e.g., 10s → 20s → 40s. That said, an overly aggressive Liveness Probe (e.g., a very short <code class='ic'>initialDelaySeconds</code> that fires before the app has had a chance to come up) can cause continuous restarts which <em>eventually</em> lead to <code class='ic'>CrashLoopBackOff</code>. The two are not directly equivalent, however — treating them as the same will cause you to misdiagnose the root cause of an incident.</p>
+</blockquote>
 <p><strong>Readiness Probe</strong> — &quot;Is this container ready to accept traffic right now?&quot;</p>
 <ul>
 <li>A failure does <strong>not</strong> restart the container. Instead, the Pod is <strong>temporarily removed from the Service&#x27;s load-balancer target list</strong>.</li>
@@ -1047,7 +1049,7 @@ kubectl get pod nginx-liveness -w
 # Inspect events for Probe activity (Unhealthy / Killing / Started, etc.)
 kubectl describe pod nginx-liveness
 </code></pre>
-<p>When Liveness begins to fail, the Events section of <code class='ic'>describe</code> output will show <code class='ic'>Liveness probe failed</code>, followed by <code class='ic'>Killing container</code>, and then <code class='ic'>Started</code> for the new container. At this point, <strong>the Pod itself remains alive — only the container restarts</strong> — so the Pod&#x27;s IP address does not change. This distinction is important.</p>
+<p>When Liveness begins to fail, the Events section of <code class='ic'>describe</code> output will show <code class='ic'>Liveness probe failed</code>, followed by <code class='ic'>Killing container</code>, and then <code class='ic'>Started</code> for the new container. At this point, <strong>the Pod itself remains alive — only the container restarts</strong> — so the Pod&#x27;s IP address does not change. This distinction matters. If the container exits again immediately after restarting, and this cycle repeats, the Pod status changes to <code class='ic'>CrashLoopBackOff</code> and the <code class='ic'>RESTARTS</code> count climbs rapidly — this is a signal that &quot;a restart alone cannot fix this problem&quot; and you should investigate the Probe configuration and application logs.</p>
 <h4>2. Rolling Updates and maxSurge / maxUnavailable</h4>
 <p>Now for new-version deployments. The <strong>default deployment strategy in a Kubernetes Deployment is a rolling update</strong>. Even without explicit configuration, this is how Kubernetes handles updates internally.</p>
 <p>A rolling update <strong>replaces Pods one at a time</strong> (or in defined batches). By cycling through — terminating old-version Pods and spinning up new ones — across the entire set, the service stays up throughout the upgrade.</p>
@@ -1078,10 +1080,10 @@ spec:
 </code></pre>
 <p>What the two parameters mean:</p>
 <ul>
-<li><strong>maxSurge</strong>: The maximum number of Pods that can be created <strong>above</strong> the target replica count (<code class='ic'>replicas</code>). Controls the upper bound — how many extra Pods can exist at once.</li>
+<li><strong>maxSurge</strong>: The maximum number of Pods that can be created <strong>above</strong> the target replica count (<code class='ic'>replicas</code>). Controls the upper bound — how many extra Pods can exist at once to speed up the rollout.</li>
 <li><strong>maxUnavailable</strong>: The maximum number of Pods that can be <strong>below</strong> the target count during a rollout. Controls the lower bound — how much capacity can be temporarily sacrificed.</li>
 </ul>
-<p>Both accept absolute numbers (<code class='ic'>1</code>) or percentages (<code class='ic'>20%</code>). With replicas=5 and both set to 1, the Pod count during an update stays between <strong>4 (5−1) and 6 (5+1)</strong>, ensuring at least 4 Pods are always running and zero-downtime is guaranteed.</p>
+<p>Both accept absolute numbers (<code class='ic'>1</code>) or percentages (<code class='ic'>20%</code>). With replicas=5 and both set to 1, the Pod count during an update stays between <strong>4 (5−1) and 6 (5+1)</strong>, ensuring at least 4 Pods are always running and zero downtime is guaranteed.</p>
 <p>As shown in the sequence diagram below, maxSurge and maxUnavailable pace each step as the Deployment scales down the old ReplicaSet and scales up the new one.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
     participant D as Deployment
@@ -1097,7 +1099,7 @@ spec:
     D-&gt;&gt;Old: Scale old Pods down to 0
     Note over D,Old: Old ReplicaSet retained at 0 replicas for rollback</div><figcaption>ReplicaSet replacement flow during a rolling update</figcaption></figure>
 <blockquote class='callout'>
-<p>If availability is the top priority, set <code class='ic'>maxUnavailable: 0</code>. Kubernetes will never terminate an old Pod until a new one is Ready, so available capacity never drops even for an instant. Note that maxSurge must not also be 0 (both at 0 means nothing can move). Additionally, a <strong>Readiness Probe must be configured</strong> alongside this setup — that is how Kubernetes determines whether a new Pod is genuinely ready to serve traffic before proceeding to the next replacement.</p>
+<p>If availability is the top priority, set <code class='ic'>maxUnavailable: 0</code>. Kubernetes will never terminate an old Pod until a new one is Ready, so available capacity never drops even for an instant. <strong>However, <code class='ic'>maxSurge</code> must be at least 1 in this case.</strong> With <code class='ic'>maxUnavailable: 0</code>, no existing Pod can be taken down first, so if there is no room to add a new Pod (<code class='ic'>maxSurge</code>), the rollout cannot make any progress. (Setting both to 0 blocks the rollout entirely.) Additionally, a <strong>Readiness Probe must be configured</strong> alongside this setup — that is how Kubernetes determines whether a new Pod is genuinely ready to serve traffic before proceeding to the next replacement.</p>
 </blockquote>
 <p>Monitor rollout progress in real time with:</p>
 <pre><code>
@@ -1123,23 +1125,33 @@ kubectl rollout pause deployment/demo
 kubectl rollout resume deployment/demo
 </code></pre>
 <p>Each deployment is recorded with a <strong>revision number</strong> — revision 1 for the first deploy, revision 2 for the next, and so on. <code class='ic'>rollout undo</code> scales the saved old ReplicaSet back up and scales the current one down to zero, performing the rollback <strong>in the same rolling fashion, with zero downtime</strong>.</p>
-<blockquote class='callout'>
-<p>Tip: To capture a change description in <code class='ic'>kubectl rollout history</code>, add a <code class='ic'>kubernetes.io/change-cause</code> annotation to the Deployment&#x27;s <code class='ic'>metadata.annotations</code> instead of using the deprecated <code class='ic'>--record</code> flag. This makes it easy to identify &quot;what was deployed in which revision&quot; later.</p>
-</blockquote>
+<p>To capture a meaningful change description in <code class='ic'>kubectl rollout history</code>, add a <code class='ic'>kubernetes.io/change-cause</code> annotation to the Deployment&#x27;s <code class='ic'>metadata.annotations</code>. This is the clearest approach — the deprecated <code class='ic'>--record</code> flag should no longer be used.</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  annotations:
+    kubernetes.io/change-cause: &quot;image v2 - fix payment timeout bug&quot;  # appears in CHANGE-CAUSE column
+spec:
+  replicas: 5
+  # ... (rest unchanged)
+</code></pre>
+<p>After running <code class='ic'>kubectl apply</code>, the <code class='ic'>CHANGE-CAUSE</code> column in <code class='ic'>kubectl rollout history deployment/demo</code> will display this message, making it easy to identify &quot;what was deployed in which revision&quot; later.</p>
 <p>The number of retained revisions is controlled by <code class='ic'>spec.revisionHistoryLimit</code> in the Deployment (default: 10). Keeping this too high causes old ReplicaSets to accumulate, so set a reasonable limit.</p>
 <h4>Common Pitfalls</h4>
 <ul>
 <li><strong>Do not use Liveness alone without Readiness.</strong> Without a Readiness Probe, traffic is routed to new Pods before they are ready, causing 5xx errors. The Readiness Probe is the foundation of zero-downtime deployment.</li>
 <li><strong>Do not set Liveness Probe thresholds too aggressively.</strong> A short <code class='ic'>initialDelaySeconds</code> or a low <code class='ic'>failureThreshold</code> can kill a healthy application that is still starting up, triggering <code class='ic'>CrashLoopBackOff</code>. Use a Startup Probe to protect slow-starting applications.</li>
 <li><strong>Keep probe commands lightweight.</strong> If a Probe puts load on the application, the health check itself becomes the cause of the failure.</li>
-<li><strong>Never set both maxUnavailable and maxSurge to 0.</strong> The rollout cannot make any progress if both are zero.</li>
+<li><strong>Never set both maxUnavailable and maxSurge to 0.</strong> The rollout cannot make any progress. In particular, when using <code class='ic'>maxUnavailable: 0</code>, make sure <code class='ic'>maxSurge</code> is at least 1.</li>
 </ul>
 <h3>Key Takeaways</h3>
 <ul>
-<li>Probes are Kubernetes&#x27; self-healing mechanism. <strong>Liveness = restart</strong>, <strong>Readiness = block/restore traffic</strong>, <strong>Startup = protect slow-starting apps</strong> — each has a distinct role.</li>
+<li>Probes are Kubernetes&#x27; self-healing mechanism. <strong>Liveness = restart</strong>, <strong>Readiness = block/restore traffic</strong>, <strong>Startup = protect slow-starting apps</strong> — each has a distinct role. A Liveness Probe failure triggers only a restart; <code class='ic'>CrashLoopBackOff</code> is a separate state that occurs when the container keeps exiting right after restarting.</li>
 <li>Each Probe type checks health via one of three mechanisms — <strong>httpGet / tcpSocket / exec</strong> — with sensitivity tuned via <code class='ic'>initialDelaySeconds</code>, <code class='ic'>periodSeconds</code>, <code class='ic'>failureThreshold</code>, and related fields.</li>
-<li>Rolling updates are the default Deployment strategy. <strong>maxSurge</strong> (how many extra Pods can exist) and <strong>maxUnavailable</strong> (how many Pods can be missing) define the Pod count range during a rollout to guarantee zero downtime. A Readiness Probe is required for truly uninterrupted updates.</li>
-<li>Every deployment is recorded as a <strong>revision</strong>. Use <code class='ic'>kubectl rollout history</code> to view history and <code class='ic'>kubectl rollout undo</code> to perform a zero-downtime rollback.</li>
+<li>Rolling updates are the default Deployment strategy. <strong>maxSurge</strong> (how many extra Pods can exist) and <strong>maxUnavailable</strong> (how many Pods can be missing) define the Pod count range during a rollout to guarantee zero downtime. When <code class='ic'>maxUnavailable: 0</code>, <code class='ic'>maxSurge</code> must be at least 1, and a Readiness Probe is required for truly uninterrupted updates.</li>
+<li>Every deployment is recorded as a <strong>revision</strong>. Use the <code class='ic'>kubernetes.io/change-cause</code> annotation to document changes, <code class='ic'>kubectl rollout history</code> to view history, and <code class='ic'>kubectl rollout undo</code> to perform a zero-downtime rollback.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
               <p class='q'>Practice 1. [Warm-up] Observing Liveness Probe Behavior
@@ -1622,15 +1634,14 @@ kubectl delete deployment probe-demo</code></pre>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=x2e6pIBLKzw' target='_blank'>Kubernetes Health Probes Explained | Liveness Probe vs Readiness Probe</a></li><li><a href='https://www.youtube.com/watch?v=XbVNMhr55WM' target='_blank'>Kubernetes Rolling Updates Tutorial</a></li></ul></div>
         </article>
 <article id='lec4' class='lecture'>
-          <h2>04. Resource Management and Autoscaling - requests/limits and HPA </h2>
-          <h2>Resource Management and Autoscaling - requests/limits and HPA</h2>
-<h3>Learning Objectives</h3>
+          <h2>04. Resource Management and Autoscaling - requests/limits and HPA <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Understand how CPU/memory requests and limits affect scheduling, QoS class assignment, and OOMKill behavior</li>
 <li>Learn how the Horizontal Pod Autoscaler (HPA) adjusts the number of Pods in response to load</li>
 <li>Configure an HPA backed by metrics-server and verify its behavior through a load test</li>
 </ul>
-<h3>Body</h3>
+<h3>Content</h3>
 <h4>Why Resource Management Matters</h4>
 <p>Running workloads in a cluster without understanding requests and limits is like spending money without knowing your budget. Two outcomes await. One is a cloud bill that silently grows, and the other is a Pod that gets killed by Kubernetes without warning.</p>
 <p>Every application needs two resources to run: <strong>CPU</strong> and <strong>memory</strong>. Pods run on nodes (worker machines), and all Pods on the same node <strong>share</strong> that node&#x27;s CPU and memory. When one Pod consumes resources uncontrollably, every other Pod on that node suffers. This is known as the &quot;Noisy Neighbor&quot; problem, and isolation is the primary reason to manage resources explicitly.</p>
@@ -1662,7 +1673,7 @@ resources:
 <h4>QoS Classes and Eviction Order Under Memory Pressure</h4>
 <p>requests and limits are more than resource numbers — they signal to Kubernetes <strong>how important this application is</strong>. Based on how these two values are set, Kubernetes automatically assigns each Pod one of three QoS (Quality of Service) classes.</p>
 <ul>
-<li><strong>Guaranteed</strong>: Every container has requests equal to limits. Resources are reserved from start to finish, making this the most stable class — but also the most wasteful if the actual usage is lower.</li>
+<li><strong>Guaranteed</strong>: Every container has requests equal to limits. Resources are reserved from start to finish, making this the most stable class — but also the most wasteful if actual usage is lower.</li>
 <li><strong>Burstable</strong>: requests &lt; limits. The container uses up to its requests amount normally, and can burst up to its limits when capacity is available. This is the best balance between cost efficiency and stability, and the most commonly used class.</li>
 <li><strong>BestEffort</strong>: No requests or limits are set. This is the lowest priority class.</li>
 </ul>
@@ -1683,12 +1694,12 @@ resources:
 <p>There is an ongoing community debate about CPU limits. The argument for omitting CPU limits goes: throttling occurs even when spare CPU is available, which is irrational, and unlike memory, CPU is usually not the bottleneck. However, removing limits introduces Noisy Neighbor risk and degrades QoS class. <strong>The recommended practice is to set limits, but do so carefully.</strong></p>
 <h4>metrics-server: The Eyes of Autoscaling</h4>
 <p>Now we move to automatically adjusting the number of Pods based on load. For Kubernetes to make a scaling decision, it needs to know &quot;how much CPU is being used right now.&quot; The component that gathers this usage data is <strong>metrics-server</strong>.</p>
-<p>The collection flow works like this. Inside each worker node&#x27;s kubelet is an agent called <strong>cAdvisor</strong>, which periodically (roughly every 10 seconds) scrapes CPU and memory usage for each Pod. <strong>metrics-server</strong> collects these values from all nodes, aggregates them, and exposes them through the Kubernetes API server. You can then view live usage with <code class='ic'>kubectl top</code>, and the HPA controller reads the same data to make scaling decisions. As shown in the diagram below, usage data flows from nodes through the API server to both the HPA controller and operators.</p>
+<p>The collection flow works like this. Inside each worker node&#x27;s kubelet is an agent called <strong>cAdvisor</strong> that measures CPU and memory usage for each Pod. <strong>metrics-server</strong> collects these values from all nodes on a regular schedule, aggregates them, and exposes the results through the Kubernetes API server. The interval at which metrics-server scrapes each node is called the <strong>metric resolution (<code class='ic'>--metric-resolution</code>)</strong>, and its <strong>default is 60 seconds</strong>. You can then view live usage with <code class='ic'>kubectl top</code>, and the HPA controller reads the same data to make scaling decisions. As shown in the diagram below, usage data flows from nodes through the API server to both the HPA controller and operators.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
     subgraph WorkerNode[&quot;Worker Node&quot;]
-        CA[&quot;cAdvisor - built into kubelet, collects ~every 10s&quot;]
+        CA[&quot;cAdvisor - built into kubelet, measures Pod usage&quot;]
     end
-    CA --&gt;|&quot;Pod CPU/memory usage&quot;| MS[&quot;metrics-server - aggregates per-node values&quot;]
+    CA --&gt;|&quot;Pod CPU/memory usage&quot;| MS[&quot;metrics-server - collects and aggregates per-node values (default 60s interval)&quot;]
     MS --&gt;|&quot;Exposes aggregated metrics&quot;| API[&quot;Kubernetes API server&quot;]
     API --&gt;|&quot;kubectl top&quot;| USER[&quot;Operator&quot;]
     API --&gt;|&quot;Metric query&quot;| HPA[&quot;HPA controller&quot;]</div><figcaption>metrics-server usage data collection and exposure flow</figcaption></figure>
@@ -1711,7 +1722,7 @@ kubectl top pods
 desired replicas = ceil( current replicas × (current metric value / target metric value) )
 </code></pre>
 <p>For example, if there are 2 Pods with an average CPU of 90% and the target is 70%, the result is <code class='ic'>2 × (90 / 70) = 2.57</code>, which is <strong>rounded up (ceil)</strong> to 3. The key point is that fractional results are always <strong>rounded up</strong>. (If 1 Pod is at 240% and the target is 100%: <code class='ic'>1 × 2.4 = 2.4</code>, ceil → 3, not round → 2.) When multiple metrics are specified simultaneously, each is calculated independently and the <strong>largest result</strong> is used.</p>
-<p>The HPA controller <strong>only updates the replica count</strong>. The actual work of creating or deleting Pods is handled by the Deployment/ReplicaSet controller. As shown in the decision loop below, the controller queries, calculates, and updates approximately every 15 seconds, delegating actual Pod creation to other controllers.</p>
+<p>The HPA controller <strong>only updates the replica count</strong>. The actual work of creating or deleting Pods is handled by the Deployment/ReplicaSet controller. As shown in the decision loop below, the controller queries, calculates, and updates approximately every 15 seconds, delegating actual Pod management to other controllers.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TD
     Q[&quot;Query metrics from API server - ~every 15s&quot;] --&gt; C[&quot;Compute desired replicas - ceil(current × currentValue ÷ targetValue)&quot;]
     C --&gt; D{&quot;Does desired differ from current?&quot;}
@@ -1720,9 +1731,12 @@ desired replicas = ceil( current replicas × (current metric value / target metr
     U --&gt; DC[&quot;Deployment/ReplicaSet controller creates/deletes Pods&quot;]
     DC --&gt; Q
     W --&gt; Q</div><figcaption>HPA controller 15-second evaluation loop</figcaption></figure>
-<h4>Scaling Has Latency (Thunder and Lightning)</h4>
-<p>HPA does not react instantaneously. The cAdvisor collection interval, metrics-server aggregation time (approximately 30-second average), and the HPA sync cycle (approximately 15 seconds) all stack up, meaning it can take up to <strong>30–45 seconds</strong> from when a metric spikes to when scaling actually occurs. It is like seeing lightning and only hearing the thunder later. Even with an 80% target, scaling may not trigger until the actual load has already climbed to 85% or 90%.</p>
-<p>You can shorten these intervals through configuration, but reducing them too aggressively — say, to 1 second — creates a tradeoff of dramatically increased API server load. The recommendation is not to push these values to extremes. Instead, consider the following approaches.</p>
+<h4>Scaling Has Latency (The Delay Between Lightning and Thunder)</h4>
+<p>HPA does not react instantaneously. Multiple delays stack up before a metric spike translates into new Pods. The largest contributor is the <strong>metrics-server collection interval</strong>. As noted above, the default (<code class='ic'>--metric-resolution</code>) is <strong>60 seconds</strong>, which means the usage data HPA reads can already be up to a minute stale. Add the HPA controller&#x27;s own sync cycle (approximately 15 seconds), and <strong>with default settings it is completely normal for scale-out to take over a minute after load spikes</strong>. It is like seeing lightning but not hearing the thunder until later. You might set a target of 80%, yet scaling may not trigger until actual load has already climbed to 85% or 90%.</p>
+<blockquote class='callout'>
+<p>The &quot;30–45 seconds&quot; figures often cited online assume that metrics-server&#x27;s collection interval has been tuned shorter than the default 60 seconds — typically down to 15–30 seconds. With a stock installation, plan for more than a minute, and lower <code class='ic'>--metric-resolution</code> explicitly if faster response is required.</p>
+</blockquote>
+<p>You can reduce these intervals through configuration, but doing so aggressively — e.g., down to 1 second — dramatically increases API server load. The recommendation is not to push these values to extremes. Instead, consider the following approaches.</p>
 <ul>
 <li><strong>Tune the target utilization</strong>: An 80% target may react slowly. Lowering it to 50% triggers scaling sooner, but keeps more Pods running than necessary during normal traffic, raising costs. Calibrate the sensitivity to your traffic pattern.</li>
 <li><strong>Speed up Pod startup itself</strong>: Image pull time, init container work, and readiness probe delays all consume startup time. Pre-caching images, avoiding heavy initialization, and minimizing readiness probe delays all make scaling faster.</li>
@@ -1804,19 +1818,19 @@ kubectl get hpa php-apache --watch    # REPLICAS increases when CPU% in TARGETS 
 kubectl get pods -w                    # watch Pods being added
 kubectl top pods                       # check real-time usage
 </code></pre>
-<p>Once CPU exceeds the target, REPLICAS climbs from 1 → 4 → ... up to the ceiling of 10. Running <code class='ic'>kubectl describe hpa php-apache</code> shows scale events recorded with reasons like &quot;CPU resource above target&quot;. Then press <code class='ic'>Ctrl+C</code> in the load generator terminal to stop the requests — after a short delay, CPU drops and HPA scales Pods back down to minReplicas.</p>
+<p>Once CPU exceeds the target, REPLICAS climbs from 1 → 4 → ... up to the ceiling of 10. Due to the collection delay described earlier, do not expect an immediate reaction — with default settings, it is normal to wait around a minute before scaling kicks in. Running <code class='ic'>kubectl describe hpa php-apache</code> shows scale events recorded with reasons like &quot;CPU resource above target.&quot; Then press <code class='ic'>Ctrl+C</code> in the load generator terminal to stop the requests — after a short delay, CPU drops and HPA scales Pods back down to minReplicas.</p>
 <blockquote class='callout'>
 <p>Scale-down is more conservative than scale-up. To prevent &quot;flapping&quot; — rapidly removing Pods during a short spike only to spin them back up — HPA applies a stabilization window (default approximately 5 minutes) before scaling down. It is normal for scale-down to take time.</p>
 </blockquote>
 <h4>Where HPA Alone Is Not Enough</h4>
-<p>Even a well-configured HPA cannot guarantee service stability on its own. If a traffic surge drives a Pod to its memory or database connection limits, that Pod can no longer handle requests — yet it continues to receive traffic until it dies. This is why <strong>health checks (readiness probes)</strong> are essential alongside HPA. When a Pod honestly reports &quot;I&#x27;m overloaded,&quot; Kubernetes stops routing traffic to it and directs requests only to healthy Pods. Stable autoscaling is only complete when requests/limits, HPA, and readiness probes <strong>all work together</strong>. (Health checks were covered in Lecture 3.)</p>
+<p>Even a well-configured HPA cannot guarantee service stability on its own. If a traffic surge drives a Pod to its memory or database connection limits, that Pod can no longer handle requests — yet it continues to receive traffic until it dies. This is why <strong>health checks (readiness probes)</strong> are essential alongside HPA. When a Pod honestly signals &quot;I&#x27;m overloaded,&quot; Kubernetes stops routing traffic to it and directs requests only to healthy Pods. Stable autoscaling is only complete when requests/limits, HPA, and readiness probes <strong>all work together</strong>. (Health checks were covered in Lecture 3.)</p>
 <h3>Key Takeaways</h3>
 <ul>
 <li><strong>requests</strong> define the scheduling baseline (minimum guarantee); <strong>limits</strong> define the runtime ceiling. Units: memory in bytes (Mi/Gi), CPU in cores (1000m = 1 core).</li>
 <li><strong>Exceeding a memory limit causes OOMKill (container dies); exceeding a CPU limit causes throttling (container slows down)</strong> — these behaviors are fundamentally different.</li>
 <li>The combination of requests and limits determines the QoS class (Guaranteed/Burstable/BestEffort), which governs eviction order under memory pressure. Always set both values — workloads without them become BestEffort and are evicted first.</li>
 <li>HPA calculates desired Pod count as <code class='ic'>ceil(current replicas × (current value / target value))</code> and depends on usage data from metrics-server (cAdvisor → aggregation → API server).</li>
-<li>Metric collection, aggregation, and sync delays mean scaling reactions can take 30–45 seconds. Tuning target utilization, accelerating Pod startup, using Burstable QoS, and adding readiness probes together deliver stable autoscaling.</li>
+<li>metrics-server&#x27;s default collection interval (<code class='ic'>--metric-resolution</code>) is <strong>60 seconds</strong>, so with default settings it is normal for scale-out to take <strong>over a minute</strong> after load spikes. For faster response, lower the collection interval explicitly; also tune target utilization, accelerate Pod startup, use Burstable QoS, and add readiness probes together for stable autoscaling.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
               <p class='q'>Practice 1. [Warm-up] Deploy a Deployment with requests/limits configured and verify its QoS class.
@@ -2147,9 +2161,8 @@ kubectl get svc php-apache          # Error: not found</code></pre>
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=jyBDbm1FHiM' target='_blank'>Autoscaling in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=2CrprvnzPXY' target='_blank'>Kubernetes CPU Limits &amp; Requests EXPLAINED (Stop Wasting Resources!)</a></li></ul></div>
         </article>
 <article id='lec5' class='lecture'>
-          <h2>05. Routing External Traffic with Ingress - L7 Routing and Domain-Based Access </h2>
-          <h2>Routing External Traffic with Ingress - L7 Routing and Domain-Based Access</h2>
-<h3>Learning Objectives</h3>
+          <h2>05. Routing External Traffic with Ingress - L7 Routing and Domain-Based Access <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Understand the limitations of NodePort/LoadBalancer and why Ingress is necessary</li>
 <li>Learn the relationship between an Ingress Controller and an Ingress resource, and how host- and path-based routing rules work</li>
@@ -2167,23 +2180,27 @@ kubectl get svc php-apache          # Error: not found</code></pre>
 <p><strong>The problem with NodePort.</strong> Giving users an address like <code class='ic'>http://node-ip:31080</code> is not practical. The port number is high (above 30000), users cannot remember it, and even if you point DNS to the node IP, you have to chase down and update the record every time a node is replaced or its IP changes. You inevitably end up standing up yet another proxy server in front just to forward port 80/443 to 31080.</p>
 <p><strong>The problem with LoadBalancer.</strong> It is clean in a cloud environment, but the rule is <strong>one load balancer per service</strong>. Load balancers are billed resources in the cloud, so ten services means ten load balancers — ten times the cost. On top of that, a new external IP is created every time you add a service, and routing logic (&quot;which URL goes to which load balancer&quot;) has to be handled by yet another proxy layer. TLS certificates end up being attached to each service individually as well.</p>
 <p>In short, a natural desire arises: route multiple services from a single entry point based on URL or domain, and manage TLS in one place. <strong>Ingress</strong> is what Kubernetes provides to satisfy this desire — a resource you declare in YAML alongside all your other manifests. As shown in the comparison diagram below, the LoadBalancer approach multiplies load balancers per service, while Ingress consolidates everything through a single entry point.</p>
-<figure class='diagram'><div class='mermaid'>flowchart LR
-    subgraph LB[&quot;LoadBalancer approach - one per service&quot;]
-        direction TB
-        ext1[&quot;External user&quot;] --&gt; lb1[&quot;Load Balancer 1 (billed)&quot;]
-        ext1 --&gt; lb2[&quot;Load Balancer 2 (billed)&quot;]
-        ext1 --&gt; lb3[&quot;Load Balancer 3 (billed)&quot;]
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    ext1[&quot;External user&quot;]
+    ext2[&quot;External user&quot;]
+    subgraph LB[&quot;LoadBalancer approach - one per service (cluster)&quot;]
+        lb1[&quot;Load Balancer 1 - billed&quot;]
+        lb2[&quot;Load Balancer 2 - billed&quot;]
+        lb3[&quot;Load Balancer 3 - billed&quot;]
         lb1 --&gt; svcA[&quot;Service A&quot;]
         lb2 --&gt; svcB[&quot;Service B&quot;]
         lb3 --&gt; svcC[&quot;Service C&quot;]
     end
-    subgraph ING[&quot;Ingress approach - single entry point&quot;]
-        direction TB
-        ext2[&quot;External user&quot;] --&gt; ic[&quot;Ingress Controller (single entry point)&quot;]
+    subgraph ING[&quot;Ingress approach - single entry point (cluster)&quot;]
+        ic[&quot;Ingress Controller - single entry point&quot;]
         ic --&gt; isvcA[&quot;Service A&quot;]
         ic --&gt; isvcB[&quot;Service B&quot;]
         ic --&gt; isvcC[&quot;Service C&quot;]
-    end</div><figcaption>Comparison of external exposure: LoadBalancer approach vs. Ingress approach</figcaption></figure>
+    end
+    ext1 --&gt; lb1
+    ext1 --&gt; lb2
+    ext1 --&gt; lb3
+    ext2 --&gt; ic</div><figcaption>Comparing External Exposure: LoadBalancer vs. Ingress</figcaption></figure>
 <blockquote class='callout'>
 <p>Think of Ingress as a built-in L7 (application layer, HTTP/HTTPS) load balancer for your cluster. Where NodePort/LoadBalancer operate at L4 (IP and port), Ingress inspects the URL path and domain of each request before routing it.</p>
 </blockquote>
@@ -2198,17 +2215,17 @@ kubectl get svc php-apache          # Error: not found</code></pre>
 </blockquote>
 <p>The relationship between the two, and the traffic flow, works as follows. An external user accesses a domain → DNS resolves to the Ingress Controller&#x27;s entry point (a LoadBalancer IP or node:NodePort) → the controller inspects the request&#x27;s host and path → it forwards the request to the appropriate Service according to the rules in the Ingress resource → the Service load-balances across its Pods. The controller only needs to be exposed externally once; from that point on, all routing and TLS changes are handled simply by adding or modifying Ingress resources. The architecture diagram below shows this full flow.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TD
-    user[&quot;External user&quot;] --&gt;|&quot;Domain access&quot;| dns[&quot;DNS&quot;]
-    dns --&gt;|&quot;Returns entry-point IP&quot;| user
-    user --&gt;|&quot;HTTP/HTTPS request&quot;| ic[&quot;Ingress Controller (nginx)&quot;]
-    rule[&quot;Ingress resource - routing rules YAML&quot;] -.-&gt;|&quot;Provides rules&quot;| ic
-    ic --&gt;|&quot;host/path matching&quot;| branch{&quot;Rule branching&quot;}
+    user[&quot;External user&quot;] --&gt;|&quot;domain access&quot;| dns[&quot;DNS&quot;]
+    dns --&gt;|&quot;returns entry-point IP&quot;| user
+    user --&gt;|&quot;HTTP/HTTPS request&quot;| ic[&quot;Ingress Controller - nginx&quot;]
+    rule[&quot;Ingress resource - routing rules YAML&quot;] -.-&gt;|&quot;provides rules&quot;| ic
+    ic --&gt;|&quot;host/path matching&quot;| branch{&quot;rule branching&quot;}
     branch --&gt;|&quot;/ or shop.example.com&quot;| svc1[&quot;marvel-service&quot;]
     branch --&gt;|&quot;/pay or pay.example.com&quot;| svc2[&quot;pay-service&quot;]
-    branch --&gt;|&quot;No rule matched&quot;| def[&quot;default backend - 404&quot;]
-    svc1 --&gt;|&quot;Load balancing&quot;| pod1[&quot;Pod&quot;]
+    branch --&gt;|&quot;no rule matched&quot;| def[&quot;default backend - 404&quot;]
+    svc1 --&gt;|&quot;load balancing&quot;| pod1[&quot;Pod&quot;]
     svc1 --&gt; pod2[&quot;Pod&quot;]
-    svc2 --&gt;|&quot;Load balancing&quot;| pod3[&quot;Pod&quot;]
+    svc2 --&gt;|&quot;load balancing&quot;| pod3[&quot;Pod&quot;]
     svc2 --&gt; pod4[&quot;Pod&quot;]</div><figcaption>Traffic flow from an external user through the Ingress Controller to Services and Pods</figcaption></figure>
 <h4>Routing Rules: Host-Based and Path-Based</h4>
 <p>Ingress rules are built around two axes.</p>
@@ -2219,9 +2236,12 @@ kubectl get svc php-apache          # Error: not found</code></pre>
 <p>The two can be combined. A single host rule can contain multiple paths. Requests that match no rule fall through to the <strong>default backend</strong> (typically a 404 page).</p>
 <p>You should also know the <code class='ic'>pathType</code> field, which is required in the current API. Two values are used most often:</p>
 <ul>
-<li><code class='ic'>Prefix</code>: Prefix-based path matching. <code class='ic'>/pay</code> matches <code class='ic'>/pay</code>, <code class='ic'>/pay/card</code>, and so on. This is by far the most common choice in production.</li>
-<li><code class='ic'>Exact</code>: Matches only when the path is an exact match.</li>
+<li><code class='ic'>Prefix</code>: <strong>Segment-prefix matching</strong> — <code class='ic'>/pay</code> matches <code class='ic'>/pay</code> itself and any sub-paths like <code class='ic'>/pay/card</code> and <code class='ic'>/pay/history</code> (not simple string prefix matching; <code class='ic'>/payment</code> does not match <code class='ic'>/pay</code>). This is by far the most common choice in production.</li>
+<li><code class='ic'>Exact</code>: Matches only when the path is an exact match. <code class='ic'>/pay</code> matches only <code class='ic'>/pay</code>, not <code class='ic'>/pay/card</code>.</li>
 </ul>
+<blockquote class='callout'>
+<p>When multiple path rules could match the same request, <strong>the more specific (longer) path wins</strong>. For example, if <code class='ic'>/</code> (main) and <code class='ic'>/pay</code> (payment) both exist, a request for <code class='ic'>/pay/card</code> matches both, but is routed to the more specific <code class='ic'>/pay</code>. This means you can safely mix a broad catch-all (<code class='ic'>/</code>) with narrower paths (<code class='ic'>/pay</code>) in the same Ingress and they will route as intended.</p>
+</blockquote>
 <h4>Lab: Exposing Two Services Through a Single Entry Point</h4>
 <p>We will use a Marvel storefront as our example. Requests to <code class='ic'>/</code> go to the main page (<code class='ic'>marvel-service</code>); requests to <code class='ic'>/pay</code> go to the payment page (<code class='ic'>pay-service</code>). We assume the Deployments and Services already exist (covered in previous lectures) and focus on the Ingress resource.</p>
 <pre><code>
@@ -2230,21 +2250,22 @@ kind: Ingress
 metadata:
   name: marvel-ingress
   annotations:
-    # Controls routing and rewrite behavior in ingress-nginx
+    # Strips the matched path prefix and replaces it with / before forwarding to the backend
+    # — see the explanation below
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
-  ingressClassName: nginx          # Specifies which controller handles this Ingress
+  ingressClassName: nginx          # specifies which controller handles this Ingress
   rules:
     - http:
         paths:
-          - path: /                 # Main page
+          - path: /                 # main page
             pathType: Prefix
             backend:
               service:
                 name: marvel-service
                 port:
                   number: 80
-          - path: /pay              # Payment page
+          - path: /pay              # payment page
             pathType: Prefix
             backend:
               service:
@@ -2252,6 +2273,14 @@ spec:
                 port:
                   number: 80
 </code></pre>
+<h5>What rewrite-target Actually Does (Essential Reading)</h5>
+<p>The <code class='ic'>nginx.ingress.kubernetes.io/rewrite-target: /</code> annotation in the manifest above is not decorative — it performs a <strong>critical rewrite of the request path before it is forwarded to the backend</strong>. Here is exactly what it means:</p>
+<blockquote class='callout'>
+<p><code class='ic'>rewrite-target: /</code> tells the Ingress to <strong>strip the matched path prefix (e.g., <code class='ic'>/pay</code>) and replace it with <code class='ic'>/</code></strong> before sending the request to the backend service. So when a user requests <code class='ic'>http://domain/pay</code>, the <code class='ic'>pay-service</code> receives the request with a path of <strong><code class='ic'>/</code></strong>, not <code class='ic'>/pay</code>. If the user requests <code class='ic'>/pay/card</code>, the <code class='ic'>pay-service</code> receives <code class='ic'>/card</code>.</p>
+</blockquote>
+<p>Why is this rewrite necessary? Many backend applications are built assuming they are served at the root path (<code class='ic'>/</code>). Without a rewrite, when Ingress routes <code class='ic'>/pay</code> requests to the app, the app receives the path <code class='ic'>/pay</code> — which it has no route for — and returns 404. <code class='ic'>rewrite-target: /</code> bridges the gap between the externally exposed path (<code class='ic'>/pay</code>) and the path the backend app actually expects (<code class='ic'>/</code>).</p>
+<p>There is an equally important <strong>caveat</strong>. If the <code class='ic'>pay-service</code> backend is designed to <em>expect</em> the <code class='ic'>/pay</code> prefix (i.e., its routes are defined as <code class='ic'>/pay/...</code>), enabling <code class='ic'>rewrite-target: /</code> will strip that prefix and the app will receive <code class='ic'>/</code> instead — causing <strong>404 errors</strong>. In that case, remove the annotation or adjust the rewrite rule to match what the backend expects. In summary: <code class='ic'>rewrite-target</code> is the bridge between the external path and the app&#x27;s internal path. <strong>Whether to enable it depends entirely on what path the backend application expects.</strong> For a simple demo where the backend responds at <code class='ic'>/</code>, enable it; if the backend wants the prefix intact, leave it off.</p>
+<p>(Note: if you want the original path — e.g., <code class='ic'>/pay</code> — forwarded as-is to the backend, simply omit the annotation. The <code class='ic'>pay-service</code> will then receive requests with the <code class='ic'>/pay</code> path.)</p>
 <blockquote class='callout'>
 <p>API version note: Many older examples use <code class='ic'>apiVersion: extensions/v1beta1</code>, but that has been deprecated and removed. Use <code class='ic'>networking.k8s.io/v1</code>, which became generally available (GA) in Kubernetes 1.19. The v1 syntax places <code class='ic'>service.name</code> and <code class='ic'>service.port.number</code> nested inside <code class='ic'>backend</code>.</p>
 </blockquote>
@@ -2268,15 +2297,15 @@ kubectl describe ingress marvel-ingress
 </code></pre>
 <p>Once an external IP appears in the <code class='ic'>ADDRESS</code> column, hit both <code class='ic'>/</code> and <code class='ic'>/pay</code> on that address and confirm that different pages are returned.</p>
 <pre><code>
-curl http://192.168.0.10/        # Main page
-curl http://192.168.0.10/pay     # Payment page
+curl http://192.168.0.10/        # main page
+curl http://192.168.0.10/pay     # payment page (backend receives / due to rewrite-target)
 </code></pre>
 <p>To switch to host-based routing, add a <code class='ic'>host</code> field to each entry in <code class='ic'>rules</code>:</p>
 <pre><code>
 spec:
   ingressClassName: nginx
   rules:
-    - host: shop.example.com       # This domain routes to the main service
+    - host: shop.example.com       # this domain routes to the main service
       http:
         paths:
           - path: /
@@ -2286,7 +2315,7 @@ spec:
                 name: marvel-service
                 port:
                   number: 80
-    - host: pay.example.com        # This domain routes to the payment service
+    - host: pay.example.com        # this domain routes to the payment service
       http:
         paths:
           - path: /
@@ -2297,19 +2326,20 @@ spec:
                 port:
                   number: 80
 </code></pre>
-<p>Point both domains to the same Ingress Controller IP in DNS (or in <code class='ic'>/etc/hosts</code> for local testing), and the controller will branch based on the Host header. In summary: path-based routing uses multiple paths under a single rule, while host-based routing uses one rule per host.</p>
+<p>Point both domains to the same Ingress Controller IP in DNS (or in <code class='ic'>/etc/hosts</code> for local testing), and the controller will branch based on the Host header. In summary: path-based routing uses multiple paths under a single rule, while host-based routing uses one rule per host. Note that with host-based routing, each service receives requests at <code class='ic'>/</code>, so <code class='ic'>rewrite-target</code> is usually unnecessary.</p>
 <h4>Important Notes and Production Tips</h4>
 <ul>
 <li><strong>Install the controller first, then create resources.</strong> If Ingress is not working, nine times out of ten the controller is missing or <code class='ic'>ingressClassName</code> does not match.</li>
 <li><strong>Terminate TLS in one place.</strong> Attach a Secret containing your certificate to <code class='ic'>spec.tls</code> in the Ingress, and the controller handles TLS termination. Developers no longer need to implement SSL in each application.</li>
-<li><strong>Annotations vary by controller.</strong> Fine-grained behavior such as <code class='ic'>rewrite-target</code>, session affinity, and timeouts is controlled via annotations in the form <code class='ic'>nginx.ingress.kubernetes.io/...</code>. Other controllers such as Traefik use different annotation keys.</li>
+<li><strong>If <code class='ic'>/pay</code> returns 404, suspect rewrite-target.</strong> As explained above, <code class='ic'>rewrite-target: /</code> strips the path to <code class='ic'>/</code> before forwarding. If the backend expects the <code class='ic'>/pay</code> prefix and is returning 404, this annotation is likely the culprit. Note that annotation keys differ by controller (Traefik uses different keys), so always consult the documentation for the controller you are using.</li>
 <li><strong>Ingress is HTTP/HTTPS only.</strong> Routing non-HTTP traffic — TCP/UDP or gRPC streams — is outside the scope of Ingress. Growing demand for these capabilities drove the creation of the Gateway API, which is a topic for the next level of study.</li>
 </ul>
 <h3>Key Takeaways</h3>
 <ul>
 <li>NodePort suffers from high port numbers and node-IP dependency; LoadBalancer creates a separate load balancer per service, which multiplies costs. Ingress consolidates L7 routing and TLS management through a single entry point.</li>
 <li>Ingress requires two pieces working together: the <strong>Controller</strong> (the actual traffic-handling engine, e.g., nginx) and the <strong>Ingress resource</strong> (the routing rules in YAML). The controller is not installed by default and must be set up before any Ingress resource will have any effect.</li>
-<li>Host-based routing splits traffic by domain; path-based routing splits it by URL path. The two can be combined. Requests matching no rule are sent to the default backend.</li>
+<li>Host-based routing splits traffic by domain; path-based routing splits it by URL path. The two can be combined. <code class='ic'>Prefix</code> is segment-prefix matching; when multiple rules match, the more specific (longer) path wins. Requests matching no rule are sent to the default backend.</li>
+<li><code class='ic'>rewrite-target: /</code> strips the matched path and replaces it with <code class='ic'>/</code> before forwarding to the backend. Enable it when the backend serves from <code class='ic'>/</code>; leave it off when the backend expects the prefix as-is — getting this wrong is a common cause of 404 errors.</li>
 <li>Always use <code class='ic'>networking.k8s.io/v1</code> in your manifests, and make sure <code class='ic'>ingressClassName</code>, <code class='ic'>pathType</code>, and the <code class='ic'>service.port.number</code> structure are all present and correct.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>

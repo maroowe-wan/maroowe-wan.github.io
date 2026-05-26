@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kafka for Beginners</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/kafka-beginner/index.html'>한국어</a></div>
+  <h1>Kafka for Beginners</h1>
+  <div class="sub">Beginners and newcomers to Kafka who are familiar with basic server/networking concepts and simple CLI usage. Advanced topics such as replication, delivery guarantees, Kafka Connect, Streams, and operations are covered in the follow-up &#x27;Kafka Intermediate&#x27; track. · 6 lectures</div>
+  <ul><li><a href='#lec1'>01. What Is Kafka — Why Messaging and Event Streaming Matter</a></li>
+<li><a href='#lec2'>02. Core Concepts — Topic, Partition, Offset, Broker</a></li>
+<li><a href='#lec3'>03. Kafka Architecture — Cluster, Broker, ZooKeeper vs KRaft</a></li>
+<li><a href='#lec4'>04. Producer Basics — Publishing Messages, acks, and the Role of Keys</a></li>
+<li><a href='#lec5'>05. Consumer and Consumer Group — Subscribe, Offset, Parallel Consumption</a></li>
+<li><a href='#lec6'>06. Installing Kafka Locally and End-to-End Practice — Produce/Consume via CLI</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. What Is Kafka — Why Messaging and Event Streaming Matter </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the limitations of direct point-to-point integration and the need for asynchronous messaging</li>
+<li>Explain the difference between message queues and event streaming, and describe the background that led to Kafka&#x27;s creation</li>
+<li>Identify what problems Kafka solves through real-world use cases</li>
+</ul>
+<h3>Content</h3>
+<h4>Why This Topic Matters</h4>
+<p>Nearly every service we use today operates in &quot;real time.&quot; Place an order and a notification arrives instantly. A delivery driver&#x27;s location moves continuously on a map. The moment a card transaction occurs, fraudulent activity is detected. Behind these experiences lies a structure in which <strong>countless systems are constantly exchanging data with one another</strong>. Kafka is a tool built specifically for &quot;moving data safely and quickly.&quot; Understanding why Kafka was created makes every concept you learn afterward fall naturally into place.</p>
+<h4>The Limits of Direct Integration (Point-to-Point)</h4>
+<p>Consider an online shop as an example. When a customer places an order, a chain of events must follow: inventory is decremented, a confirmation email is sent, a receipt is issued, and a sales dashboard is updated.</p>
+<p>The simplest approach is to have <strong>the order service call each downstream service directly</strong> — &quot;Hey inventory, decrement stock,&quot; &quot;Hey email, send a confirmation,&quot; and so on. This works fine at small scale. But as traffic surges or the number of services grows, problems emerge.</p>
+<ul>
+<li><strong>Tight coupling:</strong> One service calls another directly, so they become deeply intertwined. Adding a new feature means drawing yet another connection line.</li>
+<li><strong>Synchronous domino effect:</strong> The caller waits for a response. If the payment service slows down, the entire order flow stalls and users are left watching a loading spinner.</li>
+<li><strong>Single point of failure:</strong> If the inventory service goes down for ten minutes, every order that arrives during that window piles up and cascades into a larger outage.</li>
+<li><strong>Data loss:</strong> If an analytics service crashes briefly, the important data produced during that window simply disappears.</li>
+</ul>
+<blockquote class='callout'>
+<p>Direct integration is clean only when you have few services. As services multiply, connection lines explode into a tangled web and a failure in one place spreads across the entire system.</p>
+</blockquote>
+<p>As shown below, direct integration (left) becomes a tangled web as services grow, while placing Kafka as a central hub (right) means each service only needs to connect to Kafka.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph P2P[&quot;Direct Integration (point-to-point)&quot;]
+        O1[&quot;Order Service&quot;]
+        I1[&quot;Inventory Service&quot;]
+        E1[&quot;Email Service&quot;]
+        R1[&quot;Receipt Service&quot;]
+        D1[&quot;Dashboard Service&quot;]
+        O1 --&gt; I1
+        O1 --&gt; E1
+        O1 --&gt; R1
+        O1 --&gt; D1
+        I1 --&gt; E1
+        I1 --&gt; D1
+        E1 --&gt; R1
+    end
+    subgraph HUB[&quot;Kafka Hub (pub/sub)&quot;]
+        O2[&quot;Order Service&quot;]
+        K((&quot;Kafka&quot;))
+        I2[&quot;Inventory Service&quot;]
+        E2[&quot;Email Service&quot;]
+        R2[&quot;Receipt Service&quot;]
+        D2[&quot;Dashboard Service&quot;]
+        O2 --&gt;|publish| K
+        K --&gt;|subscribe| I2
+        K --&gt;|subscribe| E2
+        K --&gt;|subscribe| R2
+        K --&gt;|subscribe| D2
+    end</div><figcaption>Comparison: direct point-to-point integration (left) vs. Kafka hub architecture (right)</figcaption></figure>
+<h4>Asynchronous Messaging: Placing a &quot;Post Office&quot; in the Middle</h4>
+<p>The core idea behind solving this problem is to place a <strong>middleman tool</strong> between services. A post office is a good analogy. When we send a package, we don&#x27;t fly directly to the recipient&#x27;s door — we drop it off at the post office and go about our day, trusting the post office to handle delivery.</p>
+<p>Kafka plays exactly this post-office role. The order service wraps the fact that &quot;an order occurred&quot; into a small bundle called an <strong>event</strong> and drops it into Kafka, then immediately continues with its own work — no waiting for a response. This style of communication, where the sender and receiver do not wait on each other, is called <strong>asynchronous messaging</strong>. The side that creates and sends events is called the <strong>Producer</strong>, and the side that receives and processes those events is called the <strong>Consumer</strong>.</p>
+<p>Placing a post office in the middle loosens the coupling between services (this is known as <strong>decoupling</strong>, or dependency separation). The order service doesn&#x27;t need to know who receives its events, and receiving services pull what they need when they need it. Adding a new service requires no changes to the existing ones.</p>
+<h4>Message Queue vs. Event Streaming</h4>
+<p>Middleware that acts as a bridge between services is not a new idea. A classic example is a <strong>traditional message queue</strong> like RabbitMQ. So what makes Kafka different?</p>
+<p>The biggest difference is <strong>what happens to a message after it has been consumed</strong>.</p>
+<ul>
+<li><strong>Traditional message queue:</strong> Once a consumer fetches a message and processes it, the message is gone from the queue. It is essentially single-use.</li>
+<li><strong>Kafka (event streaming):</strong> Reading an event does <strong>not delete it</strong> — it stays on disk for the configured retention period. Other services can read the same data later, or the same service can read it multiple times.</li>
+</ul>
+<p>A simple analogy: a traditional queue is like live TV — you have to watch at the scheduled time or miss it. Kafka is like Netflix — you can watch on demand, at your own pace, and start over from the beginning. This approach of <strong>storing continuously flowing data while simultaneously streaming it in real time</strong> is called event streaming.</p>
+<blockquote class='callout'>
+<p>A Kafka message is not &quot;mail that disappears once read&quot; — it is &quot;a record that remains for the retention period.&quot; This is the decisive difference that sets Kafka apart from a simple message queue.</p>
+</blockquote>
+<h4>The Background Behind Kafka</h4>
+<p>Kafka was created around 2010 at <strong>LinkedIn</strong>. As its user base exploded, enormous amounts of activity data were generated every second, and existing tools could no longer handle the scale. LinkedIn engineers designed a new <strong>distributed streaming platform</strong> that splits data across multiple servers for storage and processing, and released it as open source in 2011. Today, Kafka has become the de facto standard for large-scale, real-time data.</p>
+<h4>Real-World Use Cases</h4>
+<p>Seeing what problems Kafka solves makes its value concrete.</p>
+<ul>
+<li><strong>Decoupling between services:</strong> Instead of directly wiring payment, shipping, inventory, and notification services together, each service publishes and subscribes to events so they can be developed and operated independently.</li>
+<li><strong>Real-time location tracking:</strong> In ride-hailing services, a driver&#x27;s location is sent as an event every second to update the user&#x27;s map and calculate surge pricing based on supply and demand.</li>
+<li><strong>Real-time analytics:</strong> User activity — songs played, products clicked — is collected to instantly update recommendation engines or sales dashboards.</li>
+<li><strong>Fraud detection:</strong> Card transaction events are streamed in real time so fraudulent transactions can be caught the moment they occur.</li>
+</ul>
+<p>Processing individual events one at a time is the basic role of a consumer. More advanced processing — aggregating and analyzing a continuous stream of data — is also possible, but those advanced capabilities are covered in the <strong>Kafka Intermediate</strong> track and are beyond the scope of this course.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Point-to-point direct integration breaks down at scale due to tight coupling, synchronous blocking, and single points of failure.</li>
+<li>Kafka acts as a &quot;post office&quot; in the middle, accepting and forwarding messages to enable asynchronous, loosely coupled communication.</li>
+<li>Traditional message queues delete a message once it is read, but Kafka retains events for the retention period so multiple consumers can read the same data repeatedly (event streaming).</li>
+<li>Kafka is a distributed streaming platform created by LinkedIn to handle massive real-time data at scale, and is used for decoupling, location tracking, real-time analytics, fraud detection, and more.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <p class='q'>Q1. What is the most significant problem with a point-to-point approach in which an order service directly calls inventory, email, receipt, and dashboard services?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>The code quality of each service degrades, leading to more bugs.</li><li class='opt' onclick='pick(this,0,1)'>Tight coupling between services means that a failure or slowdown in one service can bring the entire flow to a halt.</li><li class='opt' onclick='pick(this,0,2)'>Direct calls between services make network encryption impossible, creating security vulnerabilities.</li><li class='opt' onclick='pick(this,0,3)'>The system automatically scales without code changes as the number of services grows.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content identifies the core problems of point-to-point integration as tight coupling (services become deeply intertwined), the synchronous domino effect (one service slowing down stalls everything), a single point of failure (one service going down propagates across the whole system), and data loss. Option 1 describes a code quality problem unrelated to the integration style. Option 3 raises a security concern not mentioned in the content. Option 4 is the opposite of reality — as services multiply, the number of connection lines grows exponentially, making management increasingly difficult.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q2. When Kafka is compared to a &#x27;post office,&#x27; which core characteristic does this analogy best describe?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>Kafka encrypts messages to ensure secure delivery.</li><li class='opt' onclick='pick(this,1,1)'>Asynchronous communication is possible because the sender (Producer) does not need to wait for a response from the receiver (Consumer).</li><li class='opt' onclick='pick(this,1,2)'>Kafka requires that the sender and receiver use the same programming language.</li><li class='opt' onclick='pick(this,1,3)'>Once a message is delivered, Kafka immediately deletes it internally.</li></ul>
+              <div class='exp'>The correct answer is option 2. The analogy of &#x27;dropping a package off at the post office and going about your day&#x27; represents the core property of asynchronous messaging: you can send without waiting for a response. This allows Producers and Consumers to operate independently (decoupling). Option 1 is unrelated to encryption. Option 3 is not a Kafka characteristic — Kafka is language-agnostic. Option 4 describes the behavior of a traditional message queue; Kafka&#x27;s distinguishing feature is that it does not delete events for the duration of the retention period.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q3. What is the most decisive difference between a traditional message queue (e.g., RabbitMQ) and Kafka (event streaming)?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>Kafka can run across multiple servers, while RabbitMQ can only run on a single server.</li><li class='opt' onclick='pick(this,2,1)'>Kafka does not delete a message after a consumer reads it — it retains the event for the retention period so multiple consumers can read the same data repeatedly.</li><li class='opt' onclick='pick(this,2,2)'>Traditional message queues cannot perform real-time processing, while only Kafka supports it.</li><li class='opt' onclick='pick(this,2,3)'>Kafka does not guarantee message order, which makes it faster.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content explicitly states: &#x27;Traditional message queues delete a message once it is read, but Kafka retains events for the retention period so multiple consumers can read the same data repeatedly.&#x27; Using the Netflix analogy, Kafka allows you to re-watch content you have already seen. Option 1 is false — RabbitMQ also supports cluster configurations. Option 3 is also false — traditional queues do support real-time message delivery. Option 4 is not mentioned in the content, and Kafka does guarantee ordering within a partition.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q4. Read the following scenario and choose the statement that best explains how Kafka resolves the problem.
+
+[Scenario] An e-commerce team wants to add a new &#x27;points accrual service.&#x27; Currently, the order service directly calls the inventory, email, and receipt services.</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>Add a new direct call to the order service&#x27;s code for the points accrual service, and modify the existing services&#x27; code so they are aware of the points service.</li><li class='opt' onclick='pick(this,3,1)'>With Kafka as the hub, the order service only needs to publish events to Kafka, and the points service can subscribe to those events independently without touching any existing service.</li><li class='opt' onclick='pick(this,3,2)'>The points accrual service replaces the existing email service to keep the number of connection lines the same.</li><li class='opt' onclick='pick(this,3,3)'>Kafka automatically generates the code for the points service.</li></ul>
+              <div class='exp'>The correct answer is option 2. This question asks you to apply the concept of decoupling to a real-world scenario. When Kafka serves as the central hub, adding a new service requires zero changes to existing services. The order service only publishes events, and the new points service independently subscribes. The pub/sub hub diagram in the content visualizes this. Option 1 perpetuates the exact problem of point-to-point integration. Option 3 confuses adding a service with replacing one. Option 4 is not a Kafka feature.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q5. Which statement most accurately describes the background and design goals behind Kafka&#x27;s creation?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>Microsoft designed it for cloud services and released it as open source in 2015.</li><li class='opt' onclick='pick(this,4,1)'>When LinkedIn could no longer handle its explosively growing user activity data with existing tools, its engineers built a distributed platform for processing large-scale real-time data and released it as open source in 2011.</li><li class='opt' onclick='pick(this,4,2)'>Netflix built it as a CDN-based tool for delivering streaming video.</li><li class='opt' onclick='pick(this,4,3)'>Google designed it internally for fast search index updates and released it publicly in 2010.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content explicitly states that &#x27;Kafka was created around 2010 at LinkedIn,&#x27; explains the background as &#x27;an explosion of user data that existing tools could not handle,&#x27; and notes it was &#x27;released as open source in 2011.&#x27; Option 1 has both the company (Microsoft) and the year wrong. Option 3 incorrectly attributes creation to Netflix and is unrelated to CDN. Option 4 incorrectly attributes creation to Google rather than LinkedIn.</div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=QkdkLdMBuL0' target='_blank'>Kafka Tutorial for Beginners | Everything you need to get started</a></li><li><a href='https://www.youtube.com/watch?v=aj9CDZm0Glc' target='_blank'>What is Kafka?</a></li><li><a href='https://www.youtube.com/watch?v=Ydts27Qa8H0' target='_blank'>Learn Kafka in 10 Minutes | Most Important Skill for Data Engineering</a></li></ul></div>
+        </article>
+<article id='lec2' class='lecture'>
+          <h2>02. Core Concepts — Topic, Partition, Offset, Broker <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand that a Topic is the logical unit for classifying messages and that it is divided into Partitions</li>
+<li>Explain the meaning of Offset as the sequence number and position of a message within a Partition</li>
+<li>Identify the role of a Broker as the server that stores and serves data, and diagram the relationship among all four concepts</li>
+</ul>
+<h3>Content</h3>
+<h4>Why This Topic Matters</h4>
+<p>In Lecture 1 we compared Kafka to a &quot;post office that receives and forwards messages.&quot; Now it is time to look inside that post office. The four terms you will encounter most often when working with Kafka are <strong>Topic, Partition, Offset, and Broker</strong>. Once you can visualize how these four relate to one another, learning about Producers and Consumers becomes much easier.</p>
+<h4>Topic — The Logical Unit for Classifying Messages</h4>
+<p>A <strong>Topic</strong> is a labeled container that groups events of the same kind. Just as a post office has separate windows for letters and large parcels, Kafka separates data by character into topics like <code class='ic'>orders</code>, <code class='ic'>payments</code>, and <code class='ic'>trucks_gps</code>. Topics are distinguished by <strong>name</strong>, and how to divide them is a design decision developers make themselves — much like designing database tables.</p>
+<p>Comparing a topic to a database table is a helpful starting point, but there is one important difference: unlike a table, a topic <strong>cannot be queried by condition</strong>. Data is only ever appended to the end and read sequentially from the front.</p>
+<p>A more precise analogy is a <strong>log</strong> — a record where events accumulate line by line in the order they occur. The fact that a topic is a log gives it three properties:</p>
+<ul>
+<li><strong>Append-only:</strong> New messages are always added to the very end. Nothing is inserted in the middle.</li>
+<li><strong>Immutable:</strong> Once an event is written, consumers cannot modify or delete it. Like history, it cannot be undone. (Messages are cleaned up in bulk after their retention period expires, but individual messages are never selectively edited.)</li>
+<li><strong>Durable:</strong> Stored as files on disk and retained for a configured retention period. The default is typically one week, but it can be set to a few seconds or virtually forever.</li>
+</ul>
+<h4>Partition — Splitting a Topic for Scale</h4>
+<p>If all messages in a topic piled up in a single sequence, one server would have to handle everything as data volume grows — creating a bottleneck. To solve this, Kafka divides each topic into multiple chunks called <strong>Partitions</strong>.</p>
+<p>Going back to the post office analogy: when the letter window gets too crowded, you hire several clerks and split the work by destination — Europe, the Americas, Asia. With multiple partitions, messages can be written and read in parallel, enabling <strong>high throughput and horizontal scalability</strong>. Partitions can reside on different servers, and that is how Kafka scales out.</p>
+<p>For example, creating the <code class='ic'>trucks_gps</code> topic with 12 partitions means that location data from a large fleet is split into 12 streams and processed simultaneously. The number of partitions is decided when the topic is designed.</p>
+<h4>How Messages Are Assigned to Partitions — The Role of Keys</h4>
+<p>Now that we know <em>why</em> topics are partitioned, we need to understand <em>how</em> a message ends up in a specific partition. The answer lies in the <strong>key</strong> attached to a message. Each message a producer sends is typically a key-value pair, and the key controls partition assignment.</p>
+<ul>
+<li><strong>No key (null):</strong> Kafka selects a partition automatically, spreading the load across partitions. This is the right approach when it does not matter which partition a message lands in.</li>
+<li><strong>Key present:</strong> The key is hashed (converted to a number by a deterministic formula) to determine the partition. As a result, <strong>messages with the same key always go to the same partition</strong>.</li>
+</ul>
+<p>This connects directly to the point made earlier: ordering is only guaranteed within a partition. For example, if GPS coordinates from a single truck (ID <code class='ic'>T-7</code>) must be processed in the exact order they were sent, all messages from that truck must land in the same partition. By using the <strong>truck ID as the key</strong>, every message from <code class='ic'>T-7</code> is routed to the same partition and read in order. Without a key, coordinates from the same truck could scatter across partitions and arrive out of sequence.</p>
+<blockquote class='callout'>
+<p>If messages within the same logical group must be processed in order, use a value that identifies that group (truck ID, order ID, customer ID, etc.) as the key. The key pins the group to a single partition and preserves order. (Exactly how key-based assignment works, along with the acks setting, is covered in detail in Lecture 4.)</p>
+</blockquote>
+<h4>Offset — Sequence and Position Within a Partition</h4>
+<p>As messages accumulate inside a partition, each is assigned a number starting from 0 and incrementing by 1. This number is the <strong>Offset</strong>. It indicates <strong>the position and order</strong> of a message within that partition.</p>
+<p>A few key points to remember about offsets:</p>
+<ul>
+<li><strong>Ordering is only guaranteed within a partition.</strong> Messages within the same partition are read in offset order, but there is no ordering guarantee across different partitions.</li>
+<li><strong>Offsets are partition-scoped.</strong> Offset 2 in Partition 0 and Offset 2 in Partition 1 are entirely different messages.</li>
+<li><strong>Offsets are never reused.</strong> Even after older messages expire and are deleted, the numbering only ever increases.</li>
+</ul>
+<p>Offsets also serve as a bookmark for consumers. A consumer records &quot;I have read this partition up to offset 5,&quot; and even if it pauses and restarts, it can resume reading from exactly that point. (This bookmarking action is called an offset commit and is covered in detail in Lecture 5.)</p>
+<h4>Broker — The Server That Stores and Serves Data</h4>
+<p>Topics and partitions as described above must be physically stored somewhere. The <strong>Kafka server</strong> responsible for this is called a <strong>Broker</strong>. A broker receives messages from producers, assigns offsets, writes them to disk, and serves that data in response to consumer requests. Think of it as a branch office of the post office.</p>
+<p>Brokers typically run as a group — multiple brokers working together form a <strong>cluster</strong>. Cluster architecture and reliability guarantees (such as replication) are covered in Lecture 3. For now, the one thing to lock in is: <strong>broker = the server that physically stores and serves data</strong>.</p>
+<h4>How the Four Concepts Relate</h4>
+<p>Putting the four concepts together: inside a <strong>Broker (server)</strong> there are multiple <strong>Topics (logical categories)</strong>, each topic is divided into multiple <strong>Partitions (chunks for parallel processing)</strong>, and every message inside a partition is identified by an <strong>Offset (sequence/position number)</strong>. Every message can therefore be addressed precisely by coordinates: &quot;which broker → which topic → which partition → which offset.&quot;</p>
+<p>The diagram below shows the containment hierarchy: Broker contains Topics, Topics contain Partitions, and messages accumulate inside Partitions in Offset order.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    B[&quot;Broker (server that stores and serves data)&quot;]
+    T1[&quot;Topic: orders&quot;]
+    T2[&quot;Topic: payments&quot;]
+    B --&gt; T1
+    B --&gt; T2
+    P0[&quot;Partition 0&quot;]
+    P1[&quot;Partition 1&quot;]
+    P2[&quot;Partition 2&quot;]
+    T1 --&gt; P0
+    T1 --&gt; P1
+    T1 --&gt; P2
+    M0[&quot;offset 0&quot;]
+    M1[&quot;offset 1&quot;]
+    M2[&quot;offset 2 (appended at the end)&quot;]
+    P0 --&gt; M0
+    M0 --&gt; M1
+    M1 --&gt; M2</div><figcaption>Broker → Topic → Partition → Offset containment hierarchy</figcaption></figure>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A Topic is the labeled classification unit that groups events of the same kind; it is a log that only appends to the end and does not support modification or condition-based querying.</li>
+<li>A Partition is a slice of a Topic that enables parallel processing and horizontal scaling.</li>
+<li>Messages are assigned to partitions based on their key. Without a key, Kafka distributes messages automatically; with a key, messages always go to the same partition, preserving order for that group.</li>
+<li>An Offset is the number that indicates the sequence and position of a message within a partition; ordering guarantees and consumer bookmarks are meaningful only at the partition level.</li>
+<li>A Broker is the Kafka server that stores and serves data; multiple brokers together form a cluster.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='2'>
+              <p class='q'>Q1. What is the most important difference when comparing a Kafka Topic to a &#x27;database table&#x27;?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>Unlike a table, a topic cannot be stored across multiple servers.</li><li class='opt' onclick='pick(this,0,1)'>Topics support condition-based SQL queries, while tables can only be read sequentially.</li><li class='opt' onclick='pick(this,0,2)'>Topics cannot be queried by condition; data can only be appended to the end, and once written it cannot be modified or deleted.</li><li class='opt' onclick='pick(this,0,3)'>Topics have no retention limit and store data permanently.</li></ul>
+              <div class='exp'>The correct answer is option 3. The content explicitly states that &#x27;a topic cannot be queried by condition like a table,&#x27; and describes three log properties: append-only, immutable, and durable. Option 1 is incorrect — partitions can be distributed across multiple brokers. Option 2 has it backwards: topics cannot be queried, while tables do support SQL queries. Option 4 is incorrect — retention is a configurable setting whose default is typically one week.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q2. An &#x27;orders&#x27; topic has 12 partitions and a producer is sending messages. Which statement best describes the role of Partitions?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>Partitions encrypt messages to enhance security.</li><li class='opt' onclick='pick(this,1,1)'>With 12 partitions, messages can be written and read simultaneously in multiple places, enabling parallel processing and high throughput.</li><li class='opt' onclick='pick(this,1,2)'>Having more partitions means message ordering is more accurately guaranteed.</li><li class='opt' onclick='pick(this,1,3)'>Partitions store the metadata that holds the topic&#x27;s name.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content explains that &#x27;with multiple partitions, messages can be written and read simultaneously in multiple places, enabling parallel processing and high throughput.&#x27; Using the `trucks_gps` topic with 12 partitions means fleet data is split into 12 streams processed in parallel. Option 1 is unrelated — encryption and partitions are separate concerns. Option 3 is incorrect — ordering is only guaranteed within a partition, and more partitions actually make topic-wide ordering harder to guarantee. Option 4 describes the role of a topic, not a partition.</div></div><div class='quiz' data-ans='2'>
+              <p class='q'>Q3. Which of the following statements about Offsets is correct?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>An offset is a unique number across the entire topic and guarantees ordering across all partitions.</li><li class='opt' onclick='pick(this,2,1)'>Offset 3 in Partition 0 and Offset 3 in Partition 1 refer to the same message.</li><li class='opt' onclick='pick(this,2,2)'>Offsets are assigned independently per partition, and ordering guarantees are only meaningful within the same partition.</li><li class='opt' onclick='pick(this,2,3)'>Offsets are reassigned (reused) whenever messages are deleted.</li></ul>
+              <div class='exp'>The correct answer is option 3. The content explicitly states three things: &#x27;offsets are partition-scoped,&#x27; &#x27;ordering is only guaranteed within a partition,&#x27; and &#x27;offsets are never reused.&#x27; Option 1 is incorrect — offsets are per-partition, not per-topic. Option 2 is incorrect — Offset 3 in Partition 0 and Offset 3 in Partition 1 are completely different messages. Option 4 is also incorrect — offsets are never reused; they only ever increase.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q4. Which option correctly lists the four concepts (Broker, Topic, Partition, Offset) in their proper containment hierarchy?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>Topic → Broker → Partition → Offset</li><li class='opt' onclick='pick(this,3,1)'>Broker → Topic → Partition → Offset (message)</li><li class='opt' onclick='pick(this,3,2)'>Partition → Topic → Offset → Broker</li><li class='opt' onclick='pick(this,3,3)'>Offset → Partition → Broker → Topic</li></ul>
+              <div class='exp'>The correct answer is option 2. The content states: &#x27;Inside a Broker (server) there are multiple Topics (logical categories), each topic is divided into multiple Partitions (chunks for parallel processing), and every message inside a partition is identified by an Offset (sequence/position number).&#x27; This gives the four-level hierarchy: Broker → Topic → Partition → Offset (message). The other options present this containment relationship in incorrect order. Memorizing this coordinate system means you can precisely address any message as &#x27;which broker, which topic, which partition number, which offset.&#x27;</div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=kj9JH3ZdsBQ' target='_blank'>Apache Kafka 101: Topics (2023)</a></li><li><a href='https://www.youtube.com/watch?v=y9BStKvVzSs' target='_blank'>Apache Kafka 101: Partitioning (2023)</a></li><li><a href='https://www.youtube.com/watch?v=UHjSP7nxk7g' target='_blank'>Topics, Partitions and Offsets: Apache Kafka Tutorial #2</a></li></ul></div>
+        </article>
+<article id='lec3' class='lecture'>
+          <h2>03. Kafka Architecture — Cluster, Broker, ZooKeeper vs KRaft </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand how multiple brokers form a cluster and how responsibilities are distributed</li>
+<li>Distinguish between the ZooKeeper approach and the KRaft approach for metadata management</li>
+<li>Draw the full flow of how Producers and Consumers communicate with the cluster</li>
+</ul>
+<h3>Content</h3>
+<h4>Why This Topic Matters</h4>
+<p>In Lecture 2 we examined the individual building blocks — topic, partition, offset, and broker — one by one. Now it is time to see <strong>how these components cooperate across multiple servers</strong>, and how producers and consumers <strong>communicate with that system</strong>. Kafka can run on a single machine, but its real value lies in multiple servers working together to provide reliability and scalability.</p>
+<h4>Cluster and Broker — Multiple Servers Working Together</h4>
+<p>A <strong>Broker</strong> is a single Kafka server. Multiple brokers working together as a unit form a <strong>cluster</strong>. A cluster can span many servers, or even multiple data centers.</p>
+<p>Why run more than one? Two reasons:</p>
+<ul>
+<li><strong>Scalability:</strong> Spreading a topic&#x27;s partitions across multiple brokers removes the I/O ceiling of a single server. When throughput is insufficient, add more brokers and partitions.</li>
+<li><strong>High availability:</strong> If one broker goes down, the others take over its work so the service keeps running without interruption.</li>
+</ul>
+<h4>Replication — A Safety Net Against Data Loss (Conceptual Overview)</h4>
+<p>Replication is the key to high availability. The same partition is copied to multiple brokers. One copy becomes the <strong>leader</strong> — it handles all reads and writes. The remaining copies are <strong>followers</strong> that continuously replicate the leader&#x27;s content.</p>
+<p>By default, producers and consumers only communicate with the <strong>leader partition</strong>. If the broker holding the leader fails, one of the followers is automatically elected as the new leader, and reads and writes continue seamlessly — with no data loss.</p>
+<blockquote class='callout'>
+<p>For this lecture, it is enough to understand replication as &quot;copying data to multiple brokers so the system can survive the loss of one.&quot; Details such as the replication factor and ISR (In-Sync Replicas) are covered in the Kafka Intermediate track.</p>
+</blockquote>
+<h4>Who Coordinates the Cluster — Controller and Metadata</h4>
+<p>For multiple brokers to work together, someone must manage the overall state: which brokers are alive, who is the leader of each partition, what are the topic configurations. This information is called <strong>metadata</strong>. The role of managing metadata and electing leaders is handled by a <strong>controller</strong>. At any given time, a cluster has exactly one active controller.</p>
+<p>The question of &quot;how to manage this controller and its metadata&quot; gives rise to two approaches: the ZooKeeper approach and the KRaft approach.</p>
+<h4>ZooKeeper Mode (Legacy Approach)</h4>
+<p>Early Kafka depended on an external tool called <strong>ZooKeeper</strong>. ZooKeeper is a separate distributed system that took on the work of electing the controller, managing broker membership, and storing topic configurations.</p>
+<p>However, ZooKeeper is itself a distributed system, so in production environments it typically had to be operated as its own cluster of 3 or 5 nodes. This meant running Kafka required managing <strong>two separate systems</strong> — a Kafka cluster plus a ZooKeeper cluster — which added significant operational complexity.</p>
+<h4>KRaft Mode (Modern Approach)</h4>
+<p>To eliminate this complexity, Kafka introduced <strong>KRaft (Kafka Raft)</strong> mode. KRaft removes the external ZooKeeper dependency and <strong>embeds metadata management and controller election directly inside the Kafka brokers</strong>. The &quot;Raft&quot; in the name refers to the Raft consensus algorithm, a standard algorithm used in distributed systems to agree on things like who the leader is.</p>
+<p>KRaft mode has been production-ready since Kafka 3.3, and has since become the default direction. The benefits are clear:</p>
+<ul>
+<li>ZooKeeper, which had to be operated separately, is gone — the overall system is simpler.</li>
+<li>Metadata handling becomes more efficient and latency decreases.</li>
+</ul>
+<blockquote class='callout'>
+<p>If you are starting fresh with Kafka and have no legacy systems that depend on ZooKeeper, starting with KRaft mode is recommended.</p>
+</blockquote>
+<p>| | ZooKeeper Mode | KRaft Mode |</p>
+<p>|---|---|---|</p>
+<p>| Metadata management | Handled by external ZooKeeper | Handled internally within Kafka brokers |</p>
+<p>| Operational overhead | Two systems: Kafka + ZooKeeper | Single system: Kafka only |</p>
+<p>| Recommendation | When legacy compatibility is required | Recommended for new deployments |</p>
+<p>As shown in the diagram below, ZooKeeper mode delegates metadata to an external cluster, while KRaft mode embeds the controller inside brokers so the whole thing operates as a single system.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph ZK[&quot;ZooKeeper Mode (two systems)&quot;]
+        direction TB
+        Z[(&quot;ZooKeeper Cluster&quot;)]
+        KZ[&quot;Kafka Cluster (brokers)&quot;]
+        Z -.metadata management.-&gt; KZ
+    end
+    subgraph KR[&quot;KRaft Mode (single system)&quot;]
+        direction TB
+        BC[&quot;Broker + Controller (metadata embedded)&quot;]
+        B2[&quot;Broker&quot;]
+        B3[&quot;Broker&quot;]
+        BC --- B2
+        BC --- B3
+    end</div><figcaption>Comparison of metadata management: ZooKeeper mode vs. KRaft mode</figcaption></figure>
+<h4>The Communication Flow Between Producers/Consumers and the Cluster</h4>
+<p>Let&#x27;s trace the entire flow from start to finish.</p>
+<p>1. The <strong>producer</strong> starts by connecting to one broker in the cluster (the bootstrap server) and fetching metadata — specifically, which broker is the leader for the partition it wants to write to.</p>
+<p>2. The producer sends the message <strong>directly to the leader broker</strong> for that partition. The leader assigns an offset, writes the message to disk, and the followers replicate the content.</p>
+<p>3. The <strong>consumer</strong> works the same way — it connects to the leader broker for the partition it wants to read, and pulls messages in offset order. Reading does not delete the data.</p>
+<p>4. If a broker fails, the controller elects a new leader and automatically reconnects producers and consumers to the new broker.</p>
+<p>As shown in the sequence diagram below, producers and consumers first discover the leader&#x27;s location via metadata, then communicate directly with that leader broker.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant P as Producer
+    participant B as Bootstrap Broker
+    participant L as Leader Broker
+    participant F as Follower Broker
+    participant C as Consumer
+    P-&gt;&gt;B: Request metadata (leader location)
+    B--&gt;&gt;P: Partition leader = Leader Broker
+    P-&gt;&gt;L: Send message
+    L-&gt;&gt;L: Assign offset and write to disk
+    L-&gt;&gt;F: Replicate
+    L--&gt;&gt;P: Acknowledge write (ack)
+    C-&gt;&gt;L: Request messages in offset order
+    L--&gt;&gt;C: Deliver messages (data not deleted after read)</div><figcaption>Communication sequence between Producer/Consumer and the Kafka cluster</figcaption></figure>
+<p>All of this coordination happens automatically — developers rarely need to think about it directly. How producers and consumers actually send and receive messages is covered hands-on in Lectures 4 and 5.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Multiple brokers form a cluster; partitions are spread across brokers to achieve scalability and high availability.</li>
+<li>Partitions are replicated with a leader and followers so that if one broker fails, a new leader is automatically elected and service continues.</li>
+<li>Metadata management was traditionally handled by an external ZooKeeper, but modern Kafka uses KRaft mode, which operates without ZooKeeper.</li>
+<li>Producers and consumers fetch metadata to locate the leader of their target partition, then communicate directly with that leader broker; on failure, the cluster handles reconnection automatically.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <p class='q'>Q1. Which option includes both primary reasons for using multiple brokers in a Kafka cluster?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>To increase message encryption speed and distribute user authentication processing.</li><li class='opt' onclick='pick(this,0,1)'>To achieve throughput scalability (distributing partitions across brokers) and high availability (another broker takes over if one goes down so the service continues).</li><li class='opt' onclick='pick(this,0,2)'>So that each broker can communicate with clients written in a different programming language.</li><li class='opt' onclick='pick(this,0,3)'>To set different message retention periods per broker in order to reduce storage costs.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content answers &#x27;why run more than one broker?&#x27; with two reasons: scalability (distributing partitions across multiple brokers removes the I/O ceiling of a single server) and high availability (if one broker fails, another takes over). Option 1 is unrelated to encryption or authentication. Option 3 is incorrect — the number of brokers has no connection to client programming languages. Option 4 is not mentioned in the content.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q2. What is the most accurate description of why partitions are divided into leader and follower in Kafka, and how this works?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>The leader is read-only and the follower is write-only, splitting roles to improve throughput.</li><li class='opt' onclick='pick(this,1,1)'>The leader partition handles all actual reads and writes, and followers maintain replicas. If the broker holding the leader fails, one of the followers is automatically elected as the new leader.</li><li class='opt' onclick='pick(this,1,2)'>Leader and follower store completely independent data, and consumers choose which one to read from.</li><li class='opt' onclick='pick(this,1,3)'>Followers hold more recent data than the leader; the leader is only for storing older data.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content states that &#x27;one copy becomes the leader and handles all reads and writes, while the remaining copies are followers that replicate the leader&#x27;s content.&#x27; It also specifies that &#x27;if the broker holding the leader fails, one of the followers is automatically elected as the new leader.&#x27; Option 1 has the read/write roles backwards. Option 3 is incorrect — followers store the same data as replicas, not independent data. Option 4 is the opposite of reality — since followers replicate from the leader, the leader has the most current data.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q3. Which comparison of ZooKeeper mode and KRaft mode is correct?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>ZooKeeper mode embeds metadata inside Kafka brokers; KRaft mode runs a separate external ZooKeeper cluster.</li><li class='opt' onclick='pick(this,2,1)'>KRaft mode removes ZooKeeper and embeds both metadata management and controller election directly inside Kafka brokers, operating as a single system.</li><li class='opt' onclick='pick(this,2,2)'>KRaft is the traditional approach that has been the default since Kafka 1.0.</li><li class='opt' onclick='pick(this,2,3)'>ZooKeeper and KRaft are functionally identical — only their names differ.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content explains that &#x27;KRaft removes the external ZooKeeper and embeds metadata management and controller election directly inside Kafka brokers.&#x27; It has been production-ready since Kafka 3.3 and is recommended for new deployments. Option 1 has the descriptions reversed — it is ZooKeeper mode that runs a separate external cluster. Option 3 is incorrect — KRaft is the modern approach recommended for Kafka 3.3+. Option 4 is incorrect — ZooKeeper mode requires operating two separate systems, while KRaft simplifies this to a single system.</div></div><div class='quiz' data-ans='1'>
+              <p class='q'>Q4. Which option most accurately describes the sequence in which a producer sends a message to a Kafka cluster?</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>The producer sends the message to all brokers simultaneously and stores it on whichever responds first.</li><li class='opt' onclick='pick(this,3,1)'>The producer first fetches metadata (partition leader location) from the bootstrap broker, then sends the message directly to the leader broker for that partition.</li><li class='opt' onclick='pick(this,3,2)'>The producer sends the message directly to ZooKeeper or the controller, which then distributes it to each broker.</li><li class='opt' onclick='pick(this,3,3)'>The consumer must send a request first before the producer can send a message.</li></ul>
+              <div class='exp'>The correct answer is option 2. The content describes the communication sequence as: 1) the producer connects to the bootstrap server address and fetches metadata (partition leader location) → 2) sends the message directly to the leader broker for that partition → 3) the leader assigns an offset and writes to disk → 4) followers replicate → 5) ack response. Option 1 is wrong — messages are not broadcast to all brokers simultaneously. Option 3 is wrong — messages go directly to the leader broker, not to ZooKeeper. Option 4 is wrong — producers and consumers operate independently.</div></div><div class='quiz' data-ans='2'>
+              <p class='q'>Q5. Given the following situation, choose the most appropriate description of Kafka cluster behavior.
+
+[Situation] Broker A was serving as the leader for a certain partition when it suddenly went down due to a failure.</p>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>All data for that partition is lost and the partition is deleted.</li><li class='opt' onclick='pick(this,4,1)'>The entire cluster stops automatically and waits until an administrator manually designates a new leader.</li><li class='opt' onclick='pick(this,4,2)'>The controller automatically elects one of the followers as the new leader, and producers and consumers reconnect to the new leader so service continues.</li><li class='opt' onclick='pick(this,4,3)'>The producer directly selects the new leader and notifies the consumer.</li></ul>
+              <div class='exp'>The correct answer is option 3. This question asks you to apply the concepts of replication and automatic leader election to a real failure scenario. The content states that &#x27;if the broker holding the leader fails, one of the followers is automatically elected as the new leader and takes over reads and writes,&#x27; and that &#x27;users can continue reading and writing without data loss.&#x27; Option 1 is incorrect — follower replicas exist, so there is no data loss. Option 2 is incorrect — automatic leader election is available, so no manual intervention is needed. Option 4 is incorrect — leader election is the controller&#x27;s responsibility, not the producer&#x27;s.</div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=IsgRatCefVc' target='_blank'>Apache Kafka Architecture</a></li><li><a href='https://www.youtube.com/watch?v=jY02MB-sz8I' target='_blank'>4. How Kafka Works | Apache Kafka Fundamentals</a></li><li><a href='https://www.youtube.com/watch?v=FKgi3n-FyNU' target='_blank'>What is Apache Kafka?</a></li></ul></div>
+        </article>
+<article id='lec4' class='lecture'>
+          <h2>04. Producer Basics — Publishing Messages, acks, and the Role of Keys <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand which Topic and Partition a Producer sends a message to</li>
+<li>Explain how a message key influences partition assignment</li>
+<li>Understand the basic meaning of the acks setting (0/1/all) and publish a simple message</li>
+</ul>
+<h3>Content</h3>
+<h4>Why This Topic Matters</h4>
+<p>So far we have been drawing Kafka&#x27;s architecture in our heads. Now it is time to focus on the side that <strong>actually puts data in</strong> — the <strong>Producer</strong>. A producer is the client application that publishes messages to Kafka. Knowing where a producer sends messages, how it uses keys, and how it confirms safe delivery means you have learned half of what it takes to work with Kafka.</p>
+<h4>What a Message (Event) Looks Like</h4>
+<p>A single message sent by a producer typically consists of:</p>
+<ul>
+<li><strong>Key:</strong> An identifier that groups messages. It is optional (can be null).</li>
+<li><strong>Value:</strong> The actual content — e.g., <code class='ic'>&quot;John added an iPhone to the cart&quot;</code>. Any format works: JSON, string, number, and so on.</li>
+<li><strong>Timestamp</strong> and optional <strong>headers</strong>.</li>
+</ul>
+<p>The producer specifies <strong>which Topic</strong> to send the message to. Which partition within that topic the message goes to is decided by the key, as explained next.</p>
+<h4>How the Key Affects Partition Assignment</h4>
+<p>In Lecture 2 we learned that a topic is divided into multiple partitions. So which partition does a given message go to? The answer depends on <strong>whether or not a key is present</strong>.</p>
+<ul>
+<li><strong>Key present:</strong> The key is hashed to determine the partition. As a result, <strong>messages with the same key always go to the same partition</strong>. This behavior is consistent regardless of Kafka version.</li>
+<li><strong>No key (null):</strong> Kafka&#x27;s default partitioner selects the partition automatically. There is a common misconception worth addressing here: many people assume Kafka sends messages to partitions one by one in strict round-robin fashion, but <strong>that has not been the default behavior since Kafka 2.4</strong>. The current default is the <strong>Sticky Partitioner</strong>, which accumulates messages into a <strong>batch for the current partition and sends that batch before switching</strong> to the next partition. Batching improves network efficiency. This means that over a short window you may see messages concentrated in one partition, but over time they spread evenly across all partitions.</li>
+</ul>
+<p>The bottom line: <strong>without a key, there is no guarantee which partition any given message will land in.</strong> This is why a key is required whenever ordering matters.</p>
+<p>Why does this matter? In Lecture 2 we learned that <strong>ordering is only guaranteed within a partition</strong>. For example, if an order&#x27;s status must be processed in the sequence <code class='ic'>created → shipped → delivered</code>, and those messages land on different partitions, the processing order can be scrambled. By using the <strong>order ID as the key</strong>, all status events for the same order end up in one partition and are read in the exact order they were sent.</p>
+<blockquote class='callout'>
+<p>If ordering matters, assign the same key (e.g., order ID, customer ID) to all messages in the same logical group. If ordering does not matter, leaving the key null and letting Kafka distribute load automatically is the simpler choice. One caveat: if a single key attracts a disproportionate volume of messages, that partition can become a hotspot.</p>
+</blockquote>
+<p>The diagram below shows how the producer decides which partition a message goes to based on whether a key is present. With a key, hashing pins the message to a fixed partition. Without a key, the Sticky Partitioner (Kafka 2.4+) batches messages per partition and rotates over time.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    M[&quot;Producer publishes message&quot;]
+    Q{&quot;Key present?&quot;}
+    M --&gt; Q
+    Q --&gt;|&quot;yes&quot;| H[&quot;Hash key to determine partition&quot;]
+    H --&gt;|&quot;same key always goes to the same partition&quot;| P1[&quot;Partition 1&quot;]
+    Q --&gt;|&quot;no (null)&quot;| SP[&quot;Default partitioner (Sticky)&quot;]
+    SP --&gt;|&quot;first batch&quot;| P0[&quot;Partition 0&quot;]
+    SP --&gt;|&quot;next batch (switches)&quot;| P2[&quot;Partition 2&quot;]</div><figcaption>Partition assignment flow based on message key</figcaption></figure>
+<h4>acks — Confirming Safe Delivery</h4>
+<p>The <strong>acks (acknowledgment)</strong> setting controls whether the producer waits for confirmation that a message was successfully stored. There are three values:</p>
+<ul>
+<li><strong>acks=0:</strong> No confirmation is awaited. The producer sends and immediately moves on. This is the fastest option (lowest latency) but provides no visibility into whether the message was actually stored, so messages can be lost.</li>
+<li><strong>acks=1:</strong> The <strong>leader broker</strong> sends an acknowledgment after writing the message to its own disk — a middle-ground trade-off between speed and reliability. In the rare case where the leader crashes immediately after responding, data loss is still possible.</li>
+<li><strong>acks=all:</strong> An acknowledgment is sent only after the leader <strong>and</strong> all in-sync replicas (followers) have received and stored the message. The safest option — very little chance of data loss — but slower because of the extra round-trips.</li>
+</ul>
+<p>A simple analogy: acks is the choice of &quot;how far do I need to track my shipment?&quot; — send and forget (0), confirm the post office received it (1), or confirm it is in the recipient&#x27;s hands (all).</p>
+<p>There is one more prerequisite for <code class='ic'>acks=all</code> to be truly safe. The topic must have <strong>multiple replicas</strong>, and the <code class='ic'>min.insync.replicas</code> setting (minimum number of in-sync replicas required for a write to succeed) must be configured to match. If <code class='ic'>min.insync.replicas</code> is 1, only the leader needs to store the message for it to be counted as a success — making <code class='ic'>acks=all</code> effectively equivalent to <code class='ic'>acks=1</code>. In practice, a common setup is 3 replicas with <code class='ic'>min.insync.replicas=2</code> to get meaningful durability guarantees. (Replication and this setting are covered in depth in the intermediate track.)</p>
+<blockquote class='callout'>
+<p><code class='ic'>acks=all</code> alone does not guarantee zero data loss. You need <strong>replica count</strong> and <strong><code class='ic'>min.insync.replicas</code></strong> configured together to achieve the strongest durability guarantee.</p>
+</blockquote>
+<h4>Hands-On — Publishing Messages with the Console Producer</h4>
+<p>Let&#x27;s publish some messages. The examples below use Kafka&#x27;s CLI with Kafka running locally. CLI (command-line interface) simply means controlling a program by typing commands in a terminal.</p>
+<blockquote class='callout'>
+<p>If Kafka is not installed yet, these commands will not run right now. Installation and a full end-to-end setup are covered from scratch in Lecture 6. The goal here is to <strong>get familiar with the shape of each command and what its options mean</strong> — you can run these exact examples again after completing Lecture 6.</p>
+</blockquote>
+<p>First, create a topic to hold the messages. We create an <code class='ic'>orders</code> topic with 3 partitions.</p>
+<pre><code>
+kafka-topics.sh --create \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --partitions 3 \
+  --replication-factor 1
+</code></pre>
+<ul>
+<li><code class='ic'>--topic orders</code>: the name of the topic to create</li>
+<li><code class='ic'>--bootstrap-server localhost:9092</code>: the Kafka broker address to connect to (default port 9092)</li>
+<li><code class='ic'>--partitions 3</code>: number of partitions</li>
+<li><code class='ic'>--replication-factor 1</code>: number of replicas (1 for a local single-broker setup)</li>
+</ul>
+<p>Now start the console producer and enter messages. This is the simplest form — no key.</p>
+<pre><code>
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092
+</code></pre>
+<p>When the command runs, a prompt (<code class='ic'>&gt;</code>) appears waiting for input. Every time you type a line and press Enter, one message is published.</p>
+<pre><code>
+&gt; order-1001 created
+&gt; order-1002 created
+</code></pre>
+<p>Now let&#x27;s send messages <strong>with a key</strong>. Add options to separate key and value using a colon (<code class='ic'>:</code>).</p>
+<pre><code>
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --property &quot;parse.key=true&quot; \
+  --property &quot;key.separator=:&quot;
+</code></pre>
+<pre><code>
+&gt; 1001:order created
+&gt; 1001:order shipped
+&gt; 1002:order created
+</code></pre>
+<p>The two messages with key <code class='ic'>1001</code> (<code class='ic'>order created</code> and <code class='ic'>order shipped</code>) both go to the <strong>same partition</strong> and will be read in the order they were sent. The message with key <code class='ic'>1002</code> may go to a different partition.</p>
+<p>Finally, let&#x27;s <strong>explicitly set the acks level</strong>. With the console producer you can pass producer configuration via <code class='ic'>--producer-property</code>. The example below publishes with <code class='ic'>acks=all</code> — the safest setting.</p>
+<pre><code>
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --producer-property acks=all
+</code></pre>
+<ul>
+<li><code class='ic'>--producer-property acks=all</code>: the publish is not counted as successful until the leader and all in-sync replicas have stored the message. Try changing the value to <code class='ic'>0</code> or <code class='ic'>1</code> and think through the difference. (On a local single-broker setup with one replica, all three settings behave almost identically — the real difference only shows up when multiple replicas are in play.)</li>
+</ul>
+<p>How to read back these published messages using a consumer is covered in the next lecture, Lecture 5.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A producer publishes messages to a specific Topic; which Partition within that topic the message goes to is determined by the key.</li>
+<li>With a key, hashing ensures all messages sharing that key always land in the same partition, preserving order. Without a key, the default Sticky Partitioner (Kafka 2.4+) batches messages per partition and rotates across partitions over time.</li>
+<li>acks=0 is the fastest but risks data loss; acks=1 confirms the leader has stored the message (a middle-ground trade-off); acks=all confirms all in-sync replicas have stored the message — the safest option, but its guarantee depends on replica count and the <code class='ic'>min.insync.replicas</code> setting working together.</li>
+<li><code class='ic'>kafka-console-producer.sh</code> can publish messages with or without a key from the terminal, and <code class='ic'>--producer-property acks=...</code> lets you set the acknowledgment level directly.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <p class='q'>Practice 1. Use the kafka-topics.sh command to create an &#x27;orders&#x27; topic with 3 partitions, then use the --describe option to verify the topic details.</p>
+              <pre class='starter'><code># Assume Kafka is running at localhost:9092
+# Fill in the blanks to complete the topic creation command, and also write the describe command
+
+kafka-topics.sh --create \
+  --topic ______ \
+  --bootstrap-server ______ \
+  --partitions ______ \
+  --replication-factor 1
+
+# Verify creation
+kafka-topics.sh ______ --topic orders --bootstrap-server localhost:9092</code></pre>
+              <details><summary>Hint</summary><ul><li>Enter the topic name &#x27;orders&#x27; after --topic, and set --bootstrap-server to localhost:9092.</li><li>Specify the number of partitions with --partitions 3. In a local environment, use --replication-factor 1.</li><li>To verify after creation, use --describe instead of --create.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>kafka-topics.sh --create \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --partitions 3 \
+  --replication-factor 1
+
+# Verify creation
+kafka-topics.sh --describe --topic orders --bootstrap-server localhost:9092</code></pre>
+                <p class='exp2'>--topic is the name of the topic to create, --bootstrap-server is the Kafka broker address (default port 9092), --partitions is the number of partitions, and --replication-factor is the number of replicas. In a local single-broker environment, replication-factor is set to 1. The --describe option shows per-partition details including leader and replica information.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 2. Publish 3 messages to the &#x27;orders&#x27; topic using the console producer without a key. The messages to enter are: &#x27;order-1001 created&#x27;, &#x27;order-1002 created&#x27;, and &#x27;order-1003 created&#x27;.</p>
+              <pre class='starter'><code># Write the command to run the console producer
+# Once running, enter the three lines below at the &gt; prompt and exit with Ctrl+C
+
+kafka-console-producer.sh \
+  --topic ______ \
+  --bootstrap-server ______</code></pre>
+              <details><summary>Hint</summary><ul><li>Specify --topic orders and --bootstrap-server localhost:9092 as options.</li><li>Once the command is running, type a message at the &gt; prompt and press Enter to publish it.</li><li>Press Ctrl+C to exit. If you get an error, check that Kafka is running first.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092
+
+# Enter at the prompt:
+&gt; order-1001 created
+&gt; order-1002 created
+&gt; order-1003 created
+# Exit with Ctrl+C</code></pre>
+                <p class='exp2'>kafka-console-producer.sh is a tool that lets you type messages directly from the terminal and publish them. After running the command, the &gt; prompt appears — type one line and press Enter to publish one message. Without a key, the default partitioner distributes the 3 messages evenly across the 3 partitions.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 3. This time, publish messages with a key. Configure a colon (:) as the key separator so that events with the same order ID (key) always go to the same partition, then publish the following 3 messages:
+- 1001:order created
+- 1001:order shipped
+- 1002:order created
+
+After publishing, run a consumer with the --from-beginning option and print both key and value to directly verify that the two messages with key 1001 ended up in the same partition.</p>
+              <pre class='starter'><code># Step 1: Run producer with key support (add parse.key and key.separator options)
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --property &quot;______=true&quot; \
+  --property &quot;______=:&quot;
+
+# Step 2: Run consumer that prints both key and value
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --from-beginning \
+  --property &quot;______=true&quot; \
+  --property &quot;______=:&quot;</code></pre>
+              <details><summary>Hint</summary><ul><li>The producer options are --property &quot;parse.key=true&quot; and --property &quot;key.separator=:&quot;.</li><li>To print the key on the consumer side, add --property &quot;print.key=true&quot; and --property &quot;key.separator=:&quot;.</li><li>If the two messages with key 1001 appear consecutively from the same partition number, key-based partition routing worked correctly.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: Run producer with key support
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --property &quot;parse.key=true&quot; \
+  --property &quot;key.separator=:&quot;
+
+# Enter at the prompt:
+&gt; 1001:order created
+&gt; 1001:order shipped
+&gt; 1002:order created
+# Exit with Ctrl+C
+
+# Step 2: Run consumer that prints both key and value
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --from-beginning \
+  --property &quot;print.key=true&quot; \
+  --property &quot;key.separator=:&quot;</code></pre>
+                <p class='exp2'>parse.key=true tells Kafka to split each input line on the key.separator and treat the prefix as the key and the remainder as the value. Since the same key (1001) always produces the same hash, it always routes to the same partition number. On the consumer side, print.key=true prints the key alongside the value, so you can verify that the two messages with key 1001 appear in order from the same partition.</p>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=QkdkLdMBuL0' target='_blank'>Kafka Tutorial for Beginners | Everything you need to get started</a></li><li><a href='https://www.youtube.com/watch?v=y9BStKvVzSs' target='_blank'>Apache Kafka 101: Partitioning (2023)</a></li><li><a href='https://www.youtube.com/watch?v=UHjSP7nxk7g' target='_blank'>Topics, Partitions and Offsets: Apache Kafka Tutorial #2</a></li></ul></div>
+        </article>
+<article id='lec5' class='lecture'>
+          <h2>05. Consumer and Consumer Group — Subscribe, Offset, Parallel Consumption </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the flow of a Consumer subscribing to a Topic, reading messages, and committing offsets</li>
+<li>Grasp the principle by which multiple Consumers in a Consumer Group split Partitions for parallel consumption</li>
+<li>Understand the concept of rebalancing that occurs when Consumers are added or removed from a group</li>
+</ul>
+<h3>Content</h3>
+<h4>Why This Topic Matters</h4>
+<p>In Lecture 4, the producer put messages into Kafka. Now it is the turn of the side that <strong>reads those messages</strong> — the <strong>Consumer</strong>. Kafka separates &quot;storing data&quot; from &quot;processing data,&quot; and processing is almost always the job of consumer applications. Understanding how consumers subscribe, how they remember their progress, and how multiple consumers split the work completes the Kafka reading flow.</p>
+<h4>Subscribing and Reading — Basic Consumer Behavior</h4>
+<p>A consumer starts by <strong>subscribing</strong> to the topics it wants to read. It can subscribe to more than one topic at a time. After subscribing, a consumer typically runs an <strong>infinite loop</strong> — continuously polling for new messages and processing any that arrive.</p>
+<p>Here Kafka&#x27;s important characteristic emerges: reading a message <strong>does not delete it</strong>. Like the Netflix analogy from Lecture 1, data stays in place for the retention period so other consumers can read the same data later. This makes it natural for the same topic to be read by zero, one, or many consumers, each at its own pace.</p>
+<h4>Offset Commit — Remembering &quot;How Far I&#x27;ve Read&quot;</h4>
+<p>A consumer reads each partition in offset order (Lecture 2 recap: an offset is the position number within a partition). But if a consumer pauses and restarts, where should it resume reading? To answer this, the consumer records a bookmark — &quot;I have processed this partition up to offset N&quot; — and this action is called an <strong>offset commit</strong>.</p>
+<p>Committed offsets are stored in a special internal Kafka topic (<code class='ic'>__consumer_offsets</code>). When a consumer restarts, it looks up the last committed offset for each partition and resumes reading from the next message. If no committed offset exists (a brand-new consumer), the setting controls whether to start from the <strong>very beginning of the topic (earliest)</strong> or from the <strong>latest point (new messages only)</strong>.</p>
+<blockquote class='callout'>
+<p>Thanks to offset commits, a consumer never loses its place even after a restart. The fact that &quot;the consumer itself manages where it is&quot; is a major difference from traditional queues that delete a message the moment it is read.</p>
+</blockquote>
+<h4>Consumer Group — Multiple Consumers Sharing the Work</h4>
+<p>When data volume surges, a single consumer cannot keep up. The solution is to run multiple consumers doing the same job and <strong>divide the work among them</strong> — this is a <strong>Consumer Group</strong>.</p>
+<p>The rule for grouping is simple: consumers that specify the same <strong>group.id</strong> when registering with Kafka belong to the same group. Multiple replicas of the same application share the same group.id, so they automatically form one group.</p>
+<p>The key rule is: <strong>one partition is assigned to exactly one consumer within a group at a time.</strong> Kafka automatically distributes partitions among the consumers in a group, and each consumer processes its assigned partitions in parallel.</p>
+<p>For example, say a Consumer Group is processing a topic with 3 partitions:</p>
+<ul>
+<li>1 consumer: that one consumer reads all 3 partitions.</li>
+<li>3 consumers: each consumer takes 1 partition, processing 3× faster.</li>
+<li>4 consumers: 3 consumers each handle 1 partition; the 4th sits idle.</li>
+</ul>
+<p>The important point here is that <strong>the maximum parallelism within a group is capped at the number of partitions</strong>. To parallelize further, you first need to increase the number of partitions.</p>
+<p>The diagram below shows 3 consumers each taking 1 of 3 partitions, while a 4th consumer has no partition to be assigned and sits idle.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph T[&quot;Topic: orders (3 partitions)&quot;]
+        P0[&quot;Partition 0&quot;]
+        P1[&quot;Partition 1&quot;]
+        P2[&quot;Partition 2&quot;]
+    end
+    subgraph G[&quot;Consumer Group (order-processors)&quot;]
+        C1[&quot;Consumer 1&quot;]
+        C2[&quot;Consumer 2&quot;]
+        C3[&quot;Consumer 3&quot;]
+        C4[&quot;Consumer 4 (idle / no partition assigned)&quot;]
+    end
+    P0 --&gt; C1
+    P1 --&gt; C2
+    P2 --&gt; C3</div><figcaption>Partition-to-consumer mapping when a Consumer Group of 4 splits 3 partitions</figcaption></figure>
+<blockquote class='callout'>
+<p>Multiple groups can subscribe to the same topic simultaneously. In this case, each group independently receives all messages. For example, if a &quot;notifications group&quot; and a &quot;billing group&quot; both subscribe to the <code class='ic'>orders</code> topic, both groups receive every order event and process it for their own purpose.</p>
+</blockquote>
+<h4>Rebalancing — Redistributing Work When Membership Changes</h4>
+<p>In production, the composition of a group can change: a consumer is added to handle increased load, a consumer dies due to a failure, or new partitions are added. When the group membership changes, Kafka <strong>automatically redistributes partitions among the remaining members</strong>. This process is called <strong>rebalancing</strong>.</p>
+<p>Rebalancing is orchestrated by the <strong>group coordinator</strong> (a role on the broker side). For example, if a consumer dies, the partitions it owned are handed off to other live consumers so processing continues without interruption. Conversely, when a new consumer joins, some partitions are moved to it.</p>
+<p>Rebalancing happens automatically — developers do not need to manually assign partitions. Note that processing may pause briefly during a rebalance; advanced strategies for minimizing this pause are covered in the Kafka Intermediate track.</p>
+<h4>Hands-On — Consuming Messages with the Console Consumer</h4>
+<p>In Lecture 4 we published messages to the <code class='ic'>orders</code> topic. Now let&#x27;s read them back. (Kafka installation and setup is covered from scratch in Lecture 6.)</p>
+<p>The simplest approach: read all messages from the beginning of the topic.</p>
+<pre><code>
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --from-beginning
+</code></pre>
+<ul>
+<li><code class='ic'>--from-beginning</code>: reads from the first stored message (the oldest offset). Omitting this option means only messages that arrive after the command is run will be received.</li>
+</ul>
+<p>To print both key and value together, add options:</p>
+<pre><code>
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --from-beginning \
+  --property &quot;print.key=true&quot; \
+  --property &quot;key.separator=:&quot;
+</code></pre>
+<p>Specifying a consumer group causes offsets to be committed under that group name, so the next time the same group is started it resumes from where it left off.</p>
+<pre><code>
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group order-processors
+</code></pre>
+<p>Now open a second terminal and run the same command (the same <code class='ic'>--group order-processors</code>). The two consumers form one group and each takes a share of the partitions. If you send more messages using the producer from Lecture 4, you can see the messages arriving split between the two consumers — parallel consumption in action.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A consumer subscribes to a topic and reads messages in offset order; reading does not delete messages.</li>
+<li>Offset commits record &quot;how far I have read&quot; so that when a consumer restarts, it resumes from exactly where it left off.</li>
+<li>Consumers sharing the same group.id form a group that splits partitions for parallel consumption; one partition is assigned to exactly one consumer within a group (maximum parallelism = number of partitions).</li>
+<li>When group membership changes, Kafka automatically redistributes partitions in a process called rebalancing.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <p class='q'>Practice 1. Run a consumer with the --from-beginning option to read all messages in the &#x27;orders&#x27; topic from the start. After reviewing the messages, exit with Ctrl+C, then run the same command without --from-beginning and leave the consumer waiting for new messages.</p>
+              <pre class='starter'><code># Step 1: Read all messages from the beginning
+kafka-console-consumer.sh \
+  --topic ______ \
+  --bootstrap-server ______ \
+  ______
+
+# After Ctrl+C
+
+# Step 2: Wait for new messages only (without --from-beginning)
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092</code></pre>
+              <details><summary>Hint</summary><ul><li>Adding --from-beginning starts reading from the oldest offset.</li><li>The messages published in Lecture 4 are still stored in the topic, so all of them will be printed.</li><li>Running without --from-beginning leaves the cursor waiting silently for new messages. Send a new message with the producer and it will appear immediately.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: Read all messages from the beginning
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --from-beginning
+
+# After Ctrl+C
+
+# Step 2: Wait for new messages only (without --from-beginning)
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092</code></pre>
+                <p class='exp2'>Adding --from-beginning starts reading from the earliest offset — that is, the oldest message stored in the topic. Omitting this option uses the latest offset, meaning only messages that arrive after the command runs are received. Because Kafka does not delete messages after they are read, --from-beginning can be used at any time to re-read everything from the start.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 2. Run a consumer with group.id set to &#x27;order-processors&#x27;. After consuming messages once, exit with Ctrl+C, then run the same group again to confirm that already-read messages are not printed again. Also use the kafka-consumer-groups.sh command to inspect the group&#x27;s committed offset state.</p>
+              <pre class='starter'><code># Step 1: Run consumer with group specified
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group ______ \
+  --from-beginning
+
+# After Ctrl+C, run the same command again
+# (--from-beginning only takes effect when the group has no committed offset)
+
+# Step 2: Check group offset state
+kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group ______ \
+  --describe</code></pre>
+              <details><summary>Hint</summary><ul><li>Adding --group order-processors commits offsets under that group name.</li><li>After the first run exits with Ctrl+C, running the same command again will not print the already-committed messages.</li><li>In the kafka-consumer-groups.sh --describe output, a LAG of 0 means the group has consumed all messages.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: Run consumer with group specified
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group order-processors \
+  --from-beginning
+
+# After Ctrl+C, run the same command again → already-read messages are not printed
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group order-processors
+
+# Step 2: Check group offset state
+kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 \
+  --group order-processors \
+  --describe</code></pre>
+                <p class='exp2'>Specifying --group commits consumed offsets to Kafka&#x27;s internal topic (__consumer_offsets) under that group name. Running the same group again starts reading from the position after the last committed offset, so already-processed messages are not printed again. The --describe output shows CURRENT-OFFSET (the current read position), LOG-END-OFFSET (the offset at the end of the partition), and LAG (number of messages remaining to be consumed).</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 3. Open two terminals side by side and run two consumers in the same group (order-processors). From a third terminal, use the producer to quickly publish 6 messages to the orders topic (which has 3 partitions). Verify that messages arrive split between the two consumers, and confirm that the total across both consumers adds up to 6.</p>
+              <pre class='starter'><code># Terminal 1: Consumer A (group order-processors)
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group ______
+
+# Terminal 2: Consumer B (same group)
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group ______
+
+# Terminal 3: Publish 6 messages with the producer
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092
+# Enter at the prompt:
+# msg-1, msg-2, msg-3, msg-4, msg-5, msg-6 (one per Enter)</code></pre>
+              <details><summary>Hint</summary><ul><li>Both terminals must specify --group order-processors identically. The same group.id puts them in the same group.</li><li>With 3 partitions and 2 consumers, each consumer takes a different partition. The producer distributes messages across partitions, and each consumer only receives its own partition&#x27;s messages.</li><li>The total message count across both consumers should match the 6 messages published. If the same message appears in both terminals, the group.id values are different.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Terminal 1: Consumer A
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group order-processors
+
+# Terminal 2: Consumer B (same group)
+kafka-console-consumer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092 \
+  --group order-processors
+
+# Terminal 3: Publish 6 messages with the producer
+kafka-console-producer.sh \
+  --topic orders \
+  --bootstrap-server localhost:9092
+&gt; msg-1
+&gt; msg-2
+&gt; msg-3
+&gt; msg-4
+&gt; msg-5
+&gt; msg-6
+# Exit with Ctrl+C
+
+# Result: 6 messages arrive split between the two consumers (e.g., A gets 2-3, B gets 3-4)
+# The combined output across both terminals should total 6</code></pre>
+                <p class='exp2'>Consumers sharing the same group.id automatically divide up the partitions. Since the orders topic has 3 partitions, 2 consumers split them (e.g., A takes partitions 0 and 1, B takes partition 2). Messages arrive split between the two consumers, but the group as a whole consumes all 6. This is Consumer Group parallel consumption. Note that messages in the same partition are assigned to only one consumer, so the same message never appears in both terminals.</p>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=ovdSOIXSyzI' target='_blank'>Apache Kafka Consumers and Consumer Group Protocol</a></li><li><a href='https://www.youtube.com/watch?v=lAdG16KaHLs' target='_blank'>Kafka Consumer and Consumer Groups Explained</a></li><li><a href='https://www.youtube.com/watch?v=XgmJWoXQVvY' target='_blank'>What is a Kafka Consumer and How does it work?</a></li></ul></div>
+        </article>
+<article id='lec6' class='lecture'>
+          <h2>06. Installing Kafka Locally and End-to-End Practice — Produce/Consume via CLI </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Install and run Kafka locally using Docker or a binary distribution</li>
+<li>Create a Topic via CLI and publish messages using the console producer</li>
+<li>Consume messages with the console consumer and verify the complete produce→consume flow hands-on</li>
+</ul>
+<h3>Content</h3>
+<h4>Why This Topic Matters</h4>
+<p>The previous five lectures introduced Kafka&#x27;s concepts and commands. This time we <strong>run Kafka directly on our own machine</strong>, create a topic, send and receive messages, and complete the full end-to-end flow with our own hands. Doing it once makes all the concepts you drew in your head click into place at the fingertips.</p>
+<p>The overall flow is: <strong>Start Kafka → Create a topic → Publish with a producer → Consume with a consumer.</strong> We&#x27;ll follow this single pipeline from start to finish.</p>
+<h4>Choosing an Installation Method</h4>
+<p>There are two main ways to run Kafka locally.</p>
+<ul>
+<li><strong>Docker (recommended):</strong> Runs Kafka in a container, so your machine stays clean and you can start and tear down the environment in one step. (Docker is a tool that runs applications inside isolated boxes called containers.)</li>
+<li><strong>Binary:</strong> Download the official Apache Kafka distribution and run it directly. Requires Java.</li>
+</ul>
+<p><strong>Docker is the recommended approach here</strong>, but binary instructions are provided as well. Both ultimately use the same CLI tools — <code class='ic'>kafka-topics</code>, <code class='ic'>kafka-console-producer</code>, <code class='ic'>kafka-console-consumer</code> — and so on.</p>
+<h4>Option A: Running Kafka with Docker</h4>
+<p>First, Docker Desktop must be installed (download it for free from the official Docker website). In your working directory, create a <code class='ic'>docker-compose.yml</code> file as shown below. This example starts a single broker in <strong>KRaft mode</strong> (see Lecture 3: the modern approach that does not require ZooKeeper).</p>
+<pre><code>
+services:
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    ports:
+      - &quot;9092:9092&quot;
+</code></pre>
+<p>Open a terminal in the same directory and run the following to start Kafka in the background.</p>
+<pre><code>
+docker compose up -d
+</code></pre>
+<p>The <code class='ic'>-d</code> flag means detached (background) mode. Verify the container is up.</p>
+<pre><code>
+docker ps
+</code></pre>
+<p>If the <code class='ic'>kafka</code> container appears in the list, you are good to go. All subsequent CLI commands are run inside the container. To open a shell inside the container, run:</p>
+<pre><code>
+docker exec -it kafka /bin/bash
+</code></pre>
+<blockquote class='callout'>
+<p><code class='ic'>docker exec -it ... /bin/bash</code> opens a terminal session inside a running container. All the <code class='ic'>kafka-topics.sh</code> commands that follow are run inside this container shell. In the official Apache image, the scripts are located at <code class='ic'>/opt/kafka/bin</code>, and this path may not be in the PATH by default — so right after entering the shell, run <code class='ic'>cd /opt/kafka/bin</code> to navigate there. The commands below will then work as written (if you see <code class='ic'>command not found</code>, you have likely skipped this step).</p>
+</blockquote>
+<h4>Option B: Running Kafka from the Binary Distribution (Alternative)</h4>
+<p>To run without Docker, download the Apache Kafka distribution and extract it. The latest Kafka starts in KRaft mode as follows (run from inside the distribution folder).</p>
+<pre><code>
+# 1) Generate a cluster ID
+KAFKA_CLUSTER_ID=&quot;$(bin/kafka-storage.sh random-uuid)&quot;
+
+# 2) Format the storage
+bin/kafka-storage.sh format -t $KAFKA_CLUSTER_ID -c config/kraft/server.properties
+
+# 3) Start the broker
+bin/kafka-server-start.sh config/kraft/server.properties
+</code></pre>
+<p>Once the broker is running on port 9092, open a new terminal and follow the CLI exercises below.</p>
+<h4>Step 1: Create a Topic</h4>
+<p>Create a practice topic called <code class='ic'>quickstart</code> with 1 partition.</p>
+<pre><code>
+kafka-topics.sh --create \
+  --topic quickstart \
+  --bootstrap-server localhost:9092 \
+  --partitions 1 \
+  --replication-factor 1
+</code></pre>
+<p>Verify the topic was created by checking the topic list and details.</p>
+<pre><code>
+kafka-topics.sh --list --bootstrap-server localhost:9092
+
+kafka-topics.sh --describe \
+  --topic quickstart \
+  --bootstrap-server localhost:9092
+</code></pre>
+<p><code class='ic'>--describe</code> shows detailed information about the topic — partition count, leader broker, and so on.</p>
+<h4>Step 2: Publish Messages with the Producer</h4>
+<p>Start the console producer. When the prompt (<code class='ic'>&gt;</code>) appears, type one line at a time to publish messages.</p>
+<pre><code>
+kafka-console-producer.sh \
+  --topic quickstart \
+  --bootstrap-server localhost:9092
+</code></pre>
+<pre><code>
+&gt; hello kafka
+&gt; my first message
+&gt; end-to-end test
+</code></pre>
+<p>Leave this terminal running so you can continue sending messages.</p>
+<h4>Step 3: Consume Messages with the Consumer</h4>
+<p><strong>Open a new terminal</strong> (if using Docker, enter the container again with <code class='ic'>docker exec -it kafka /bin/bash</code>). Then read all messages from the beginning.</p>
+<pre><code>
+kafka-console-consumer.sh \
+  --topic quickstart \
+  --bootstrap-server localhost:9092 \
+  --from-beginning
+</code></pre>
+<p>If the three lines you just published appear in the output, the <strong>produce → consume</strong> flow is working end to end.</p>
+<pre><code>
+hello kafka
+my first message
+end-to-end test
+</code></pre>
+<p>The sequence below traces the complete path, from creating the topic through publishing, storing, and consuming.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant CLI as User (CLI)
+    participant Prod as console producer
+    participant B as Kafka Broker
+    participant Cons as console consumer
+    CLI-&gt;&gt;B: kafka-topics.sh --create (create quickstart topic)
+    B--&gt;&gt;CLI: Topic created
+    CLI-&gt;&gt;Prod: Enter message (hello kafka)
+    Prod-&gt;&gt;B: Publish to quickstart topic
+    B-&gt;&gt;B: Assign offset and write to disk
+    CLI-&gt;&gt;Cons: kafka-console-consumer.sh --from-beginning
+    Cons-&gt;&gt;B: Subscribe to quickstart topic (request from offset 0)
+    B--&gt;&gt;Cons: Deliver stored messages
+    Cons--&gt;&gt;CLI: Print messages to screen</div><figcaption>End-to-end flow from topic creation through produce → broker → consume</figcaption></figure>
+<h4>Step 4: Verifying Real-Time Delivery</h4>
+<p>Now place the two terminals side by side. Leave the consumer running and type new messages in the producer terminal.</p>
+<pre><code>
+&gt; live message 1
+&gt; live message 2
+</code></pre>
+<p>The moment you press Enter, the same message appears in the consumer terminal. This is the &quot;real-time data streaming&quot; mentioned in Lecture 1, happening right in front of you. One side sends, the other receives immediately.</p>
+<h4>Step 5: Cleaning Up</h4>
+<p>When you are done, delete the topic and stop the container.</p>
+<pre><code>
+# Delete the topic
+kafka-topics.sh --delete \
+  --topic quickstart \
+  --bootstrap-server localhost:9092
+</code></pre>
+<p>If you started Kafka with Docker, exit the container shell and then shut down the container.</p>
+<pre><code>
+exit
+docker compose down
+</code></pre>
+<p><code class='ic'>docker compose down</code> stops and removes the containers, leaving your environment clean.</p>
+<blockquote class='callout'>
+<p>If you get stuck during the practice, the cause is usually one of two things: (1) the broker has not finished starting — wait a moment and retry; (2) a typo in the <code class='ic'>--bootstrap-server</code> address or port — confirm it is 9092. CLI script names may include <code class='ic'>.sh</code> (<code class='ic'>kafka-topics.sh</code>) or not, depending on the distribution.</p>
+</blockquote>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Kafka can be run as a local single-broker instance using Docker (recommended) or a binary distribution; modern Kafka runs in KRaft mode without ZooKeeper.</li>
+<li>Use <code class='ic'>kafka-topics.sh --create</code> to create a topic, and <code class='ic'>--list</code> / <code class='ic'>--describe</code> to verify it.</li>
+<li>Use <code class='ic'>kafka-console-producer.sh</code> to publish messages and <code class='ic'>kafka-console-consumer.sh --from-beginning</code> to consume them, confirming the end-to-end flow.</li>
+<li>Running the producer and consumer side by side in separate terminals lets you watch messages being delivered in real time.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <p class='q'>Practice 1. Use docker compose to run a single-broker Kafka in KRaft mode locally. Use the docker-compose.yml below, then verify that the container started successfully.</p>
+              <pre class='starter'><code># docker-compose.yml contents
+services:
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: kafka
+    ports:
+      - &quot;9092:9092&quot;
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+# Save the contents above as docker-compose.yml, then run the command below
+docker compose ______
+
+# Check container status
+docker ps</code></pre>
+              <details><summary>Hint</summary><ul><li>Use docker compose up -d to start the container in the background.</li><li>Run docker ps and check that the kafka container STATUS is Up. If STATUS shows Exiting, check the logs with docker logs kafka.</li><li>To stop the container, use docker compose down.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Run from the directory containing docker-compose.yml
+docker compose up -d
+
+# Check container status (STATUS should be Up)
+docker ps
+
+# Example expected output:
+# CONTAINER ID   IMAGE                  COMMAND                  CREATED         STATUS         PORTS                    NAMES
+# xxxxxxxxxxxx   apache/kafka:3.7.0     ...                      10 seconds ago  Up 9 seconds   0.0.0.0:9092-&gt;9092/tcp   kafka</code></pre>
+                <p class='exp2'>docker compose up -d starts the container in the background (-d for detach). KRaft mode allows the broker to also serve as the controller, eliminating the need for ZooKeeper. The KAFKA_PROCESS_ROLES: broker,controller setting reflects this. If docker ps shows the kafka container with STATUS Up and port 9092 mapped, Kafka is running correctly.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 2. Access the running kafka container&#x27;s shell, navigate to the /opt/kafka/bin directory, create a &#x27;test-topic&#x27; with 1 partition, and verify the result.</p>
+              <pre class='starter'><code># Step 1: Access the container shell
+docker exec -it kafka ______
+
+# Step 2: Navigate to the kafka bin directory
+cd ______
+
+# Step 3: Create the topic
+kafka-topics.sh --create \
+  --topic test-topic \
+  --bootstrap-server ______ \
+  --partitions 1 \
+  --replication-factor 1
+
+# Step 4: Verify the topic list
+kafka-topics.sh --list --bootstrap-server ______</code></pre>
+              <details><summary>Hint</summary><ul><li>Use docker exec -it kafka bash to open a bash shell inside the container.</li><li>Inside the container, you must run cd /opt/kafka/bin before kafka-topics.sh and other scripts will work.</li><li>Use --list to verify the created topic name appears in the output. If it does not, check whether the --create command produced any errors.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: Access the container shell
+docker exec -it kafka bash
+
+# Step 2: Navigate to the kafka bin directory
+cd /opt/kafka/bin
+
+# Step 3: Create the topic
+kafka-topics.sh --create \
+  --topic test-topic \
+  --bootstrap-server localhost:9092 \
+  --partitions 1 \
+  --replication-factor 1
+
+# Step 4: Verify the topic list (test-topic should appear)
+kafka-topics.sh --list --bootstrap-server localhost:9092</code></pre>
+                <p class='exp2'>The command docker exec -it kafka bash opens a bash shell inside the running kafka container. Kafka CLI scripts are located at /opt/kafka/bin inside the container. After navigating there with cd /opt/kafka/bin, you can run kafka-topics.sh. The --list option shows the current topic list, and seeing test-topic in the output confirms a successful creation.</p>
+              </details></div><div class='task'>
+              <p class='q'>Practice 3. From the container shell (/opt/kafka/bin), complete an end-to-end message flow using the console producer and console consumer. Use two terminals: publish a message with the producer in one and verify it appears immediately in the other consumer terminal.
+
+1. Terminal A: Enter the kafka container and start the console consumer first (subscribe to test-topic, reading from earliest)
+2. Terminal B: Open a new terminal, enter the kafka container, and publish 3 messages with the console producer
+3. Verify that Terminal A displays the published messages in real time</p>
+              <pre class='starter'><code># Terminal A: Start the consumer first
+docker exec -it kafka bash
+cd /opt/kafka/bin
+kafka-console-consumer.sh \
+  --topic ______ \
+  --bootstrap-server ______ \
+  --from-beginning
+
+# Terminal B: Start the producer (in a new terminal)
+docker exec -it kafka bash
+cd /opt/kafka/bin
+kafka-console-producer.sh \
+  --topic ______ \
+  --bootstrap-server ______
+# Enter messages at the prompt:
+# hello kafka
+# my first message
+# end-to-end works</code></pre>
+              <details><summary>Hint</summary><ul><li>Both terminals must connect using docker exec -it kafka bash, then navigate to /opt/kafka/bin.</li><li>If the consumer is already running when the producer sends a message, the message appears in the consumer&#x27;s terminal immediately.</li><li>Type a message at the producer prompt (&gt;) and press Enter to publish it. If the same text appears in Terminal A, you have succeeded.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Terminal A: Start the consumer first
+docker exec -it kafka bash
+cd /opt/kafka/bin
+kafka-console-consumer.sh \
+  --topic test-topic \
+  --bootstrap-server localhost:9092 \
+  --from-beginning
+
+# Terminal B: Start the producer (in a new terminal window)
+docker exec -it kafka bash
+cd /opt/kafka/bin
+kafka-console-producer.sh \
+  --topic test-topic \
+  --bootstrap-server localhost:9092
+# Enter at the prompt:
+&gt; hello kafka
+&gt; my first message
+&gt; end-to-end works
+# Exit with Ctrl+C
+
+# All three messages should appear immediately in Terminal A</code></pre>
+                <p class='exp2'>Starting the consumer first and then sending messages with the producer causes the messages to appear in real time on the consumer screen. This is the produce → Kafka stores → consume end-to-end flow. Inside the container, localhost:9092 points to the Kafka broker. Both terminals must connect to the same container using docker exec -it kafka bash, and each must run cd /opt/kafka/bin before the CLI tools are accessible.</p>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=U4y2R3v9tlY' target='_blank'>Kafka Tutorial | Apache Kafka Tutorial For Beginners | Kafka Architecture | What Is Kafka | Simplilearn</a></li><li><a href='https://www.youtube.com/watch?v=GvdlpbQr6jo' target='_blank'>Apache Kafka 101: Partitioning (Hands On - 2023)</a></li><li><a href='https://www.youtube.com/watch?v=QkdkLdMBuL0' target='_blank'>Kafka Tutorial for Beginners | Everything you need to get started</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js"></script>
+</body></html>

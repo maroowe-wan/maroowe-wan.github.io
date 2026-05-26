@@ -28,13 +28,17 @@ function pick(el, qi, oi) {
   articles.forEach(function (a) { obs.observe(a); });
 })();
 
-// Mermaid 다이어그램 — CDN 동적 import. 라이트 테마(Academic Clarity). 실패 시 .mermaid 폴백 CSS.
+// Mermaid 다이어그램 — CDN 동적 import 후 mermaid.run()으로 명시 렌더.
+// startOnLoad는 import가 window load 이벤트보다 늦게 끝나면(모바일=느린 망/CPU) 렌더를 놓쳐
+// 소스 텍스트가 그대로 노출되므로 쓰지 않는다. 대신 명시적으로 그려 결정적으로 렌더한다.
 (async function () {
-  if (!document.querySelector('.mermaid')) return;
+  var blocks = document.querySelectorAll('.mermaid');
+  if (!blocks.length) return;
+  var mermaid;
   try {
-    const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs');
+    mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.esm.min.mjs')).default;
     mermaid.initialize({
-      startOnLoad: true, securityLevel: 'loose', theme: 'base',
+      startOnLoad: false, securityLevel: 'loose', theme: 'base',
       themeVariables: {
         fontFamily: 'Hanken Grotesk, sans-serif',
         primaryColor: '#d9e2ff', primaryBorderColor: '#003178', primaryTextColor: '#1a1c1e',
@@ -43,6 +47,21 @@ function pick(el, qi, oi) {
     });
   } catch (e) {
     console.warn('Mermaid 로드 실패 — 다이어그램 소스를 텍스트로 표시합니다.', e);
+    return; // 폴백 CSS(.mermaid:not([data-processed='true']))가 소스를 텍스트로 표시
+  }
+  function render(el) { mermaid.run({ nodes: [el] }).catch(function (e) { console.warn('Mermaid 렌더 실패', e); }); }
+  // 화면에 가까워진 다이어그램만 렌더(성능). 옵저버 미지원이면 즉시 전부 렌더.
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        io.unobserve(en.target);
+        render(en.target);
+      });
+    }, { rootMargin: '200px 0px' });
+    blocks.forEach(function (el) { io.observe(el); });
+  } else {
+    blocks.forEach(render);
   }
 })();
 

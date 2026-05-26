@@ -20,83 +20,88 @@
 </nav>
 <main><article id='lec1' class='lecture'>
           <h2>01. What Is Kubernetes - Why Container Orchestration Matters </h2>
-          <h2>What Is Kubernetes - Why Container Orchestration Matters</h2>
-<h3>Learning Objectives</h3>
+          <h3>Learning Objectives</h3>
 <ul>
-<li>Understand the limitations of running services with containers alone (scaling, failure recovery, deployment)</li>
-<li>Explain in your own words the problem Kubernetes solves and the core value it provides</li>
-<li>Grasp the concept of orchestration intuitively through everyday analogies</li>
+<li>Understand the limitations of running services with containers alone (scaling, failure recovery, and deployment)</li>
+<li>Explain in your own words what problems Kubernetes solves and why it matters</li>
+<li>Grasp the concept of orchestration through an everyday analogy</li>
 </ul>
-<h3>Content</h3>
+<h3>Lecture</h3>
 <h4>Why Does This Matter?</h4>
-<p>You have probably heard phrases like &quot;we need to migrate to Kubernetes&quot; or &quot;let&#x27;s adopt containers.&quot; But if you follow along without understanding <em>why</em> it is necessary, you will quickly find yourself lost in a sea of complex terminology. In this lecture, we will set commands and configuration files aside for now and start with the most fundamental question: <strong>&quot;What problem was Kubernetes created to solve in the first place?&quot;</strong> Once you have a solid answer to that question, every concept you learn going forward will naturally make sense.</p>
-<h4>A Quick Recap of Containers</h4>
-<p>Let&#x27;s start with a one-line definition of a <strong>container</strong>. A container is <em>a self-contained, executable unit that packages an application together with everything it needs to run — code, libraries, and configuration.</em></p>
-<p>Here is an analogy. Imagine you are a building owner trying to bring in tenants. If you had to build new walls and renovate the interior every time someone moved in, it would be an enormous hassle. Instead, picture each new tenant arriving with a fully furnished <strong>shipping container</strong> that they simply slot into place inside the building. No construction required, and when they leave, they just take the box with them. That is exactly how container technology works. The older <strong>virtual machine (VM)</strong> approach was like doing heavy construction every time — containers are lightweight, portable boxes that can be moved in seconds.</p>
+<p>You have probably heard things like &quot;we need to move to Kubernetes&quot; or &quot;let&#x27;s adopt containers.&quot; But if you follow along without understanding <em>why</em>, you will quickly get lost in a maze of jargon. In this lecture, we will set aside commands and config files for now and start with the most fundamental question: <strong>&quot;What problem did Kubernetes actually come to solve?&quot;</strong> Getting this foundation right makes every concept you learn afterward click into place naturally.</p>
+<h4>A Quick Refresher on Containers</h4>
+<p>Let&#x27;s start with a one-line definition of a <strong>container</strong>. A container is a <em>self-contained, runnable unit that bundles an application together with everything it needs to run — code, libraries, and configuration.</em></p>
+<p>Here is an analogy. Imagine a landlord renting out space in a building. If every new tenant required a full renovation before moving in, that would be exhausting. Now picture tenants arriving with a <strong>fully furnished shipping container</strong> that they simply slot into the building — no construction needed, and when they leave, they just take the box with them. That is exactly how containers work. Where the old approach of <strong>virtual machines (VMs)</strong> was like building out a new floor for every tenant, containers are lightweight, portable boxes you can move around with ease.</p>
 <blockquote class='callout'>
-<p>Thanks to containers, the classic problem of &quot;it works on my machine but not on the server&quot; has been greatly reduced. The entire runtime environment travels with the application.</p>
+<p>Containers largely eliminated the classic &quot;it works on my machine&quot; problem, because you ship the entire runtime environment along with the application.</p>
 </blockquote>
-<h4>One Container Is Easy — What About Hundreds?</h4>
-<p>This is where things get complicated. Modern services are not single monolithic programs. They are collections of small, independently deployable services — each responsible for a specific function. This is called a <strong>microservice</strong> architecture. A single e-commerce platform, for example, might have a separate frontend for rendering pages, a backend for processing orders, and a database for storing data. When traffic spikes, you may need to scale out only the most-used components (say, the frontend), so the number of containers can quickly grow from dozens to hundreds, or even thousands.</p>
-<p>Now imagine managing all those containers across multiple servers by hand. You would be responsible for <em>all</em> of the following:</p>
+<h4>One Container Is Easy — But What About Hundreds?</h4>
+<p>This is where the real challenge begins. Modern applications are rarely monolithic. Instead, they are broken into small, focused services — a pattern known as <strong>microservices</strong>. An e-commerce site, for example, might have a frontend rendering the UI, a backend handling orders, and a separate database — all running independently. As traffic grows, you need to scale specific services (say, just the frontend), and your container count can quickly climb into the hundreds or even thousands.</p>
+<p>Now imagine managing all those containers, spread across multiple servers, by hand. You would have to:</p>
 <ul>
-<li>Deciding which container goes on which server, one by one</li>
-<li>Waking up at 2 a.m. to restart a container every time one crashes</li>
-<li>Manually scaling replicas up when traffic surges, then scaling them back down</li>
-<li>Carefully swapping out containers during deployments without causing downtime</li>
-<li>Manually wiring up the network so containers can discover and talk to each other</li>
+<li>Decide by hand which container to place on which server</li>
+<li>Wake up in the middle of the night to restart any container that crashes</li>
+<li>Manually scale replicas up when traffic spikes and back down when it eases</li>
+<li>Carefully swap containers one by one during deployments to avoid downtime</li>
+<li>Wire up networking between containers so they can find and talk to each other</li>
 </ul>
-<p>You might get by with scripts and homegrown tooling for a while, but at scale this approach hits a hard wall — it simply becomes more than any team can manage. <strong>This is exactly the point where container orchestration enters the picture.</strong></p>
-<h4>Orchestration — Understanding It Through a Conductor Analogy</h4>
-<p>The word <strong>orchestration</strong> comes from the orchestra. Even if dozens of musicians (containers) each have their instruments ready, without a <strong>conductor</strong> to coordinate them, the result is noise, not music. A container orchestration tool plays the role of that conductor.</p>
-<p>Here is another analogy. Suppose you own several buildings. You have assigned an on-site specialist — essentially a container management tool like <strong>Docker</strong> — to each building. That worked fine at first, but as you acquired more buildings, you found yourself making phone call after phone call to each specialist to issue instructions. So you hire a <strong>highly capable general manager</strong> to run the whole operation. That general manager&#x27;s name is <strong>Kubernetes</strong>.</p>
-<p>Now you only need to give the big picture to your manager. &quot;Keep three frontend instances running at all times; maintain two backend instances.&quot; Kubernetes then figures out which server to place them on, and if any instance dies, it quietly brings a new one back up to keep the count right. The reason you do not have to micromanage every detail is that Kubernetes remembers your <strong>desired state</strong> and continuously reconciles reality to match it.</p>
-<p>As shown in the flow diagram below, Kubernetes constantly compares the desired state you have declared against the actual current state, and takes action on its own whenever the two diverge. This reconciliation loop is the heart of declarative management.</p>
+<p>You can get by with scripts and homegrown tooling for a while, but at scale this quickly becomes unmanageable. <strong>This is precisely where container orchestration comes in.</strong></p>
+<h4>Orchestration — The Conductor Analogy</h4>
+<p>The word <strong>orchestration</strong> comes from the orchestra. Even with dozens of skilled musicians (containers), without a <strong>conductor</strong> to coordinate them, the result is noise, not music. A container orchestration tool acts as that conductor.</p>
+<p>Here is another analogy. Imagine you own several buildings. Each building already has a tool installed that can create and run containers — that tool is <strong>Docker</strong>, the most widely used platform for building and running containers. At first this worked fine, but as your portfolio grew you found yourself rushing from building to building, telling each one exactly what to run and where. You need a smart <strong>general manager</strong> to handle it all. That general manager&#x27;s name is <strong>Kubernetes</strong>.</p>
+<p>Now you only have to give the manager the big picture: &quot;Keep three frontend instances running and two backend instances up at all times.&quot; Kubernetes figures out where to place them, and whenever one dies it quietly brings up a replacement to keep the count right. You do not micromanage every step, because Kubernetes remembers your <strong>desired state</strong> and continuously drives reality toward it.</p>
+<p>The flowchart below shows how Kubernetes compares your declared desired state with what is actually running, and acts whenever the two diverge. This continuous loop is the heart of declarative management.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
     A[&quot;User declares desired state&lt;br/&gt;e.g. keep 3 frontends&quot;] --&gt; B[Kubernetes stores the state]
     B --&gt; C{Compare with current state}
     C --&gt;|Match| D[Keep as-is and keep watching]
-    C --&gt;|Missing or dead| E[Auto-create new container]
+    C --&gt;|Missing or crashed| E[Automatically create new container]
     C --&gt;|Excess| F[Remove surplus container]
     D --&gt; C
     E --&gt; C
     F --&gt; C</div><figcaption>Kubernetes reconciliation loop — continuously aligning reality with the declared desired state</figcaption></figure>
 <h4>The Core Value Kubernetes Delivers</h4>
-<p>Kubernetes is an open-source container orchestration platform originally built at Google. It is agnostic to the container technology you use — Docker or otherwise — and works across physical servers, virtual machines, and cloud environments alike. Its core value can be summarized in four areas:</p>
-<p>1. <strong>Self-healing and High Availability</strong> — When a container crashes, Kubernetes automatically restarts it, minimizing downtime for users. The desired number of instances is always maintained.</p>
-<p>2. <strong>Scalability</strong> — When traffic increases, Kubernetes scales replicas up; when things quiet down, it scales them back. Kubernetes inspects available resources across nodes and determines <em>the most efficient placement</em> for each container. This intelligent placement decision is called <strong>scheduling</strong>.</p>
-<p>3. <strong>Service Discovery and Load Balancing</strong> — Containers die and are replaced frequently, and their IP addresses change each time. Kubernetes puts a stable, fixed endpoint in front of them so that other services always connect to the same address, and incoming traffic is distributed evenly across available instances.</p>
-<p>4. <strong>Disaster Recovery</strong> — If infrastructure failures cause data loss, Kubernetes provides backup and recovery mechanisms to restore the last known good state.</p>
-<h4>How Developers and Operators See Things Differently</h4>
-<p>One more perspective worth addressing: even when looking at the same system, a <strong>developer</strong> and an <strong>operator</strong> have very different views. Developers focus on what is <em>inside</em> the container — their code, dependencies, and whether the application behaves correctly. Operators, on the other hand, look at the broader picture: which servers to deploy on, how to scale, how to expose services externally, and how to detect and respond to failures.</p>
-<p>As illustrated in the layer diagram below, developers focus on the top layer — &quot;my container&quot; — while Kubernetes takes on the operational layer beneath it, governing a fleet of containers distributed across multiple servers.</p>
+<p>Kubernetes is an open-source container orchestration platform originally built at Google. It is runtime-agnostic — it does not care whether you are using Docker or another technology — and it works across physical servers, VMs, and cloud environments alike. Its value comes down to four pillars:</p>
+<blockquote class='callout'>
+<p>One common misconception worth clearing up: many people assume &quot;Kubernetes runs on top of Docker,&quot; but that is not quite accurate. Kubernetes connects to container runtimes through a standard interface called the <strong>CRI (Container Runtime Interface)</strong>, and the most common runtimes today are <strong>containerd</strong> and <strong>CRI-O</strong>. The older mechanism that plugged Docker directly into Kubernetes (called dockershim) was removed in Kubernetes 1.24. That said, <strong>images built with Docker are standard OCI-compliant images and continue to work perfectly</strong> — so your Docker-based build workflow does not need to change.</p>
+</blockquote>
+<p>1. <strong>Self-healing and high availability</strong> — When a container or node goes down, Kubernetes automatically restarts it or reschedules it on a healthy node, minimizing downtime. It always strives to maintain the declared replica count.</p>
+<p>2. <strong>Scalability</strong> — When traffic increases, Kubernetes scales replicas up; when traffic drops, it scales them back down. It evaluates available resources across nodes and picks the most efficient placement. This smart placement decision is called <strong>scheduling</strong>.</p>
+<p>3. <strong>Service discovery and load balancing</strong> — Containers come and go, and their IP addresses change with them. Kubernetes places a stable, fixed endpoint in front of a group of containers so that other services always connect to the same address, with traffic distributed evenly across healthy instances.</p>
+<p>4. <strong>Declarative configuration and state management</strong> — This foundational principle underpins the other three. In Kubernetes you do not specify <em>how</em> to do something; you declare <em>what the end result should look like</em>. That declared configuration is stored in <strong>etcd</strong>, the cluster&#x27;s data store, and Kubernetes controllers continuously compare actual state against it, correcting any drift. This mechanism is formally called <strong>Desired State Reconciliation</strong>, and its core unit of work is the <strong>reconciliation loop</strong>. If a node goes down or a container crashes and the actual state drifts from the declaration, the controllers automatically restore the system to the declared configuration. Backing up etcd lets you restore the <strong>cluster&#x27;s configuration state</strong> (which resources should be running and how) to the last declared snapshot — though this restores <em>configuration</em> only, not application data, as explained next.</p>
+<blockquote class='callout'>
+<p>Important: What Kubernetes automatically restores is the <em>configuration state</em> declared in etcd — which apps to run, how many replicas, and so on. It does <strong>not</strong> restore your <strong>application data</strong> (database contents, user-uploaded files, etc.). Protecting data requires separate solutions such as persistent volume backups or database-level backups. &quot;The app comes back, but the data can still be gone&quot; is a distinction you must internalize early.</p>
+</blockquote>
+<h4>How Developers and Operators See the System Differently</h4>
+<p>One more perspective worth covering. <strong>Developers</strong> and <strong>operators</strong> look at the same system through very different lenses. Developers focus on what is <em>inside</em> the container — their code, dependencies, and whether the app behaves correctly. Operators look at the bigger picture: which server to deploy on, how to scale, how to expose services externally, and how to detect and respond to failures.</p>
+<p>As the diagram below shows, developers focus on the top layer — their containers — while Kubernetes takes ownership of the operational layer, governing the sprawl of containers spread across many servers.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TB
     subgraph DEV[&quot;Developer&#x27;s view — inside the container&quot;]
         D1[My code]
         D2[Library dependencies]
-        D3[Whether it works correctly]
+        D3[Correct behavior]
     end
-    subgraph K8S[&quot;Kubernetes — operations automation layer&quot;]
-        K1[Placement &amp; scheduling]
-        K2[Scale up &amp; down]
+    subgraph K8S[&quot;Kubernetes — operational automation layer&quot;]
+        K1[Scheduling and placement]
+        K2[Scaling up and down]
         K3[Self-healing]
-        K4[External exposure &amp; networking]
+        K4[External exposure and networking]
     end
-    subgraph OPS[&quot;Infrastructure the operator owns&quot;]
+    subgraph OPS[&quot;Infrastructure the operator is responsible for&quot;]
         N1[Server node 1]
         N2[Server node 2]
         N3[Server node 3]
     end
     DEV --&gt; K8S
-    K8S --&gt; OPS</div><figcaption>Developer and operator concerns, and how Kubernetes bridges them</figcaption></figure>
-<p>Kubernetes automates most of the heavy lifting that used to fall on operators. Developers can stay focused on &quot;my container,&quot; while operations teams can govern hundreds of containers through <strong>declared rules</strong> rather than late-night manual intervention. The growing prominence of roles like SRE (Site Reliability Engineer) reflects precisely this shift — designing for reliability on top of an automated, policy-driven infrastructure.</p>
+    K8S --&gt; OPS</div><figcaption>Developer and operator perspectives — and the Kubernetes layer bridging them</figcaption></figure>
+<p>Kubernetes automates most of the operational burden. Developers can stay focused on their containers, while operations teams govern hundreds of containers through <strong>declared rules</strong> rather than manual intervention. Interestingly, as operations become codified through declarations, developers naturally become involved in deployment and scaling decisions too. This blurring of the line between development (Dev) and operations (Ops) is exactly why <strong>DevOps</strong> culture spread so rapidly alongside Kubernetes. The growing prominence of roles like <strong>SRE (Site Reliability Engineer)</strong> reflects the same trend — designing for reliability on top of this kind of automated operational foundation.</p>
 <h3>Key Takeaways</h3>
 <ul>
-<li>Containers are a lightweight, portable unit that packages an application together with its runtime environment. But when container counts reach the hundreds and span multiple servers, manual management becomes practically impossible.</li>
-<li>The tool built to solve this problem is <strong>container orchestration</strong>, and its de facto standard is the open-source platform <strong>Kubernetes</strong>, originally created by Google.</li>
-<li>Like an orchestra conductor — or a highly capable building manager — Kubernetes only needs to be told the <strong>desired state</strong>. It handles placement, replication, self-healing, and network connectivity on its own.</li>
-<li>Its four core values are: self-healing and high availability, scalability and smart scheduling, service discovery and load balancing, and disaster recovery.</li>
-<li>With this &quot;why&quot; firmly in mind, the internal structure (architecture) of Kubernetes covered in the next lecture will feel far more natural.</li>
+<li>Containers are a lightweight, portable unit that bundles an app with its entire runtime environment. But when hundreds of containers span multiple servers, managing them by hand quickly becomes impossible.</li>
+<li><strong>Container orchestration</strong> solves this problem. The de facto standard — created by Google and released as open source — is <strong>Kubernetes</strong>.</li>
+<li>Like the conductor of an orchestra (or a building&#x27;s general manager), Kubernetes lets you declare a desired state and handles placement, replication, self-healing, and networking automatically.</li>
+<li>The four core pillars are: self-healing and high availability, scalability and smart scheduling, service discovery and load balancing, and the foundation that holds them all together — <strong>declarative configuration</strong>. Kubernetes uses <strong>Desired State Reconciliation</strong> to continuously align the cluster with what is declared in etcd. Application <strong>data</strong>, however, must be protected through a <strong>separate backup solution</strong>.</li>
+<li>With this &quot;why&quot; understood, the internal architecture covered in the next lecture will make intuitive sense.</li>
 </ul>
           <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
               <p class='q'>Q1. When operating a microservice environment with containers, what problems arise from managing hundreds of containers manually? Select the most appropriate answer based on the lecture content.</p>
@@ -119,46 +124,45 @@
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=kBF6Bvth0zw' target='_blank'>Container Orchestration Explained</a></li></ul></div>
         </article>
 <article id='lec2' class='lecture'>
-          <h2>02. Kubernetes Architecture - Control Plane and Worker Nodes </h2>
-          <h2>Kubernetes Architecture - Control Plane and Worker Nodes</h2>
-<h3>Learning Objectives</h3>
+          <h2>02. Kubernetes Architecture - Control Plane and Worker Nodes <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
 <ul>
-<li>Distinguish the roles of a cluster, the master (control plane), and worker nodes.</li>
-<li>Understand what each core component — API Server, Scheduler, etcd, kubelet — is responsible for.</li>
-<li>Trace the sequence of steps a user command goes through inside the cluster.</li>
+<li>Distinguish the roles of a cluster, the control plane (formerly called &quot;master&quot;), and worker nodes</li>
+<li>Understand what each core component — API Server, Scheduler, etcd, kubelet — is responsible for</li>
+<li>Trace the sequence of steps a user command goes through inside the cluster</li>
 </ul>
-<h3>Content</h3>
+<h3>Lecture</h3>
 <h4>Why You Need to Understand the Architecture</h4>
-<p>In Lecture 1, we learned that &quot;Kubernetes automatically places containers and restarts them when they crash.&quot; But if you do not understand what &quot;automatically&quot; actually means, you will be at a loss when something goes wrong. When a Pod fails to start, which component has stopped doing its job?</p>
-<p>Kubernetes is not a magic black box — it is <strong>a system of many small programs (processes) that communicate and cooperate with each other</strong>. Once you have this structure clear in your mind, every hands-on exercise that follows will be much easier to work through. This lecture has no commands to run, but it lays the most important foundation for everything ahead.</p>
-<p>Think of a Kubernetes cluster as <strong>a large logistics company</strong>. There are warehouses (worker nodes) where workers actually move and stack goods, and there is a central control room (the control plane) that tells those workers &quot;what to place, where, and how many.&quot;</p>
+<p>In Lecture 1 we learned that &quot;Kubernetes automatically places containers and restarts them when they crash.&quot; But if you do not understand what that &quot;automatically&quot; actually means, you will be at a loss whenever something goes wrong. When a Pod fails to start, which component has stopped doing its job?</p>
+<p>Kubernetes is not a magic black box — it is <strong>a system of many small programs (processes) that communicate and cooperate with each other</strong>. Once you have this structure clear in your mind, every hands-on exercise that follows becomes much easier. This lecture has no commands to run, but it lays the most important conceptual foundation for everything ahead.</p>
+<p>Think of a Kubernetes cluster as <strong>a large logistics company</strong>. There are warehouses (worker nodes) where workers actually move and stack goods, and there is a central control room (the control plane) that tells those workers what to do, where, and how many.</p>
 <h4>Cluster, Control Plane, and Worker Nodes</h4>
-<p>Let us start with the big picture.</p>
+<p>Let&#x27;s start with the big picture.</p>
 <ul>
 <li><strong>Cluster</strong>: The overall system that groups multiple machines (servers) together to run containerized applications. Think of it as the entire company. An organization might run several clusters simultaneously — one for production, one for testing, and so on.</li>
 <li><strong>Node</strong>: A single machine that makes up the cluster. It can be a cloud virtual machine (e.g., EC2), a physical server, or even your laptop.</li>
 </ul>
-<p>Nodes are divided into two types based on their role.</p>
+<p>Nodes are divided into two types based on their role:</p>
 <ul>
-<li><strong>Control Plane (formerly called &quot;master&quot;)</strong>: The <strong>brain</strong> that manages the entire cluster and makes decisions. It receives user requests, decides which container to run where, stores the cluster&#x27;s state data, and responds to failures. It does not run your applications directly — it is the one giving orders.</li>
+<li><strong>Control Plane (formerly called &quot;master&quot;)</strong>: The <strong>brain</strong> that manages the entire cluster and makes decisions. It receives user requests, decides where to run each container, stores the cluster&#x27;s state data, and responds to failures. It does not run your applications directly — it is the command-and-control layer.</li>
 <li><strong>Worker Node</strong>: The <strong>workfloor</strong> where your applications actually <strong>run</strong>. It receives instructions from the control plane and starts and maintains containers.</li>
 </ul>
 <blockquote class='callout'>
-<p>In production environments, if the brain goes down the entire cluster is at risk, so the control plane is distributed across multiple nodes to ensure high availability. For testing purposes, it is fine to run both the control plane and workers on a single machine.</p>
+<p>In production environments, if the brain goes down the entire cluster is at risk, so the control plane is typically distributed across multiple nodes to ensure high availability. For testing purposes, it is perfectly fine to run both the control plane and workers on a single machine.</p>
 </blockquote>
 <p>One important fact: <strong>worker nodes do not run containers directly — they run units called Pods.</strong> If Docker&#x27;s smallest unit is a container, Kubernetes&#x27; smallest deployable unit is a Pod. A Pod contains one or more containers, and to scale up an application you simply run more Pods. (Pods are covered in detail in Lecture 3.)</p>
 <h4>The 4 Core Components of the Control Plane</h4>
 <p>Inside the control room (control plane) there are four programs, each with a distinct role.</p>
-<p><strong>1. API Server (the front desk of the control room)</strong></p>
-<p>The <strong>sole entry point</strong> through which every request entering the cluster passes. When you issue a command with <code class='ic'>kubectl</code> (the Kubernetes CLI) or through the dashboard, you are actually talking to the API Server. Even the components on worker nodes communicate exclusively through the API Server. As the front desk, it also handles <strong>authentication (verifying who you are) and authorization (verifying what you are allowed to do)</strong>, as well as validating that requests are properly formatted.</p>
+<p><strong>1. API Server (the front desk)</strong></p>
+<p>The <strong>sole entry point</strong> for every request entering the cluster. When you issue a command with <code class='ic'>kubectl</code> (the Kubernetes CLI) or through the dashboard, you are actually talking to the API Server. Even the components on worker nodes communicate exclusively through the API Server. As the front desk, it also handles <strong>authentication (verifying who you are) and authorization (verifying what you are allowed to do)</strong>, as well as validating that requests are properly formed.</p>
 <p><strong>2. etcd (the company ledger)</strong></p>
 <p>A <strong>key-value store</strong> that holds all of the cluster&#x27;s state data. Which nodes exist, which Pods are running where, what the user has requested — every &quot;current fact&quot; is recorded in etcd. This is why etcd is called the cluster&#x27;s <strong>single source of truth</strong>. When you create a Pod, that information is written to etcd; when you delete it, it is removed from etcd.</p>
 <p><strong>3. Scheduler (the placement coordinator)</strong></p>
-<p>Decides <strong>which worker node a newly created Pod should run on</strong>. Rather than simply finding any open slot, the Scheduler considers the CPU and memory a Pod requires, the available resources on each node, and constraints such as &quot;keep this Pod close to that Pod,&quot; then picks the most suitable node. It solves what is essentially a bin-packing problem — fitting multiple applications optimally onto a limited set of servers.</p>
+<p>Decides <strong>which worker node a newly created Pod should run on</strong>. Rather than simply finding any open slot, the Scheduler considers the CPU and memory a Pod requires, the available resources on each node, and any constraints such as &quot;keep this Pod near that Pod,&quot; then picks the most suitable node. It solves what is essentially a bin-packing problem — fitting multiple applications optimally onto a limited set of servers.</p>
 <p><strong>4. Controller Manager (the floor supervisor)</strong></p>
-<p>A background process that continuously tries to <strong>bring the system back to the user&#x27;s desired state</strong>. For example, if you declared via a Deployment or ReplicaSet that &quot;3 Pods must be running&quot; and one dies, the controller detects this and creates a new Pod object to restore the count. There are dedicated controllers for each resource type — a Node Controller that detects downed nodes, a Deployment Controller that manages rollouts, and so on. Kubernetes&#x27; self-healing capability comes from here.</p>
+<p>A set of background processes that continuously tries to <strong>bring the system back to the user&#x27;s desired state</strong>. For example, if you declared via a Deployment or ReplicaSet that &quot;3 Pods must be running&quot; and one dies, the controller detects this and creates a new Pod object to restore the count. There are dedicated controllers for each resource type — a Node Controller that detects downed nodes, a Deployment Controller that manages rollouts, and so on. Kubernetes&#x27; self-healing capability lives here.</p>
 <blockquote class='callout'>
-<p>The Controller Manager&#x27;s job is to ensure the correct number of Pod objects exist as declared — it does not directly start a Pod on a specific node. Actually starting a Pod that has already been assigned to a node is the job of that node&#x27;s kubelet.</p>
+<p>The Controller Manager&#x27;s job is to ensure the declared number of Pod <em>objects</em> exist — it does not directly start a Pod on a specific node. Actually starting a Pod that has already been assigned to a node is the responsibility of that node&#x27;s kubelet.</p>
 </blockquote>
 <blockquote class='callout'>
 <p>When running in a cloud environment, a Cloud Controller Manager is added to delegate cloud-specific tasks — such as provisioning virtual machines for nodes — to the cloud provider (AWS, GCP, or Azure).</p>
@@ -166,21 +170,21 @@
 <h4>The 3 Core Components of a Worker Node</h4>
 <p>Each worker node (workfloor) runs three programs that together keep Pods running.</p>
 <p><strong>1. kubelet (the on-site crew leader)</strong></p>
-<p>An agent that runs on every worker node. It communicates with the control plane (API Server) to receive instructions about which Pods to run on its node, and takes responsibility for keeping those Pods alive and healthy. Think of it as the liaison between a node and the brain.</p>
+<p>An agent that runs on every worker node. It communicates with the control plane (API Server) to receive instructions about which Pods to run on its node, and takes responsibility for keeping those Pods alive and healthy. Think of it as the liaison connecting a node to the brain.</p>
 <p><strong>2. Container Runtime (the container execution engine)</strong></p>
-<p>The software that actually runs containers. It pulls images from a registry, starts and stops containers, and manages their resources. Docker comes to mind first, but Docker is only one of several runtimes. Kubernetes can work with any runtime — containerd, CRI-O, and others — as long as it conforms to the standard interface (CRI). The kubelet directs this runtime to carry out actual execution.</p>
+<p>The software that actually runs containers. It pulls images from a registry, starts and stops containers, and manages their resources. Docker comes to mind first, but it is only one of several available runtimes. Kubernetes can work with any runtime — containerd, CRI-O, and others — as long as it conforms to the standard <strong>CRI (Container Runtime Interface)</strong>. The kubelet directs this runtime to carry out actual execution.</p>
 <p><strong>3. kube-proxy (the network traffic director)</strong></p>
-<p>Manages the network rules on each node so that traffic from inside and outside the cluster is correctly routed and load-balanced to the right Pod.</p>
-<p>The full cluster layout described so far is summarized in the diagram below. Confirm for yourself where the control plane&#x27;s four components and the worker node&#x27;s three components each belong.</p>
+<p>Manages the network rules on each node so that traffic — from inside and outside the cluster — is correctly routed and load-balanced to the right Pod.</p>
+<p>The full cluster layout described above is summarized in the diagram below. Check where the control plane&#x27;s four components and the worker node&#x27;s three components each belong.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TB
     User[&quot;User (kubectl)&quot;]
 
     subgraph Cluster[&quot;Kubernetes Cluster&quot;]
         subgraph CP[&quot;Control Plane (Brain)&quot;]
-            API[&quot;API Server&lt;br/&gt;Sole Entry Point · Auth&quot;]
-            ETCD[&quot;etcd&lt;br/&gt;State Store&quot;]
-            SCH[&quot;Scheduler&lt;br/&gt;Node Placement Decision&quot;]
-            CM[&quot;Controller Manager&lt;br/&gt;Self-Healing&quot;]
+            API[&quot;API Server&lt;br/&gt;Sole entry point · Auth&quot;]
+            ETCD[&quot;etcd&lt;br/&gt;State store&quot;]
+            SCH[&quot;Scheduler&lt;br/&gt;Node placement decision&quot;]
+            CM[&quot;Controller Manager&lt;br/&gt;Self-healing&quot;]
         end
 
         subgraph W1[&quot;Worker Node 1&quot;]
@@ -198,26 +202,26 @@
         end
     end
 
-    User --&gt;|Command Request| API
-    API --- ETCD
-    API --- SCH
-    API --- CM
-    API --&gt;|Pod Spec Delivery| KL1
-    API --&gt;|Pod Spec Delivery| KL2
-    KL1 --&gt;|Execution Order| CR1
-    KL2 --&gt;|Execution Order| CR2
-    CR1 --&gt;|Container Start| POD1
-    CR2 --&gt;|Container Start| POD2</div><figcaption>Kubernetes Cluster Architecture - Core Components of the Control Plane and Worker Nodes</figcaption></figure>
+    User --&gt;|Command request| API
+    API &lt;--&gt; ETCD
+    SCH --&gt;|watch · write decision| API
+    CM --&gt;|watch · write decision| API
+    API --&gt;|Pod spec delivery| KL1
+    API --&gt;|Pod spec delivery| KL2
+    KL1 --&gt;|Execution instruction| CR1
+    KL2 --&gt;|Execution instruction| CR2
+    CR1 --&gt;|Start container| POD1
+    CR2 --&gt;|Start container| POD2</div><figcaption>Kubernetes cluster architecture — core components of the control plane and worker nodes</figcaption></figure>
 <h4>How a User Command Is Processed</h4>
-<p>Now let us see how these components work together by following a &quot;create a Pod&quot; request as it flows through the cluster. <strong>The key point is that every communication passes through the API Server.</strong> The flow is as follows.</p>
+<p>Now let&#x27;s see how these components work together. Follow a &quot;create a Pod&quot; request as it moves through the cluster. <strong>The key point is that every communication passes through the API Server.</strong> The flow goes like this:</p>
 <p>1. The user sends a &quot;run this container as a Pod&quot; request to the <strong>API Server</strong> via <code class='ic'>kubectl</code>.</p>
 <p>2. The API Server verifies authentication, authorization, and request format, then writes the Pod information to <strong>etcd</strong>.</p>
-<p>3. The <strong>Scheduler</strong> notices the Pod has not yet been assigned to a node. It analyzes resource availability and picks the most suitable worker node, then notifies the API Server of the binding. This decision is also recorded in etcd.</p>
-<p>4. The <strong>kubelet</strong> on the selected worker node is continuously watching the API Server. It spots the Pod assigned to its node and proceeds to start it.</p>
-<p>5. The kubelet instructs the node&#x27;s <strong>Container Runtime</strong> to pull the image and start the container — the Pod comes up.</p>
-<p>6. The kubelet reports &quot;this Pod is now Running&quot; to the API Server, and the state change is saved back to etcd. Now when the user runs <code class='ic'>kubectl get pod</code>, they see &quot;Running.&quot;</p>
-<p>One thing to note: in this single-Pod creation flow, <strong>the Controller Manager does not appear</strong>. Once the Scheduler assigns a node, the kubelet on that node watches the API Server and starts the Pod on its own. The Controller Manager&#x27;s turn comes separately — when a Deployment or ReplicaSet declares &quot;keep N Pods running,&quot; it <strong>creates Pod objects</strong> to make up any shortfall. Those newly created Pods then go through steps 4–6 above (Scheduler assigns a node → kubelet starts the Pod).</p>
-<p>The six steps in chronological order are shown in the sequence diagram below. Notice that every arrow passes through the API Server.</p>
+<p>3. The <strong>Scheduler</strong> notices the Pod has not yet been assigned to a node. It analyzes resource availability and picks the best worker node, then notifies the API Server of the binding decision. This decision is also written to etcd.</p>
+<p>4. The <strong>kubelet</strong> on the selected worker node has been continuously watching the API Server. It spots the Pod assigned to its node and proceeds to start it.</p>
+<p>5. The kubelet instructs the node&#x27;s <strong>Container Runtime</strong> to pull the image and launch the container — the Pod comes up.</p>
+<p>6. The kubelet reports &quot;this Pod is now Running&quot; back to the API Server, and that state change is saved to etcd. Now when the user runs <code class='ic'>kubectl get pod</code>, they see &quot;Running.&quot;</p>
+<p>One thing to note here: in this single-Pod creation flow, <strong>the Controller Manager does not appear</strong>. Once the Scheduler assigns a node, the kubelet on that node watches the API Server and starts the Pod on its own. The Controller Manager gets involved under a different circumstance — when a Deployment or ReplicaSet declares &quot;keep N Pods running,&quot; it <strong>creates Pod objects</strong> to fill any shortfall. Those newly created Pods then go through steps 4–6 above (Scheduler assigns a node → kubelet starts the Pod).</p>
+<p>Here is a critical detail about how watching works. Rather than the Scheduler and kubelet repeatedly polling the API Server asking &quot;any new work?&quot;, they each set up a persistent <strong>watch</strong> from the start. Whenever something relevant changes, the API Server pushes the event to them. That is why the arrows in the diagram represent a continuous subscription stream rather than one-off queries.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
     participant U as User (kubectl)
     participant API as API Server
@@ -226,25 +230,30 @@
     participant KL as kubelet
     participant CR as Container Runtime
 
+    Note over SCH,KL: Each sets up a persistent watch on the API Server at startup
+    SCH-&gt;&gt;API: Start watch (unscheduled Pods)
+    KL-&gt;&gt;API: Start watch (Pods on my node)
+
     U-&gt;&gt;API: 1. Pod creation request
     API-&gt;&gt;API: 2. Auth · authz · format validation
     API-&gt;&gt;ETCD: 2. Write Pod record
-    SCH-&gt;&gt;API: 3. Unscheduled Pod found, optimal node selected (binding)
-    KL-&gt;&gt;API: 4. Pod assigned to this node discovered via watch
-    KL-&gt;&gt;CR: 5. Container execution order
+    API--&gt;&gt;SCH: 3. Push: unscheduled Pod event
+    SCH-&gt;&gt;API: 3. Write binding (optimal node selected)
+    API--&gt;&gt;KL: 4. Push: Pod assigned to this node
+    KL-&gt;&gt;CR: 5. Container execution instruction
     CR--&gt;&gt;KL: 5. Pod started successfully
     KL-&gt;&gt;API: 6. Status report (Running)
-    API-&gt;&gt;ETCD: 6. State change saved
+    API-&gt;&gt;ETCD: 6. Save state change
     U-&gt;&gt;API: kubectl get pod
-    API--&gt;&gt;U: Running</div><figcaption>6-Step Processing Sequence of a Pod Creation Request Through the Cluster</figcaption></figure>
-<p>One more thing to consider. What happens if a Pod launched via a Deployment suddenly crashes? The <strong>Controller Manager</strong> detects that &quot;the desired state (N Pods running) differs from the current state (N-1 Pods)&quot; and creates a new Pod object to fill the gap. That Pod then rides the same flow (Scheduler assigns a node → kubelet starts it) and comes back up on a new node. This is how the cluster heals itself without any manual intervention.</p>
+    API--&gt;&gt;U: Running</div><figcaption>Pod creation request flowing through the cluster in 6 steps — watch-based event delivery</figcaption></figure>
+<p>One more scenario worth thinking through. What happens if a Pod launched via a Deployment suddenly crashes? The <strong>Controller Manager</strong> detects that &quot;the desired state (N Pods running) no longer matches the current state (N-1 Pods)&quot; and creates a new Pod object to fill the gap. That Pod then goes through the same flow (Scheduler assigns a node → kubelet starts it) and comes back up. This is how the cluster heals itself without any manual intervention.</p>
 <h3>Key Takeaways</h3>
 <ul>
-<li>A <strong>cluster</strong> is a collection of nodes, divided into the <strong>control plane</strong> (makes decisions) and <strong>worker nodes</strong> (run applications).</li>
-<li>Control plane&#x27;s 4 components: <strong>API Server</strong> (sole entry point · authentication), <strong>etcd</strong> (single source of truth for state data), <strong>Scheduler</strong> (decides which node a Pod runs on), <strong>Controller Manager</strong> (self-healing — ensures the declared number of Pod objects exists).</li>
+<li>A <strong>cluster</strong> is a collection of nodes, split into the <strong>control plane</strong> (makes decisions) and <strong>worker nodes</strong> (run applications).</li>
+<li>Control plane&#x27;s 4 components: <strong>API Server</strong> (sole entry point · authentication), <strong>etcd</strong> (single source of truth for cluster state), <strong>Scheduler</strong> (decides which node a Pod runs on), <strong>Controller Manager</strong> (self-healing — ensures the declared number of Pod objects exists).</li>
 <li>Worker node&#x27;s 3 components: <strong>kubelet</strong> (watches the API Server and directly starts/maintains Pods on its node), <strong>Container Runtime</strong> (actually runs containers), <strong>kube-proxy</strong> (network routing).</li>
 <li>Worker nodes run <strong>Pods</strong>, not bare containers.</li>
-<li>Every request and internal communication <strong>must go through the API Server</strong>. A single Pod creation flows as: API Server → etcd → Scheduler (node decision) → kubelet on that node (direct execution) → Container Runtime. The Controller Manager creates Pod objects when a Deployment/ReplicaSet needs to maintain a replica count.</li>
+<li>Every request and every internal message <strong>must go through the API Server</strong>. A single Pod creation flows: API Server → etcd → Scheduler (node assignment) → kubelet on that node (starts the Pod) → Container Runtime. The Controller Manager steps in when a Deployment or ReplicaSet needs to create Pod objects to maintain the declared replica count.</li>
 </ul>
           <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
               <p class='q'>Q1. Which statement best describes the difference in roles between the control plane and worker nodes?</p>
@@ -266,36 +275,35 @@
         </article>
 <article id='lec3' class='lecture'>
           <h2>03. Pods and Containers - The Smallest Deployable Unit in Kubernetes </h2>
-          <h2>Pods and Containers - The Smallest Deployable Unit in Kubernetes</h2>
-<h3>Learning Objectives</h3>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Understand what a Pod is and how it differs from a container</li>
 <li>Know the Pod lifecycle and both single-container and multi-container patterns</li>
-<li>Be able to create a Pod with kubectl and check its status</li>
+<li>Create a Pod with kubectl and check its status</li>
 </ul>
-<h3>Content</h3>
+<h3>Lecture</h3>
 <h4>Why Pods Instead of Containers?</h4>
-<p>In previous lectures, we learned that a container is &quot;a self-contained unit that bundles application code with everything it needs to run.&quot; Yet when you actually work with Kubernetes, you rarely interact with containers directly - the term <strong>Pod</strong> keeps coming up instead. Why doesn&#x27;t Kubernetes deal with containers directly?</p>
-<p>In Kubernetes, a <strong>Pod is the smallest deployable unit</strong>. Kubernetes does not manage containers directly; instead, it wraps containers inside an envelope called a Pod. In other words, deploying anything to a cluster means deploying a Pod.</p>
+<p>In previous lectures we learned that a container is &quot;a self-contained unit that bundles application code with everything it needs to run.&quot; Yet when you actually work with Kubernetes, you rarely interact with containers directly — the term <strong>Pod</strong> keeps appearing instead. Why doesn&#x27;t Kubernetes manage containers directly?</p>
+<p>In Kubernetes, a <strong>Pod is the smallest deployable unit</strong>. Kubernetes does not manage containers directly; it wraps containers inside an envelope called a Pod. Deploying anything to a cluster means deploying a Pod.</p>
 <blockquote class='callout'>
-<p>Key point: A container is the &quot;packaging unit.&quot; A Pod is Kubernetes&#x27;s &quot;execution and deployment unit.&quot; You never throw a container straight at the cluster - it always goes inside a Pod first.</p>
+<p>Key point: A container is the &quot;packaging unit.&quot; A Pod is Kubernetes&#x27;s &quot;execution and deployment unit.&quot; You never throw a container straight at the cluster — it always goes inside a Pod first.</p>
 </blockquote>
-<h4>What Is a Pod? - An Envelope for Containers</h4>
-<p>A Pod is <strong>a group of one or more containers</strong>. The key feature is that containers within the same Pod <strong>share</strong> the following:</p>
+<h4>What Is a Pod? — An Envelope for Containers</h4>
+<p>A Pod is <strong>a group of one or more containers</strong>. The defining feature is that containers within the same Pod <strong>share</strong> the following:</p>
 <ul>
 <li><strong>Network</strong>: Containers in the same Pod share a single IP address and can reach each other via <code class='ic'>localhost</code>. They also share port space.</li>
-<li><strong>Storage (volumes)</strong>: They can share directories to exchange data.</li>
+<li><strong>Storage (volumes)</strong>: They can share a directory to exchange data.</li>
 </ul>
-<p>Each container still has its own filesystem, so <strong>isolation is maintained</strong>. Think of a Pod as &quot;roommates living at the same address (shared network and IP),&quot; where each person has their own room (separate filesystem).</p>
-<p>Here is something beginners often miss: <strong>regardless of whether a Pod has one container or several, all containers in the same Pod are always scheduled on the same node, created together, and destroyed together.</strong> You cannot move individual containers to a different node.</p>
+<p>Each container still has its own filesystem, so <strong>isolation is maintained</strong>. Think of a Pod as &quot;roommates sharing an address (same IP and network),&quot; where each person has their own room (separate filesystem).</p>
+<p>Here is something beginners often miss: <strong>regardless of whether a Pod holds one container or several, all containers in the same Pod are always scheduled on the same node, created together, and destroyed together.</strong> You cannot move individual containers to a different node.</p>
 <h4>Single-Container vs. Multi-Container Patterns</h4>
-<p>In practice, <strong>most Pods contain a single container (single-container pattern)</strong>. &quot;One application = one container = one Pod&quot; is the most fundamental and recommended approach. When you are starting out, this is the only pattern you need to think about.</p>
+<p>In practice, <strong>most Pods contain a single container (single-container pattern)</strong>. &quot;One application = one container = one Pod&quot; is the most fundamental and recommended form. When you are starting out, this is the only pattern you need to think about.</p>
 <p>So when do you use multiple containers? Only when you have a <strong>helper container that must work so closely with the main container that separating them makes no sense</strong>. The canonical example is the sidecar pattern:</p>
 <ul>
 <li>Main container: a Python application serving web content</li>
 <li>Sidecar container: a container that collects the application&#x27;s logs and ships them to an external destination</li>
 </ul>
-<p>Because these two need to operate on the same data and communicate tightly over <code class='ic'>localhost</code>, they are placed in the same Pod rather than split into separate Pods. This way they always run together in the same location and are managed as one unit.</p>
+<p>Because these two need to operate on the same data and communicate tightly over <code class='ic'>localhost</code>, they are placed in the same Pod rather than split into separate ones. That way they always run together in the same location and are managed as a single unit.</p>
 <p>As shown in the diagram below, both patterns share an IP and volumes within a single Pod, while each container keeps its own isolated filesystem.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
     subgraph SinglePod[&quot;Single-Container Pod&quot;]
@@ -319,17 +327,17 @@
         MSide --- MVol
     end</div><figcaption>Internal structure of a single-container Pod and a multi-container (sidecar) Pod</figcaption></figure>
 <blockquote class='callout'>
-<p>Note: Multi-container Pods are not for grouping things together just because they appear on the same screen. Use this pattern only when the coupling is tight enough that the containers must share a lifecycle. Otherwise, split them into separate Pods.</p>
+<p>Note: Multi-container Pods are not for grouping things together simply because they seem related. Use this pattern only when the coupling is tight enough that the containers genuinely must share a lifecycle. Otherwise, split them into separate Pods.</p>
 </blockquote>
-<h4>The Pod Lifecycle - and &quot;Pods Are Ephemeral&quot;</h4>
+<h4>The Pod Lifecycle — and &quot;Pods Are Ephemeral&quot;</h4>
 <p>Once a Pod is created, it passes through the following phases:</p>
 <ul>
-<li><strong>Pending</strong>: The cluster has received the request and is preparing - deciding which node to place it on and pulling the image.</li>
+<li><strong>Pending</strong>: The cluster has received the request and is preparing — deciding which node to place it on and pulling the image.</li>
 <li><strong>Running</strong>: The Pod has been scheduled to a node and its containers are actively running.</li>
 <li><strong>Succeeded</strong>: (For one-off jobs) All containers have exited successfully.</li>
 <li><strong>Failed</strong>: At least one container exited with an error.</li>
 </ul>
-<p>As shown in the state diagram below, a Pod moves through a preparation phase before running, and then ends in either a successful or failed state depending on the nature of the workload.</p>
+<p>As shown in the state diagram below, a Pod goes through a preparation phase before running, then ends in either a successful or failed state depending on the nature of the workload.</p>
 <figure class='diagram'><div class='mermaid'>stateDiagram-v2
     [*] --&gt; Pending: Pod creation requested
     Pending --&gt; Running: Node assigned · image pull complete
@@ -337,98 +345,118 @@
     Running --&gt; Failed: Exited with error
     Succeeded --&gt; [*]
     Failed --&gt; [*]</div><figcaption>Pod lifecycle phase transitions</figcaption></figure>
-<p>One concept you must internalize: <strong>Pods are ephemeral (temporary)</strong>. When a Pod dies, Kubernetes does not &quot;revive&quot; it. Instead, it <strong>creates a brand-new Pod with the same specification</strong>. The new Pod may even receive a different IP address.</p>
-<p>Who creates the new Pod when one dies? The <strong>restart policy</strong> you set when creating the Pod, along with the <strong>replication controller</strong> inside Kubernetes&#x27;s <strong>controller manager</strong>, handles this. The controller constantly compares the &quot;desired state&quot; with the &quot;actual state.&quot; When it detects that a Pod is gone, it spins up a new one to restore the desired state. This is the &quot;self-healing&quot; principle from Lecture 1 in action.</p>
+<p>There is a critical concept to internalize here: <strong>Pods are ephemeral (temporary)</strong>. The term &quot;ephemeral&quot; covers two distinct behaviors, and it is important to keep them straight:</p>
+<p><strong>① Container restart within the same Pod — controlled by <code class='ic'>restartPolicy</code>.</strong></p>
+<p>When the Pod itself is still alive but a container <em>inside</em> it crashes, the <strong>kubelet</strong> on that node restarts the container within the same Pod according to the Pod&#x27;s restart policy (<code class='ic'>Always</code> / <code class='ic'>OnFailure</code> / <code class='ic'>Never</code>). The Pod&#x27;s name and IP stay the same; only the <code class='ic'>RESTARTS</code> counter in <code class='ic'>kubectl get pods</code> goes up. The restart policy governs <em>containers inside</em> a Pod.</p>
+<p><strong>② Pod itself is gone — replacement is the job of a higher-level controller.</strong></p>
+<p>If a node goes down entirely or someone deletes the Pod so that the <strong>Pod itself disappears</strong>, that Pod does not come back. Creating a <em>new</em> Pod to restore the desired count is the responsibility of a higher-level controller such as a <strong>Deployment or ReplicaSet</strong>. (ReplicationController used to handle this, but it is rarely used today. ReplicaSet replaced it, and in practice you typically manage ReplicaSets indirectly through a Deployment.) The replacement Pod has a completely new name and IP.</p>
+<p>In short: <strong>a container crash triggers a kubelet restart inside the same Pod; a Pod&#x27;s disappearance triggers a higher-level controller to create a brand-new replacement Pod.</strong> These two mechanisms together deliver the &quot;self-healing&quot; described in Lecture 1. Note that a <strong>standalone Pod</strong> created directly with <code class='ic'>kubectl run</code> has no controller watching over it, so if that Pod disappears, nothing will recreate it.</p>
 <blockquote class='callout'>
-<p>In practice, you rarely manage Pods directly. Instead, you use Deployments - covered in the next lecture - to manage Pods on your behalf. This lecture works with Pods directly so you can internalize the concepts.</p>
+<p>That is exactly why in production you use a Deployment to manage Pods rather than creating them directly. This lecture works with Pods directly so you can build a solid conceptual foundation.</p>
 </blockquote>
 <h4>Creating and Inspecting Pods with kubectl (Hands-On)</h4>
 <p>Time to try it yourself. To practice Kubernetes locally, you can use <strong>minikube</strong> (a tool that runs a single-node cluster on your development machine) or the Kubernetes feature built into Docker Desktop. The following assumes your cluster is up and <code class='ic'>kubectl</code> is connected to it.</p>
-<p><code class='ic'>kubectl</code> is the command-line tool for sending commands to Kubernetes. Commands are delivered to the API server, and the flow looks like this:</p>
+<p><code class='ic'>kubectl</code> is the command-line tool for sending commands to Kubernetes. Commands are delivered to the API Server, following the flow below.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
     participant U as User
     participant K as kubectl
     participant API as API Server
     participant Sched as Scheduler
     participant Kubelet as kubelet (Node)
-    U-&gt;&gt;K: kubectl run my-web --image=nginx
+    U-&gt;&gt;K: kubectl run my-pod --image=nginx
     K-&gt;&gt;API: Pod creation request
-    API--&gt;&gt;K: pod/my-web created
+    API--&gt;&gt;K: pod/my-pod created
     API-&gt;&gt;Sched: Request node assignment
     Sched--&gt;&gt;API: Selected node
     API-&gt;&gt;Kubelet: Instruction to start container on assigned node
-    Kubelet--&gt;&gt;API: Image pull · container start report</div><figcaption>Flow of a kubectl run command through the API server to a running Pod</figcaption></figure>
-<p>Let&#x27;s start by creating a Pod containing a single nginx web server container.</p>
+    Kubelet--&gt;&gt;API: Image pull · container start report</div><figcaption>Flow of a kubectl run command through the API Server to a running Pod</figcaption></figure>
+<p>Let&#x27;s start by creating a Pod containing a single nginx web server container. Good news: <strong>in modern Kubernetes (1.18 and later), <code class='ic'>kubectl run</code> creates a single Pod by default.</strong> No extra flags are needed:</p>
 <pre><code>
-kubectl run my-web --image=nginx
+kubectl run my-pod --image=nginx
 </code></pre>
 <pre><code>
-pod/my-web created
+pod/my-pod created
 </code></pre>
 <ul>
-<li><code class='ic'>run</code>: command that creates a single Pod</li>
-<li><code class='ic'>my-web</code>: name of the Pod</li>
+<li><code class='ic'>run</code>: the command that creates a standalone Pod</li>
+<li><code class='ic'>my-pod</code>: the name for the Pod</li>
 <li><code class='ic'>--image=nginx</code>: the container image to use</li>
 </ul>
-<p>Now check the Pod list and its status.</p>
+<blockquote class='callout'>
+<p>A note on history: before Kubernetes 1.18, <code class='ic'>kubectl run</code> had a &quot;generator&quot; feature that created different resource types (Deployments, Jobs, etc.) depending on the flags you passed. That is why older documentation says &quot;add <code class='ic'>--restart=Never</code> to create a single Pod.&quot; The generator behavior was <strong>removed in 1.18</strong>, and <code class='ic'>kubectl run</code> now creates only Pods. Use <code class='ic'>kubectl create deployment</code> when you need a Deployment.</p>
+</blockquote>
+<p>So what does <code class='ic'>--restart</code> do in current Kubernetes? It simply sets the <strong><code class='ic'>restartPolicy</code> field on the resulting Pod</strong> — it does not change the kind of resource created. Whether or not you include <code class='ic'>--restart</code>, you always get a Pod; only the restart policy differs:</p>
+<ul>
+<li>Omitted: <code class='ic'>restartPolicy: Always</code> (default)</li>
+<li><code class='ic'>--restart=OnFailure</code>: restart only on non-zero exit (suitable for batch jobs)</li>
+<li><code class='ic'>--restart=Never</code>: never restart (run once and stop)</li>
+</ul>
+<blockquote class='callout'>
+<p>Tip: Add <code class='ic'>--dry-run=client -o yaml</code> to preview the YAML manifest a command would produce without actually creating anything. For example: <code class='ic'>kubectl run my-pod --image=nginx --dry-run=client -o yaml</code>. Check the <code class='ic'>kind: Pod</code> and <code class='ic'>restartPolicy</code> fields in the output — it is a great bridge to the declarative YAML approach covered in Lecture 5.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>Practical tip: For a quick debugging shell, use <code class='ic'>kubectl run tmp --image=busybox --rm -it --restart=Never -- sh</code>. The <code class='ic'>--rm</code> flag deletes the Pod automatically when you exit, and <code class='ic'>--restart=Never</code> ensures it runs once without restarting.</p>
+</blockquote>
+<p>Now check the Pod list and status:</p>
 <pre><code>
 kubectl get pods
 </code></pre>
 <pre><code>
 NAME     READY   STATUS    RESTARTS   AGE
-my-web   1/1     Running   12s        12s
+my-pod   1/1     Running   0          12s
 </code></pre>
 <ul>
-<li><code class='ic'>READY 1/1</code>: all 1 container in the Pod is ready (for a multi-container Pod this would show <code class='ic'>2/2</code>)</li>
+<li><code class='ic'>READY 1/1</code>: all 1 container in the Pod is ready (a multi-container Pod would show <code class='ic'>2/2</code>)</li>
 <li><code class='ic'>STATUS Running</code>: running normally (right after creation you may briefly see <code class='ic'>ContainerCreating</code> or <code class='ic'>Pending</code>)</li>
-<li><code class='ic'>RESTARTS</code>: number of times the container has been restarted</li>
+<li><code class='ic'>RESTARTS</code>: the number of times the <strong>container has been restarted within the same Pod</strong> by the restart policy mechanism described above</li>
 </ul>
-<p>For more detail - which node it landed on, its IP, events, and more - use <code class='ic'>describe</code>. This is the first command you will reach for when something goes wrong.</p>
+<p>For more detail — which node it landed on, its IP, events, and more — use <code class='ic'>describe</code>. This is the first command you will reach for when something goes wrong:</p>
 <pre><code>
-kubectl describe pod my-web
+kubectl describe pod my-pod
 </code></pre>
 <pre><code>
-Name:         my-web
+Name:         my-pod
 Namespace:    default
 Node:         minikube/192.168.49.2
 Status:       Running
 IP:           10.244.0.7
 Containers:
-  my-web:
+  my-pod:
     Image:    nginx
     State:    Running
 Events:
   Type    Reason     Age   Message
   ----    ------     ----  -------
-  Normal  Scheduled  20s   Successfully assigned default/my-web to minikube
+  Normal  Scheduled  20s   Successfully assigned default/my-pod to minikube
   Normal  Pulled     18s   Container image &quot;nginx&quot; already present on machine
-  Normal  Started    17s   Started container my-web
+  Normal  Started    17s   Started container my-pod
 </code></pre>
-<p>Look at the <code class='ic'>Events</code> section: you can see the actual log entries for the scheduler assigning a node (Scheduled), pulling the image (Pulled), and starting the container (Started) - the same flow described in Lecture 2.</p>
-<p>You can also view the container&#x27;s logs or open an interactive shell inside it.</p>
+<p>The <code class='ic'>Events</code> section shows the actual log entries for the Scheduler assigning a node (Scheduled), pulling the image (Pulled), and starting the container (Started) — the same flow described in Lecture 2, now visible as real output.</p>
+<p>You can also view the container&#x27;s logs or open an interactive shell inside it:</p>
 <pre><code>
-kubectl logs my-web
-kubectl exec -it my-web -- /bin/bash
+kubectl logs my-pod
+kubectl exec -it my-pod -- /bin/bash
 </code></pre>
-<p>When you are done, delete the Pod.</p>
+<p>When you are done, delete the Pod:</p>
 <pre><code>
-kubectl delete pod my-web
+kubectl delete pod my-pod
 </code></pre>
 <pre><code>
-pod &quot;my-web&quot; deleted
+pod &quot;my-pod&quot; deleted
 </code></pre>
 <blockquote class='callout'>
-<p>A Pod created directly with <code class='ic'>kubectl run</code> simply disappears when deleted. By contrast, a Pod managed by a Deployment (covered next) will be immediately replaced by the controller the moment you delete it. That difference is exactly what &quot;Pods are ephemeral&quot; means in practice.</p>
+<p>A standalone Pod created with <code class='ic'>kubectl run</code> simply disappears when deleted — there is no controller to recreate it. But a Pod managed by a Deployment (covered next) gets replaced immediately the moment you delete it. That difference is exactly what &quot;Pods are ephemeral&quot; means in practice.</p>
 </blockquote>
 <h4>Wrapping Up</h4>
-<p>A Pod is the smallest unit Kubernetes works with - an envelope that wraps containers and lets them share networking and storage. Most of the time you use a single-container Pod, and you only bundle multiple containers together when a tightly coupled helper needs to share the same lifecycle. Pods are ephemeral: when one dies it is not revived; a new one takes its place. That is why in production you hand Pod management over to a Deployment rather than dealing with Pods directly - which is the topic of the next lecture.</p>
+<p>A Pod is the smallest unit Kubernetes works with — an envelope that wraps containers and lets them share networking and storage. Most of the time you use a single-container Pod, and you only bundle multiple containers together when a tightly coupled sidecar needs to share the same lifecycle. Pods are ephemeral: a container crash triggers a kubelet restart inside the same Pod, while a Pod&#x27;s disappearance is handled by a higher-level controller that creates a brand-new replacement. That is why production workloads hand Pod management over to a Deployment — which is the topic of the next lecture.</p>
 <h3>Key Takeaways</h3>
 <ul>
-<li>A <strong>Pod</strong> is the smallest deployable unit in Kubernetes - a group wrapping one or more containers. You deploy Pods to the cluster, not bare containers.</li>
+<li>A <strong>Pod</strong> is Kubernetes&#x27;s smallest deployable unit — a group wrapping one or more containers. You deploy Pods to the cluster, not bare containers.</li>
 <li>Containers in the same Pod <strong>share an IP, network, and storage volumes</strong> and communicate over <code class='ic'>localhost</code>, but each has its own isolated filesystem. They are always co-located on the same node and are created and destroyed together.</li>
 <li>Use a <strong>single-container Pod</strong> by default. Only use a <strong>multi-container (sidecar)</strong> Pod when a helper container is so tightly coupled to the main container that they must share a lifecycle.</li>
-<li>The Pod lifecycle is <code class='ic'>Pending → Running → (Succeeded / Failed)</code>. <strong>Pods are ephemeral</strong> - when one dies the controller creates an identical new Pod to restore the desired state.</li>
-<li>Key commands: <code class='ic'>kubectl run</code> (create) → <code class='ic'>kubectl get pods</code> (list and status) → <code class='ic'>kubectl describe pod</code> (detail and events) → <code class='ic'>kubectl logs</code> / <code class='ic'>kubectl exec</code> (logs and shell access) → <code class='ic'>kubectl delete pod</code> (delete).</li>
+<li>The Pod lifecycle is <code class='ic'>Pending → Running → (Succeeded / Failed)</code>. <strong>When a container crashes</strong>, the kubelet restarts it inside the same Pod according to <code class='ic'>restartPolicy</code>. <strong>When the Pod itself disappears</strong>, a higher-level controller such as a Deployment or ReplicaSet creates a brand-new replacement Pod. Do not confuse these two mechanisms.</li>
+<li><strong><code class='ic'>kubectl run</code> in modern Kubernetes (1.18+) creates a single Pod.</strong> The <code class='ic'>--restart</code> flag sets only the <code class='ic'>restartPolicy</code> on that Pod — it does not change what kind of resource is created. Use <code class='ic'>kubectl create deployment</code> when you need a Deployment.</li>
+<li>Hands-on commands: <code class='ic'>kubectl run</code> (create) → <code class='ic'>kubectl get pods</code> (list and status) → <code class='ic'>kubectl describe pod</code> (detail and events) → <code class='ic'>kubectl logs</code> / <code class='ic'>kubectl exec</code> (logs and shell access) → <code class='ic'>kubectl delete pod</code> (delete).</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
               <p class='q'>Practice 1. Use kubectl run to create a Pod named &#x27;my-web&#x27; using the nginx image. After creating it, do the following three things.
@@ -672,34 +700,33 @@ kubectl delete -f sidecar-pod.yaml
         </article>
 <article id='lec4' class='lecture'>
           <h2>04. Deployment and Service - Deploying Apps and Exposing Them Externally </h2>
-          <h2>Deployment and Service - Deploying Apps and Exposing Them Externally</h2>
-<h3>Learning Objectives</h3>
+          <h3>Learning Objectives</h3>
 <ul>
-<li>Manage Pod replication, self-healing, and rolling updates using a Deployment.</li>
-<li>Understand how to access Pods through a Service (ClusterIP / NodePort).</li>
-<li>Deploy a Deployment with kubectl and expose it externally via a Service.</li>
+<li>Manage Pod replication, self-healing, and rolling updates using a Deployment</li>
+<li>Understand how to access Pods through a Service (ClusterIP / NodePort)</li>
+<li>Deploy a Deployment with kubectl and expose it externally via a Service</li>
 </ul>
-<h3>Content</h3>
+<h3>Lecture</h3>
 <h4>Why Not Create Pods Directly?</h4>
-<p>In Lecture 3 we created a Pod directly with <code class='ic'>kubectl run</code>. In practice, however, you will rarely — if ever — create Pods by hand. The reason is simple: a Pod is a <strong>disposable resource that can disappear at any moment</strong>. If a node goes down, someone accidentally deletes the Pod, or the cluster migrates the Pod to another node, that Pod is gone. If you created it by hand, the service stays down until someone manually recreates it.</p>
-<p>That is why Kubernetes provides <strong>Deployment</strong> as a higher-level abstraction on top of Pods. You simply declare the desired state — &quot;keep N Pods running at all times&quot; — and let Kubernetes do the work of actually maintaining that state.</p>
+<p>In Lecture 3 we created a Pod directly with <code class='ic'>kubectl run</code>. In practice, however, you will rarely — if ever — create Pods by hand. The reason is simple: a Pod is a <strong>disposable resource that can disappear at any moment</strong>. If a node goes down, someone accidentally deletes the Pod, or the cluster migrates the Pod to another node, that Pod is gone. If you created it manually, the service stays down until someone recreates it by hand.</p>
+<p>That is why Kubernetes provides <strong>Deployment</strong> as a higher-level abstraction on top of Pods. You simply declare the desired state — &quot;keep N Pods running at all times&quot; — and let Kubernetes do the work of maintaining that state.</p>
 <blockquote class='callout'>
 <p>The core philosophy of Kubernetes is to declare <em>what state you want</em>, not <em>how to get there</em>. A Deployment is the canonical example of this declarative mindset.</p>
 </blockquote>
 <h4>Three Things a Deployment Does</h4>
-<p>A Deployment manages a group of Pod <strong>replicas</strong>. It has three core capabilities.</p>
+<p>A Deployment manages a group of Pod <strong>replicas</strong>. It has three core capabilities:</p>
 <p><strong>1. Replication — run multiple identical copies.</strong></p>
-<p>If you specify <code class='ic'>replicas: 3</code> in a Deployment, Kubernetes ensures exactly three identical Pods are always running. When traffic increases, simply raise the number. With multiple replicas, losing one Pod does not interrupt the service.</p>
-<p><strong>2. Self-healing — automatically restart what dies.</strong></p>
-<p>A Deployment continuously monitors the number of Pods it manages. If one Pod dies and the count drops from 3 to 2, Kubernetes immediately creates a new Pod to bring it back to 3. The desired state (3 replicas) is restored automatically without any human intervention. This is the single biggest reason to use a Deployment instead of raw Pods.</p>
+<p>If you set <code class='ic'>replicas: 3</code> in a Deployment, Kubernetes ensures exactly three identical Pods are always running. When traffic increases, simply raise the number. With multiple replicas, losing one Pod does not interrupt the service.</p>
+<p><strong>2. Self-healing — automatically replace what dies.</strong></p>
+<p>A Deployment continuously monitors the number of Pods it manages. If one Pod dies and the count drops from 3 to 2, Kubernetes immediately creates a new Pod to bring it back to 3. The desired state is restored automatically without any human intervention. This is the single biggest reason to use a Deployment instead of raw Pods.</p>
 <p><strong>3. Rolling Update — deploy a new version without downtime.</strong></p>
-<p>When upgrading an app from v1 to v2, a Deployment does not replace all Pods at once. It gradually swaps them out one at a time, ensuring the service never goes down (zero downtime).</p>
+<p>When upgrading an app from v1 to v2, a Deployment does not replace all Pods at once. It gradually swaps them out, keeping the service running throughout the update (zero downtime).</p>
 <p>The rolling update process works as follows:</p>
 <p>1. Create one additional Pod running the new version (v2).</p>
 <p>2. Once the new Pod is ready and accepting traffic, route requests to it.</p>
-<p>3. Terminate one Pod running the old version (v1).</p>
+<p>3. Terminate one Pod still running the old version (v1).</p>
 <p>4. Repeat until every Pod runs the new version.</p>
-<p>The diagram below illustrates the cycle of bringing up a new Pod and tearing down an old one.</p>
+<p>The diagram below shows this cycle of bringing up a new Pod and tearing down an old one.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TD
     A[&quot;Spin up one new v2 Pod&quot;] --&gt; B{&quot;Is the new Pod ready?&quot;}
     B --&gt;|No| B
@@ -708,12 +735,12 @@ kubectl delete -f sidecar-pod.yaml
     D --&gt; E{&quot;Have all Pods been replaced with v2?&quot;}
     E --&gt;|No| A
     E --&gt;|Yes| F[&quot;Rolling update complete — zero downtime&quot;]</div><figcaption>Rolling update step-by-step flow</figcaption></figure>
-<p>Two safety parameters control the process. <strong>maxUnavailable</strong> sets how many Pods may be taken down simultaneously, and <strong>maxSurge</strong> sets how many extra Pods may exist above the desired count. Both default to 25%. With 4 Pods, for example, at most 1 is taken down at a time, and at most 1 extra (5 total) is spun up to fill the gap.</p>
+<p>Two safety parameters control the process. <strong>maxUnavailable</strong> sets how many Pods may be taken down simultaneously, and <strong>maxSurge</strong> sets how many extra Pods may exist above the desired count. Both default to 25%. With 4 Pods, for example, at most 1 is taken down at a time, and at most 1 extra is spun up — temporarily running 5 — to fill the gap without leaving any Pod slot empty.</p>
 <blockquote class='callout'>
 <p>If the new version has a problem, <code class='ic'>kubectl rollout undo</code> instantly reverts to the previous version. A Deployment retains the revision history to make this possible.</p>
 </blockquote>
 <h4>Let&#x27;s Deploy a Deployment</h4>
-<p>Time to try it hands-on. (Assumes a local cluster such as Minikube is already running.) The command below deploys an nginx web server with 3 replicas.</p>
+<p>Time to try it hands-on. (Assumes a local cluster such as Minikube is already running.) The command below deploys an nginx web server with 3 replicas:</p>
 <pre><code>
 # Create a Deployment using the nginx image with 3 replicas
 kubectl create deployment web --image=nginx --replicas=3
@@ -725,7 +752,7 @@ kubectl get deployments
 NAME   READY   UP-TO-DATE   AVAILABLE   AGE
 web    3/3     3            3           15s
 </code></pre>
-<p><code class='ic'>READY 3/3</code> means all three desired replicas are healthy. Let&#x27;s also look at the Pods that were created.</p>
+<p><code class='ic'>READY 3/3</code> means all three desired replicas are healthy. Now check the Pods that were created:</p>
 <pre><code>
 kubectl get pods
 </code></pre>
@@ -735,7 +762,7 @@ web-5d4f8c7b9c-7k2lp   1/1     Running   0          30s
 web-5d4f8c7b9c-q8xvr   1/1     Running   0          30s
 web-5d4f8c7b9c-zm4tn   1/1     Running   0          30s
 </code></pre>
-<p>Now let&#x27;s witness self-healing firsthand. Force-delete one of the Pods.</p>
+<p>Now let&#x27;s see self-healing in action. Force-delete one of the Pods:</p>
 <pre><code>
 kubectl delete pod web-5d4f8c7b9c-7k2lp
 kubectl get pods
@@ -747,36 +774,50 @@ web-5d4f8c7b9c-zm4tn   1/1     Running             0          1m
 web-5d4f8c7b9c-rt9wd   0/1     ContainerCreating   0          2s
 </code></pre>
 <p>A new Pod with a different name (<code class='ic'>...-rt9wd</code>) appears immediately in place of the deleted one. We did nothing, yet the count is back to 3. That is self-healing in action.</p>
-<p>Changing the replica count is equally straightforward — just one command.</p>
+<p>Changing the replica count takes a single command:</p>
 <pre><code>
 kubectl scale deployment web --replicas=5
 </code></pre>
-<h4>Service - Stable Access to a Shifting Set of Pods</h4>
-<p>There is one problem left. Every time a Pod dies and is recreated, its <strong>IP address changes</strong>. As you saw above, a replaced Pod gets a new name and a new IP. How would users of your app know which IP to connect to?</p>
-<p><strong>Service</strong> solves this. A Service is a <strong>stable front door and load balancer</strong> placed in front of a set of Pods. It holds a single address that never changes and distributes incoming requests evenly across the Pods behind it (load balancing). Even as Pods die and are recreated with new IPs, the Service automatically refreshes its list of healthy Pods, so users never notice any change.</p>
-<p>The Service decides which Pods to send traffic to using a <strong>label selector</strong>. If you specify &quot;send to Pods with the label <code class='ic'>app=web</code>&quot;, the Service will find and distribute requests to all Pods carrying that label, regardless of how many there are.</p>
-<p>There are several types of Service. The two you must know at the beginner level are:</p>
-<p><strong>ClusterIP (default)</strong> — assigns an address that is reachable only <em>inside</em> the cluster. It cannot be accessed from outside, and is used for Pod-to-Pod communication within the cluster. For example, a web server Pod connecting to a database Pod would access the database through a ClusterIP Service. Because there is no external exposure, this is the safest default choice.</p>
-<p><strong>NodePort</strong> — opens the same port (in the range 30000–32767) on <em>every node</em> in the cluster and forwards external traffic on that port to the Service. You can reach the cluster from outside using <code class='ic'>&lt;NodeIP&gt;:&lt;NodePort&gt;</code>, making it well-suited for learning and simple testing.</p>
-<p>The two access paths can be summarised as:</p>
+<blockquote class='callout'>
+<p>The <code class='ic'>kubectl create</code>, <code class='ic'>kubectl scale</code>, and <code class='ic'>kubectl expose</code> commands used here are <strong>imperative</strong> — you tell Kubernetes what action to take. This is convenient for learning, but the production standard is the <strong>declarative</strong> approach covered in Lecture 5: writing the desired state into a YAML manifest and applying it with <code class='ic'>kubectl apply -f</code>. Think of these commands as a preview of what you will eventually express in YAML.</p>
+</blockquote>
+<h4>Service — Stable Access to a Shifting Set of Pods</h4>
+<p>There is one problem remaining. Every time a Pod dies and is recreated, its <strong>IP address changes</strong>. As you saw above, a replaced Pod gets a new name and a new IP. How do users of your app know which IP to connect to?</p>
+<p><strong>Service</strong> solves this. A Service is a <strong>stable front door and load balancer</strong> placed in front of a set of Pods. It holds a single address that never changes and distributes incoming requests evenly across the Pods behind it. Even as Pods are replaced with new IPs, the Service automatically keeps track of healthy Pods, so users never notice the change.</p>
+<p>The Service decides which Pods to send traffic to using a <strong>label selector</strong>. If you specify &quot;send to Pods with the label <code class='ic'>app=web</code>&quot;, the Service finds and distributes requests to all Pods carrying that label, regardless of how many there are.</p>
+<p>There are several Service types. The two you must know at the beginner level are:</p>
+<p><strong>ClusterIP (default)</strong> — assigns a virtual address that is reachable only <em>inside</em> the cluster. External access is not possible. Use it for Pod-to-Pod communication within the cluster — for example, a web server Pod connecting to a database Pod. Because there is no external exposure, this is the safest default choice.</p>
+<p><strong>NodePort</strong> — extends ClusterIP by adding an external access path. Here is the most important thing to understand: <strong>NodePort is not a separate Service that replaces ClusterIP. It wraps ClusterIP and adds an external port on top of it.</strong> Creating a NodePort Service automatically (1) assigns a ClusterIP for internal communication, and (2) opens the same port (in the range 30000–32767) on every node so that <code class='ic'>&lt;NodeIP&gt;:&lt;NodePort&gt;</code> reaches the Service from outside the cluster. NodePort is well-suited for learning and simple testing.</p>
+<p>A single NodePort Service therefore provides <strong>two access paths to the same set of Pods</strong>:</p>
 <ul>
-<li>External user → (NodePort) → Service → multiple Pods</li>
-<li>Pod inside the cluster → (ClusterIP) → Service → multiple Pods</li>
+<li>External user → <code class='ic'>NodeIP:NodePort</code> (NodePort) → <strong>same Service</strong> → the backing Pods</li>
+<li>Pod inside the cluster → ClusterIP address (included in the NodePort Service) → <strong>same Service</strong> → the same backing Pods</li>
 </ul>
-<p>The architecture diagram below shows how external traffic comes in through NodePort and internal traffic through ClusterIP, both reaching the same Service and then being distributed to the backing Pods.</p>
+<p>The diagram below shows how external traffic (via NodePort) and internal traffic (via ClusterIP) both arrive at <strong>one Service object</strong> and are then distributed to the same set of Pods. NodePort is the &quot;outer door&quot; added to that Service, while ClusterIP is the &quot;inner door&quot; that was already there.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
-    User[&quot;External User&quot;] --&gt;|&quot;NodeIP:NodePort&quot;| NP[&quot;NodePort Service&quot;]
-    InPod[&quot;Pod Inside Cluster&quot;] --&gt;|&quot;ClusterIP address&quot;| CIP[&quot;ClusterIP Service&quot;]
+    User[&quot;External User&quot;]
+    InPod[&quot;Pod Inside Cluster&quot;]
 
     subgraph Cluster[&quot;Kubernetes Cluster&quot;]
-        NP --&gt; P1[&quot;Pod web-1&quot;]
-        NP --&gt; P2[&quot;Pod web-2&quot;]
-        NP --&gt; P3[&quot;Pod web-3&quot;]
-        CIP --&gt; D1[&quot;Pod db-1&quot;]
-        CIP --&gt; D2[&quot;Pod db-2&quot;]
-    end</div><figcaption>Service access paths - external NodePort and internal ClusterIP</figcaption></figure>
+        subgraph Svc[&quot;One NodePort Service (web)&quot;]
+            NPGate[&quot;External path&lt;br/&gt;NodeIP:NodePort&quot;]
+            CIPGate[&quot;Internal path&lt;br/&gt;ClusterIP address&quot;]
+        end
+        P1[&quot;Pod web-1&lt;br/&gt;app=web&quot;]
+        P2[&quot;Pod web-2&lt;br/&gt;app=web&quot;]
+        P3[&quot;Pod web-3&lt;br/&gt;app=web&quot;]
+    end
+
+    User --&gt;|&quot;NodeIP:NodePort&quot;| NPGate
+    InPod --&gt;|&quot;ClusterIP address&quot;| CIPGate
+    NPGate --&gt;|Load-balanced to the same Pod set| P1
+    NPGate --&gt; P2
+    NPGate --&gt; P3
+    CIPGate --&gt; P1
+    CIPGate --&gt; P2
+    CIPGate --&gt; P3</div><figcaption>Service access paths — one NodePort Service providing both an external port and an internal ClusterIP</figcaption></figure>
 <h4>Let&#x27;s Expose the Service</h4>
-<p>Expose the <code class='ic'>web</code> Deployment we created earlier as a NodePort Service.</p>
+<p>Expose the <code class='ic'>web</code> Deployment as a NodePort Service:</p>
 <pre><code>
 # Expose the web Deployment as a NodePort Service on port 80
 kubectl expose deployment web --type=NodePort --port=80
@@ -788,14 +829,15 @@ kubectl get service web
 NAME   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
 web    NodePort   10.96.142.31    &lt;none&gt;        80:31845/TCP   5s
 </code></pre>
-<p>Look at the <code class='ic'>PORT(S)</code> column: <code class='ic'>80:31845</code>. The left-hand <code class='ic'>80</code> is the Service&#x27;s internal port; the right-hand <code class='ic'>31845</code> is the NodePort opened to the outside (the number is assigned automatically and varies by environment). On Minikube, you can get the full accessible URL with a single command:</p>
+<p>Notice the <code class='ic'>CLUSTER-IP</code> column (<code class='ic'>10.96.142.31</code>). Even though this is a NodePort Service, a ClusterIP is still assigned — that is the internal path for Pods within the cluster. In the <code class='ic'>PORT(S)</code> column, <code class='ic'>80:31845</code> means port 80 is the Service port and <code class='ic'>31845</code> is the NodePort exposed to the outside (automatically assigned; the number varies by environment). One Service object, two access paths — visible right here in the output.</p>
+<p>On Minikube, get the full external URL with one command:</p>
 <pre><code>
 minikube service web --url
 </code></pre>
 <pre><code>
 http://192.168.49.2:31845
 </code></pre>
-<p>Open that URL in a browser or with curl and you will see the default nginx page.</p>
+<p>Open that URL in a browser or with curl and you will see the nginx default page:</p>
 <pre><code>
 curl http://192.168.49.2:31845
 </code></pre>
@@ -805,10 +847,10 @@ curl http://192.168.49.2:31845
 &lt;head&gt;&lt;title&gt;Welcome to nginx!&lt;/title&gt;&lt;/head&gt;
 ...
 </code></pre>
-<p>Now let&#x27;s also try a rolling update. Simply change the image:</p>
+<p>Now let&#x27;s try a rolling update. Simply change the image:</p>
 <pre><code>
 # Update the container image to a new version → rolling update starts automatically
-kubectl set image deployment/web nginx=nginx:1.25
+kubectl set image deployment/web nginx=nginx:1.27
 
 # Watch the rollout progress in a human-readable format
 kubectl rollout status deployment/web
@@ -817,18 +859,19 @@ kubectl rollout status deployment/web
 Waiting for deployment &quot;web&quot; rollout to finish: 2 out of 3 new replicas have been updated...
 deployment &quot;web&quot; successfully rolled out
 </code></pre>
-<p>If a problem is spotted during the update, roll back immediately:</p>
+<p>If a problem shows up during the update, roll back immediately:</p>
 <pre><code>
 kubectl rollout undo deployment/web
 </code></pre>
-<p>Throughout this entire process, the Service address remains the same and user requests are never interrupted. A Deployment (keeping the app alive) paired with a Service (providing a stable access point) is the most fundamental pattern for running applications on Kubernetes.</p>
+<p>Throughout this entire process, the Service address stays the same and user requests are never interrupted. A Deployment (keeping the app alive) paired with a Service (providing a stable access point) is the most fundamental pattern for running applications on Kubernetes.</p>
 <h3>Key Takeaways</h3>
 <ul>
 <li><strong>Pods are ephemeral</strong>, so instead of creating them directly, manage them through a <strong>Deployment</strong>.</li>
-<li>A Deployment handles three things: <strong>replication</strong> (maintaining the desired number), <strong>self-healing</strong> (auto-recreating failed Pods), and <strong>rolling updates</strong> (zero-downtime deployments).</li>
+<li>A Deployment handles three things: <strong>replication</strong> (maintaining the desired count), <strong>self-healing</strong> (auto-recreating failed Pods), and <strong>rolling updates</strong> (zero-downtime deployments).</li>
 <li>A rolling update brings up new Pods until they are ready, then replaces old Pods one at a time. <code class='ic'>maxUnavailable</code> and <code class='ic'>maxSurge</code> control the pace and safety margin. Use <code class='ic'>kubectl rollout undo</code> to revert if something goes wrong.</li>
 <li>Because Pod IPs change constantly, a <strong>Service</strong> provides a stable address and load balancing. The <strong>label selector</strong> determines which Pods receive traffic.</li>
-<li><strong>ClusterIP</strong> is for internal cluster communication (default); <strong>NodePort</strong> exposes the Service externally via a port on each node.</li>
+<li><strong>ClusterIP</strong> is for internal cluster communication (default). <strong>NodePort</strong> wraps ClusterIP and adds an external port on every node, giving a single Service object two access paths — one internal, one external.</li>
+<li>The <code class='ic'>kubectl create/scale/expose</code> commands used in this lecture are imperative; the production standard is the declarative YAML + <code class='ic'>kubectl apply</code> approach covered in Lecture 5.</li>
 <li>Key commands: <code class='ic'>kubectl create deployment</code>, <code class='ic'>kubectl scale</code>, <code class='ic'>kubectl expose</code>, <code class='ic'>kubectl set image</code>, <code class='ic'>kubectl rollout status/undo</code>.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>
@@ -996,28 +1039,27 @@ kubectl describe deployment web | grep Image
           <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=lxc4EXZOOvE' target='_blank'>Most Common Kubernetes Deployment Strategies (Examples &amp; Code)</a></li><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=mNK14yXIZF4' target='_blank'>How Kubernetes deployments work</a></li></ul></div>
         </article>
 <article id='lec5' class='lecture'>
-          <h2>05. Deploying with YAML Manifests - Declarative Configuration in Practice </h2>
-          <h2>Deploying with YAML Manifests - Declarative Configuration in Practice</h2>
-<h3>Learning Objectives</h3>
+          <h2>05. Deploying with YAML Manifests - Declarative Configuration in Practice <span class='badge warn'>⚠ Needs human review</span></h2>
+          <h3>Learning Objectives</h3>
 <ul>
 <li>Understand the difference between imperative and declarative deployment approaches</li>
 <li>Write YAML manifests for a Deployment and a Service from scratch</li>
 <li>Apply manifests with <code class='ic'>kubectl apply</code> and verify the results</li>
 </ul>
-<h3>Content</h3>
+<h3>Lecture</h3>
 <h4>Why Deploy with YAML?</h4>
-<p>In lectures 3 and 4, we created Pods and Deployments using commands like <code class='ic'>kubectl run</code> and <code class='ic'>kubectl create deployment</code>. One line and you&#x27;re done — fast and convenient. In real-world environments, however, resources are almost never created this way. Instead, teams <strong>describe the desired state in a YAML file</strong> and apply that file to the cluster. In this lecture, you will learn why, and practice the technique hands-on.</p>
+<p>In Lectures 3 and 4 we created Pods and Deployments using commands like <code class='ic'>kubectl run</code> and <code class='ic'>kubectl create deployment</code>. One line and you are done — fast and convenient. In real-world environments, however, resources are almost never created this way. Instead, teams <strong>describe the desired state in a YAML file</strong> and apply that file to the cluster. In this lecture you will learn why, and practice the technique hands-on.</p>
 <blockquote class='callout'>
 <p>YAML (YAML Ain&#x27;t Markup Language) is a human-readable configuration file format. In Kubernetes, it acts as a blueprint that specifies &quot;what resource to run and what it should look like.&quot;</p>
 </blockquote>
 <h4>Imperative vs. Declarative — The Core Difference</h4>
-<p>The distinction between the two approaches comes down to one sentence.</p>
+<p>The distinction between the two approaches comes down to one sentence:</p>
 <ul>
 <li><strong>Imperative</strong>: You tell Kubernetes <em>what to do</em>, step by step. Examples: <code class='ic'>kubectl run</code>, <code class='ic'>kubectl create</code>, <code class='ic'>kubectl delete</code>. You explicitly dictate each action.</li>
 <li><strong>Declarative</strong>: You tell Kubernetes <em>what the end state should look like</em>. Examples: YAML file + <code class='ic'>kubectl apply</code>. Kubernetes figures out on its own how to get there.</li>
 </ul>
-<p>Think of it like a restaurant. The imperative approach is walking into the kitchen and barking orders: &quot;Light the burner, grill the patty, toast the bun.&quot; The declarative approach is simply saying, <strong>&quot;One cheeseburger, please.&quot;</strong> The kitchen (Kubernetes) compares the current state to the desired state and fills in whatever is missing.</p>
-<p>This continuous process of <strong>adjusting the current state to match the desired state</strong> is called the <strong>reconciliation loop</strong>. That is precisely what makes the declarative approach so powerful. Applying the same YAML file two or three times always produces the same result (idempotency), and if someone deletes a Pod, Kubernetes automatically restores it to the declared state.</p>
+<p>Think of it like ordering at a restaurant. The imperative approach is walking into the kitchen and barking orders: &quot;Light the burner, grill the patty, toast the bun.&quot; The declarative approach is simply saying <strong>&quot;One cheeseburger, please.&quot;</strong> The kitchen (Kubernetes) compares the current state to the desired state and fills in whatever is missing.</p>
+<p>This continuous process of <strong>adjusting the current state to match the desired state</strong> is called the <strong>reconciliation loop</strong>. It is exactly what makes the declarative approach so powerful. Applying the same YAML file two or three times always produces the same result (idempotency), and if someone deletes a Pod, Kubernetes automatically restores the declared state.</p>
 <p>As shown in the diagram below, the reconciliation loop endlessly repeats: compare desired state to current state → adjust if there is a difference → compare again.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
     A[&quot;Desired State&lt;br/&gt;(YAML Declaration)&quot;] --&gt; B{&quot;Does it match&lt;br/&gt;current state?&quot;}
@@ -1026,25 +1068,25 @@ kubectl describe deployment web | grep Image
     B -- &quot;Mismatch&quot; --&gt; E[&quot;Create or delete resources&lt;br/&gt;to close the gap&quot;]
     E --&gt; C
     D --&gt; B</div><figcaption>Reconciliation loop that continuously enforces the declared state</figcaption></figure>
-<p>The practical advantages of the declarative approach can be summarized as follows:</p>
+<p>The practical advantages of the declarative approach:</p>
 <ul>
 <li><strong>Version control</strong>: Store YAML files in Git to track changes and roll back when needed.</li>
-<li><strong>Reproducibility</strong>: Use the same file to deploy identical configurations across development, staging, and production environments.</li>
+<li><strong>Reproducibility</strong>: Use the same file to deploy identical configurations across development, staging, and production.</li>
 <li><strong>Collaboration</strong>: Share the file with teammates and anyone can recreate the exact same resources.</li>
-<li><strong>Reviewability</strong>: Changes can go through code review (pull requests) before being applied.</li>
+<li><strong>Reviewability</strong>: Changes can go through code review (pull requests) before being applied to the cluster.</li>
 </ul>
 <blockquote class='callout'>
-<p>For experimentation and learning, <code class='ic'>kubectl run</code> works just fine. But for production environments, YAML + <code class='ic'>kubectl apply</code> is the right approach.</p>
+<p>For experimentation and learning, <code class='ic'>kubectl run</code> works just fine. For production, YAML + <code class='ic'>kubectl apply</code> is the right approach.</p>
 </blockquote>
 <h4>The Common Structure of Every Manifest</h4>
-<p>Regardless of whether the resource is a Pod, a Deployment, or a Service, every manifest starts with the same four top-level fields.</p>
+<p>Regardless of whether the resource is a Pod, a Deployment, or a Service, every manifest starts with the same four top-level fields:</p>
 <p>| Field | Description |</p>
 <p>|-------|-------------|</p>
 <p>| <code class='ic'>apiVersion</code> | The Kubernetes API version to use (varies by resource type) |</p>
 <p>| <code class='ic'>kind</code> | The type of resource to create (Pod, Deployment, Service, etc.) |</p>
 <p>| <code class='ic'>metadata</code> | Identifying information such as the resource name and labels |</p>
 <p>| <code class='ic'>spec</code> | The actual specification describing the desired state of the resource |</p>
-<p>The field beginners get wrong most often is <code class='ic'>apiVersion</code>, because the value differs by resource type. Pods and Services use <code class='ic'>v1</code>; Deployments use <code class='ic'>apps/v1</code>. Also, YAML <strong>uses indentation (2 spaces) to represent hierarchy</strong>, so always use spaces instead of tabs and leave exactly one space after each colon (<code class='ic'>:</code>).</p>
+<p>The field beginners get wrong most often is <code class='ic'>apiVersion</code>, because the value differs by resource type. Pods and Services use <code class='ic'>v1</code>; Deployments use <code class='ic'>apps/v1</code>. YAML also <strong>uses indentation (2 spaces) to represent hierarchy</strong>, so always use spaces instead of tabs and leave exactly one space after each colon (<code class='ic'>:</code>).</p>
 <h4>Exercise 1 — Writing a Deployment Manifest</h4>
 <p>Let&#x27;s write a Deployment that runs the nginx web server with 2 replicas. Create a file called <code class='ic'>nginx-deployment.yaml</code>.</p>
 <pre><code>
@@ -1065,21 +1107,24 @@ spec:
         app: nginx            # Must match the selector above
     spec:
       containers:
-        - name: nginx         # Container list uses &#x27;-&#x27; because it is a YAML list
-          image: nginx:1.27
+        - name: nginx         # Container list — uses &#x27;-&#x27; because it is a YAML sequence
+          image: nginx:1      # Latest image in the nginx 1.x major version line
           ports:
             - containerPort: 80
 </code></pre>
-<p>The critical rule here is that the label in <code class='ic'>selector</code> and the label in <code class='ic'>template</code> <strong>must match exactly</strong>. The Deployment uses this label to identify which Pods it is responsible for. A mismatch will produce an error when you apply the manifest.</p>
+<p>The critical rule is that the label in <code class='ic'>selector</code> and the label in <code class='ic'>template</code> <strong>must match exactly</strong>. The Deployment uses this label to identify which Pods it is responsible for. A mismatch produces an error at apply time.</p>
+<blockquote class='callout'>
+<p>Image tag tip: <code class='ic'>nginx:1</code> refers to the <strong>latest image in the nginx 1.x major version line</strong> — it automatically follows the newest 1.x patch, which is convenient for picking up security fixes but means the actual version can change over time. <code class='ic'>nginx:stable</code>, by contrast, is a separate tag pointing to the nginx project&#x27;s designated stable branch. <strong><code class='ic'>nginx:1</code> and <code class='ic'>nginx:stable</code> are not the same thing</strong> — the former tracks the latest mainline 1.x release, the latter tracks the stable branch. In production, where reproducibility matters most, pin the full version explicitly, such as <code class='ic'>nginx:1.27.4</code>.</p>
+</blockquote>
 <h4>Exercise 2 — Writing a Service Manifest</h4>
-<p>Pods created by a Deployment are only visible inside the cluster, and their IP addresses change every time they restart. To allow external access, you need a <strong>Service</strong> — a stable entry point into the cluster. Create <code class='ic'>nginx-service.yaml</code>.</p>
+<p>Pods created by a Deployment are only reachable inside the cluster, and their IPs change every time they are replaced. To allow external access, you need a <strong>Service</strong> — a stable entry point. Create <code class='ic'>nginx-service.yaml</code>.</p>
 <pre><code>
 apiVersion: v1               # Services use v1
 kind: Service
 metadata:
   name: nginx-service
 spec:
-  type: NodePort             # Expose the service on a port of each node
+  type: NodePort             # Expose the Service on a port of each node (ClusterIP also assigned automatically)
   selector:
     app: nginx               # Forward traffic to Pods with this label
   ports:
@@ -1087,8 +1132,8 @@ spec:
       targetPort: 80         # The port to forward to inside the Pod (container)
       nodePort: 30080        # The node port accessible from outside (30000–32767)
 </code></pre>
-<p>The Service also uses the <code class='ic'>selector</code> label (<code class='ic'>app: nginx</code>) to find its target Pods. Because this matches the label on the Pods created by the Deployment, the Service automatically distributes traffic across those 2 Pods. You don&#x27;t need to know any Pod&#x27;s IP, and even if a Pod dies and is replaced, the label match keeps traffic flowing seamlessly.</p>
-<p>As shown in the diagram below, the Deployment and the Service are both connected to the same set of Pods through the shared <code class='ic'>app: nginx</code> label. All connectivity depends on this label matching correctly.</p>
+<p>The Service uses the same <code class='ic'>selector</code> label (<code class='ic'>app: nginx</code>) to find its target Pods. Because this matches the label on the Pods created by the Deployment, the Service automatically distributes traffic across those 2 Pods. You do not need to know any Pod&#x27;s IP, and even when a Pod is replaced, the label match keeps traffic flowing seamlessly.</p>
+<p>As shown in the diagram below, both the Deployment and the Service connect to the same Pod set through the shared <code class='ic'>app: nginx</code> label. All connectivity depends on this label matching correctly.</p>
 <figure class='diagram'><div class='mermaid'>flowchart TB
     Dep[&quot;Deployment&lt;br/&gt;nginx-deployment&lt;br/&gt;replicas: 2&quot;]
     Svc[&quot;Service&lt;br/&gt;nginx-service&lt;br/&gt;type: NodePort&quot;]
@@ -1100,7 +1145,7 @@ spec:
     Svc -- &quot;Routes traffic via&lt;br/&gt;selector app=nginx&quot; --&gt; P1
     Svc -- &quot;Routes traffic via&lt;br/&gt;selector app=nginx&quot; --&gt; P2</div><figcaption>&quot;Deployment, Service, and Pod relationships linked by the app: nginx label&quot;</figcaption></figure>
 <h4>Exercise 3 — Applying Manifests with kubectl apply and Verifying Results</h4>
-<p>Apply the manifests to the cluster. Notice that we use <code class='ic'>apply</code> rather than the imperative <code class='ic'>create</code>.</p>
+<p>Apply the manifests to the cluster. Use <code class='ic'>apply</code> rather than the imperative <code class='ic'>create</code>:</p>
 <pre><code>
 kubectl apply -f nginx-deployment.yaml
 kubectl apply -f nginx-service.yaml
@@ -1110,9 +1155,9 @@ deployment.apps/nginx-deployment created
 service/nginx-service created
 </code></pre>
 <blockquote class='callout'>
-<p><code class='ic'>create</code> only creates a resource if it doesn&#x27;t already exist, but <code class='ic'>apply</code> means &quot;make the cluster match this state.&quot; If you edit the file and run <code class='ic'>apply</code> again, only the changed parts are updated. This is the essence of declarative operations.</p>
+<p><code class='ic'>create</code> only creates a resource when it does not yet exist; <code class='ic'>apply</code> means &quot;make the cluster match this state.&quot; Edit the file and run <code class='ic'>apply</code> again, and only the changed parts are updated. This is the essence of declarative operations.</p>
 </blockquote>
-<p>Now verify the results.</p>
+<p>Now verify the results:</p>
 <pre><code>
 kubectl get deployment
 kubectl get pods
@@ -1129,7 +1174,14 @@ nginx-deployment-7d9c5b8f6c-fghij   1/1     Running   0          20s
 NAME            TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
 nginx-service   NodePort   10.96.120.45    &lt;none&gt;        80:30080/TCP   18s
 </code></pre>
-<p><code class='ic'>READY 2/2</code> means both requested replicas are up and running, and you can see 2 Pods in <code class='ic'>Running</code> status. To see the power of the declarative approach in action, try forcibly deleting one of those Pods.</p>
+<p><code class='ic'>READY 2/2</code> means both requested replicas are up. Look at the Pod names: <code class='ic'>nginx-deployment-7d9c5b8f6c-abcde</code> is made of three parts — <strong><code class='ic'>&lt;Deployment name&gt;-&lt;ReplicaSet hash&gt;-&lt;Pod unique suffix&gt;</code></strong>.</p>
+<ul>
+<li><code class='ic'>nginx-deployment</code> — the <strong>Deployment&#x27;s name</strong>, exactly as we wrote it</li>
+<li><code class='ic'>7d9c5b8f6c</code> — a hash identifying the <strong>ReplicaSet</strong> the Deployment created automatically. All Pods spun out by the same ReplicaSet share this middle segment (you can verify with <code class='ic'>kubectl get replicaset</code>, where you will find <code class='ic'>nginx-deployment-7d9c5b8f6c</code>)</li>
+<li><code class='ic'>abcde</code> — a <strong>random suffix unique to each Pod</strong>. Even Pods from the same ReplicaSet have different suffixes</li>
+</ul>
+<p>This three-part name directly reflects the three-tier ownership chain: Deployment → ReplicaSet → Pod. We will revisit this chain in a moment.</p>
+<p>To see the declarative approach&#x27;s power, force-delete one of those Pods:</p>
 <pre><code>
 kubectl delete pod nginx-deployment-7d9c5b8f6c-abcde
 kubectl get pods
@@ -1139,39 +1191,53 @@ NAME                                READY   STATUS    RESTARTS   AGE
 nginx-deployment-7d9c5b8f6c-fghij   1/1     Running   0          90s
 nginx-deployment-7d9c5b8f6c-klmno   1/1     Running   0          5s
 </code></pre>
-<p>The moment the Pod is deleted, Kubernetes brings up a new one to restore the count to 2. The reconciliation loop continuously enforces the declared state of &quot;2 replicas.&quot; Finally, verify everything is working.</p>
+<p>The moment the Pod is deleted, Kubernetes brings up a new one to restore the count to 2. Notice that the new Pod shares the same ReplicaSet hash (<code class='ic'>7d9c5b8f6c</code>) but has a new unique suffix (<code class='ic'>klmno</code>) — the same ReplicaSet created a fresh replacement. The reconciliation loop continuously enforces &quot;2 replicas&quot; as declared.</p>
+<p>Finally, verify everything is working:</p>
 <pre><code>
 curl http://localhost:30080
 </code></pre>
-<p>If you see <code class='ic'>Welcome to nginx!</code> in the response, the deployment is successful. When you&#x27;re finished with the exercise, clean up.</p>
+<p>If you see <code class='ic'>Welcome to nginx!</code> in the response, the deployment is a success. When you are finished with the exercise, clean up:</p>
 <pre><code>
 kubectl delete -f nginx-service.yaml -f nginx-deployment.yaml
 </code></pre>
-<h4>The Full Apply Flow at a Glance</h4>
-<p>Here is what happens inside the cluster when you apply a manifest. When you send a YAML file to the API Server via <code class='ic'>kubectl apply</code>, the API Server stores the desired state in etcd, the Deployment controller creates a ReplicaSet, the ReplicaSet controller creates Pods, the scheduler assigns them to nodes, and the kubelet on each node actually starts the containers. The sequence diagram below shows this flow in chronological order.</p>
+<h4>The Full Apply Flow — Deployment → ReplicaSet → Pod</h4>
+<p>Let&#x27;s be precise about what happens inside the cluster when you apply a manifest. There is a common misconception here: <strong>a Deployment does not create Pods directly.</strong> Responsibility is delegated down a three-tier chain:</p>
+<p>1. The user sends a YAML (desired state) to the <strong>API Server</strong> via <code class='ic'>kubectl apply</code>.</p>
+<p>2. The API Server stores the desired state in <strong>etcd</strong>.</p>
+<p>3. The <strong>Deployment controller</strong> detects the Deployment. Rather than creating Pods itself, it creates a <strong>ReplicaSet object</strong>. (A ReplicaSet is a simpler controller whose only job is &quot;keep N identical Pods running.&quot; Deployment wraps ReplicaSet to add version management and rolling updates on top.)</p>
+<p>4. The <strong>ReplicaSet controller</strong> detects the new ReplicaSet and creates the <strong>Pod objects</strong> specified in <code class='ic'>replicas</code>.</p>
+<p>5. The <strong>Scheduler</strong> finds the unscheduled Pods and assigns each one to an appropriate node.</p>
+<p>6. The <strong>kubelet</strong> on each selected node picks up its assigned Pods and starts the actual containers, then reports status back to the API Server.</p>
+<p>The chain of responsibility is: <strong>Deployment (version management and rollouts) → ReplicaSet (replica count maintenance) → Pod (actual execution)</strong>. The three-part Pod name you saw earlier mirrors this chain exactly. The &quot;self-healing&quot; from Lecture 4 actually happens at the ReplicaSet level; Deployment sits above it and handles new-version rollouts by creating a new ReplicaSet and gradually shifting traffic over.</p>
+<p>The sequence diagram below shows this flow in chronological order. Notice that the Deployment controller and ReplicaSet controller are listed as separate participants, illustrating how responsibility is handed off one step at a time.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
     participant U as User (kubectl)
     participant API as API Server
     participant ETCD as etcd
-    participant CTRL as Controller
+    participant DC as Deployment Controller
+    participant RC as ReplicaSet Controller
     participant SCH as Scheduler
     participant KUBELET as kubelet (Node)
 
-    U-&gt;&gt;API: kubectl apply — sends YAML desired state
-    API-&gt;&gt;ETCD: Stores desired state
+    U-&gt;&gt;API: kubectl apply — YAML desired state
+    API-&gt;&gt;ETCD: Store desired state
     API--&gt;&gt;U: Acknowledgement (created)
-    CTRL-&gt;&gt;API: Compares desired state vs. current state
-    CTRL-&gt;&gt;API: Requests ReplicaSet and Pod creation
-    SCH-&gt;&gt;API: Selects a node for scheduling
-    KUBELET-&gt;&gt;API: Checks Pods assigned to this node
-    KUBELET-&gt;&gt;KUBELET: Starts the container
-    KUBELET-&gt;&gt;API: Reports status (Running)</div><figcaption>How a single kubectl apply leads to a running container</figcaption></figure>
+    DC-&gt;&gt;API: Detect Deployment
+    DC-&gt;&gt;API: Request ReplicaSet creation
+    RC-&gt;&gt;API: Detect ReplicaSet
+    RC-&gt;&gt;API: Request Pod creation (replicas count)
+    SCH-&gt;&gt;API: Find unscheduled Pods, assign nodes
+    KUBELET-&gt;&gt;API: Discover Pods assigned to this node
+    KUBELET-&gt;&gt;KUBELET: Start containers
+    KUBELET-&gt;&gt;API: Report status (Running)</div><figcaption>A single kubectl apply flows through Deployment → ReplicaSet → Pod delegation to reach a running container</figcaption></figure>
 <h3>Key Takeaways</h3>
 <ul>
-<li>The imperative approach tells Kubernetes <em>what actions to perform</em> (<code class='ic'>kubectl run/create</code>); the declarative approach tells it <em>what the desired state should be</em> (YAML + <code class='ic'>kubectl apply</code>).</li>
+<li>The imperative approach instructs Kubernetes <em>what actions to perform</em> (<code class='ic'>kubectl run/create</code>); the declarative approach declares <em>what the desired state should be</em> (YAML + <code class='ic'>kubectl apply</code>).</li>
 <li>The declarative approach is better for version control, reproducibility, and team collaboration. The reconciliation loop guarantees idempotency and self-healing.</li>
-<li>Every manifest is composed of four fields: <code class='ic'>apiVersion</code>, <code class='ic'>kind</code>, <code class='ic'>metadata</code>, and <code class='ic'>spec</code>. Pods and Services use <code class='ic'>v1</code>; Deployments use <code class='ic'>apps/v1</code>.</li>
-<li>Both Deployments and Services find their target Pods via <code class='ic'>selector</code> labels, so label matching is critical.</li>
+<li>Every manifest has four fields: <code class='ic'>apiVersion</code>, <code class='ic'>kind</code>, <code class='ic'>metadata</code>, and <code class='ic'>spec</code>. Pods and Services use <code class='ic'>v1</code>; Deployments use <code class='ic'>apps/v1</code>.</li>
+<li>Both Deployments and Services find their target Pods through <code class='ic'>selector</code> labels — label matching is critical.</li>
+<li>Pod names follow the <strong><code class='ic'>&lt;Deployment name&gt;-&lt;ReplicaSet hash&gt;-&lt;Pod unique suffix&gt;</code></strong> structure. The middle segment identifies the ReplicaSet; the last segment is unique to each Pod.</li>
+<li>A Deployment does not create Pods directly. The chain is <strong>Deployment → ReplicaSet → Pod</strong>: the ReplicaSet handles replica count maintenance (self-healing), while the Deployment manages versions and rollouts by creating and replacing ReplicaSets.</li>
 <li>Apply with <code class='ic'>kubectl apply -f</code> and verify with <code class='ic'>kubectl get</code>. Running <code class='ic'>apply</code> again after editing the file updates only the changed portions.</li>
 </ul>
           <section class='ex'><h3>🛠 Practice</h3><div class='task'>

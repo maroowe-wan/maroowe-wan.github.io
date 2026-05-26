@@ -20,8 +20,7 @@
 </nav>
 <main><article id='lec1' class='lecture'>
           <h2>01. ConfigMap과 Secret으로 설정 분리하기 - 코드와 구성의 분리 </h2>
-          <h2>ConfigMap과 Secret으로 설정 분리하기 - 코드와 구성의 분리</h2>
-<h3>학습 목표</h3>
+          <h3>학습 목표</h3>
 <ul>
 <li>환경 변수·설정 파일을 이미지에서 분리해야 하는 이유(12-factor)를 이해한다</li>
 <li>ConfigMap과 Secret의 차이와 각각의 사용 시점을 구분한다</li>
@@ -68,13 +67,14 @@ kubectl create configmap app-config \
 </code></pre>
 <p><strong>2) 파일로부터 생성 (<code class='ic'>--from-file</code>)</strong></p>
 <pre><code>
-# app.properties 파일의 내용을 한 덩어리로 담는다
+# app.properties 파일 하나를 통째로 담는다
 kubectl create configmap app-config-file --from-file=app.properties
 
 # --from-env-file 을 쓰면 파일의 각 줄을 개별 key-value 로 분리해 담는다
 kubectl create configmap app-config-env --from-env-file=app.properties
 </code></pre>
-<p><code class='ic'>--from-file</code>은 파일 전체를 &quot;파일명=내용&quot; 형태의 하나의 key로 넣는 반면, <code class='ic'>--from-env-file</code>은 파일 안의 <code class='ic'>KEY=VALUE</code> 줄들을 각각 별도 key로 풀어 넣는다. 이 차이가 헷갈리기 쉬우니 주의한다.</p>
+<p><code class='ic'>--from-file=app.properties</code>를 쓰면 <strong><code class='ic'>app.properties</code>(파일 이름)가 key가 되고, 그 파일의 전체 내용이 value</strong>가 된다. 즉 key는 딱 하나(<code class='ic'>app.properties</code>)이고, 값이 파일 본문 전체인 셈이다. 파일을 통째로 하나의 설정 파일로 마운트하고 싶을 때 쓴다. key 이름을 직접 지정하고 싶다면 <code class='ic'>--from-file=설정파일=app.properties</code>처럼 <code class='ic'>key=경로</code> 형식으로 줄 수도 있다.</p>
+<p>반면 <code class='ic'>--from-env-file=app.properties</code>는 파일 안의 <code class='ic'>KEY=VALUE</code> 줄들을 한 줄씩 읽어 <strong>각 줄을 별도의 key-value로</strong> 풀어 넣는다. 예를 들어 파일에 <code class='ic'>LOG_LEVEL=info</code>, <code class='ic'>APP_REGION=ap-northeast-2</code> 두 줄이 있으면 ConfigMap에는 <code class='ic'>LOG_LEVEL</code>, <code class='ic'>APP_REGION</code> 두 개의 key가 생긴다. &quot;파일 하나를 한 덩어리로 담을지(<code class='ic'>--from-file</code>)&quot; vs &quot;파일 안의 항목을 낱개로 풀어 담을지(<code class='ic'>--from-env-file</code>)&quot;가 핵심 차이이니 혼동하지 않도록 주의한다.</p>
 <p><strong>3) YAML 매니페스트로 선언 (실무 권장)</strong></p>
 <p>운영에서는 명령형(imperative) 명령보다 매니페스트를 Git으로 버전 관리하는 선언형(declarative) 방식을 권장한다.</p>
 <pre><code>
@@ -92,7 +92,7 @@ kubectl apply -f app-config.yaml
 kubectl describe configmap app-config   # 들어간 값 확인
 </code></pre>
 <h4>Secret 만들기</h4>
-<p>Secret도 동일한 패턴이지만, 비밀값을 평문 파일로 저장소에 올리지 않도록 명령형 생성이 더 안전한 선택이 되기도 한다.</p>
+<p>Secret도 동일한 패턴이지만, 비밀값을 평문 파일로 저장소에 올리지 않도록 명령형(imperative) 생성이 더 안전한 선택이 되기도 한다.</p>
 <pre><code>
 kubectl create secret generic db-secret \
   --from-literal=DB_USER=admin \
@@ -201,7 +201,7 @@ kubectl exec -it &lt;pod-name&gt; -- cat /etc/app/config/LOG_LEVEL  # 볼륨 파
 <ul>
 <li>설정과 비밀을 이미지에서 분리하면 같은 이미지를 모든 환경에서 재사용할 수 있다(12-factor). 이미지 갈라짐·비밀 유출·불필요한 재빌드를 막는다.</li>
 <li><strong>ConfigMap = 비밀 아닌 설정</strong>, <strong>Secret = 민감한 비밀값</strong>. 둘 다 key-value 모음이며 1MB 제한이 있다. Secret의 base64는 암호화가 아닌 인코딩이다.</li>
-<li>생성은 <code class='ic'>--from-literal</code>/<code class='ic'>--from-file</code>/<code class='ic'>--from-env-file</code> 또는 YAML 매니페스트(권장)로 한다.</li>
+<li>생성은 <code class='ic'>--from-literal</code>/<code class='ic'>--from-file</code>(파일명이 key, 내용이 value)/<code class='ic'>--from-env-file</code>(줄마다 개별 key-value) 또는 YAML 매니페스트(권장)로 한다.</li>
 <li>주입은 환경변수(<code class='ic'>valueFrom</code>의 <code class='ic'>configMapKeyRef</code>/<code class='ic'>secretKeyRef</code>, 또는 <code class='ic'>envFrom</code>)와 볼륨 마운트 두 방식. 볼륨은 key당 파일 하나로 마운트되고 변경이 자동 반영된다.</li>
 <li>보안은 base64가 아니라 etcd 암호화·RBAC·Git 제외·앱 내 보호로 지킨다.</li>
 </ul>
@@ -449,8 +449,7 @@ kubectl exec volume-pod -- cat /etc/app/config/LOG_LEVEL
         </article>
 <article id='lec2' class='lecture'>
           <h2>02. 영구 볼륨(PV/PVC)과 스토리지 - 데이터를 잃지 않는 법 </h2>
-          <h2>영구 볼륨(PV/PVC)과 스토리지 - 데이터를 잃지 않는 법</h2>
-<h3>학습 목표</h3>
+          <h3>학습 목표</h3>
 <ul>
 <li>Pod가 재시작되면 데이터가 사라지는 문제와 영구 스토리지의 필요성을 이해한다</li>
 <li>PersistentVolume(PV), PersistentVolumeClaim(PVC), StorageClass의 관계를 설명한다</li>
@@ -948,9 +947,8 @@ kubectl delete pv demo-pv</code></pre>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=inJ7YJ-jt8I' target='_blank'>How volumes and storage work in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=OKBTg2hMnw4' target='_blank'>Day 52 - Storage Classes in Kubernetes | Static vs Dynamic Volume Provisioning</a></li><li><a href='https://www.youtube.com/watch?v=YW3BFbXIB9U' target='_blank'>Kubernetes Storage Explained in 30 Minutes | PV, PVC, Static vs Dynamic Provisioning | Chapter 9</a></li></ul></div>
         </article>
 <article id='lec3' class='lecture'>
-          <h2>03. 헬스체크(Probes)와 무중단 배포 - 롤링 업데이트·롤백 전략 </h2>
-          <h2>헬스체크(Probes)와 무중단 배포 - 롤링 업데이트·롤백 전략</h2>
-<h3>학습 목표</h3>
+          <h2>03. 헬스체크(Probes)와 무중단 배포 - 롤링 업데이트·롤백 전략 <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h3>학습 목표</h3>
 <ul>
 <li>Liveness·Readiness·Startup Probe의 역할과 차이를 구분한다</li>
 <li>롤링 업데이트의 maxSurge/maxUnavailable 동작 원리를 이해한다</li>
@@ -967,8 +965,12 @@ kubectl delete pv demo-pv</code></pre>
 <ul>
 <li>컨테이너가 데드락에 빠지거나 응답 불능 상태가 되면, <strong>컨테이너를 재시작(restart)</strong> 한다.</li>
 <li>일시적 오류나 멈춤을 재시작으로 자가 치유하는 것이 목적이다.</li>
-<li>실패가 누적되면 <code class='ic'>CrashLoopBackOff</code> 상태로 빠지며, 운영자에게 &quot;이건 재시작으로 안 고쳐진다&quot;는 신호를 준다.</li>
+<li>Liveness Probe가 하는 일은 <strong>딱 하나, &quot;재시작 트리거&quot;</strong> 뿐이다. 즉 실패가 누적되면(<code class='ic'>failureThreshold</code> 초과) kubelet이 컨테이너를 죽이고 다시 띄운다.</li>
 </ul>
+<p>여기서 흔히 혼동하는 것이 <code class='ic'>CrashLoopBackOff</code>다. 둘의 관계를 정확히 짚자.</p>
+<blockquote class='callout'>
+<p><strong>Liveness Probe 실패 ≠ CrashLoopBackOff.</strong> Liveness Probe 실패는 컨테이너 &quot;재시작&quot;을 유발할 뿐이다. <code class='ic'>CrashLoopBackOff</code>는 별개의 상태로, 컨테이너가 시작 직후 계속 비정상 종료될 때 kubelet이 재시작 사이의 대기 시간(back-off)을 점점 늘리는(예: 10초 → 20초 → 40초 …) 상태를 가리킨다. 다만 Liveness Probe를 너무 공격적으로 잡으면(예: <code class='ic'>initialDelaySeconds</code>가 짧아 앱이 뜨기도 전에 검사 실패) 끊임없는 재시작을 유발해 <em>결과적으로</em> CrashLoopBackOff로 이어질 수 있다. 그러나 Liveness 실패 자체가 곧 CrashLoopBackOff인 것은 아니다 — 이 둘을 직접 인과로 단정하면 장애 원인을 오진하기 쉽다.</p>
+</blockquote>
 <p><strong>Readiness Probe (준비 진단)</strong> — &quot;이 컨테이너 지금 트래픽 받아도 되나?&quot;</p>
 <ul>
 <li>실패해도 <strong>재시작하지 않는다.</strong> 대신 해당 Pod를 Service의 <strong>로드밸런서 대상에서 잠시 제외</strong>한다.</li>
@@ -992,7 +994,7 @@ kubectl delete pv demo-pv</code></pre>
     준비완료 --&gt; 재시작: Liveness 실패
     트래픽제외 --&gt; 재시작: Liveness 실패
     재시작 --&gt; 기동중: 컨테이너 다시 시작
-    재시작 --&gt; 크래시루프: 재시작 반복 실패
+    재시작 --&gt; 크래시루프: 기동 직후 종료가 반복될 때
     크래시루프 --&gt; 기동중: 백오프 후 재시도</div><figcaption>컨테이너의 Probe 판정에 따른 상태 전이</figcaption></figure>
 <h5>진단 방법 3가지 (HTTP / TCP / Exec)</h5>
 <p>세 종류의 Probe는 각각 다음 세 가지 방법 중 하나로 건강을 검사한다. 애플리케이션 성격에 맞춰 고르면 된다.</p>
@@ -1047,7 +1049,7 @@ kubectl get pod nginx-liveness -w
 # 이벤트로 Probe 동작 내역 확인 (Unhealthy / Killing / Started 등)
 kubectl describe pod nginx-liveness
 </code></pre>
-<p>Liveness가 실패하기 시작하면 <code class='ic'>describe</code> 출력의 Events에 <code class='ic'>Liveness probe failed</code>, 이어서 <code class='ic'>Killing container</code>, 그리고 새 컨테이너 <code class='ic'>Started</code>가 찍힌다. 이때 <strong>Pod는 그대로 살아 있고 컨테이너만 재시작</strong>되므로, Pod의 IP는 바뀌지 않는다. 이 점이 중요하다.</p>
+<p>Liveness가 실패하기 시작하면 <code class='ic'>describe</code> 출력의 Events에 <code class='ic'>Liveness probe failed</code>, 이어서 <code class='ic'>Killing container</code>, 그리고 새 컨테이너 <code class='ic'>Started</code>가 찍힌다. 이때 <strong>Pod는 그대로 살아 있고 컨테이너만 재시작</strong>되므로, Pod의 IP는 바뀌지 않는다. 이 점이 중요하다. 만약 재시작 후에도 컨테이너가 곧장 다시 종료되기를 반복하면, 그제서야 Pod 상태가 <code class='ic'>CrashLoopBackOff</code>로 바뀌고 <code class='ic'>RESTARTS</code> 수치가 빠르게 누적된다 — 이는 &quot;재시작으로 안 고쳐지는 문제&quot;라는 신호이니 Probe 설정이나 앱 로그를 의심해야 한다.</p>
 <h4>2. 롤링 업데이트와 maxSurge / maxUnavailable</h4>
 <p>이제 새 버전 배포다. 쿠버네티스 Deployment의 <strong>기본 배포 전략이 바로 롤링 업데이트</strong>다. 별도로 설정하지 않아도 내부에서 이 방식으로 동작한다.</p>
 <p>롤링 업데이트는 Pod를 <strong>한 번에 하나씩(또는 정해진 묶음씩) 교체</strong>한다. 기존 Pod를 내리고 새 버전 Pod를 띄우는 과정을 전체 Pod에 걸쳐 굴려 나가기 때문에, 서비스를 멈추지 않고 업그레이드할 수 있다.</p>
@@ -1097,7 +1099,7 @@ spec:
     D-&gt;&gt;Old: 옛 Pod 0개까지 감소
     Note over D,Old: 옛 ReplicaSet은 0개로 보존 (롤백 대비)</div><figcaption>롤링 업데이트 시 ReplicaSet 교체 흐름</figcaption></figure>
 <blockquote class='callout'>
-<p>안정성이 최우선이면 <code class='ic'>maxUnavailable: 0</code>으로 두자. 새 Pod가 Ready 될 때까지 기존 Pod를 절대 내리지 않으므로 가용량이 한 순간도 줄지 않는다. 대신 maxSurge가 0이면 안 된다(둘 다 0이면 아무것도 못 움직인다). 또한 <strong>Readiness Probe가 반드시 함께 설정</strong>되어야 한다. 그래야 쿠버네티스가 &quot;새 Pod가 진짜 트래픽을 받을 준비가 됐는지&quot; 판단해 다음 교체로 넘어간다.</p>
+<p>안정성이 최우선이면 <code class='ic'>maxUnavailable: 0</code>으로 두자. 새 Pod가 Ready 될 때까지 기존 Pod를 절대 내리지 않으므로 가용량이 한 순간도 줄지 않는다. <strong>단, 이 경우 <code class='ic'>maxSurge</code>는 반드시 1 이상이어야 한다.</strong> maxUnavailable이 0이면 기존 Pod를 먼저 내릴 수 없으니, 새 Pod를 추가로 띄울 여유(maxSurge)가 없으면 배포가 한 발짝도 진행되지 못하기 때문이다. (둘 다 0이면 교체 자체가 막힌다.) 또한 <strong>Readiness Probe가 반드시 함께 설정</strong>되어야 한다. 그래야 쿠버네티스가 &quot;새 Pod가 진짜 트래픽을 받을 준비가 됐는지&quot; 판단해 다음 교체로 넘어간다.</p>
 </blockquote>
 <p>배포 진행 상황은 다음 명령으로 실시간 관찰한다.</p>
 <pre><code>
@@ -1123,23 +1125,33 @@ kubectl rollout pause deployment/demo
 kubectl rollout resume deployment/demo
 </code></pre>
 <p>각 배포는 <strong>리비전(revision) 번호</strong>로 기록된다. 첫 배포가 revision 1, 다음 배포가 revision 2… 식이다. <code class='ic'>rollout undo</code>는 보관된 옛 ReplicaSet의 Pod 수를 다시 올리고 현재 것을 0으로 내려서, <strong>롤링 업데이트와 똑같은 방식으로 무중단 롤백</strong>을 수행한다.</p>
-<blockquote class='callout'>
-<p>팁: <code class='ic'>kubectl rollout history</code>에 변경 사유가 남게 하려면, 배포 시 <code class='ic'>kubectl apply -f deployment.yaml</code>에 변경 원인 주석을 달거나 <code class='ic'>--record</code>(deprecated)를 대신해 매니페스트의 <code class='ic'>kubernetes.io/change-cause</code> 어노테이션을 활용한다. 그래야 나중에 &quot;어느 리비전이 무엇이었는지&quot; 추적할 수 있다.</p>
-</blockquote>
+<p><code class='ic'>kubectl rollout history</code>에 &quot;이 리비전이 무슨 변경이었는지&quot;를 남기려면, Deployment 매니페스트의 <code class='ic'>metadata.annotations</code>에 <code class='ic'>kubernetes.io/change-cause</code> 어노테이션을 직접 적어 두는 것이 가장 명확하다. (과거에 쓰던 <code class='ic'>--record</code> 플래그는 deprecated 되었다.)</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  annotations:
+    kubernetes.io/change-cause: &quot;image v2 적용 - 결제 타임아웃 버그 수정&quot;  # 이 줄이 history의 CHANGE-CAUSE에 표시됨
+spec:
+  replicas: 5
+  # ... (이하 동일)
+</code></pre>
+<p>이렇게 두고 <code class='ic'>kubectl apply</code> 하면 <code class='ic'>kubectl rollout history deployment/demo</code> 출력의 <code class='ic'>CHANGE-CAUSE</code> 칸에 위 문구가 그대로 표시되어, 나중에 &quot;어느 리비전이 무엇이었는지&quot; 한눈에 추적할 수 있다.</p>
 <p>보관되는 리비전 개수는 Deployment의 <code class='ic'>spec.revisionHistoryLimit</code>(기본 10)으로 조절한다. 너무 크게 두면 옛 ReplicaSet이 잔뜩 쌓이니 적당히 유지하는 것이 좋다.</p>
 <h4>주의사항 정리</h4>
 <ul>
 <li><strong>Liveness만 쓰고 Readiness를 빼지 말 것.</strong> Readiness가 없으면 아직 준비 안 된 새 Pod로 트래픽이 흘러 5xx가 터진다. 무중단 배포의 핵심은 Readiness Probe다.</li>
-<li><strong>Liveness Probe를 너무 공격적으로 설정하지 말 것.</strong> <code class='ic'>initialDelaySeconds</code>가 짧거나 <code class='ic'>failureThreshold</code>가 작으면, 기동 중인 멀쩡한 앱을 계속 죽여 <code class='ic'>CrashLoopBackOff</code>에 빠뜨린다. 느린 앱은 Startup Probe로 보호하라.</li>
+<li><strong>Liveness Probe를 너무 공격적으로 설정하지 말 것.</strong> <code class='ic'>initialDelaySeconds</code>가 짧거나 <code class='ic'>failureThreshold</code>가 작으면, 기동 중인 멀쩡한 앱을 계속 재시작시켜 결국 <code class='ic'>CrashLoopBackOff</code>로 몰아넣을 수 있다. 느린 앱은 Startup Probe로 보호하라.</li>
 <li><strong>진단 명령은 가볍게.</strong> Probe가 앱에 부하를 주면 진단이 곧 장애의 원인이 된다.</li>
-<li><strong>maxUnavailable과 maxSurge를 동시에 0으로 두지 말 것.</strong> 배포가 한 발짝도 못 나간다.</li>
+<li><strong>maxUnavailable과 maxSurge를 동시에 0으로 두지 말 것.</strong> 배포가 한 발짝도 못 나간다. 특히 <code class='ic'>maxUnavailable: 0</code>을 쓸 때는 <code class='ic'>maxSurge</code>를 1 이상으로 둬야 한다.</li>
 </ul>
 <h3>핵심 요약</h3>
 <ul>
-<li>Probe는 컨테이너 자가 치유 장치다. <strong>Liveness=재시작</strong>, <strong>Readiness=트래픽 차단/연결</strong>, <strong>Startup=느린 앱 기동 보호</strong>로 역할이 다르다.</li>
+<li>Probe는 컨테이너 자가 치유 장치다. <strong>Liveness=재시작</strong>, <strong>Readiness=트래픽 차단/연결</strong>, <strong>Startup=느린 앱 기동 보호</strong>로 역할이 다르다. Liveness 실패는 &quot;재시작&quot;을 부를 뿐이며, CrashLoopBackOff는 재시작 직후 종료가 반복될 때의 별개 상태다.</li>
 <li>각 Probe는 <strong>httpGet / tcpSocket / exec</strong> 세 방법 중 하나로 검사하며, <code class='ic'>initialDelaySeconds</code>·<code class='ic'>periodSeconds</code>·<code class='ic'>failureThreshold</code> 등으로 민감도를 조절한다.</li>
-<li>롤링 업데이트는 Deployment의 기본 전략으로, <strong>maxSurge(초과 허용)</strong> 와 <strong>maxUnavailable(부족 허용)</strong> 으로 교체 중 Pod 수 범위를 정해 무중단을 보장한다. Readiness Probe와 함께 써야 진짜 무중단이 된다.</li>
-<li>배포는 <strong>리비전</strong>으로 기록되며, <code class='ic'>kubectl rollout history</code>로 이력을 보고 <code class='ic'>kubectl rollout undo</code>로 무중단 롤백한다.</li>
+<li>롤링 업데이트는 Deployment의 기본 전략으로, <strong>maxSurge(초과 허용)</strong> 와 <strong>maxUnavailable(부족 허용)</strong> 으로 교체 중 Pod 수 범위를 정해 무중단을 보장한다. <code class='ic'>maxUnavailable: 0</code>이면 <code class='ic'>maxSurge</code>가 1 이상이어야 하고, Readiness Probe와 함께 써야 진짜 무중단이 된다.</li>
+<li>배포는 <strong>리비전</strong>으로 기록되며, <code class='ic'>kubernetes.io/change-cause</code> 어노테이션으로 변경 사유를 남기고, <code class='ic'>kubectl rollout history</code>로 이력을 보고 <code class='ic'>kubectl rollout undo</code>로 무중단 롤백한다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
               <p class='q'>실습 1. [워밍업] Liveness Probe 동작 관찰
@@ -1622,9 +1634,8 @@ kubectl delete deployment probe-demo</code></pre>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=-NeJS7wQu_Q' target='_blank'>[따배쿠] 5-2. 쿠버네티스 Pod - livenessProbe를 이용해서 Self-healing Pod 만들기</a></li><li><a href='https://www.youtube.com/watch?v=x2e6pIBLKzw' target='_blank'>Kubernetes Health Probes Explained | Liveness Probe vs Readiness Probe</a></li><li><a href='https://www.youtube.com/watch?v=XbVNMhr55WM' target='_blank'>Kubernetes Rolling Updates Tutorial</a></li></ul></div>
         </article>
 <article id='lec4' class='lecture'>
-          <h2>04. 리소스 관리와 오토스케일링 - requests/limits와 HPA </h2>
-          <h2>리소스 관리와 오토스케일링 - requests/limits와 HPA</h2>
-<h3>학습 목표</h3>
+          <h2>04. 리소스 관리와 오토스케일링 - requests/limits와 HPA <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h3>학습 목표</h3>
 <ul>
 <li>CPU/메모리 requests와 limits가 스케줄링·QoS·OOMKill에 미치는 영향을 이해한다</li>
 <li>Horizontal Pod Autoscaler(HPA)가 부하에 따라 Pod 수를 조절하는 원리를 안다</li>
@@ -1683,12 +1694,12 @@ resources:
 <p>CPU limit을 두고는 커뮤니티 내 논쟁이 있다. &quot;CPU limit을 설정하지 말자&quot;는 주장인데, 여유 CPU가 있는데도 스로틀링당하는 게 비합리적이고 메모리와 달리 CPU는 보통 병목이 아니라는 이유다. 다만 limit을 빼면 시끄러운 이웃 위험과 QoS 저하가 따른다. <strong>권장은 &quot;limit을 설정하되 신중하게 잡는 것&quot;</strong>이다.</p>
 <h4>metrics-server: 오토스케일링의 눈</h4>
 <p>이제 부하에 따라 Pod 수를 자동 조절하는 단계로 넘어간다. 그런데 쿠버네티스가 &quot;지금 CPU를 얼마나 쓰는지&quot;를 알아야 스케일 판단을 할 수 있다. 이 사용량 데이터를 모아 주는 컴포넌트가 <strong>metrics-server</strong>다.</p>
-<p>수집 흐름은 이렇다. 각 워커 노드의 kubelet 안에는 <strong>cAdvisor</strong>라는 에이전트가 있어 Pod의 CPU·메모리 사용량을 주기적으로(약 10초마다) 긁는다. <strong>metrics-server</strong>는 이 값을 노드들로부터 모아 집계(aggregate)해 쿠버네티스 API 서버에 노출한다. 그러면 우리는 <code class='ic'>kubectl top</code> 명령으로 실사용량을 볼 수 있고, HPA 컨트롤러도 이 데이터를 읽어 판단한다. 아래 구성도처럼 사용량 데이터가 노드에서 API 서버를 거쳐 HPA와 사용자에게 흘러간다.</p>
+<p>수집 흐름은 이렇다. 각 워커 노드의 kubelet 안에는 <strong>cAdvisor</strong>라는 에이전트가 있어 Pod의 CPU·메모리 사용량을 측정한다. <strong>metrics-server</strong>는 이 값을 노드들로부터 주기적으로 긁어와 집계(aggregate)해 쿠버네티스 API 서버에 노출한다. 이때 metrics-server가 노드를 긁는 주기를 <strong>메트릭 해상도(<code class='ic'>--metric-resolution</code>)</strong>라고 부르는데, <strong>기본값이 60초</strong>다(과거 일부 버전·튜닝 환경에서는 더 짧게 잡기도 한다). 그러면 우리는 <code class='ic'>kubectl top</code> 명령으로 실사용량을 볼 수 있고, HPA 컨트롤러도 이 데이터를 읽어 판단한다. 아래 구성도처럼 사용량 데이터가 노드에서 API 서버를 거쳐 HPA와 사용자에게 흘러간다.</p>
 <figure class='diagram'><div class='mermaid'>flowchart LR
     subgraph 워커노드
-        CA[&quot;cAdvisor - kubelet 내장, 약 10초마다 수집&quot;]
+        CA[&quot;cAdvisor - kubelet 내장, Pod 사용량 측정&quot;]
     end
-    CA --&gt;|&quot;Pod CPU·메모리 사용량&quot;| MS[&quot;metrics-server - 노드별 값 집계&quot;]
+    CA --&gt;|&quot;Pod CPU·메모리 사용량&quot;| MS[&quot;metrics-server - 기본 60초 주기로 노드별 값 수집·집계&quot;]
     MS --&gt;|&quot;집계 메트릭 노출&quot;| API[&quot;쿠버네티스 API 서버&quot;]
     API --&gt;|&quot;kubectl top&quot;| USER[&quot;운영자&quot;]
     API --&gt;|&quot;메트릭 질의&quot;| HPA[&quot;HPA 컨트롤러&quot;]</div><figcaption>metrics-server의 사용량 데이터 수집·노출 흐름</figcaption></figure>
@@ -1721,7 +1732,10 @@ kubectl top pods
     DC --&gt; Q
     W --&gt; Q</div><figcaption>HPA 컨트롤러의 15초 주기 판단 루프</figcaption></figure>
 <h4>반응에는 지연이 있다 (천둥과 번개)</h4>
-<p>HPA는 즉각적이지 않다. cAdvisor 수집 주기, metrics-server 집계 시간(약 30초 평균), HPA 동기화 주기(약 15초)가 겹쳐, 메트릭이 실제로 치솟은 뒤 스케일이 일어나기까지 <strong>최대 30~45초</strong>가 걸릴 수 있다. 번개를 보고 나서 천둥소리가 늦게 들리는 것과 같다. 목표를 80%로 잡아도 실제 스케일은 부하가 85%, 90%까지 오른 뒤에 일어날 수 있다.</p>
+<p>HPA는 즉각적이지 않다. 메트릭이 HPA의 판단에 닿기까지 여러 단계의 지연이 쌓인다. 가장 큰 몫은 <strong>metrics-server의 수집 주기</strong>다. 앞서 봤듯 기본값(<code class='ic'>--metric-resolution</code>)이 <strong>60초</strong>이므로, HPA가 보는 사용량은 이미 최대 1분쯤 묵은 값일 수 있다. 여기에 HPA 컨트롤러의 동기화 주기(약 15초)가 더해진다. 그래서 <strong>기본 설정 그대로라면 부하가 실제로 치솟은 뒤 스케일업 결정까지 1분 이상 걸리는 것이 정상</strong>이다. 번개를 보고 나서 천둥소리가 늦게 들리는 것과 같다. 목표를 80%로 잡아도 실제 스케일은 부하가 85%, 90%까지 오른 뒤에 일어날 수 있다.</p>
+<blockquote class='callout'>
+<p>흔히 보이는 &quot;30~45초 안에 반응한다&quot;는 수치는 metrics-server의 수집 주기를 기본 60초보다 짧게(예: 15~30초) 튜닝한, 기본값보다 공격적인 환경을 가정한 것이다. 기본 설치 그대로라면 1분 이상을 염두에 두고, 더 빠른 반응이 필요하면 <code class='ic'>--metric-resolution</code>을 명시적으로 낮춰야 한다.</p>
+</blockquote>
 <p>이 주기를 설정으로 줄일 수는 있지만, 1초처럼 극단적으로 낮추면 API 서버 부하가 폭증하는 트레이드오프가 있다. 권장은 무리하게 줄이지 않는 것이다. 대신 다음을 고려한다.</p>
 <ul>
 <li><strong>목표 사용률(target utilization) 조정</strong>: 80%는 반응이 느릴 수 있다. 50%로 낮추면 더 빨리 대응하지만, 평소에도 Pod를 여유 있게 띄우므로 비용이 늘 수 있다. 트래픽 패턴을 보며 민감도를 맞춘다.</li>
@@ -1804,7 +1818,7 @@ kubectl get hpa php-apache --watch    # TARGETS의 CPU%가 50을 넘으면 REPLI
 kubectl get pods -w                    # Pod가 늘어나는 모습 확인
 kubectl top pods                       # 실제 사용량 확인
 </code></pre>
-<p>CPU가 목표를 넘으면 REPLICAS가 1 → 4 → ... 식으로 상한(10)까지 늘어난다. <code class='ic'>kubectl describe hpa php-apache</code>를 보면 &quot;CPU resource above target&quot; 같은 스케일 사유가 기록된다. 그다음 부하 생성 터미널에서 <code class='ic'>Ctrl+C</code>로 호출을 멈추면, 잠시 뒤 CPU가 떨어지고 HPA가 Pod를 다시 minReplicas까지 줄인다.</p>
+<p>CPU가 목표를 넘으면 REPLICAS가 1 → 4 → ... 식으로 상한(10)까지 늘어난다. 다만 앞서 설명한 수집 지연 때문에 부하를 준 직후 바로 늘지 않고 잠시(기본 설정이면 1분 안팎) 뜸을 들인 뒤 반응하니 조급해하지 말자. <code class='ic'>kubectl describe hpa php-apache</code>를 보면 &quot;CPU resource above target&quot; 같은 스케일 사유가 기록된다. 그다음 부하 생성 터미널에서 <code class='ic'>Ctrl+C</code>로 호출을 멈추면, 잠시 뒤 CPU가 떨어지고 HPA가 Pod를 다시 minReplicas까지 줄인다.</p>
 <blockquote class='callout'>
 <p>스케일 다운은 스케일 업보다 보수적이다. 짧은 스파이크에 Pod를 곧장 없앴다가 다시 띄우는 &quot;출렁임&quot;을 막으려고 안정화 시간(기본 약 5분)을 두기 때문이다. 줄어드는 데 시간이 걸려도 정상이다.</p>
 </blockquote>
@@ -1816,7 +1830,7 @@ kubectl top pods                       # 실제 사용량 확인
 <li><strong>메모리 limit 초과는 OOMKill(죽음), CPU limit 초과는 스로틀링(느려짐)</strong>으로 동작이 다르다.</li>
 <li>requests/limits 조합으로 QoS 클래스(Guaranteed/Burstable/BestEffort)가 정해지고, 메모리 압박 시 낮은 우선순위부터 축출된다. requests/limits 없는 워크로드는 가장 먼저 희생되므로 항상 지정한다.</li>
 <li>HPA는 <code class='ic'>현재 레플리카 × (현재값/목표값)</code>을 <strong>올림</strong>해 Pod 수를 조절하며, metrics-server(cAdvisor→집계→API 서버)의 사용량 데이터에 의존한다.</li>
-<li>메트릭 수집·집계·동기화 지연으로 스케일 반응에 30~45초가 걸린다. 목표 사용률 조정, 빠른 Pod 기동, Burstable QoS, readiness probe를 함께 활용해야 안정적이다.</li>
+<li>metrics-server의 기본 수집 주기(<code class='ic'>--metric-resolution</code>)는 <strong>60초</strong>라서, 기본 설정이면 부하 폭증 후 스케일업까지 <strong>1분 이상</strong> 걸리는 게 정상이다. 더 빠른 반응이 필요하면 수집 주기를 낮추되, 목표 사용률 조정·빠른 Pod 기동·Burstable QoS·readiness probe를 함께 활용해야 안정적이다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>
               <p class='q'>실습 1. [워밍업] requests/limits를 지정한 Deployment를 배포하고 QoS 클래스를 확인하라.
@@ -2147,9 +2161,8 @@ kubectl get svc php-apache          # Error: not found</code></pre>
           <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=lKH1K5R3kqg' target='_blank'>12분 안에 알아야 할 모든 것: 쿠버네티스의 포드 요청 및 제한</a></li><li><a href='https://www.youtube.com/watch?v=V-Ib-DdconY' target='_blank'>K8S HPA 강의 제대로 듣고 있었습니까? 정신 차리십시오 | Kubernetes Autoscaling with HPA</a></li><li><a href='https://www.youtube.com/watch?v=jyBDbm1FHiM' target='_blank'>Autoscaling in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=2CrprvnzPXY' target='_blank'>Kubernetes CPU Limits &amp; Requests EXPLAINED (Stop Wasting Resources!)</a></li></ul></div>
         </article>
 <article id='lec5' class='lecture'>
-          <h2>05. Ingress로 외부 트래픽 라우팅하기 - L7 라우팅과 도메인 기반 접근 </h2>
-          <h2>Ingress로 외부 트래픽 라우팅하기 - L7 라우팅과 도메인 기반 접근</h2>
-<h3>학습 목표</h3>
+          <h2>05. Ingress로 외부 트래픽 라우팅하기 - L7 라우팅과 도메인 기반 접근 <span class='badge warn'>⚠ 사람 검토 필요</span></h2>
+          <h3>학습 목표</h3>
 <ul>
 <li>NodePort/LoadBalancer의 한계와 Ingress가 필요한 이유를 이해한다</li>
 <li>Ingress Controller와 Ingress 리소스의 관계, 호스트·경로 기반 라우팅 규칙을 안다</li>
@@ -2167,23 +2180,27 @@ kubectl get svc php-apache          # Error: not found</code></pre>
 <p><strong>NodePort의 문제.</strong> 사용자에게 <code class='ic'>http://노드IP:31080</code> 같은 주소를 주는 건 현실적이지 않다. 포트 번호가 높고(30000번 이상), 사용자가 이를 기억할 수도 없다. DNS를 노드 IP로 연결하더라도 노드가 죽거나 교체되면 IP가 바뀌어 따라다니며 갱신해야 한다. 결국 앞단에 80/443 포트를 31080으로 넘겨주는 프록시 서버를 또 두게 된다.</p>
 <p><strong>LoadBalancer의 문제.</strong> 클라우드에서는 깔끔하지만, <strong>서비스 1개당 로드밸런서 1개</strong>가 원칙이다. 로드밸런서는 클라우드에서 과금되는 자원이라, 서비스가 10개면 로드밸런서 10개 → 비용 10배다. 게다가 새 서비스를 추가할 때마다 외부 IP가 또 생기고, &quot;어느 URL은 어느 로드밸런서로&quot; 같은 분기를 또 다른 프록시에서 처리해야 한다. SSL/TLS 인증서도 서비스마다 따로 붙이게 된다.</p>
 <p>정리하면, 여러 서비스를 URL이나 도메인에 따라 한 진입점에서 나눠 보내고, TLS를 한곳에서 관리하고 싶은 욕구가 생긴다. 이걸 쿠버네티스 리소스로, 즉 다른 매니페스트들과 함께 YAML로 선언해서 관리하게 해주는 것이 바로 <strong>Ingress</strong>다. 아래 비교도처럼, LoadBalancer 방식은 서비스마다 로드밸런서가 늘어나지만 Ingress는 단일 진입점으로 모은다.</p>
-<figure class='diagram'><div class='mermaid'>flowchart LR
-    subgraph LB[&quot;LoadBalancer 방식 - 서비스마다 1개&quot;]
-        direction TB
-        ext1[&quot;외부 사용자&quot;] --&gt; lb1[&quot;로드밸런서 1 (과금)&quot;]
-        ext1 --&gt; lb2[&quot;로드밸런서 2 (과금)&quot;]
-        ext1 --&gt; lb3[&quot;로드밸런서 3 (과금)&quot;]
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    ext1[&quot;외부 사용자&quot;]
+    ext2[&quot;외부 사용자&quot;]
+    subgraph LB[&quot;LoadBalancer 방식 - 서비스마다 1개 (클러스터)&quot;]
+        lb1[&quot;로드밸런서 1 - 과금&quot;]
+        lb2[&quot;로드밸런서 2 - 과금&quot;]
+        lb3[&quot;로드밸런서 3 - 과금&quot;]
         lb1 --&gt; svcA[&quot;서비스 A&quot;]
         lb2 --&gt; svcB[&quot;서비스 B&quot;]
         lb3 --&gt; svcC[&quot;서비스 C&quot;]
     end
-    subgraph ING[&quot;Ingress 방식 - 단일 진입점&quot;]
-        direction TB
-        ext2[&quot;외부 사용자&quot;] --&gt; ic[&quot;Ingress Controller (진입점 1개)&quot;]
+    subgraph ING[&quot;Ingress 방식 - 단일 진입점 (클러스터)&quot;]
+        ic[&quot;Ingress Controller - 진입점 1개&quot;]
         ic --&gt; isvcA[&quot;서비스 A&quot;]
         ic --&gt; isvcB[&quot;서비스 B&quot;]
         ic --&gt; isvcC[&quot;서비스 C&quot;]
-    end</div><figcaption>LoadBalancer 방식과 Ingress 방식의 외부 노출 구조 비교</figcaption></figure>
+    end
+    ext1 --&gt; lb1
+    ext1 --&gt; lb2
+    ext1 --&gt; lb3
+    ext2 --&gt; ic</div><figcaption>LoadBalancer 방식과 Ingress 방식의 외부 노출 구조 비교</figcaption></figure>
 <blockquote class='callout'>
 <p>Ingress는 클러스터에 내장된 L7(애플리케이션 계층, HTTP/HTTPS) 로드밸런서라고 생각하면 된다. NodePort/LoadBalancer가 L4(IP·포트) 수준이라면, Ingress는 &quot;어떤 URL 경로/도메인이냐&quot;까지 보고 라우팅한다.</p>
 </blockquote>
@@ -2200,7 +2217,7 @@ kubectl get svc php-apache          # Error: not found</code></pre>
 <figure class='diagram'><div class='mermaid'>flowchart TD
     user[&quot;외부 사용자&quot;] --&gt;|&quot;도메인 접속&quot;| dns[&quot;DNS&quot;]
     dns --&gt;|&quot;진입점 IP 응답&quot;| user
-    user --&gt;|&quot;HTTP/HTTPS 요청&quot;| ic[&quot;Ingress Controller (nginx)&quot;]
+    user --&gt;|&quot;HTTP/HTTPS 요청&quot;| ic[&quot;Ingress Controller - nginx&quot;]
     rule[&quot;Ingress 리소스 - 라우팅 규칙 YAML&quot;] -.-&gt;|&quot;규칙 제공&quot;| ic
     ic --&gt;|&quot;host/path 매칭&quot;| branch{&quot;규칙 분기&quot;}
     branch --&gt;|&quot;/ 또는 shop.example.com&quot;| svc1[&quot;marvel-service&quot;]
@@ -2219,9 +2236,12 @@ kubectl get svc php-apache          # Error: not found</code></pre>
 <p>이 둘은 함께 쓸 수 있다. host 규칙 안에 여러 path를 둘 수 있다. 어느 규칙에도 맞지 않는 요청은 <strong>default backend</strong>(보통 404 페이지)로 떨어진다.</p>
 <p>path 매칭 방식(<code class='ic'>pathType</code>)도 알아두자. 현재 API에서는 명시가 필수이며 주로 두 가지를 쓴다.</p>
 <ul>
-<li><code class='ic'>Prefix</code>: 경로 접두사 매칭. <code class='ic'>/pay</code>는 <code class='ic'>/pay</code>, <code class='ic'>/pay/card</code> 등을 포함한다. 실무에서 가장 많이 쓴다.</li>
-<li><code class='ic'>Exact</code>: 경로가 정확히 일치할 때만.</li>
+<li><code class='ic'>Prefix</code>: 경로를 <code class='ic'>/</code>로 끊은 <strong>요소 단위 접두사 매칭</strong>이다. <code class='ic'>/pay</code>는 <code class='ic'>/pay</code> 자체와 그 하위인 <code class='ic'>/pay/card</code>, <code class='ic'>/pay/history</code> 등을 모두 포함한다(단순 문자열 접두사가 아니라 경로 세그먼트 단위라 <code class='ic'>/payment</code>는 <code class='ic'>/pay</code>에 매칭되지 않는다). 실무에서 가장 많이 쓴다.</li>
+<li><code class='ic'>Exact</code>: 경로가 정확히 일치할 때만. <code class='ic'>/pay</code>는 오직 <code class='ic'>/pay</code>에만 매칭되고 <code class='ic'>/pay/card</code>는 안 된다.</li>
 </ul>
+<blockquote class='callout'>
+<p>여러 path 규칙이 동시에 맞을 때는 <strong>더 구체적인(긴) 경로가 우선</strong>한다. 예컨대 <code class='ic'>/</code>(메인)와 <code class='ic'>/pay</code>(결제)가 함께 있을 때 <code class='ic'>/pay/card</code> 요청은 <code class='ic'>/</code>에도 <code class='ic'>/pay</code>에도 걸리지만, 더 긴 <code class='ic'>/pay</code>로 라우팅된다. 그래서 넓은 경로(<code class='ic'>/</code>)와 좁은 경로(<code class='ic'>/pay</code>)를 한 Ingress에 함께 두어도 의도대로 갈린다.</p>
+</blockquote>
 <h4>실습: 두 서비스를 하나의 진입점으로 노출하기</h4>
 <p>마블 쇼핑몰을 예로 든다. <code class='ic'>/</code>로 들어오면 메인 페이지(<code class='ic'>marvel-service</code>), <code class='ic'>/pay</code>로 들어오면 결제 페이지(<code class='ic'>pay-service</code>)로 보낸다. Deployment와 Service는 이미 있다고 가정하고(이전 강의에서 다룬 내용), Ingress 리소스에 집중한다.</p>
 <pre><code>
@@ -2230,7 +2250,7 @@ kind: Ingress
 metadata:
   name: marvel-ingress
   annotations:
-    # ingress-nginx에서 라우팅·재작성 동작을 제어하는 주석
+    # 매칭된 경로(/pay 등)를 제거하고 / 로 바꿔 백엔드로 전달 — 아래 본문 설명 참고
     nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   ingressClassName: nginx          # 이 Ingress를 처리할 컨트롤러 지정
@@ -2252,6 +2272,14 @@ spec:
                 port:
                   number: 80
 </code></pre>
+<h5>rewrite-target은 정확히 무슨 일을 하나 (필수 이해)</h5>
+<p>위 매니페스트에서 <code class='ic'>nginx.ingress.kubernetes.io/rewrite-target: /</code>는 &quot;장식용 주석&quot;이 아니라 <strong>요청 경로를 백엔드로 넘기기 전에 다시 쓰는 핵심 동작</strong>을 한다. 이 한 줄의 의미는 이렇다.</p>
+<blockquote class='callout'>
+<p><code class='ic'>rewrite-target: /</code>는 Ingress가 매칭한 경로(예: <code class='ic'>/pay</code>)를 <strong>잘라내고 <code class='ic'>/</code>로 바꿔서</strong> 백엔드 서비스에 전달한다. 즉 사용자가 <code class='ic'>http://도메인/pay</code>로 요청하면, <code class='ic'>pay-service</code>는 그 요청을 <code class='ic'>/pay</code>가 아니라 <strong><code class='ic'>/</code></strong> 경로로 받는다. <code class='ic'>/pay/card</code>로 들어오면 <code class='ic'>pay-service</code>에는 <code class='ic'>/card</code>로 전달된다.</p>
+</blockquote>
+<p>왜 이런 재작성이 필요할까? 많은 백엔드 앱은 자신이 루트(<code class='ic'>/</code>)에서 서비스된다고 가정하고 만들어진다. 그런데 Ingress에서 <code class='ic'>/pay</code> 접두사를 붙여 노출하면, 재작성이 없을 경우 앱은 <code class='ic'>/pay</code>라는 (자신이 모르는) 경로로 요청을 받아 404를 내기 쉽다. <code class='ic'>rewrite-target: /</code>는 외부에 노출되는 경로(<code class='ic'>/pay</code>)와 앱 내부 경로(<code class='ic'>/</code>)의 불일치를 메워 준다.</p>
+<p>반대로 <strong>주의할 점</strong>도 분명하다. 만약 <code class='ic'>pay-service</code> 앱이 <em>스스로</em> <code class='ic'>/pay</code> 경로를 기대하도록 만들어졌다면(즉 앱 라우트가 <code class='ic'>/pay/...</code>로 정의돼 있다면), <code class='ic'>rewrite-target: /</code>를 켜는 순간 경로가 <code class='ic'>/</code>로 깎여 전달되므로 오히려 <strong>404가 난다</strong>. 이 경우에는 rewrite를 빼거나, 앱이 기대하는 경로에 맞게 재작성 규칙을 조정해야 한다. 정리하면 rewrite-target은 &quot;외부 노출 경로와 앱 내부 경로가 다를 때 둘을 맞춰 주는 다리&quot;이며, <strong>켤지 말지는 백엔드 앱이 어떤 경로를 기대하는가에 달려 있다.</strong> 단순 데모처럼 백엔드가 <code class='ic'>/</code>에서 응답한다면 켜고, 앱이 접두사를 그대로 받길 원하면 끄는 식으로 판단한다.</p>
+<p>(참고로 <code class='ic'>/pay</code>처럼 접두사를 그대로 백엔드에 전달하고 싶다면 rewrite-target 주석을 생략하면 된다. 그러면 <code class='ic'>pay-service</code>는 <code class='ic'>/pay</code> 경로 그대로 요청을 받는다.)</p>
 <blockquote class='callout'>
 <p>API 버전 주의: 예전 자료에는 <code class='ic'>apiVersion: extensions/v1beta1</code>로 되어 있는 경우가 많은데, 이는 폐기(deprecated)되어 제거되었다. 쿠버네티스 1.19부터 정식(GA)이 된 <code class='ic'>networking.k8s.io/v1</code>을 사용해야 하며, <code class='ic'>backend</code> 안에 <code class='ic'>service.name</code>/<code class='ic'>service.port.number</code>로 쓰는 구조가 v1 문법이다.</p>
 </blockquote>
@@ -2269,7 +2297,7 @@ kubectl describe ingress marvel-ingress
 <p><code class='ic'>ADDRESS</code>에 컨트롤러의 외부 IP가 채워졌다면, 그 주소의 <code class='ic'>/</code>와 <code class='ic'>/pay</code>로 접속해 서로 다른 페이지가 뜨는지 확인한다.</p>
 <pre><code>
 curl http://192.168.0.10/        # 메인 페이지
-curl http://192.168.0.10/pay     # 결제 페이지
+curl http://192.168.0.10/pay     # 결제 페이지 (rewrite-target 으로 백엔드엔 / 로 전달됨)
 </code></pre>
 <p>이제 도메인 기반으로 나누고 싶다면 <code class='ic'>rules</code> 항목마다 <code class='ic'>host</code>를 추가한다.</p>
 <pre><code>
@@ -2297,19 +2325,20 @@ spec:
                 port:
                   number: 80
 </code></pre>
-<p>두 도메인 모두 같은 Ingress Controller IP를 가리키도록 DNS(또는 로컬 테스트라면 <code class='ic'>/etc/hosts</code>)를 설정하면, 컨트롤러가 Host 헤더로 분기한다. 정리하면 path 분기는 &quot;규칙 1개에 path 여러 개&quot;, host 분기는 &quot;host마다 규칙 1개&quot;라는 차이다.</p>
+<p>두 도메인 모두 같은 Ingress Controller IP를 가리키도록 DNS(또는 로컬 테스트라면 <code class='ic'>/etc/hosts</code>)를 설정하면, 컨트롤러가 Host 헤더로 분기한다. 정리하면 path 분기는 &quot;규칙 1개에 path 여러 개&quot;, host 분기는 &quot;host마다 규칙 1개&quot;라는 차이다. 참고로 host 기반에서는 각 서비스가 <code class='ic'>/</code>에서 받으므로 rewrite-target이 따로 필요 없는 경우가 많다.</p>
 <h4>주의사항과 실무 팁</h4>
 <ul>
 <li><strong>컨트롤러 먼저, 리소스는 그다음.</strong> Ingress가 동작하지 않으면 십중팔구 컨트롤러가 없거나 <code class='ic'>ingressClassName</code>이 맞지 않는 경우다.</li>
 <li><strong>TLS는 한곳에서.</strong> Ingress의 <code class='ic'>spec.tls</code>에 인증서를 담은 Secret을 연결하면 HTTPS 종료(TLS termination)를 컨트롤러가 처리한다. 개발자가 앱마다 SSL을 구현할 필요가 없어진다.</li>
-<li><strong>annotation은 컨트롤러마다 다르다.</strong> <code class='ic'>rewrite-target</code>, 세션 어피니티, 타임아웃 같은 세부 동작은 <code class='ic'>nginx.ingress.kubernetes.io/...</code> 형태의 주석으로 제어한다. Traefik 등 다른 컨트롤러는 주석 키가 다르다.</li>
+<li><strong><code class='ic'>/pay</code>인데 404가 난다면 rewrite-target을 의심하라.</strong> 위에서 설명했듯 <code class='ic'>rewrite-target: /</code>은 경로를 <code class='ic'>/</code>로 깎아 전달한다. 백엔드 앱이 <code class='ic'>/pay</code>를 기대하는데 404가 난다면 이 주석이 원인일 가능성이 높다. annotation은 컨트롤러마다 키가 다르니(Traefik 등은 다른 키 사용) 쓰는 컨트롤러 문서를 확인한다.</li>
 <li><strong>Ingress는 HTTP/HTTPS 전용.</strong> TCP/UDP나 gRPC 스트림 같은 비-HTTP 트래픽 라우팅은 Ingress의 범위를 벗어난다. 이런 요구가 커지면서 등장한 것이 Gateway API인데, 이는 다음 단계 학습 주제다.</li>
 </ul>
 <h3>핵심 요약</h3>
 <ul>
 <li>NodePort는 높은 포트·노드 IP 의존, LoadBalancer는 서비스마다 별도 로드밸런서(비용) 문제가 있다. Ingress는 단일 진입점에서 L7 라우팅과 TLS를 통합 관리한다.</li>
 <li>Ingress는 <strong>Controller(실제 트래픽을 처리하는 nginx 등 엔진)</strong> 와 <strong>Ingress 리소스(라우팅 규칙 YAML)</strong> 의 짝으로 동작한다. 컨트롤러는 기본 탑재되지 않으므로 반드시 먼저 설치해야 한다.</li>
-<li>host 기반은 도메인으로, path 기반은 URL 경로로 분기하며 함께 쓸 수 있다. 어느 규칙에도 안 맞으면 default backend로 간다.</li>
+<li>host 기반은 도메인으로, path 기반은 URL 경로로 분기하며 함께 쓸 수 있다. <code class='ic'>Prefix</code>는 경로 세그먼트 단위 접두사 매칭이고, 여러 규칙이 맞으면 더 긴 경로가 우선한다. 어느 규칙에도 안 맞으면 default backend로 간다.</li>
+<li><code class='ic'>rewrite-target: /</code>은 매칭된 경로(<code class='ic'>/pay</code>)를 잘라 <code class='ic'>/</code>로 바꿔 백엔드에 전달한다. 백엔드가 <code class='ic'>/</code>에서 응답하면 켜고, 접두사를 그대로 받길 원하면 끈다 — 잘못 쓰면 404의 원인이 된다.</li>
 <li>매니페스트는 <code class='ic'>networking.k8s.io/v1</code> 사용이 정답이며, <code class='ic'>ingressClassName</code>·<code class='ic'>pathType</code>·<code class='ic'>service.port.number</code> 구조를 지켜야 한다.</li>
 </ul>
           <section class='ex'><h3>🛠 실습</h3><div class='task'>

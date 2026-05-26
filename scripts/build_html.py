@@ -80,6 +80,23 @@ def parse_content_md(path):
         body = m.group(2)
     return meta, body
 
+def strip_leading_title(body):
+    """본문 맨 앞에서 강의 제목을 한 번 더 반복하는 H1(`# ...`)을 제거한다.
+
+    content.md 는 frontmatter 의 title 을 본문 첫 줄에 `# {제목}` 으로 또 적는 관례가 있고,
+    빌더는 강의 제목을 이미 <h2> 로 출력하므로 그대로 두면 제목이 두 번 나온다.
+    본문 소제목은 `##` 이상이라 '맨 앞 단일 # H1' 하나만 떼면 중복만 정확히 제거된다.
+    """
+    lines = body.splitlines()
+    i = 0
+    while i < len(lines) and not lines[i].strip():   # 선행 빈 줄 건너뛰기
+        i += 1
+    if i < len(lines) and re.match(r"^#\s+\S", lines[i]) and not lines[i].lstrip().startswith("##"):
+        del lines[i]
+        while i < len(lines) and not lines[i].strip():  # 제거된 헤딩 뒤 빈 줄도 정리
+            del lines[i]
+    return "\n".join(lines)
+
 def md_to_html(md):
     """경량 Markdown→HTML (헤딩/목록/코드/굵게/다이어그램). 외부 의존성 없이.
 
@@ -273,7 +290,7 @@ def render_course(course_dir, lang, S):
         toc.append(f"<li><a href='#lec{no}'>{no:02d}. {html.escape(lec_title)}</a></li>")
         sections.append(f"""<article id='lec{no}' class='lecture'>
           <h2>{no:02d}. {html.escape(lec_title)} {badge}</h2>
-          {md_to_html(body)}
+          {md_to_html(strip_leading_title(body))}
           {render_exercise(ex, S)}
           {src_block}
         </article>""")
@@ -560,7 +577,7 @@ blockquote.callout p{margin:6px 0;font-family:var(--font-read);color:var(--on-su
 details summary{cursor:pointer;color:var(--primary);font-family:var(--font-ui);font-weight:600;margin:10px 0}
 
 /* 다이어그램 */
-.diagram{margin:28px 0;text-align:center}
+.diagram{margin:28px 0;text-align:center;overflow-x:auto}
 .diagram figcaption{font-family:var(--font-ui);color:var(--on-surface-variant);font-size:13px;margin-top:8px}
 .mermaid{display:flex;justify-content:center}
 /* Mermaid 로드 전/실패(오프라인) 폴백: 소스를 코드블록처럼 (라이트) */
@@ -593,6 +610,9 @@ details summary{cursor:pointer;color:var(--primary);font-family:var(--font-ui);f
   .site-header{padding:40px 16px 16px}.site-header h1{font-size:26px}
   .landing{padding:16px 16px 56px}
   h2{font-size:20px}
+  /* 넓은 다이어그램은 줄여 찌그러뜨리지 말고 가로 스크롤(왼쪽 정렬) */
+  .diagram{overflow-x:auto}
+  .mermaid{justify-content:flex-start}
 }
 """
 
@@ -626,13 +646,17 @@ function pick(el, qi, oi) {
   articles.forEach(function (a) { obs.observe(a); });
 })();
 
-// Mermaid 다이어그램 — CDN 동적 import. 라이트 테마(Academic Clarity). 실패 시 .mermaid 폴백 CSS.
+// Mermaid 다이어그램 — CDN 동적 import 후 mermaid.run()으로 명시 렌더.
+// startOnLoad는 import가 window load 이벤트보다 늦게 끝나면(모바일=느린 망/CPU) 렌더를 놓쳐
+// 소스 텍스트가 그대로 노출되므로 쓰지 않는다. 대신 명시적으로 그려 결정적으로 렌더한다.
 (async function () {
-  if (!document.querySelector('.mermaid')) return;
+  var blocks = document.querySelectorAll('.mermaid');
+  if (!blocks.length) return;
+  var mermaid;
   try {
-    const { default: mermaid } = await import('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs');
+    mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.esm.min.mjs')).default;
     mermaid.initialize({
-      startOnLoad: true, securityLevel: 'loose', theme: 'base',
+      startOnLoad: false, securityLevel: 'loose', theme: 'base',
       themeVariables: {
         fontFamily: 'Hanken Grotesk, sans-serif',
         primaryColor: '#d9e2ff', primaryBorderColor: '#003178', primaryTextColor: '#1a1c1e',
@@ -641,6 +665,21 @@ function pick(el, qi, oi) {
     });
   } catch (e) {
     console.warn('Mermaid 로드 실패 — 다이어그램 소스를 텍스트로 표시합니다.', e);
+    return; // 폴백 CSS(.mermaid:not([data-processed='true']))가 소스를 텍스트로 표시
+  }
+  function render(el) { mermaid.run({ nodes: [el] }).catch(function (e) { console.warn('Mermaid 렌더 실패', e); }); }
+  // 화면에 가까워진 다이어그램만 렌더(성능). 옵저버 미지원이면 즉시 전부 렌더.
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        io.unobserve(en.target);
+        render(en.target);
+      });
+    }, { rootMargin: '200px 0px' });
+    blocks.forEach(function (el) { io.observe(el); });
+  } else {
+    blocks.forEach(render);
   }
 })();
 

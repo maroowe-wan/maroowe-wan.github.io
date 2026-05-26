@@ -7,7 +7,14 @@ Usage:
 import argparse, json, subprocess, sys, re, os
 
 def check_subtitle(video_id):
-    """Returns (has_subtitle: bool, lang: str|None, detail: dict)"""
+    """Returns (has_subtitle: bool, lang: str|None, subtitle_type: str|None, detail: dict)
+
+    subtitle_lang: 영상 콘텐츠의 원본 언어 (ko/en/other).
+      - en-orig 가 있으면 영어 원본 → 'en'
+      - ko 수동 자막(Available subtitles 섹션)이 있으면 → 'ko'
+      - 그 외 자동 자막만 있는 경우 en이 있으면 'en', ko이 있으면 'ko'
+    subtitle_type: 'manual' | 'auto'
+    """
     url = f"https://www.youtube.com/watch?v={video_id}"
     cmd = [
         sys.executable, "-m", "yt_dlp",
@@ -19,35 +26,63 @@ def check_subtitle(video_id):
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     output = result.stdout + result.stderr
 
-    # 자막 없음 케이스
-    if "has no subtitles" in output.lower() or "no subtitles" in output.lower():
-        return False, None, {"raw": output[-500:]}
+    # 수동 자막 섹션 감지
+    manual_section = bool(re.search(r'Available subtitles for', output, re.IGNORECASE))
+    # 자동 자막 섹션 감지 (yt-dlp는 "Available automatic captions for ..." 로 표시)
+    auto_section = bool(re.search(r'Available automatic captions for', output, re.IGNORECASE))
 
-    # 자막 언어 감지: yt-dlp --list-subs 출력에서 ko/en 찾기
-    # 자동생성: "ko (auto-generated)", 수동: "ko"
-    ko_found = bool(re.search(r'\bko\b', output))
-    en_found = bool(re.search(r'\ben\b', output))
-
-    # Available subtitles/Automatic captions 섹션이 있는지 확인
-    has_sub_section = (
-        "Available subtitles" in output
-        or "Automatic captions" in output
-        or "available subtitles" in output.lower()
-    )
+    has_sub_section = manual_section or auto_section
 
     if not has_sub_section:
-        return False, None, {"raw": output[-300:]}
+        return False, None, None, {"raw": output[-300:]}
 
-    # 우선순위: ko > en > 기타
-    if ko_found:
-        lang = "ko"
-    elif en_found:
-        lang = "en"
+    # en-orig = 영어 원본 콘텐츠
+    en_orig = bool(re.search(r'\ben-orig\b', output))
+    # 수동 자막에서 언어 감지 (Available subtitles 섹션)
+    if manual_section:
+        # 수동 자막 섹션 텍스트만 추출
+        manual_match = re.search(
+            r'Available subtitles.*?(?=Available automatic captions|$)',
+            output, re.DOTALL | re.IGNORECASE
+        )
+        manual_text = manual_match.group(0) if manual_match else ""
+        ko_manual = bool(re.search(r'\bko\b', manual_text))
+        en_manual = bool(re.search(r'\ben\b', manual_text))
     else:
-        # 다른 언어라도 자막 섹션이 있으면 허용
+        ko_manual = False
+        en_manual = False
+
+    # 자동 자막 언어 감지
+    auto_match = re.search(
+        r'Available automatic captions.*',
+        output, re.DOTALL | re.IGNORECASE
+    )
+    auto_text = auto_match.group(0) if auto_match else ""
+    ko_auto = bool(re.search(r'\bko\b', auto_text))
+    en_auto = bool(re.search(r'\ben\b', auto_text))
+
+    # 원본 언어 판정 우선순위:
+    # 1. en-orig 있으면 → 영어 원본 → en
+    # 2. 수동 자막 ko → ko
+    # 3. 수동 자막 en → en
+    # 4. 자동 자막만: en이 있으면 en (영어 원본의 자동 자막), ko만 있으면 ko
+    if en_orig or (not ko_manual and en_auto):
+        lang = "en"
+    elif ko_manual:
+        lang = "ko"
+    elif en_manual:
+        lang = "en"
+    elif ko_auto and not en_auto:
+        lang = "ko"
+    else:
         lang = "other"
 
-    return True, lang, {"ko": ko_found, "en": en_found, "raw": output[-300:]}
+    sub_type = "manual" if manual_section else "auto"
+
+    return True, lang, sub_type, {
+        "en_orig": en_orig, "ko_manual": ko_manual, "en_manual": en_manual,
+        "ko_auto": ko_auto, "en_auto": en_auto, "raw": output[-300:]
+    }
 
 
 def main():
@@ -58,8 +93,8 @@ def main():
     a = p.parse_args()
 
     if a.video_id:
-        has_sub, lang, detail = check_subtitle(a.video_id)
-        result = {"video_id": a.video_id, "has_subtitle": has_sub, "subtitle_lang": lang}
+        has_sub, lang, sub_type, detail = check_subtitle(a.video_id)
+        result = {"video_id": a.video_id, "has_subtitle": has_sub, "subtitle_lang": lang, "subtitle_type": sub_type}
         print(json.dumps(result, ensure_ascii=False))
         return
 
@@ -70,21 +105,23 @@ def main():
         results = []
         for i, c in enumerate(candidates):
             vid = c["video_id"]
-            print(f"[{i+1}/{len(candidates)}] 자막 확인: {vid} - {c.get('title','')[:50]}", flush=True)
+            title_safe = c.get('title','')[:50].encode('ascii', errors='replace').decode('ascii')
+            print(f"[{i+1}/{len(candidates)}] 자막 확인: {vid} - {title_safe}", flush=True)
             try:
-                has_sub, lang, detail = check_subtitle(vid)
+                has_sub, lang, sub_type, detail = check_subtitle(vid)
             except subprocess.TimeoutExpired:
-                has_sub, lang = False, None
+                has_sub, lang, sub_type = False, None, None
                 print(f"  TIMEOUT")
             except Exception as e:
-                has_sub, lang = False, None
+                has_sub, lang, sub_type = False, None, None
                 print(f"  ERROR: {e}")
 
             c_result = dict(c)
             c_result["has_subtitle"] = has_sub
             c_result["subtitle_lang"] = lang
+            c_result["subtitle_type"] = sub_type
             results.append(c_result)
-            status = f"자막={lang}" if has_sub else "자막없음"
+            status = f"자막={lang}({sub_type})" if has_sub else "자막없음"
             print(f"  -> {status}")
 
         if a.out:
