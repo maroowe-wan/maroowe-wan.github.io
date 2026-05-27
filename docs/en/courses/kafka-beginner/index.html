@@ -264,18 +264,21 @@
 <figure class='diagram'><div class='mermaid'>flowchart LR
     subgraph ZK[&quot;ZooKeeper Mode (two systems)&quot;]
         direction TB
-        Z[(&quot;ZooKeeper Cluster&quot;)]
-        KZ[&quot;Kafka Cluster (brokers)&quot;]
-        Z -.metadata management.-&gt; KZ
+        Z[(&quot;🗂️ ZooKeeper Cluster&quot;)]:::coord
+        KZ[&quot;📦 Kafka Cluster (brokers)&quot;]:::svc
+        Z -.-&gt;|metadata management| KZ
     end
     subgraph KR[&quot;KRaft Mode (single system)&quot;]
         direction TB
-        BC[&quot;Broker + Controller (metadata embedded)&quot;]
-        B2[&quot;Broker&quot;]
-        B3[&quot;Broker&quot;]
+        BC[&quot;🧭 Broker + Controller (metadata embedded)&quot;]:::ctrl
+        B2[&quot;📦 Broker&quot;]:::svc
+        B3[&quot;📦 Broker&quot;]:::svc
         BC --- B2
         BC --- B3
-    end</div><figcaption>Comparison of metadata management: ZooKeeper mode vs. KRaft mode</figcaption></figure>
+    end
+    classDef coord fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef svc fill:#dcfce7,stroke:#15803d,color:#14532d;
+    classDef ctrl fill:#e0e7ff,stroke:#4338ca,color:#312e81;</div><figcaption>Comparison of metadata management: ZooKeeper mode vs. KRaft mode</figcaption></figure>
 <h4>The Communication Flow Between Producers/Consumers and the Cluster</h4>
 <p>Let&#x27;s trace the entire flow from start to finish.</p>
 <p>1. The <strong>producer</strong> starts by connecting to one broker in the cluster (the bootstrap server) and fetching metadata — specifically, which broker is the leader for the partition it wants to write to.</p>
@@ -284,11 +287,12 @@
 <p>4. If a broker fails, the controller elects a new leader and automatically reconnects producers and consumers to the new broker.</p>
 <p>As shown in the sequence diagram below, producers and consumers first discover the leader&#x27;s location via metadata, then communicate directly with that leader broker.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant P as Producer
-    participant B as Bootstrap Broker
-    participant L as Leader Broker
-    participant F as Follower Broker
-    participant C as Consumer
+    autonumber
+    participant P as 👤 Producer
+    participant B as 📦 Bootstrap Broker
+    participant L as ⭐ Leader Broker
+    participant F as 📦 Follower Broker
+    participant C as 👤 Consumer
     P-&gt;&gt;B: Request metadata (leader location)
     B--&gt;&gt;P: Partition leader = Leader Broker
     P-&gt;&gt;L: Send message

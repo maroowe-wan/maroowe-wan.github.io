@@ -36,7 +36,7 @@ function pick(el, qi, oi) {
   if (!blocks.length) return;
   var mermaid;
   try {
-    mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.esm.min.mjs')).default;
+    mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs')).default;
     mermaid.initialize({
       startOnLoad: false, securityLevel: 'loose', theme: 'base',
       themeVariables: {

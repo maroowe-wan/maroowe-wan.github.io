@@ -264,18 +264,21 @@
 <figure class='diagram'><div class='mermaid'>flowchart LR
     subgraph ZK[&quot;ZooKeeper 방식 (두 시스템)&quot;]
         direction TB
-        Z[(&quot;ZooKeeper 클러스터&quot;)]
-        KZ[&quot;Kafka 클러스터 (브로커들)&quot;]
-        Z -.메타데이터 관리.-&gt; KZ
+        Z[(&quot;🗂️ ZooKeeper 클러스터&quot;)]:::coord
+        KZ[&quot;📦 Kafka 클러스터 (브로커들)&quot;]:::svc
+        Z -.-&gt;|메타데이터 관리| KZ
     end
     subgraph KR[&quot;KRaft 방식 (단일 시스템)&quot;]
         direction TB
-        BC[&quot;브로커 + 컨트롤러 (메타데이터 내장)&quot;]
-        B2[&quot;브로커&quot;]
-        B3[&quot;브로커&quot;]
+        BC[&quot;🧭 브로커 + 컨트롤러 (메타데이터 내장)&quot;]:::ctrl
+        B2[&quot;📦 브로커&quot;]:::svc
+        B3[&quot;📦 브로커&quot;]:::svc
         BC --- B2
         BC --- B3
-    end</div><figcaption>ZooKeeper 방식과 KRaft 방식의 메타데이터 관리 구조 비교</figcaption></figure>
+    end
+    classDef coord fill:#fef3c7,stroke:#b45309,color:#78350f;
+    classDef svc fill:#dcfce7,stroke:#15803d,color:#14532d;
+    classDef ctrl fill:#e0e7ff,stroke:#4338ca,color:#312e81;</div><figcaption>ZooKeeper 방식과 KRaft 방식의 메타데이터 관리 구조 비교</figcaption></figure>
 <h4>Producer/Consumer와 클러스터의 통신 흐름</h4>
 <p>이제 전체 흐름을 한 줄기로 그려 봅시다.</p>
 <p>1. <strong>프로듀서</strong>는 처음에 클러스터의 한 브로커(부트스트랩 서버) 주소를 알고 접속해 메타데이터를 받아옵니다. &quot;내가 쓰려는 토픽의 파티션 리더가 어느 브로커인지&quot;를 알게 됩니다.</p>
@@ -284,11 +287,12 @@
 <p>4. 도중에 어떤 브로커가 죽으면, 컨트롤러가 새 리더를 뽑고 프로듀서·컨슈머를 새 브로커로 자동 연결해 줍니다.</p>
 <p>아래 시퀀스처럼, 프로듀서·컨슈머는 먼저 메타데이터로 리더 위치를 알아낸 뒤 해당 리더 브로커와 직접 메시지를 주고받습니다.</p>
 <figure class='diagram'><div class='mermaid'>sequenceDiagram
-    participant P as 프로듀서
-    participant B as 부트스트랩 브로커
-    participant L as 리더 브로커
-    participant F as 팔로워 브로커
-    participant C as 컨슈머
+    autonumber
+    participant P as 👤 프로듀서
+    participant B as 📦 부트스트랩 브로커
+    participant L as ⭐ 리더 브로커
+    participant F as 📦 팔로워 브로커
+    participant C as 👤 컨슈머
     P-&gt;&gt;B: 메타데이터 요청 (리더 위치)
     B--&gt;&gt;P: 파티션 리더 = 리더 브로커
     P-&gt;&gt;L: 메시지 전송

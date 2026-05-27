@@ -28,50 +28,53 @@ ISSUE_TYPES = (
 )
 
 PROMPT_TEMPLATE = """\
-당신은 교육 컨텐츠 감수자(QA)다. 칭찬이 아니라 정확한 결함 발견이 역할이다.
-먼저 이 강좌의 도메인 전문가 시각을 채택한다: "{course_title}" 강좌의 숙련 실무자라면
-이 설명에서 무엇이 틀렸다고 지적할지, 어떤 모범 사례·주의점이 빠졌다고 볼지를 기준으로 본다.
+You are an educational-content reviewer (QA). Your job is precise defect-finding, not praise.
+The lecture body under review is written in ENGLISH (English is the canonical authoring language
+of this pipeline). First adopt the perspective of a domain expert for the course "{course_title}":
+as a seasoned practitioner, what would you flag as wrong, and which best practices or caveats are missing?
 
-[강의 정보]
-- 강좌: {course_title}
-- 강의 번호: {lecture_no}
-- 강의 제목: {lecture_title}
-- 예상 유형(expected_type): {expected_type}
-- 학습 목표(objectives):
+[Lecture info]
+- Course: {course_title}
+- Lecture number: {lecture_no}
+- Lecture title: {lecture_title}
+- Expected type (expected_type): {expected_type}
+- Learning objectives (these come from the course spec and MAY be written in Korean;
+  the lecture body is English — verify the English body covers every objective regardless of language):
 {objectives}
 
-[감수 본문] 은 아래 "===== 감수 대상 content.md =====" 구분선 뒤에 이어지는 content.md 전체다.
+[Body under review] is the entire content.en.md that follows the divider "===== content under review =====".
 
-[프로젝트 규약 — 오탐(false positive) 금지]
-아래는 이 파이프라인의 정상 규약이니 결함으로 지적하지 말 것:
-- 코드펜스 첫 줄의 ```mermaid 뒤에 오는 한국어 텍스트는 이 빌더(build_html.py)가 그림 설명(figcaption)으로 렌더링하는 공식 규약이다. 이를 "표준이 아니다 / 문법 오류 / title 지시어를 쓰라"고 지적하지 말 것. 다이어그램 결함은 그 다음 줄부터의 다이어그램 본문(노드·화살표·문법·본문과의 의미 일치)만 본다.
-- content.md는 자막을 재구성·재작성한 본문이지 원문 복제가 아니다. "자막 복제"를 전제로 지적하지 말 것.
-- 기술 용어가 표준 한국어 표기 또는 원어 병기로 의미가 통하면 "직역"으로 보지 말 것.
+[Project conventions — DO NOT flag these as false positives]
+- The Korean/English text on the first fence line after ```mermaid is a caption that this builder
+  (build_html.py) renders as a <figcaption>. Do NOT flag it as "non-standard / syntax error / use a title directive".
+  For diagrams, judge only the diagram body from the next line on (nodes, arrows, syntax, and whether it matches the prose).
+- content.en.md is a reconstructed/rewritten lesson based on transcripts, NOT a copy of the source. Do NOT flag it as "transcript copying".
 
-[감수 체크리스트] 항목별로 점검한다:
-1. 정확성: 사실 오류·오래된 정보·잘못된 개념. 도메인 전문가가 틀렸다 할 기술 오류. (실패 시 반드시 REVISE)
-2. 목표 충족: objectives를 모두 다루는가? 빠진 목표는 missing_topics에 적는다.
-3. 충분성: 15분 강의로 충분한가, 너무 얕거나 과하지 않은가.
-4. 난이도: 대상 수준에 맞는가, 설명 없이 어려운 용어를 던지지 않는가.
-5. 적절성: 편향·부정확한 일반화·무관한 곁가지가 없는가.
-6. 구조: 도입-개념-예시-정리 흐름이 논리적인가.
-7. 다이어그램: ```mermaid 블록이 본문·사실과 일치하는가, 문법이 유효한가, 꼭 필요한 곳에 있는가. (결함은 type "diagram")
-8. 직역 오류(번역투): 영어 기술 용어를 뜻이 깨지게 직역하지 않았는가?
-   예) "flat network"를 "평평한 네트워크"로, 고유 개념을 어색하게 직역해 의미 파악이 안 되는 경우.
-   표준 한국어 기술 표기 또는 원어 병기로 바로잡아야 한다. (결함은 type "literal_translation")
+[Review checklist] Check each item:
+1. Accuracy: factual errors, outdated info, wrong concepts — technical errors a domain expert would reject. (Always REVISE on failure.)
+2. Objective coverage: does it cover every objective? List any uncovered objective in missing_topics.
+3. Sufficiency: enough for a 15-minute lecture, neither too shallow nor bloated.
+4. Difficulty: matched to the audience; no hard term thrown in without explanation.
+5. Appropriateness: no bias, inaccurate generalization, or irrelevant tangents.
+6. Structure: a logical intro → concept → example → summary flow.
+7. Diagrams: each ```mermaid block matches the prose/facts, has valid syntax, and is only where it genuinely helps. (defect type "diagram")
+8. Language quality (English): is the English idiomatic and is technical terminology standard and correct?
+   Flag unidiomatic/awkward English or non-standard technical terms (e.g. an invented term where a standard one exists).
+   (defect type "literal_translation" — reused here as the "language/terminology quality" channel)
 
-[판정 규칙]
-- PASS: 모든 항목 통과. 사소한 개선점은 minor_notes 에만 적는다.
-- REVISE: 정확성/목표충족/충분성 중 하나라도 실패. 구체적 issues 와 (목표 누락 시) missing_topics 를 반드시 적는다.
-- **REVISE는 사실 오류·학습목표 누락·명백한 분량 부족에만 쓴다.** "더 깊이 다루면 좋다", "이런 주제도 추가하면 좋다" 같은 심화·확장·취향 제안은 결함이 아니므로 issues 가 아니라 minor_notes 에만 적는다(이미 정확한 본문을 반복해서 REVISE 시키지 말 것).
+[Verdict rules]
+- PASS: all items pass. Put minor improvements in minor_notes only.
+- REVISE: any failure of accuracy / objective coverage / sufficiency. Always give concrete issues and (if objectives are missing) missing_topics.
+- **Use REVISE only for factual errors, missing objectives, or clear insufficiency.** Suggestions like "would be nice to go deeper" or
+  "could add this topic" are not defects — put them in minor_notes, not issues (do not REVISE an already-correct body repeatedly).
 
-[출력 형식] 오직 아래 스키마의 raw JSON 만 출력한다. 마크다운 펜스(```), 설명, 머리말 금지.
-issue 의 type 은 다음 중 하나: {issue_types}
+[Output format] Output ONLY raw JSON of the schema below. No markdown fences (```), no explanation, no preamble.
+The type of an issue is one of: {issue_types}
 {{
-  "verdict": "PASS" 또는 "REVISE",
-  "issues": [{{"type": "accuracy", "detail": "구체적 문제 설명"}}],
-  "missing_topics": ["다루지 않은 학습 목표"],
-  "minor_notes": ["통과시키되 참고할 사소한 점"]
+  "verdict": "PASS" or "REVISE",
+  "issues": [{{"type": "accuracy", "detail": "concrete problem description"}}],
+  "missing_topics": ["uncovered learning objective"],
+  "minor_notes": ["minor points to note while passing"]
 }}
 """
 
@@ -156,9 +159,13 @@ def main():
         die("커리큘럼에 강의 no=%d 없음" % args.lecture_no)
 
     lec_dir = find_lecture_dir(course_dir, args.lecture_no)
-    content_path = os.path.join(lec_dir, "content.md")
+    # 영문이 원본(canonical). 감수는 content.en.md 를 대상으로 한다.
+    # (레거시 강좌처럼 영문본이 없으면 한국어 content.md 로 폴백한다.)
+    content_path = os.path.join(lec_dir, "content.en.md")
     if not os.path.isfile(content_path):
-        die("content.md 없음: %s" % content_path)
+        content_path = os.path.join(lec_dir, "content.md")
+    if not os.path.isfile(content_path):
+        die("content.en.md/content.md 둘 다 없음: %s" % lec_dir)
     with open(content_path, encoding="utf-8") as f:
         content = f.read()
 
@@ -187,7 +194,7 @@ def main():
 
     # 지침(prompt)과 본문을 모두 stdin으로 보내고 -p 는 짧은 지시만 둔다.
     # (거대 프롬프트를 argv로 넘길 때의 길이·특수문자 인용 문제를 피한다.)
-    payload = prompt + "\n\n===== 감수 대상 content.md =====\n" + content
+    payload = prompt + "\n\n===== content under review =====\n" + content
     directive = ("Follow the review instructions in the input and output ONLY raw JSON "
                  "per the given schema. No markdown fences, no prose.")
 

@@ -258,16 +258,18 @@ def _pick_lang_file(ldir, base, ext, lang):
 _STALE_TOL = 2  # 초. 원본 생성 시 ko/en이 거의 동시에 써져 생기는 1초 미만 오차를 무시한다.
 
 def _check_staleness(ldir, lang):
-    """영문 산출물이 한국어 원본보다 (의미 있게) 오래됐는지 검사해 경고 문자열을 돌려준다.
+    """한국어 현지화본(content.md)이 영문 원본(content.en.md)보다 (의미 있게) 오래됐는지 검사해 경고를 돌려준다.
+    영문이 canonical 이므로, 영문 본문을 보강한 뒤 한국어 재현지화를 깜빡한 경우를 빌드 로그에서 잡아낸다.
+    정상 흐름에서는 한국어가 영문보다 '나중에' 만들어지므로(6b 현지화) 첫 빌드에서는 경고가 나지 않는다.
     mtime 비교라 git checkout/파일복사로 흔들릴 수 있어 '하드 실패'가 아니라 소프트 경고용이며,
     _STALE_TOL 초 이내 차이는 동시 작성으로 보고 무시한다(오탐 방지).
-    한국어 content.md 를 보강한 뒤 content.en.md 재번역을 깜빡한 경우를 빌드 로그에서 잡아낸다."""
-    if lang == "ko":
+    (레거시 한국어-원본 강좌는 영문이 번역본이라 이 검사가 어긋날 수 있으나, 그 강좌들은 더 이상 갱신되지 않는다.)"""
+    if lang != "ko":
         return None
     ko = os.path.join(ldir, "content.md")
-    en = os.path.join(ldir, f"content.{lang}.md")
-    if os.path.exists(ko) and os.path.exists(en) and os.path.getmtime(en) + _STALE_TOL < os.path.getmtime(ko):
-        return f"{lang} translation older than content.md - content.{lang}.md may need re-translation"
+    en = os.path.join(ldir, "content.en.md")
+    if os.path.exists(ko) and os.path.exists(en) and os.path.getmtime(ko) + _STALE_TOL < os.path.getmtime(en):
+        return "content.md (ko localization) older than content.en.md - content.md may need re-localization"
     return None
 
 def _filter_sources(selected, lang):
@@ -563,14 +565,14 @@ h3{font-family:var(--font-ui);font-size:18px;font-weight:600;color:var(--primary
 h4{font-family:var(--font-ui);font-size:15px;font-weight:600;margin:22px 0 8px}
 
 /* 본문 (Source Serif 4) */
-.lecture p,.lecture li{font-family:var(--font-read);font-size:16px;line-height:1.7;color:var(--on-surface)}
+.lecture p,.lecture li{font-family:var(--font-read);font-size:16px;line-height:1.7;color:var(--on-surface);overflow-wrap:break-word;word-break:break-word}
 .lecture ul{padding-left:22px}.lecture li{margin:6px 0}
 strong{font-weight:600}em{font-style:italic}
 
 /* 코드 (JetBrains Mono) */
 pre{background:var(--surface-container-low);border:1px solid var(--outline-variant);padding:14px;border-radius:var(--radius);overflow:auto;font-size:12.5px}
 pre code{font-family:var(--font-code)}
-code.ic{font-family:var(--font-code);background:var(--surface-container);color:var(--surface-tint);padding:2px 6px;border-radius:4px;font-size:.9em}
+code.ic{font-family:var(--font-code);background:var(--surface-container);color:var(--surface-tint);padding:2px 6px;border-radius:4px;font-size:.9em;overflow-wrap:break-word;word-break:break-all}
 
 /* 콜아웃 (Callout/Note) */
 blockquote.callout{margin:20px 0;padding:14px 18px;background:rgba(129,243,229,.18);border-left:4px solid var(--secondary);border-radius:0 var(--radius) var(--radius) 0}
@@ -585,6 +587,7 @@ blockquote.callout p{margin:6px 0;font-family:var(--font-read);color:var(--on-su
 .ex h3{margin-top:0}
 .quiz,.task{margin:16px 0;padding:16px;background:var(--surface-container-low);border:1px solid var(--outline-variant);border-radius:var(--radius)}
 .q{font-family:var(--font-ui);font-size:15px;font-weight:600;margin:0 0 10px}
+.q,.q p,.q li,.opt,.exp,.exp2,.exp p,.exp2 p,.task ul li,.quiz .exp li{overflow-wrap:break-word;word-break:break-word;min-width:0}
 .opts{list-style:none;padding:0;margin:0}
 .opt{padding:10px 14px;margin:8px 0;background:var(--surface-container-lowest);border:1px solid var(--outline-variant);border-radius:var(--radius);cursor:pointer;transition:background .12s,border-color .12s}
 .opt:hover{background:var(--surface-container);border-color:var(--outline)}
@@ -673,7 +676,7 @@ function pick(el, qi, oi) {
   if (!blocks.length) return;
   var mermaid;
   try {
-    mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.esm.min.mjs')).default;
+    mermaid = (await import('https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.esm.min.mjs')).default;
     mermaid.initialize({
       startOnLoad: false, securityLevel: 'loose', theme: 'base',
       themeVariables: {
