@@ -1,0 +1,467 @@
+Kind: captions
+Language: en
+and throughout this course we talked
+about different kubernetes resources uh
+their purpose how to use them and how
+they work however sometimes you will run
+into scenarios where the existing
+resources are too limiting or they're
+not precisely what you need
+for these purposes kubernetes also
+supports custom resource definitions or
+crds
+each resource in kubernetes
+such as pods services deployments is an
+endpoint on the kubernetes api
+this endpoint stores the collection of
+kubernetes objects we've seen an example
+of an api
+when we talked about service accounts
+and where we were accessing the pod
+information using the queries dot
+default slash api url
+other kubernetes resources have similar
+endpoints in the api and you can use
+that api to
+get the objects to create update or
+delete the objects
+custom resources are a way of extending
+that kubernetes api so you can develop
+your own resource let's say mycoolpod
+and then install it on your cluster or
+any other kubernetes cluster
+once that resource is installed you can
+create its object using the kubernetes
+cli just like you would do it for
+services or deployments so let's say you
+registered or created a custom resource
+called mycoolpod you could use cube ctl
+get my cool pod or describe to interact
+with the object of the my cool pod kind
+custom resources on their own
+simply allow you to store and retrieve
+the data but to make them more powerful
+you can combine them with a custom
+controller
+using this custom controller you can get
+a proper declarative api that allows you
+to declare your resource's desired state
+and then keep the object's current state
+in sync with the desired state so that's
+just like the replica set controller
+does when it tries to maintain the pod
+replicas
+so let's say you wanted to create a
+custom resource called pdf document and
+that resource will take the text in the
+resource and then save that resource as
+a markdown file and then it's going to
+convert it to a pdf file we will use the
+kubernetes volume to store the markdown
+and the pdf files
+there will be two init containers the
+first one will take the text store it to
+the markdown file and then the second
+one will use that markdown file to
+create a pdf file
+so let's come up with
+the resource definition so let's create
+the pdf document pdf
+document.yaml and just define how we
+want this resource to look like so let's
+say we wanted a pdf document will be the
+kind of the resource
+metadata
+it will have the name let's call it my
+document and then under spec we will
+have the document name so this is how
+the file will be named
+and then we'll have some text and this
+would be
+like a my
+document
+document and then we can say hello
+and make it in bold
+world for example
+now if i try to create this resource
+using the cli
+i'll get an error so let's see how this
+looks like so i'll say kubernetes cube
+ctl apply pdf document.yaml
+and this will fail uh because
+there's no api version set so kubernetes
+doesn't really understand what this
+resource is all about so we need to tell
+kubernetes about this pdf document kind
+and the way that we can do this is
+through the
+custom resource definition
+so let's create the custom resource
+definition for the pdf document kind so
+i'll create a new
+file here and let's just call it pdf
+custom research definition and i'll
+paste the yaml in and then we can go
+through this and explain it so this is
+the name of our custom resource
+definition
+and the name of the crd
+uses the following format so it uses the
+plural name of the resource which is pdf
+documents and it also uses the group
+name so it's pdf documents which is the
+plural dot whatever the group name is
+and in our case i just set it to
+kubernetes dot start kubernetes dot com
+uh the name of the group uh that we use
+uh
+and this is the name that we'll see in
+the rest api so we have the group name
+and the version and this will end up
+being
+under apis and then the group name will
+be kubernetes.kubernetes.com
+slash
+v1 because this is one of the versions
+that we have defined
+we are also specifying that this
+resource will be namespaced meaning
+you have to specify the namespace when
+you're creating it another option here
+would be to make the resource cluster
+scoped meaning there's a
+you can only have
+resources
+you don't have to specify the namespace
+for this resource
+under versions we're specifying all the
+versions in our case there's only one
+and then down here under names we're
+specifying the
+kind of this resource which is the pdf
+document and then the singular plural
+and the short names for our
+resource these are the short names that
+we'll be able to use uh when running
+kubernetes click
+finally under the schema
+we're actually specifying how this
+resource is going to look like using the
+open api specification format so this
+spec format allows us to define a more
+structural schema
+we can also define we could define
+required fields or we can specify any
+patterns that the fields need to conform
+to
+so let's create this
+crd and we'll say cube ctl apply minus f
+pdf
+crd.yaml
+so kubernetes created this one and now i
+can use either pdf pdfs of
+or pdf document to list all the pdf
+document resources in the cluster so
+let's do
+cube ctl get pdf document
+and notice that this time it did not
+fail
+it just simply said that there's no
+resources found in the default namespace
+no resources of the pdf document
+type i could also do cube cdl get pdf
+it'll do the same
+thing
+let's also list this
+under the api resources and i'm just
+going to grip for pdf so you can see how
+it looks like so notice there's the name
+the short names and then the group name
+and the actual kind of
+the resource so kubernetes also created
+a
+namespace to rest api endpoint for our
+for our pdf document resource so let's
+look at that so i'm just going to try
+start a proxy
+on port 8080
+and i'll open a separate separate window
+here terminal window below and we'll
+just go to localhost 8080 apis and i'll
+just grep for
+kubernetes.com
+uh so notice there's the group version
+the name
+let me actually just not grip and see if
+we can find it
+uh there you go so you'll notice we have
+an api here that's the one that we
+defined and this is the group name as
+well as the version now if we wanted to
+access the pdf documents api just like
+we accessed the pods and namespaces
+earlier
+we could do that as well so we could do
+localhost
+8080 apis kubernetes
+dot start
+kubernetes.com so that's the group name
+version namespaces
+because these are the namespace
+resources and then we can say default
+namespace and then do pdf documents
+so notice that we we got back a response
+there are zero items because we haven't
+created anything
+but let's see what would happen if we
+would actually create this pdf document
+resource so let's do cube ctl apply
+minus f pdf document.yml
+oh i actually have to
+specify the api version
+right now because we do have one
+so let's do that way
+uh actually i need to specify the full
+group name as well start kubernetes dot
+com slash v1 so let's save that and
+let's try again
+and this time the my document resource
+of type pdf document was created so this
+means that we could list it as well get
+pdf there's my document and if we curl
+again to the api you'll see that we
+actually get back
+uh one item off type pdf document and
+you'll see there's the there's the text
+that we said
+we set in that resource as well
+now this resource will behave like just
+like any other kubernetes resource uh
+but without a controller this resource
+is pretty much useless
+so let's see how we can create a simple
+controller and this what this controller
+will do it will create a job whenever we
+create a new pdf document resource that
+job will then take the text from the
+resource and it will use the init
+containers to create a pdf document from
+it
+so let's create the pdf document
+controller i'll use cube builder to
+build the crd and the controller so
+let's create a folder first so i'll call
+it pdf
+folder and then from within this folder
+i'll initialize the module called start
+kubernetes
+dot com slash v1
+and then we'll run the cube builder init
+command
+the cube builder init command will
+create the project structure and it's
+going to create any other files that are
+needed for the controller
+now once this completes then we'll have
+to create the structure for the custom
+resource using the cube builder create
+api command
+okay so the command completed and let's
+use the cube builder create api
+to create the api so we'll say
+cube
+cube builder
+create
+create api dashes group is going to be
+griddies.start kubernetes.com
+version will be v1
+and kind will be pdf document
+so we're going to get prompted if you
+want to create a resource yes we do
+do we want to create a controller yes we
+do as well and then this will go ahead
+and it's going to create all the files
+required
+for us to create the resource the crd as
+well as to create the controller
+so once this is done
+we will open the folder here the pdf
+controller in the editor
+and then we'll go to
+to the uh api and v1 folder and this is
+where the pdf document types are defined
+and you'll notice down here it's just an
+example field
+for the pdf document so here's where we
+can define those same fields that we
+defined in the custom resource
+definition so we'll say document
+document name it's going to be a string
+and then the name of the field will be
+document name and we'll say omit empty
+this
+and then the second one
+the second property will be text and
+this will be string as well
+and the name of the field will be text
+and we're going to omit empty here as
+well
+now the next part is to actually go and
+implement a controller inside the pdf
+document controller file so let's look
+at the
+let's look at that controller file
+so this is where we would put all of our
+logic on how to do uh
+what to do when there's a new pdf
+document that gets created now as i
+mentioned before to implement the
+functionality what i'll do is i will use
+two init containers
+and then the first init container will
+read the text file from the resource and
+it's gonna store it in the markdown file
+on a volume that's gonna be shared
+between all containers
+once that markdown file is stored the
+second init container will run the pan
+doc image and that image is just going
+to convert the md file into the pdf file
+this pdf file the converted one will be
+stored on the shared volume as well
+finally the main container will just
+sleep
+just so we can copy over the results to
+our local machine now to make this more
+realistic what you could do is you could
+use a persistent volume and then store
+the converted pdf documents there
+for the sake of simplicity and just to
+demonstrate how can train controllers
+work i'll just use a
+regular volume
+okay so i added bunch of code here and
+let's just walk through this one so in
+the reconcile function what i'm doing is
+i'm
+trying to get the pdf document
+resource and if that fails we're just
+going to return an error and say we're
+unable to fetch the pdf document then
+i've created this create job function
+down here that i'll go through
+we're creating the job specification and
+this job specification will have the
+init containers and everything that we
+need to go from the markdown to
+to the pdf document and then once we hit
+once we get that job spec without any
+errors of course we're just going to go
+and create that job and once that job is
+created it will
+run those containers run those init
+containers and we'll actually create the
+pdf document
+so let's look at the create job uh
+function here uh so we're just creating
+a new instance of uh the job resource
+we're specifying the the object name the
+namespace and then under the spec uh
+we're specifying the pot template
+and we're defining two in it containers
+the first one is called store to
+markdown and what it's gonna do is it's
+just gonna uh
+base64
+decode
+the text so the value that we get from
+the text and we're encoding it here
+and then it's just going to write it to
+the data slash text.md file to the
+shared volume and this is where the
+volume gets mounted and then once this
+first container first init container is
+finished
+we're going to run the second one and
+this one is actually running the pandock
+image so it has the pandoc binary and
+what it's going to do is it will just
+create the pdf file using the document
+name that we specified in the pdf
+document resource and it will create the
+pdf file again in the shared volume
+once both init containers are done we'll
+have a simple main container that's
+going to sleep for a while and it it'll
+mount this volume
+and that's pretty much it for the code
+for this uh
+for our simple controller so let's go
+and try to run this but before we run
+the controller we need to create the
+custom resource definition first so
+let's do that by using cube ctl apply
+minus f and then we'll go to
+config
+crd
+basis
+and then kubernetes. start communities
+there we go so this will actually create
+the crd
+so we can list that cube ctl get crd
+there you go so the pdf documents
+kubernetes start companies.com is
+created and now that we have this we can
+actually run use make run to
+run the controller
+so once the controller is up and running
+we will be able to create the pdf
+document resource and see
+how the
+reconcile method in the controller will
+go ahead and create the job and the job
+will create the pods
+okay so the controller is running so
+let's just open a separate terminal
+window
+and from here what we'll do is we will
+deploy that same pdf document
+that we had before so i'll say cube ctl
+actually i'll move
+one level higher cube ctl apply minus f
+bdf document.yaml
+so there you go you'll notice that there
+was a debug log line that was written to
+the log saying that
+the resource was successfully reconciled
+the controller was pdf document and the
+request was pretty much the my document
+resource that we created in the default
+namespace so let's look at this pdf
+document that was created just like
+before
+we're able to create the resource and
+then also look at the jobs because jobs
+this is the job that was created
+by uh by our controller and then this
+job also created the pods
+you'll notice that the
+pod is already running meaning that the
+two
+init containers have completed and we've
+actually got the pdf document created so
+we'll just use cube ctl copy
+and we'll copy the pdf document from
+this pod and the document is in the data
+slash my
+text because that's the document name
+dot pdf and we'll just copy this
+document over to say mytext.pdf in the
+current folder
+okay so i'll just open the pdf document
+and open a different one and there you
+go
+so
+we have a pdf document from
+the markdown text that we created in the
+resource

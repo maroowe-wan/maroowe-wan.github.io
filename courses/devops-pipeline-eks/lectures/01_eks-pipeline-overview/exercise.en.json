@@ -1,0 +1,61 @@
+{
+  "lecture_no": 1,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "In a Kubernetes deployment, the cluster control plane continuously compares the current state of the cluster to a desired state stored in a manifest. What is this design principle called, and why does it matter for pipelines?",
+      "options": [
+        "Imperative deployment — the pipeline scripts every step so there is no ambiguity about what runs.",
+        "Declarative deployment — the manifest describes the desired end state, so the pipeline only needs to apply a file; the cluster does the rest.",
+        "Event-driven deployment — the cluster reacts to webhook events from GitLab to schedule container restarts.",
+        "Stateful deployment — each environment stores its own copy of the application state in etcd."
+      ],
+      "answer_index": 1,
+      "explanation": "Kubernetes is declarative: you write what you want (a manifest), not how to get there (a script). The control plane reconciles reality with that desired state continuously. For pipelines this is powerful — the final step is just 'kubectl apply -f', and the cluster handles rolling updates, retries, and health checks. Option A describes imperative deployment, which is what traditional shell scripts do. Option C confuses the GitLab webhook (which triggers Jenkins, not the cluster) with Kubernetes event handling. Option D mixes up stateful applications with the cluster control-plane's etcd storage."
+    },
+    {
+      "question": "Which of the following best describes what Amazon EKS provides compared to self-managed Kubernetes?",
+      "options": [
+        "EKS replaces the need for container images and ECR by building images directly from source code.",
+        "EKS manages the worker nodes automatically, so you do not need to provision EC2 instances for your application.",
+        "EKS manages the control plane (API server, etcd, scheduler) across multiple availability zones; you still bring worker nodes and workloads.",
+        "EKS is a container registry that stores images and pulls them into a built-in Kubernetes cluster on demand."
+      ],
+      "answer_index": 2,
+      "explanation": "EKS is a managed Kubernetes service: AWS operates and maintains the control plane (API server, etcd, scheduler, controller manager) across availability zones. You are responsible for worker nodes (often via EC2 or managed node groups) and for the applications running on them. Option A is false — EKS runs containers but you still need a Dockerfile and a registry like ECR. Option B overstates EKS's scope; managing worker nodes is the customer's responsibility (though Fargate can abstract individual nodes). Option D conflates EKS with ECR; they are separate services."
+    },
+    {
+      "question": "A developer pushes a commit to the main branch in GitLab. Arrange the following pipeline events in the correct order:\n  (i) Jenkins builds a Docker image and tags it with the commit SHA\n  (ii) EKS performs a rolling update of running Pods\n  (iii) Jenkins receives an HTTP POST webhook from GitLab\n  (iv) The new image is pushed to Amazon ECR\n  (v) Jenkins applies an updated manifest to EKS",
+      "options": [
+        "(i) → (iii) → (iv) → (v) → (ii)",
+        "(iii) → (i) → (iv) → (v) → (ii)",
+        "(iii) → (iv) → (i) → (ii) → (v)",
+        "(i) → (iv) → (iii) → (ii) → (v)"
+      ],
+      "answer_index": 1,
+      "explanation": "The correct sequence is: GitLab detects the push and sends a webhook (iii) to Jenkins; Jenkins checks out the code and builds the image tagged with the commit SHA (i); the image is pushed to ECR (iv); Jenkins applies the updated manifest to EKS (v); EKS then executes a rolling update (ii). Options A and D place image building before the webhook is even received, which is impossible. Option C has the image pushed to ECR before it is built, which is also impossible."
+    },
+    {
+      "question": "Your team currently tags every production image as 'latest' and pushes it to ECR. A colleague argues this makes rollbacks 'guesswork'. Which statement most accurately explains why they are correct?",
+      "options": [
+        "The 'latest' tag is rejected by ECR's tag immutability feature, causing push failures.",
+        "Because 'latest' is overwritten by every new build, you cannot determine which code version a running Pod is executing, making targeted rollbacks unreliable.",
+        "Kubernetes does not support the 'latest' tag in Deployment manifests and will refuse to schedule Pods.",
+        "The 'latest' tag bypasses the GitLab webhook, so Jenkins never receives a trigger for those builds."
+      ],
+      "answer_index": 1,
+      "explanation": "The 'latest' tag is a mutable label: every new build overwrites it, so a Pod running 'latest' could be any code version. If something breaks, you cannot tell which commit introduced the problem or reliably redeploy the previous good state — you would need to guess which build to re-push. Commit-SHA tags (e.g., a1b9f3c) are immutable: the tag always identifies exactly one build, making rollbacks a matter of re-applying the manifest with the known-good tag. Option A is wrong — tag immutability is an optional ECR setting you enable deliberately, not a default rejection. Option C is false — Kubernetes accepts 'latest' but has its own pull-policy issues with it. Option D has no basis in how webhooks work."
+    },
+    {
+      "question": "A Kubernetes cluster has a control plane and worker nodes. Which component is responsible for detecting that a crashed Pod should be restarted, and on which part of the cluster does it run?",
+      "options": [
+        "kube-proxy on the worker node monitors Pod health and restarts crashed containers.",
+        "The controller manager on the control plane compares desired state to actual state and initiates Pod recreation.",
+        "The kubelet on each worker node makes cluster-wide scheduling decisions and restarts Pods across nodes.",
+        "etcd on the control plane listens for container exit codes and triggers the scheduler to place a new Pod."
+      ],
+      "answer_index": 1,
+      "explanation": "The controller manager runs on the control plane and runs reconciliation loops — it continuously compares the desired state (e.g., 3 replicas) to the actual state, and if a Pod is missing it creates a new one. The kubelet (option C) does communicate Pod status to the control plane and can restart containers within its node, but cluster-level reconciliation (e.g., creating a replacement Pod on a different node) is the controller manager's job. kube-proxy (option A) handles network traffic routing, not Pod lifecycle. etcd (option D) is a key-value store for cluster state; it does not execute logic or trigger restarts."
+    }
+  ]
+}

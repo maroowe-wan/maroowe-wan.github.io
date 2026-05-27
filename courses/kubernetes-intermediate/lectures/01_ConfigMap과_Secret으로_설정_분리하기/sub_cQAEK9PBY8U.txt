@@ -1,0 +1,186 @@
+Kind: captions
+Language: en
+you're trying to deploy an application
+into a kubernetes cluster
+and need to pass it some sensitive
+information such as an api token or an
+ssl certificate
+in the next five minutes i'm going to
+show you exactly how to do that
+taking advantage of kubernetes built-in
+secret management hey team sid here with
+devops directive where it's my job to
+help you level up your devops and cloud
+infrastructure skills
+i don't want to waste your time with a
+big preamble so let's get right into it
+nearly any application doing something
+more complex than just printing out a
+hello world
+will have some sensitive data needed to
+configure it luckily for us
+kubernetes has a primitive designed
+exactly for this use case which is aptly
+named
+a secret these secrets consist of key
+value pairs
+for example it could be an api token or
+an ssl certificate
+there are also a few different types of
+secrets the first
+is the opaque type which allows for
+arbitrary user-defined data
+there's also more specific types which
+have some other requirements and
+validations applied for their
+corresponding use cases
+for example a docker config type secret
+should be used to store credentials for
+a docker registry
+for the remainder of the video all the
+examples will refer to generic opaque
+secrets
+how do we go about actually creating one
+of these secrets there's two main
+ways which i'll walk through now first
+we can define a yaml file just like any
+other kubernetes resource
+this file will specify that it is of
+kind secret defines the name of the
+secret within a metadata
+and then contains the key and value of
+the secret within the data portion
+one important thing to note here is that
+the value field looks a little bit
+different than it did before
+this is because the value field is
+encoded in base 64.
+to encode your secret you can use the
+base64 command line utility
+you'd echo out the token with the dash n
+flag to prevent it from including a new
+line
+this is important because white space
+and new lines can cause your secrets not
+to work properly
+then we pipe it into the base64 utility
+and get the encoded string out
+to create the secret within the cluster
+we would then run the command
+cube cuddle apply f for file and then
+the name of the file where we stored the
+configuration
+cube cuddle also supports a slight
+variant that doesn't require you to
+create a file
+which is convenient since you likely
+wouldn't want to store your secrets in a
+plain text source file anyways
+the command to do this is cube cuddle
+create
+secret generic the name of the secret
+and then there's two different options
+you can do from literal where you pass
+the key and value
+as literal strings into the command or
+you can do the from file option in which
+you pass
+a key and then the path to the file on
+your local system
+both of these options from literal and
+from file handle the base64 encoding for
+you
+so you can pass in your secret without
+having to encode it first okay great
+we now have the secret stored within
+kubernetes how can i actually access it
+within an application
+there's two main methods for consuming
+secrets within kubernetes
+the first is to inject it as an
+environment variable inside the
+container
+when defining the pod or job spec we can
+use the end
+key and indicate that the value should
+be pulled from a reference to that
+secret we created earlier
+and then it references the key value
+pair to extract
+here we're telling the pod to find the
+secret name my secret
+and specifically the value corresponding
+to the api token key within that
+it then gets injected as the environment
+variable
+api token within the container the
+application running within the container
+can then
+access it using something like
+process.nb.api token for javascript
+or os.environ.get api token for python
+the second way to consume a secret is to
+mount it into a container using a volume
+this method works great for applications
+that are designed to consume
+sensitive information from configuration
+files such as nginx reading an ssl
+certificate
+to do this we need to configure two
+things
+first we declare a volume within the pod
+specification
+referencing our secret next we create a
+volume mount within the container
+the name of the volume in the volume
+mount must match the name of the volume
+where it was defined
+and then the path is where within the
+container file system the secret will be
+located
+each key in the secret will become a
+file containing its corresponding value
+i know you're probably thinking great
+now we know how to create
+and use kubernetes secrets what else
+could we possibly need to know
+i want to call out three potential
+gotchas in the kubernetes
+api server the secrets are stored within
+edcd
+the distributed key value store
+containing most kubernetes
+configurations
+if you're managing your own cluster make
+sure to encrypt this data
+and set up role-based access permissions
+to limit access to those data
+second as i mentioned before secrets
+within a yaml definition file
+are base64 encoded this is not
+encryption
+and those files should be treated as
+sensitive and not checked into version
+control
+number three you still need to protect
+your secrets within the applications
+using them
+for example don't log them out and don't
+send to an untrusted third party
+hopefully now you feel confident about
+how to manage your application
+credentials
+using kubernetes secrets if you still
+have more questions about general
+credential management
+i suggest watching that video in which i
+walk through the five different levels
+of credential management
+ranging from beginner to expert also
+if you made it this far into the video
+and you aren't subscribed to the channel
+why don't you go ahead and fix that it
+only takes a second and it really helps
+the channel grow
+that's it for today and remember just
+keep building

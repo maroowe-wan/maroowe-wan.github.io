@@ -1,0 +1,281 @@
+Kind: captions
+Language: en
+This is the first part of the Amazon EKS tutorial.
+Here, we're going to create all&nbsp;
+the necessary network components,&nbsp;&nbsp;
+starting with a VPC using Terraform.
+Terraform is widely adopted&nbsp;
+and is the de facto standard&nbsp;&nbsp;
+in our industry for managing infrastructure.
+We'll start by creating four different subnets,&nbsp;&nbsp;
+two private and two public, in&nbsp;
+two different availability zones.
+EKS requires you to provide multiple subnets&nbsp;
+in at least two different availability zones.
+We'll use private subnets to deploy Kubernetes&nbsp;&nbsp;
+nodes and use public subnets to provision&nbsp;
+network and application load balancers.
+Later in the tutorial, we'll use both&nbsp;
+the native Ingress provided by the AWS&nbsp;&nbsp;
+LoadBalancer Controller as well as the&nbsp;
+open-source NGINX Ingress Controller,&nbsp;&nbsp;
+and secure it with a TLS certificate.
+We'll also cover the necessary subnet tags that&nbsp;&nbsp;
+must be present for EKS to&nbsp;
+properly discover subnets.
+Then, we'll create an internet&nbsp;
+gateway and attach it to our VPC.
+It is used to provide internet&nbsp;
+access to any virtual machines&nbsp;&nbsp;
+that have a public IP address and&nbsp;
+are located in public subnets.
+Then, we'll create a NAT gateway and&nbsp;
+place it in one of the public subnets.
+It is used to translate private virtual&nbsp;
+machine IP addresses located in private&nbsp;&nbsp;
+subnets to a public one, and it allows&nbsp;
+internet access within private subnets.
+Then, we'll create a public route table with&nbsp;
+a default route to the internet gateway.
+For example, when the destination IP address&nbsp;
+of the request is located inside the VPC,&nbsp;&nbsp;
+the main route is used, but when the&nbsp;
+destination IP address is outside the VPC,&nbsp;&nbsp;
+the request will be routed using the default&nbsp;
+route, and in this case, the internet gateway.
+We'll also create another private route table&nbsp;
+with a default route to the NAT gateway,&nbsp;&nbsp;
+which allows virtual machines with private&nbsp;
+IP addresses to reach the internet,&nbsp;&nbsp;
+for example, to download a Python&nbsp;
+package or access an external API.
+And finally, we'll attach these route tables to&nbsp;&nbsp;
+our four subnets. That would&nbsp;
+be the scope of this section.
+A little bit about AWS network&nbsp;
+and Terraform to get you started.
+You can clone my public GitHub repo to follow&nbsp;
+along. I would also suggest deleting all the&nbsp;&nbsp;
+Terraform files under the Terraform folder&nbsp;
+and creating them with me from scratch.
+Now personally, I don’t like to&nbsp;
+use a lot of variables when I try&nbsp;&nbsp;
+to teach something. In production code, you would,&nbsp;&nbsp;
+of course, refactor and parameterize most&nbsp;
+of the values in the code. But anyway,&nbsp;&nbsp;
+let’s define the most common parameters that&nbsp;
+we’ll use in Terraform as local variables.
+First of all, we need to define the&nbsp;
+environment variable. We frequently&nbsp;&nbsp;
+create multiple environments, such as&nbsp;
+development, staging, and production,&nbsp;&nbsp;
+in a single AWS account. In order to do&nbsp;
+that, we need to use the environment as&nbsp;&nbsp;
+a prefix for objects such as IAM roles,&nbsp;
+policies, and the EKS clusters themselves.
+Also, I use numbers to prefix Terraform&nbsp;
+files. It’s intentional, just to clarify&nbsp;&nbsp;
+the order in which you would create resources.&nbsp;
+In real code, you would not use such prefixes.&nbsp;
+Then we have a region where we&nbsp;
+want to create our infrastructure.
+When you create an EKS cluster, it requires you&nbsp;
+to have multiple subnets in at least two different&nbsp;&nbsp;
+availability zones. You can think of an&nbsp;
+availability zone as a separate data center,&nbsp;&nbsp;
+so this is done to improve your&nbsp;
+availability. If something happens&nbsp;&nbsp;
+in one zone, you would still&nbsp;
+have an operational cluster.
+Then we have the EKS cluster name, which we will&nbsp;
+also use as a prefix for IAM roles and policies,&nbsp;&nbsp;
+just in case we create multiple EKS&nbsp;
+clusters in the same AWS account.
+And finally, we need to specify the EKS version;&nbsp;
+at this moment, 1.29 is the latest supported&nbsp;&nbsp;
+Kubernetes version in AWS. You can always&nbsp;
+check this page to find the latest version.
+Next, let’s create a providers file.&nbsp;
+You can think of a provider as a set&nbsp;&nbsp;
+of functions specific to a cloud or open-source&nbsp;
+project. Of course, we need to define the AWS&nbsp;&nbsp;
+provider and specify the region. In this&nbsp;
+case, we use the local variable ‘region'.
+Then we can define some constraints on the&nbsp;
+Terraform version and the provider itself.&nbsp;&nbsp;
+For example, at this moment 5.49 is the&nbsp;
+latest version. Throughout the tutorial,&nbsp;&nbsp;
+we’ll use 4 or 5 additional providers such as&nbsp;
+Helm, TLS, and Kubernetes. If you create a module,&nbsp;&nbsp;
+the best practice is to define the&nbsp;
+version constraints for all of them.
+Next, let’s create a VPC object using Terraform&nbsp;
+as well. You would define the CIDR. The most&nbsp;&nbsp;
+important part is to come up with a CIDR&nbsp;
+range that is large enough and will not clash&nbsp;&nbsp;
+with other VPCs or external networks in case&nbsp;
+you want to peer VPCs or use site-to-site VPN.
+Next, let’s enable DNS support in the VPC.&nbsp;
+It is a requirement for some add-ons such&nbsp;&nbsp;
+as the EFS CSI driver or even client VPN, so I&nbsp;
+would suggest keeping this enabled. And finally,&nbsp;&nbsp;
+we can define a tag with an environment prefix.
+Next, we need to create an Internet Gateway.&nbsp;
+It is used to provide internet access to public&nbsp;&nbsp;
+subnets. First, we need to attach it to the VPC&nbsp;
+and additionally add a Name tag. A Name tag, which&nbsp;&nbsp;
+starts with a capital 'N,' is a special tag that&nbsp;
+will be visible by default in the AWS console.
+Now let’s create 4 subnets: 2 private and 2&nbsp;
+public subnets in 2 different availability zones.&nbsp;
+First, let's define the private zone.
+Attach it to the VPC using resource&nbsp;&nbsp;
+reference. Define the CIDR block. I like to&nbsp;
+use online CIDR calculators to come up with&nbsp;&nbsp;
+ranges. They will show you how many IPs&nbsp;
+you have and the last usable IP address.&nbsp;
+Next is the availability&nbsp;
+zone. This one is us-east-2a.&nbsp;
+And we also need to create some tags.
+First, let’s use the environment prefix,&nbsp;&nbsp;
+type of the subnet, and the availability zone.&nbsp;
+Next, 'internal-elb' is a special tag that is&nbsp;
+used by EKS to create private load balancers&nbsp;&nbsp;
+in case you want to expose your service&nbsp;
+internally within the VPC. And the last&nbsp;&nbsp;
+tag is optional but recommended if you decide&nbsp;
+to provision multiple EKS clusters in a single&nbsp;&nbsp;
+AWS account. This is the EKS cluster name, and&nbsp;
+the value can be either 'owned' or ‘shared'.
+Next, let’s create another private&nbsp;
+subnet with a different CIDR range and&nbsp;&nbsp;
+place this subnet in a different&nbsp;
+availability zone, us-east-2b.
+Next, let’s create a public subnet. Use the same&nbsp;
+VPC, provide the CIDR range, and also place it in&nbsp;&nbsp;
+the first us-east-2a availability zone. Now, some&nbsp;
+services and VMs may require public IP addresses,&nbsp;&nbsp;
+so let’s enable this. If you create a&nbsp;
+Virtual Machine in the public subnet,&nbsp;&nbsp;
+AWS automatically assigns it a public&nbsp;
+IP address so that it can reach the&nbsp;&nbsp;
+internet. Even without this option,&nbsp;
+you can assign a public IP manually.
+Next, we need to define a few tags. The&nbsp;
+first one is the same, just a name tag. Then,&nbsp;&nbsp;
+a slightly different ELB tag is very important.&nbsp;
+EKS will use it to discover subnets to create&nbsp;&nbsp;
+public load balancers. And the last is to&nbsp;
+establish a relationship with the EKS cluster.
+And finally, the last public subnet&nbsp;
+in the us-east-2b availability zone.&nbsp;&nbsp;
+Just make sure that you use a&nbsp;
+different CIDR range and zone.
+So far we have created 4 subnets, but for now,&nbsp;&nbsp;
+they are neither public nor private;&nbsp;
+they don’t have any default routes.
+Next, let’s go ahead and create a NAT gateway.&nbsp;
+It is used to translate private virtual machine&nbsp;&nbsp;
+IP addresses into public ones to provide&nbsp;
+internet access to private subnets. But&nbsp;&nbsp;
+before we create the NAT, I would highly&nbsp;
+recommend allocating a static public IP&nbsp;&nbsp;
+manually. We’ll use it in the NAT gateway. In the&nbsp;
+future, in case your clients require a webhook or&nbsp;&nbsp;
+something similar, you can easily provide&nbsp;
+and whitelist this IP address; otherwise,&nbsp;&nbsp;
+it will be created and managed&nbsp;
+automatically by the NAT gateway.
+Also, make sure you place the NAT&nbsp;
+gateway in one of the public subnets&nbsp;&nbsp;
+with a default route to the internet gateway.
+We can also use a 'depends on' clause to&nbsp;
+wait until the internet gateway is created.&nbsp;
+The final step for this section is to&nbsp;
+create private and public route tables.
+First of all, let’s create a private table. Define&nbsp;
+the CIDR block that indicates the default route,&nbsp;&nbsp;
+which means if no other routes match the&nbsp;
+request, this route will be used. By 'the&nbsp;&nbsp;
+request,' I mean the destination IP address. And&nbsp;
+as the gateway, let’s use NAT. So in this case,&nbsp;&nbsp;
+if your application wants to send a request and&nbsp;
+the destination IP address is not within your&nbsp;&nbsp;
+VPC range, it will be routed outside of your VPC&nbsp;
+using the NAT gateway. And let’s set a Name tag.
+Next, let’s create a public route table. The only&nbsp;&nbsp;
+difference here is that we use the&nbsp;
+internet gateway as a default route.
+And finally, we need to associate these&nbsp;
+two route tables with our 4 subnets. First,&nbsp;&nbsp;
+let’s assign the private route table&nbsp;
+to the first private subnet. Then,&nbsp;&nbsp;
+assign it to the second private subnet. Keep&nbsp;
+in mind, some may recommend creating multiple&nbsp;&nbsp;
+NAT gateways in different availability zones&nbsp;
+and creating multiple private route tables.&nbsp;&nbsp;
+I have never found this particularly&nbsp;
+useful in real environments.
+Next, assign the public route&nbsp;
+table to the 2 public subnets.&nbsp;&nbsp;
+That’s pretty much all for the&nbsp;
+creation of a VPC from scratch.
+Let’s switch to the Terraform directory and&nbsp;
+initialize the state. Terraform will download&nbsp;&nbsp;
+all the providers used in the code and initialize&nbsp;
+the local state file. In production, you would&nbsp;&nbsp;
+use a remote state in an S3 bucket. I have a&nbsp;
+video on best practices if you're interested.
+Now, just because in the following section&nbsp;
+I'll show you how to add additional users&nbsp;&nbsp;
+and IAM roles to an EKS cluster,&nbsp;
+let me show you from scratch how&nbsp;&nbsp;
+to initialize your first default&nbsp;
+local profile. For this tutorial,&nbsp;&nbsp;
+I’ll be using my own user that is already&nbsp;
+placed in the Admin group, but I still need&nbsp;&nbsp;
+to generate an access key. Let’s go to security&nbsp;
+credentials and click on 'Create Access Key’.
+Now, just to avoid any warnings, let’s select&nbsp;
+'Other' for the purpose. And here we go,&nbsp;&nbsp;
+we have the credentials. I’ll delete all&nbsp;
+the users and keys after this tutorial,&nbsp;&nbsp;
+so you will need to generate your own.
+Now, to create the default profile, you&nbsp;
+need to run 'aws configure'. Enter the&nbsp;&nbsp;
+key ID and the secret access key.&nbsp;
+You can leave other settings empty.
+Alright, now the AWS Terraform provider&nbsp;
+will use this default profile. You can&nbsp;&nbsp;
+use other authentication methods;&nbsp;
+generally, the best practice is&nbsp;&nbsp;
+not to use authentication methods with&nbsp;
+long-lived credentials and instead use&nbsp;&nbsp;
+IAM roles with short-lived credential tokens.&nbsp;
+But that’s out of the scope of this tutorial.
+So, these are your default&nbsp;
+credentials and the default profile.&nbsp;
+Alright, let’s go ahead and apply Terraform. It’ll&nbsp;&nbsp;
+take maybe 2 or 3 minutes to&nbsp;
+create the VPC and subnets.
+Let me show you in the&nbsp;
+console what we have so far.
+We have a staging-main VPC.
+4 subnets: 2 private and two public.&nbsp;
+By the way, you may have a default&nbsp;
+VPC which is used only in tutorials;&nbsp;&nbsp;
+it is never used in real environments so&nbsp;
+you can safely delete the default VPC and&nbsp;&nbsp;
+all corresponding subnets. It’ll make&nbsp;
+your life easier. And just in case you&nbsp;&nbsp;
+want it back, it’s very easy to create&nbsp;
+a default VPC with one single click.
+Now, for example, the private subnet&nbsp;
+has a default route to the NAT gateway.&nbsp;
+And the public subnet has a default&nbsp;
+route to the internet gateway.&nbsp;
+We also have 2 route tables.
+An internet gateway.&nbsp;
+And the NAT gateway. I have only one; the first&nbsp;
+one is from the previous tutorial. Alright,&nbsp;&nbsp;
+that’s pretty much all for the first section.

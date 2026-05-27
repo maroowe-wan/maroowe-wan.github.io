@@ -1,0 +1,940 @@
+## 영상 1: Kubernetes Operator explained in 10 minutes (https://www.youtube.com/watch?v=ha3LjlD6g7g)
+
+in this video we're going to talk about
+what kubernetes operator is
+why did this operator concept even
+emerge
+and when you should use operators to
+give you an overview
+operators are used mainly for stateful
+applications
+so we'll first compare how kubernetes
+manages
+stateless and stateful applications and
+then compare deploying
+and managing stateful applications
+without an operator
+versus deploying it with a kubernetes
+operator
+by the way i have a separate video where
+i show you how to use kubernetes
+operator in practice
+using prometheus operator example so
+that you have a theoretical
+understanding of the concepts
+and also see how it's used in practice
+let's go through an example use case
+let's say we are deploying an example
+web application in a kubernetes cluster
+so you create a deployment a config map
+with some configuration attributes for
+your application
+a service and application starts maybe
+you scale the application up to three
+replicas
+if one replica dies kubernetes
+automatically recovers
+it using its built-in what's called a
+control loop mechanism
+and creates a new one in its place if
+you release a new version
+you just adjust the deployment
+configuration
+and all replicas get restarted with
+new version backups you don't need
+backups because
+your web application is stateless so
+basically once you deploy the
+application
+you don't have to sit there and control
+that your application is running
+properly
+and when you carry out these small
+adjustments and changes
+like update or scale up it works pretty
+much
+without problems and the reason is
+because all these tasks that i mentioned
+are automated by kubernetes using this
+control loop mechanism so kubernetes
+knows
+what your desired state is because you
+stated
+using configuration files and it knows
+what the actual state is and it
+automatically tries to match
+the actual state always to your desired
+state
+and that's why it automatically
+recreates a
+pod that just died or restarts the pods
+with the updated
+image version etc so all this works
+pretty much without problems that's
+great
+now for that web application you need a
+database
+so that you have some data persistence
+for your application but for stateful
+like databases this whole process isn't
+as straightforward
+these applications need more hand
+holding when you create them
+while they're running and when you
+destroy them so
+throughout its whole life cycle so
+kubernetes
+cannot automatically do all this stuff
+with stateful applications why because
+when you create three replicas of a
+mysql application for example
+all of these three replicas are
+different they
+aren't identical replicas each has its
+own
+state and identity and that makes things
+a little bit more complicated
+this means they need to be updated and
+destroyed in a certain order
+there must be a constant communication
+between these replicas
+or synchronization so that the data
+stays consistent
+and a lot of other details need to be
+considered as well and these details
+will vary for each application so mysql
+will have its own
+specific way of doing this postgres will
+have its own
+elastic search will have its own and so
+on so you can really have a standard
+solution
+for all of these applications and put it
+in kubernetes to automate the
+whole process if you want to learn more
+details
+about comparison between stateless and
+stateful applications in kubernetes
+i have a more detailed comparison video
+on that topic
+so you can check it out here typically
+that's why
+stateful applications require manual
+intervention
+no matter whether they run on kubernetes
+or
+on a traditional server environment so
+they require
+people who operate these applications
+so human operators however in kubernetes
+this could be a problem because having
+to manually update and maintain an
+application in kubernetes
+kind of goes against the main kubernetes
+concept which is automation
+less human intervention self-healing
+attributes
+etc and this could be a reason to say
+you know what i don't have the one thing
+that kubernetes promises which is
+automation here so i might as well host
+my stateful application
+outside the kubernetes cluster but there
+are also applications that you need in
+like prometheus monitoring or etsy store
+which are stateful applications so in
+any case
+there is a need for an alternative to
+managing stateful applications
+and that alternative is supposed to be
+the operator
+so what is an operator and how does it
+solve this problem
+operator basically replaces this human
+with a software operator so all the
+manual tasks that devops team
+or devops person would do to operate a
+stateful application is now
+packed into a program that has the
+knowledge and intelligence
+about how to deploy that specific
+like postgres or prometheus and so on
+how to create a cluster of multiple
+replicas of that application
+how to recover when one replica fails
+etc
+this means that tasks are automated and
+of course
+reusable so if you have two kubernetes
+clusters with
+the same setup you don't have to
+manually
+configure and then maintain these
+applications on both environments
+but rather you have one standard
+automated tool
+that does this on both environments
+which means that
+the benefit of having this automated or
+software operator versus the human
+scales and becomes bigger the more
+complex your application
+and the more environments you deploy
+that application in
+so how does operator do this at its core
+it has the same control loop mechanism
+that kubernetes has
+that watches for changes in the
+application state
+did a replica die then it creates a new
+one
+did an application configuration change
+it applies
+the up-to-date configuration did the
+application image version get updated it
+restarts it with a new image version
+so you can think of an operator as a
+custom
+control loop in kubernetes
+it also uses crds which stand for
+custom resource definitions in
+which is basically a custom kubernetes
+component
+so by default you have these default
+components in kubernetes which are
+deployment stateful set
+configmap etc on top of that
+you can create your own custom
+kubernetes components
+and that is crds i will explain the
+concept of crds and how to use them
+in more detail in a separate video but
+this is just for basic understanding
+so operator takes the basic kubernetes
+resources
+and its controller concept as a
+foundation to build
+upon and on top of that it includes the
+domain
+or application specific knowledge
+to automate the entire life cycle of
+the application it manages or operates
+so to summarize kubernetes can manage
+the complete life cycle of stateless
+applications in a fully automated way
+because these applications do not have
+business logic for deployment
+or for running and maintaining them so
+kubernetes doesn't need to know
+any application specific logic to
+automatically
+create update delete and maintain these
+whereas for stateful applications
+natively or internally doesn't have all
+the knowledge required
+to automate the process of deploying
+every single stateful application
+and because of that it uses these
+extensions
+which are the operators and it uses
+its own operator for each different
+now who creates these operators
+operators are
+built for each application as i
+mentioned by
+those that are experts in the business
+logic of installing
+running and updating that specific
+so for example if you want to create a
+cluster of for
+mysql replicas and deploy and run them
+in kubernetes
+a team that has a domain specific
+knowledge about
+mysql application creates an operator
+that contains all this knowledge about
+how to
+create a mysql cluster how to run it how
+to synchronize the replicas how to
+update
+maybe even how to do backups and all
+this stuff
+and that package becomes an operator and
+for each
+such application could be elasticsearch
+prometheus
+at cd store there will be a separate
+this means there are already operators
+out there for many applications
+created by the community which you can
+use so you don't have to create them
+yourself
+there is an operator hub website where
+you can look them up
+there are github repositories and other
+places where you can
+search them and look them up but if you
+wanted to create your own operator
+there is an operator sdk that allows
+developers or these
+expert teams to create an operator
+themselves
+so this was the operator concept shortly
+explained
+let me know in the comments if you have
+any other questions regarding the
+kubernetes operators
+thank you for watching and see you in
+the next video
+
+## 영상 2: Kubernetes Operators Explained (https://www.youtube.com/watch?v=i9V4oCa5f9I)
+
+Hi everyone, my name is Sai Vennam
+and I'm with the IBM Cloud team.
+Today we want to talk about operators,
+and no, I'm not actually talking about operations teams,
+but instead the operators framework
+which can be used on Kubernetes or OpenShift.
+CoreOS actually introduced the operator framework back in 2016.
+CoreOS is now a part of Red Hat and IBM.
+Operator framework is quickly picking up traction
+as it's a great way of managing complex Kubernetes applications.
+Now, before I jump into this,
+we want to actually introduce what the Kubernetes control loop is
+because it's a core part of the operators framework.
+In this video, we're going to be talking about things like deployments and pods,
+so if you're not familiar with those
+be sure to check out the"Kubernetes Explained" video
+that I've done on those topics.
+But let's get started with exactly what the control loop is
+in Kubernetes.
+Now, essentially the way it starts,
+the control loop is the core part of Kubernetes,
+it observes the state of what's in your actual cluster.
+So, that's the first step: "observe".
+Next, what it's going to do,
+Kubernetes is going to double-check
+that the state in the actual cluster
+versus the state that you want it to be.
+So it's going to do a diff.
+And finally, it wants to resolve that diff by acting on it.
+So, the last phase of the control loop is
+"act".
+Now, the control loop is core to how Kubernetes works
+and there's a controller that basically acts on that
+for every default resource.
+Kubernetes comes with a number of default resources.
+Let's see an example of deploying an application without operators
+using these default resources.
+So, as an end user,
+essentially the first thing you're going to want to do
+is write up some YAML,
+the specification for that actual application.
+And, for our particular example, let's say that
+we're doing a deployment.
+And in this deployment, we'll have to define some configuration.
+Things like, "What's the image?", and maybe
+the replicas, and maybe some other configuration.
+So, that's one Kubernetes resource.
+And, essentially what you would do, is take that
+and deploy it into your Kubernetes cluster
+at which point a deployment is made.
+Here's where the control loop kicks in:
+so Kubernetes observes the state of your cluster,
+so we've got a Kubernetes cluster here,
+and checks for the difference between what you want versus what's there.
+First thing it notices: there's no pods.
+So, it's gonna act on that difference,
+and it's gonna create some pods.
+Now, let's say for a fairly complex application
+we don't just have  one YAML
+but we have a second YAML, maybe it's for the backend,
+and so that deploys in the second deployment,
+and that in turn deploys a pod
+using the controllers in the control loop.
+Now, it's a simple example, but say you want to go through here,
+scale up the application, make some changes,
+set up some secrets, environment variables,
+- every single time you have to either create new Kubernetes resources,
+or go in here and edit the existing ones.
+That can start to get fairly difficult.
+Now, let's see how that's done in a world where we're using operators.
+Now, the first thing you would need to do
+is install the operator itself.
+So, someone on your team has to create the operator,
+or maybe you can use one of the many that are out there on OperatorHub,
+or the community is building on the operators that are available.
+So, the first thing you need in your Kubernetes cluster
+is the OLM,  which is the "Operator Lifecycle Manager",
+which basically manages operators that you have installed.
+Next, you deploy your actual operator into the cluster.
+The operator is made up of two major components.
+The first component in an operator is going to be the CRD.
+The other one is going to be the controller.
+Now, the CRD is basically a "Custom Resource Definition".
+So, we've talked about default resources -  things like deployments and pods.
+A custom resource is something that you define as a user in Kubernetes,
+or maybe an operator defines, it so that you can create YAML
+to work against that custom config.
+The controller is basically a custom control loop
+which runs as a pod in your cluster
+and runs this control loop against your custom resource definition.
+So, let's say that an operator is created for our custom application deployment here,
+so instead  of having to write multiple deployments
+and setting up config maps and secrets for whatever our cluster needs,
+we instead, as an end user, we'll just deploy one YAML.
+Maybe we called this operator MyApp.
+It could be a little bit more meaningful  - we can call it "stateful app", "front-end app",
+whatever we want it to be.
+And then, we could define some config here,
+or we can use the defaults that are set.
+We of have a choice of options here.
+Then we take this operator
+and we deploy it directly into the cluster.
+At this point the operator takes over,
+and this is actually responsible for running that control loop,
+and figuring out exactly what needs to be running.
+So, it's going to realize that
+we need a couple of deployments and the pods.
+Now, this is a kind of a format, or an approach
+to managing applications
+that's inherently easier - and scales better - than this approach,
+because, as an end-user, you really only have to worry about
+the config that's been exposed to you,
+and the operator itself manages the control  loop
+and the state of the application - how it needs to look.
+Now, there are great operators out there already,
+things like managing etcd, or various databases,
+or even IBM Cloud Services.
+So, all of those operators currently exist on OperatorHub.
+But say you want to develop your own, maybe a custom operator for
+for something that is native to your application architecture,
+kind of like what we sketched out here.
+Well, there's a number of ways you can do that.
+And there's something called Operator SDK that allows you
+to start building out operators yourself.
+Now, I'd say the easiest way to get started with an operator,
+is to use the Helm operator.
+So, Helm.
+As you may already know,
+there is a video that where David Okun goes over exactly how Helm works.
+Be sure to check that one out.
+The Helm approach allows you to take a Helm chart
+and apply that towards an operator, expose config -
+so, it allows you to get to a fairly mature level of an operator.
+Kind of something like this for a chart that's already there.
+Now the maturity of operators, what I've sketched out down here,
+falls into 5 different levels.
+Now, Helm actually hits the first 2 levels of maturity.
+Let's talk about what  those levels are.
+The first one is a basic install.
+Essentially, the first level is basically going to allow you to do
+just provisioning of the resources  required.
+Now, the second phase goes a little bit further
+it's gonna allow you to do upgrades.
+So, this supports minor and patch version upgrades
+to whatever is defined in your operator.
+Now Helm gets you that far,
+what about for the next 3 levels of maturity?
+For these, you're going want to use either Go,
+or, you can also use Ansible.
+Now, these will allow you to actually get to
+all 5 levels of maturity with operators.
+Let's quickly talk about what those are.
+At the third level, we've got full lifecycle support.
+So, this is storage lifecycle, app lifecycle.
+It's also going to allow you to do things like backup and failure recovery.
+So, that's something that would be configured
+and developed into the operator,
+who ever developed that one.
+Fourth, what we've got here is insights.
+This is going to allow you to get deep metrics, and analysis,
+logging, that kind of thing, from your actual operator.
+And finally, what we have is something called "autopilot".
+And just as the name implies,
+this is going to have a lot more functionality built into operator itself.
+Basically it's going to allow you to do automatic scaling,
+- horizontal and vertically.
+It's going to do automatic config tuning.
+If your operator-based app gets into a bad state,
+it's gonna identify that automatically.
+So, these are the 5 levels of maturity that operators can have.
+By looking on OperatorHub, you can see
+the ones that the community has developed
+and see what level of maturity that they hit,
+and then, again, by using operator SDK,
+you can build your own operators using either Helm, Go, or Ansible.
+Thanks for joining me for this  video on operators.
+If you have any questions be sure to drop us a line  below.
+If you want to see more videos like this in the future,
+please "like' and subscribe.
+And don't forget, you can always get started on the cloud at no cost
+by signing up for a free IBM Cloud account.
+
+## 영상 3: Writing Kubernetes Controllers (https://www.youtube.com/watch?v=q7b23612pSc)
+
+and throughout this course we talked
+about different kubernetes resources uh
+their purpose how to use them and how
+they work however sometimes you will run
+into scenarios where the existing
+resources are too limiting or they're
+not precisely what you need
+for these purposes kubernetes also
+supports custom resource definitions or
+crds
+each resource in kubernetes
+such as pods services deployments is an
+endpoint on the kubernetes api
+this endpoint stores the collection of
+kubernetes objects we've seen an example
+of an api
+when we talked about service accounts
+and where we were accessing the pod
+information using the queries dot
+default slash api url
+other kubernetes resources have similar
+endpoints in the api and you can use
+that api to
+get the objects to create update or
+delete the objects
+custom resources are a way of extending
+that kubernetes api so you can develop
+your own resource let's say mycoolpod
+and then install it on your cluster or
+any other kubernetes cluster
+once that resource is installed you can
+create its object using the kubernetes
+cli just like you would do it for
+services or deployments so let's say you
+registered or created a custom resource
+called mycoolpod you could use cube ctl
+get my cool pod or describe to interact
+with the object of the my cool pod kind
+custom resources on their own
+simply allow you to store and retrieve
+the data but to make them more powerful
+you can combine them with a custom
+controller
+using this custom controller you can get
+a proper declarative api that allows you
+to declare your resource's desired state
+and then keep the object's current state
+in sync with the desired state so that's
+just like the replica set controller
+does when it tries to maintain the pod
+replicas
+so let's say you wanted to create a
+custom resource called pdf document and
+that resource will take the text in the
+resource and then save that resource as
+a markdown file and then it's going to
+convert it to a pdf file we will use the
+kubernetes volume to store the markdown
+and the pdf files
+there will be two init containers the
+first one will take the text store it to
+the markdown file and then the second
+one will use that markdown file to
+create a pdf file
+so let's come up with
+the resource definition so let's create
+the pdf document pdf
+document.yaml and just define how we
+want this resource to look like so let's
+say we wanted a pdf document will be the
+kind of the resource
+metadata
+it will have the name let's call it my
+document and then under spec we will
+have the document name so this is how
+the file will be named
+and then we'll have some text and this
+would be
+like a my
+document
+document and then we can say hello
+and make it in bold
+world for example
+now if i try to create this resource
+using the cli
+i'll get an error so let's see how this
+looks like so i'll say kubernetes cube
+ctl apply pdf document.yaml
+and this will fail uh because
+there's no api version set so kubernetes
+doesn't really understand what this
+resource is all about so we need to tell
+kubernetes about this pdf document kind
+and the way that we can do this is
+through the
+custom resource definition
+so let's create the custom resource
+definition for the pdf document kind so
+i'll create a new
+file here and let's just call it pdf
+custom research definition and i'll
+paste the yaml in and then we can go
+through this and explain it so this is
+the name of our custom resource
+definition
+and the name of the crd
+uses the following format so it uses the
+plural name of the resource which is pdf
+documents and it also uses the group
+name so it's pdf documents which is the
+plural dot whatever the group name is
+and in our case i just set it to
+kubernetes dot start kubernetes dot com
+uh the name of the group uh that we use
+uh
+and this is the name that we'll see in
+the rest api so we have the group name
+and the version and this will end up
+being
+under apis and then the group name will
+be kubernetes.kubernetes.com
+slash
+v1 because this is one of the versions
+that we have defined
+we are also specifying that this
+resource will be namespaced meaning
+you have to specify the namespace when
+you're creating it another option here
+would be to make the resource cluster
+scoped meaning there's a
+you can only have
+resources
+you don't have to specify the namespace
+for this resource
+under versions we're specifying all the
+versions in our case there's only one
+and then down here under names we're
+specifying the
+kind of this resource which is the pdf
+document and then the singular plural
+and the short names for our
+resource these are the short names that
+we'll be able to use uh when running
+kubernetes click
+finally under the schema
+we're actually specifying how this
+resource is going to look like using the
+open api specification format so this
+spec format allows us to define a more
+structural schema
+we can also define we could define
+required fields or we can specify any
+patterns that the fields need to conform
+to
+so let's create this
+crd and we'll say cube ctl apply minus f
+pdf
+crd.yaml
+so kubernetes created this one and now i
+can use either pdf pdfs of
+or pdf document to list all the pdf
+document resources in the cluster so
+let's do
+cube ctl get pdf document
+and notice that this time it did not
+fail
+it just simply said that there's no
+resources found in the default namespace
+no resources of the pdf document
+type i could also do cube cdl get pdf
+it'll do the same
+thing
+let's also list this
+under the api resources and i'm just
+going to grip for pdf so you can see how
+it looks like so notice there's the name
+the short names and then the group name
+and the actual kind of
+the resource so kubernetes also created
+a
+namespace to rest api endpoint for our
+for our pdf document resource so let's
+look at that so i'm just going to try
+start a proxy
+on port 8080
+and i'll open a separate separate window
+here terminal window below and we'll
+just go to localhost 8080 apis and i'll
+just grep for
+kubernetes.com
+uh so notice there's the group version
+the name
+let me actually just not grip and see if
+we can find it
+uh there you go so you'll notice we have
+an api here that's the one that we
+defined and this is the group name as
+well as the version now if we wanted to
+access the pdf documents api just like
+we accessed the pods and namespaces
+earlier
+we could do that as well so we could do
+localhost
+8080 apis kubernetes
+dot start
+kubernetes.com so that's the group name
+version namespaces
+because these are the namespace
+resources and then we can say default
+namespace and then do pdf documents
+so notice that we we got back a response
+there are zero items because we haven't
+created anything
+but let's see what would happen if we
+would actually create this pdf document
+resource so let's do cube ctl apply
+minus f pdf document.yml
+oh i actually have to
+specify the api version
+right now because we do have one
+so let's do that way
+uh actually i need to specify the full
+group name as well start kubernetes dot
+com slash v1 so let's save that and
+let's try again
+and this time the my document resource
+of type pdf document was created so this
+means that we could list it as well get
+pdf there's my document and if we curl
+again to the api you'll see that we
+actually get back
+uh one item off type pdf document and
+you'll see there's the there's the text
+that we said
+we set in that resource as well
+now this resource will behave like just
+like any other kubernetes resource uh
+but without a controller this resource
+is pretty much useless
+so let's see how we can create a simple
+controller and this what this controller
+will do it will create a job whenever we
+create a new pdf document resource that
+job will then take the text from the
+resource and it will use the init
+containers to create a pdf document from
+it
+so let's create the pdf document
+controller i'll use cube builder to
+build the crd and the controller so
+let's create a folder first so i'll call
+it pdf
+folder and then from within this folder
+i'll initialize the module called start
+kubernetes
+dot com slash v1
+and then we'll run the cube builder init
+command
+the cube builder init command will
+create the project structure and it's
+going to create any other files that are
+needed for the controller
+now once this completes then we'll have
+to create the structure for the custom
+resource using the cube builder create
+api command
+okay so the command completed and let's
+use the cube builder create api
+to create the api so we'll say
+cube
+cube builder
+create
+create api dashes group is going to be
+griddies.start kubernetes.com
+version will be v1
+and kind will be pdf document
+so we're going to get prompted if you
+want to create a resource yes we do
+do we want to create a controller yes we
+do as well and then this will go ahead
+and it's going to create all the files
+required
+for us to create the resource the crd as
+well as to create the controller
+so once this is done
+we will open the folder here the pdf
+controller in the editor
+and then we'll go to
+to the uh api and v1 folder and this is
+where the pdf document types are defined
+and you'll notice down here it's just an
+example field
+for the pdf document so here's where we
+can define those same fields that we
+defined in the custom resource
+definition so we'll say document
+document name it's going to be a string
+and then the name of the field will be
+document name and we'll say omit empty
+this
+and then the second one
+the second property will be text and
+this will be string as well
+and the name of the field will be text
+and we're going to omit empty here as
+well
+now the next part is to actually go and
+implement a controller inside the pdf
+document controller file so let's look
+at the
+let's look at that controller file
+so this is where we would put all of our
+logic on how to do uh
+what to do when there's a new pdf
+document that gets created now as i
+mentioned before to implement the
+functionality what i'll do is i will use
+two init containers
+and then the first init container will
+read the text file from the resource and
+it's gonna store it in the markdown file
+on a volume that's gonna be shared
+between all containers
+once that markdown file is stored the
+second init container will run the pan
+doc image and that image is just going
+to convert the md file into the pdf file
+this pdf file the converted one will be
+stored on the shared volume as well
+finally the main container will just
+sleep
+just so we can copy over the results to
+our local machine now to make this more
+realistic what you could do is you could
+use a persistent volume and then store
+the converted pdf documents there
+for the sake of simplicity and just to
+demonstrate how can train controllers
+work i'll just use a
+regular volume
+okay so i added bunch of code here and
+let's just walk through this one so in
+the reconcile function what i'm doing is
+i'm
+trying to get the pdf document
+resource and if that fails we're just
+going to return an error and say we're
+unable to fetch the pdf document then
+i've created this create job function
+down here that i'll go through
+we're creating the job specification and
+this job specification will have the
+init containers and everything that we
+need to go from the markdown to
+to the pdf document and then once we hit
+once we get that job spec without any
+errors of course we're just going to go
+and create that job and once that job is
+created it will
+run those containers run those init
+containers and we'll actually create the
+pdf document
+so let's look at the create job uh
+function here uh so we're just creating
+a new instance of uh the job resource
+we're specifying the the object name the
+namespace and then under the spec uh
+we're specifying the pot template
+and we're defining two in it containers
+the first one is called store to
+markdown and what it's gonna do is it's
+just gonna uh
+base64
+decode
+the text so the value that we get from
+the text and we're encoding it here
+and then it's just going to write it to
+the data slash text.md file to the
+shared volume and this is where the
+volume gets mounted and then once this
+first container first init container is
+finished
+we're going to run the second one and
+this one is actually running the pandock
+image so it has the pandoc binary and
+what it's going to do is it will just
+create the pdf file using the document
+name that we specified in the pdf
+document resource and it will create the
+pdf file again in the shared volume
+once both init containers are done we'll
+have a simple main container that's
+going to sleep for a while and it it'll
+mount this volume
+and that's pretty much it for the code
+for this uh
+for our simple controller so let's go
+and try to run this but before we run
+the controller we need to create the
+custom resource definition first so
+let's do that by using cube ctl apply
+minus f and then we'll go to
+config
+crd
+basis
+and then kubernetes. start communities
+there we go so this will actually create
+the crd
+so we can list that cube ctl get crd
+there you go so the pdf documents
+kubernetes start companies.com is
+created and now that we have this we can
+actually run use make run to
+run the controller
+so once the controller is up and running
+we will be able to create the pdf
+document resource and see
+how the
+reconcile method in the controller will
+go ahead and create the job and the job
+will create the pods
+okay so the controller is running so
+let's just open a separate terminal
+window
+and from here what we'll do is we will
+deploy that same pdf document
+that we had before so i'll say cube ctl
+actually i'll move
+one level higher cube ctl apply minus f
+bdf document.yaml
+so there you go you'll notice that there
+was a debug log line that was written to
+the log saying that
+the resource was successfully reconciled
+the controller was pdf document and the
+request was pretty much the my document
+resource that we created in the default
+namespace so let's look at this pdf
+document that was created just like
+before
+we're able to create the resource and
+then also look at the jobs because jobs
+this is the job that was created
+by uh by our controller and then this
+job also created the pods
+you'll notice that the
+pod is already running meaning that the
+two
+init containers have completed and we've
+actually got the pdf document created so
+we'll just use cube ctl copy
+and we'll copy the pdf document from
+this pod and the document is in the data
+slash my
+text because that's the document name
+dot pdf and we'll just copy this
+document over to say mytext.pdf in the
+current folder
+okay so i'll just open the pdf document
+and open a different one and there you
+go
+so
+we have a pdf document from
+the markdown text that we created in the
+resource

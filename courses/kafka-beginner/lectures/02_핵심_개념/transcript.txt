@@ -1,0 +1,356 @@
+## 영상 1: Apache Kafka 101: Topics (2023)
+https://www.youtube.com/watch?v=kj9JH3ZdsBQ
+
+Kind: captions
+Language: en
+- Hey, Tim Berglund with Confluent
+here to tell you about Kafka topics.
+(mellow music)
+Now, these events that Kafka manages,
+they have a tendency to proliferate.
+I mean, just think of what's happened
+to you today since breakfast.
+There are a lot of events in the world,
+and we're gonna need a
+system for organizing them.
+Now, Kafka's fundamental unit
+of event organization is called a topic,
+and if you've never
+heard of a topic before,
+for now you can think of it being
+something like a table in a
+relational database, right?
+It's got a name, and it's a container
+for things that are probably
+similar to one another.
+As a developer using Kafka,
+when you actually start
+writing code against this thing
+the topic is the unit of abstraction
+that you're probably gonna
+think about the most.
+There are lots of other little pieces,
+and internals, and
+interesting things to know
+but that named topic tends to stand out
+as the thing that you think about.
+You create different topics,
+usually to hold different kinds of events,
+and you can create different topics
+to hold filtered and transformed versions
+of the same kind of event.
+So remember that smart thermostat example
+I'm so fond of talking about?
+You could have one topic that has
+all of the thermostats in the
+whole network phoning home.
+All of those go into one topic,
+and then you could have a filtered one
+that contains only the
+messages from thermostats
+that are in places that are hot right now
+for some value of hot, for example,
+so the same kinds of events transformed
+and filtered from one topic to another,
+and that's completely fine to do in Kafka.
+You may sometimes hear
+topics referred to as queues.
+I hear people say Kafka queue sometime,
+and I gently but firmly
+correct them when they do.
+It's probably not precise to say queue.
+It's right to say log.
+A topic is a log of events,
+and the good news is logs are
+really easy to understand,
+because they are super
+simple data structures
+with well-known semantics.
+First of all, they're append-only.
+When you write a new message
+or new thing, you log a new thing,
+it always goes on the end, right?
+Never do you insert a line
+if you just think of application logging,
+like if you're a Java developer,
+you use Log4j or one of
+the other 600 logging APIs
+that have wrapped that and other things.
+You don't put a message in
+the middle of a log file.
+That's not a thing. You put it on the end.
+That's how you use a log,
+and, second, logs can only be read
+by maybe seeking to an
+arbitrary offset in the log,
+and then scanning sequential log entries.
+By default, these are not indexed things,
+and certainly Kafka
+topics are not indexed.
+We can seek to an offset and
+then scan forward from there.
+Third, the events in a log are immutable.
+Once something has happened,
+it is exceedingly difficult
+to make it unhappen.
+In fact, I might even go so
+far as to say impossible.
+You speak words in the
+heat of an argument maybe,
+and later on you wish
+you could unspeak them.
+You just can't do it.
+The event has been produced,
+and there's nothing you can do.
+So events are immutable.
+Certainly events in Kafka
+topics are immutable,
+and the very simple semantics of a log
+make it pretty easy for
+Kafka to deliver high levels
+of sustained throughput
+in and out of topics.
+When you look at that kind
+of single-node performance,
+occasionally you'll come
+across some crazy metrics
+like some hundreds of
+thousands of messages
+being produced and
+consumed on a single server
+that was implemented on a Raspberry Pi
+with a gigabyte of memory.
+I exaggerate, but you know
+how those benchmarks normally work.
+Kafka is capable of clocking
+some pretty impressive
+single-node performance numbers,
+and system-wide single-node performance
+is usually not the point in a
+distributed system like Kafka,
+but because logs are simple,
+Kafka is able to get a lot out
+of a little performance-wise,
+and that's always good news.
+This also makes it easier to reason
+about the replication of topics,
+which we'll talk more about later,
+meaning the fact that
+events are immutable.
+That just makes it easier
+to think about making copies
+of things and putting
+them in different places.
+All kinds of simplifying
+assumptions happen
+as a result of immutability.
+Logs are also fundamentally
+durable things, right?
+A queue you think of as being
+somehow a little ephemeral.
+You put things in it,
+and somebody's gonna get those things out,
+and then they're gonna be gone,
+and traditional enterprise
+messaging systems,
+they have things called topics and queues
+which store messages
+temporarily to buffer them
+between a source and a destination,
+but Kafka topics are logs,
+and I belabor this point,
+really, 'cause it matters.
+There's nothing inherently temporary
+about the data in a log.
+Now, a Kafka topic can be configured
+for the messages in it to expire.
+After they've reached a certain age,
+they'll like fall off
+the edge of the world,
+and you can also configure that by size,
+once the topic has reached a certain size,
+but age is more typical.
+Retention period is more typical.
+That can be as short as a few seconds,
+or as long as a few years,
+or even literally infinity,
+so these really are durable things,
+and that data can live forever,
+and the logs that underlie
+those Kafka topics
+under the covers, they're
+files stored on disk.
+So when you write an event to a topic,
+it's as durable as it would be
+if you had written it to a file system
+or any database that you ever trusted.
+The simplicity of the
+log as a data structure
+and the immutability of
+the contents in it are,
+in my opinion, keys to Kafka's success
+as a critical component in
+modern data infrastructure.
+They enable us to make a number
+of simplifying assumptions
+in other parts of the system
+that are just delightful,
+and lead to all kinds of
+really beautiful architectures,
+but still logs are just the beginning.
+
+
+## 영상 2: Topics, Partitions and Offsets: Apache Kafka Tutorial #2
+https://www.youtube.com/watch?v=UHjSP7nxk7g
+
+Kind: captions
+Language: en
+In the previous video, we discussed why&nbsp;
+companies decide to use Apache Kafka.&nbsp;
+In this video, we're going to focus on how data is&nbsp;
+actually transferred. Specifically, we'll look at&nbsp;&nbsp;
+Kafka topics. So, Kafka topics are specific&nbsp;
+streams of data within your Kafka cluster.
+So, a Kafka cluster can have as many topics&nbsp;
+as you want, and especially with the new&nbsp;&nbsp;
+Kafka mode that completely removes&nbsp;
+ZooKeeper from Kafka's architecture,&nbsp;&nbsp;
+it can handle millions of topics and partitions.
+It could have names like "logs," "purchases,"&nbsp;
+"tweets," "trucks_gps," and so on.&nbsp;
+So, a topic in Kafka is a stream of data.
+If you want to compare it with databases, a&nbsp;
+Kafka topic is like a table in the database&nbsp;&nbsp;
+but without all the constraints. There is no data&nbsp;
+verification, and you can send any data you want.
+And the way to identify a topic in a Kafka cluster&nbsp;&nbsp;
+is by its name. That's why I have&nbsp;
+'logs', 'purchases', and so on.
+So, these Kafka topics support any&nbsp;
+kind of message formats. For example,&nbsp;&nbsp;
+you can send JSON, Avro, text, binary, or&nbsp;
+any other format you want. The sequence&nbsp;&nbsp;
+of the messages in a topic is called&nbsp;
+a data stream. And this is why Kafka&nbsp;&nbsp;
+is called a data streaming platform,&nbsp;
+because you work with data streams.
+You cannot query topics. So, while&nbsp;
+topics are similar to a database table,&nbsp;&nbsp;
+you cannot query them. Instead,&nbsp;
+you add data to a Kafka topic.
+For that, we are going to use Kafka Producers. To&nbsp;
+read data from a topic, we’ll use Kafka Consumers.&nbsp;
+So, the Kafka topic itself is divided into&nbsp;
+partitions. Each partision can be located on&nbsp;&nbsp;
+different broker which enables to horizontally&nbsp;
+scale kafka. Also each topic can be made up of&nbsp;&nbsp;
+hundreds of partisions. More partisions you have&nbsp;
+more paralelism and high troughput you can achive.
+But in this example, I have a Kafka&nbsp;
+topic that consists of three partitions,&nbsp;&nbsp;
+which are labeled as partition zero, one, and two.
+Now, the messages sent to the Kafka topic&nbsp;
+are going to be written to these partitions,&nbsp;&nbsp;
+and the messages within each partition&nbsp;
+are going to be ordered, 0, 1, 2, etc.
+It's important to understand that only messages&nbsp;
+within a specific partition follow the same&nbsp;&nbsp;
+order. That's why it's not an easy task&nbsp;
+to maintain this order at the topic level,&nbsp;&nbsp;
+and not many messaging systems even&nbsp;
+try to support it, but Kafka can.
+So, the first message goes into partition&nbsp;
+zero and will have the ID zero, one,&nbsp;&nbsp;
+and then two, and all the way up to six.
+As I continue to write messages into&nbsp;
+partition 0, this ID will keep increasing.
+So, the same scenario applies&nbsp;
+when I write data into partition&nbsp;&nbsp;
+one of my Kafka topic. The ID will&nbsp;
+continue to increase, and so forth.
+So, the messages being written into&nbsp;&nbsp;
+these partitions are assigned an ID&nbsp;
+that increments from zero upwards.
+This ID is referred to as&nbsp;
+a Kafka partition offset.&nbsp;
+So as we can see, each&nbsp;
+partition has different offsets.&nbsp;
+Now, Kafka topics are also immutable.
+That means that once the data is&nbsp;&nbsp;
+written into a partition,
+it cannot be changed.
+We can't delete or update data in Kafka. All we&nbsp;
+can do is keep adding more data to the partition.
+Let’s take a look at a real-world&nbsp;
+example. Let’s say a company has a&nbsp;&nbsp;
+fleet of trucks. Each truck has a GPS module and&nbsp;
+it reports its location to Apache Kafka. Then,&nbsp;&nbsp;
+each truck will send a message to Kafka&nbsp;
+every 30 seconds, for example, and each&nbsp;&nbsp;
+message will contain some information&nbsp;
+such as the truck's ID and position.
+So, we have a bunch of trucks that&nbsp;
+are going to act as data producers.&nbsp;&nbsp;
+They will send data into a Apache&nbsp;
+Kafka, specifically to ‘trucks_gps'&nbsp;&nbsp;
+topic. This topic will contain the&nbsp;
+location details of all the trucks.
+Just for this example, we decided to create&nbsp;
+12 partitions, which is an arbitrary number.&nbsp;&nbsp;
+We'll talk more about how you can decide the&nbsp;
+number of partitions you need at a later point.
+Let's discuss the potential use cases for&nbsp;
+Kafka in this scenario, specifically what&nbsp;&nbsp;
+can be done with the location data. From&nbsp;
+a management point of view, you'd want a&nbsp;&nbsp;
+dashboard that shows a map and the locations of&nbsp;
+each truck. And if you run a delivery business,&nbsp;&nbsp;
+like Amazon, you might want to notify your&nbsp;
+customers when the delivery truck is nearby.
+In the real world, there would be many&nbsp;
+more services that would want access&nbsp;&nbsp;
+to this data and could use it for different&nbsp;
+purposes. That's why Kafka is very beneficial&nbsp;&nbsp;
+for companies. It eliminates the need to&nbsp;
+connect each service directly with a truck.
+Let's take note of some important things about&nbsp;
+topics, partitions, and offsets. Once data is&nbsp;&nbsp;
+written to a partition, it cannot be changed&nbsp;
+- this is referred to as 'immutability'. It's&nbsp;&nbsp;
+crucial to understand this. Data in Kafka is only&nbsp;
+kept for a limited time, the default is one week,&nbsp;&nbsp;
+but this can be configured. That means&nbsp;
+after a week, your data will disappear.
+Offsets only have meaning for a&nbsp;
+specific partition. As you can see,&nbsp;&nbsp;
+offsets are repeated across partitions. So,&nbsp;
+offset 4 in partition 1 represents a message,&nbsp;&nbsp;
+but it isn't the same data as offset 2&nbsp;
+in partition 0. Offsets won't be reused,&nbsp;&nbsp;
+even if previous messages have been deleted.&nbsp;
+They keep increasing incrementally as you&nbsp;&nbsp;
+send messages into your Kafka topic.
+That also means the order of messages is&nbsp;&nbsp;
+guaranteed only within a partition but not across&nbsp;
+partitions. This is very important to understand.
+Messages within each partition&nbsp;
+have increasing offsets, which&nbsp;&nbsp;
+means they're in order. We read them in the&nbsp;
+order of the offsets. But across partitions,&nbsp;&nbsp;
+we have no control. We'll see later&nbsp;
+how we can achieve it if we need it.
+Data sent to a Kafka topic is assigned&nbsp;
+to a random partition, for example,&nbsp;&nbsp;
+zero, one, or two in this example,&nbsp;
+unless you provide a key. Later,&nbsp;&nbsp;
+I’ll also show you what happens when we use&nbsp;
+a key. In a Kafka topic, you can have as many&nbsp;&nbsp;
+partitions as you want. Sometimes there are&nbsp;
+three, sometimes 10, or sometimes 100. We'll&nbsp;&nbsp;
+discuss how to determine the right number&nbsp;
+of partitions for our topic later as well.&nbsp;
+That's all for this video, more to come about&nbsp;
+Kafka and other frequently used systems in&nbsp;&nbsp;
+companies. Thank you for watching&nbsp;
+and I'll see you in the next video.
+

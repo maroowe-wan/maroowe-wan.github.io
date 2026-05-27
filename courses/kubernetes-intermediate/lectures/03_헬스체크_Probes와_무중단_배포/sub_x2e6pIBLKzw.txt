@@ -1,0 +1,647 @@
+Kind: captions
+Language: en
+hello everyone welcome back to my
+channel my name is p and this is video
+number 18 in the series CK 2024 and in
+this video we'll be looking into Health
+props in kubernetes liveliness prop
+Readiness prop startup props and so on
+we'll be doing some demo and we'll be
+looking into the concept in detail with
+some Hands-On practice and yes there
+will be an assignment for you a task for
+you to complete by your own for the
+Hands-On further practice and it will be
+there in the GitHub repository as always
+in day 18 folder and uh the comments and
+likes Target of this video is pretty
+simple it's 200 comments 200 likes in
+the next 24 hours I'm sure you would be
+able to do that and without any further
+Ado let's start with the video okay so
+before looking into the demo let's
+quickly look at the concept of what
+exactly are these Health props at
+kubernetes and before that before even
+looking into Health props let's
+understand what exactly is this prob is
+this a buzzword is this something that
+that you should be worried about or
+something to understand let's have a
+look so Props is nothing but something
+some system some process something that
+is monitoring your system and taking
+some necessary actions to either recover
+the health or to um you know grab some
+status or to make sure that everything
+is working fine so it's robbing someone
+is means inspecting someone
+interrogating someone or monitoring
+someone right to take some necessary
+actions then what are Health props in
+kubernetes health props is like there
+are three type of props startup props
+Readiness prop liveliness props and all
+of these make sure that your application
+is healthy the application is
+self-healing means when it is failed it
+should be restarted automatically to
+recover from the failure and your user
+should not be impacted so that's the
+main purpose of these Health props so
+first one is let's say liveness prop
+what liveness prop does it actually
+monitors your application like all the
+props they does nothing but do the
+continuous monitoring of of your
+application after a certain period of
+time let's say 10 seconds 15 seconds so
+liveness prop uh does the same it
+monitors your application and sometimes
+your application let's say is failed or
+crashed due to uh intermittent network
+error or some application error
+something that could be recovered easily
+by just restarting the container so it
+monitors that and it takes this
+necessary action it restarts the
+application if it fails and it keeps on
+restarting it after a while if it does
+not restart it will uh you know throw
+the error so you will have some time to
+fix the issue even though the restart
+does not fix the issue you will have
+some time to you know investigate this
+and fixed the issue and you will get the
+alert that your liveness props are
+getting failed means something is wrong
+with the application something is wrong
+with the health checks that these robs
+are doing then we have Readiness prob
+Readiness prob ensures that your
+application is ready before it starts
+serving the traffic to the user right
+let's say you have U okay let's take an
+example let's say uh that's your
+application it's running in three
+different pods okay and they all are
+behind the load balancer so these are
+three applications and let me add a load
+balancer okay let's add anything let's
+add a your load balancer this is just an
+example okay so here are your users
+trying to access the application from
+load balancer and load balancer is then
+redirecting the traffic between these uh
+application pods so these applications
+are part of the same deployment and you
+know your application will be served by
+one of these pods but let's say there is
+an application that takes at least 20
+seconds or 30 seconds to boot up to be
+started completely right so till that
+time your users will be getting five or
+two errors or 5xx error that your
+application is down so to prevent that
+from happening it makes sure that your
+application will only be added to the
+load balancer or it should only be ready
+to accept the traffic from the user once
+the ress props are passed and it will
+wait for certain time it will not prop
+the application unless it is fully
+started so this is another important
+props uh that we will look into and and
+uh so if it's still confusing don't
+worry when we do the demo it will be
+pretty clear I'm sure so just be with me
+just follow me along and I will make
+sure that by the end of this video
+Readiness liveliness these props are uh
+you know it's it's pretty simple so then
+we have startup props startup props are
+mostly used for slow or Legacy container
+applications so application that takes a
+lot of time to start up right so readin
+as prop only you know make sure that
+your application is ready only then it
+will serve the traffic but then for some
+of the Legacy or slow application this
+time could be a lot of time right so for
+that we add an additional prop a startup
+prob and it will make sure that let's
+say your application will wait 5 minute
+before it starts serving the traffic and
+only then the rest of the props will be
+active so first the startup prop will be
+active it will make sure that it does it
+works and only then Readiness and
+liveliness prop will be active so we use
+a combination of these props in a
+production environment and mostly
+liveliness and Readiness prop both of
+these props we use for all the
+applications so that's one of the best
+practices now let's have a look at the
+demo let's have a look at the
+implementation of these props well I
+forgot to mention earlier but we have
+three types of Health props and each of
+these three Health props can perform
+either of three typ types of health
+checks so it could be either sttp it
+could be either TCP or it could be
+simple command so with sttp health
+checks prop what it will do it will send
+an sttp request to an endpoint after
+let's say every 10 second or after 15
+seconds and if it is getting the
+response back as uh you know success
+then only the health checks are
+successful uh in case of TCP prob it
+will try to open a port on certain
+endpoint and it will
+based on the response it will fail or
+either pass the health check and same
+thing with the command it will execute a
+command against the endo and if the
+command results in a success response
+then only the health checks will be
+successful okay so let's have a look at
+each of these three with the help of an
+example so first uh we'll look into the
+command health checks for liveliness so
+it's nothing but we have a pod okay
+inside the P pod we have a container and
+it's it uses an image okay so till here
+it's pretty basic pretty simple whatever
+we have done earlier and it uses a busy
+box image we have used this particular
+image previously as well so it does it
+has a few binaries few executables and
+it actually runs those command whatever
+you have specified as part of command
+and argument and then it gets completed
+or it's not an ongoing pod it does not
+have an operating system that keeps on
+running it so so it's it's kind of an
+image that we use when we have to run
+some arbitrary commands or inline
+commands and that's all about it so as
+part of this what we are doing is we are
+opening a shell and we are running these
+commands so let's have a look what what
+this is doing actually so with the help
+of touch command it will create an empty
+file file with the name healthy and that
+file will be there in the temp folder so
+touch /t/ healthy okay so file is
+created and then it will sleep for 30
+seconds that means it will not do
+anything for the next 30 seconds after
+30 seconds it will remove the file with
+the help of RM command and after that it
+will wait for 600 seconds so it will not
+do anything for the next 10 minutes so
+how will prob Works in that uh first
+have a look at the prob so this is the
+syntax of how we use props so we have
+lineing apps prop so we write liveness
+prop and again these uh props are part
+of containers so it has to be a child
+object of the container right so here
+are containers and liveness prob is
+inside the containers right so make sure
+you do the indentation properly so we
+have less prop inside that we are using
+exact because we are using a command so
+exact and this command this command is
+again an array of multiple commands and
+what we are doing we are doing a cat on
+temp healthy that means this liveness
+prop will issue this command against the
+endpoint against the container and based
+on the response it will make sure that
+your application is healthy or unhealthy
+right and then we have these two uh
+properties so first one is initial delay
+second that means before performing the
+first health check it will wait for 5
+seconds right so because let's say some
+applications does not start up instantly
+it has to boot the operating system it
+has to run some dependencies run some
+commands and then only it will come up
+so for that we specify the initial delay
+seconds usually it's between 10 to 30
+seconds uh in the production environment
+that's what we set based on the
+application boot up time and so on so we
+have initial delay seconds I'm sure this
+will be clear now and then we have
+period seconds period second means the
+interval after which this uh liveness
+prob will keep on probing the end point
+right so every 5 Second it will check if
+the application is returning healthy
+response or not and how it is checking
+it is checking by doing a cat on this
+file and initial delay second I'm sure
+now the difference between these two
+properties are clear so it is important
+to understand these two so initial delay
+second I'm I'm explaining it again uh so
+the initial delay second will be the
+number of second your health checks will
+wait your liveness prob will wait to
+perform the first health check right so
+first heal check will be performed after
+5 seconds and what is the frequency of
+these heal check that is defined by
+period seconds like after every 5
+seconds so it will wait for First 5
+second then after every 5 Seconds it
+will perform the heal checks okay now
+what would happen in this case over here
+so
+first when the container starts a file
+will be created instantly then it will
+wait for 30
+seconds and while it is doing that
+initial delay is 5 seconds so the prop
+will keep on hitting this endo and it
+will get a successful response on this
+Endo because this file is present but as
+soon as this 30 seconds are over and
+when the file is removed with this
+command this H checks will start failing
+because now we don't have the file
+anymore and uh doing a cad on the file
+that does not exist will return a non
+zero error code right in Unix the error
+code is zero for successful response and
+uh like rest of the error response like
+1 127 or anything else is an error
+response so it will return a nonzero
+value which will fail the health check
+and and that will prompt the application
+to be restarted So liveness Pro will
+take the action and restart the
+application now let's see how it is
+done so I'm inside my day 18 folder okay
+so let's apply this file
+liveness C.L okay let's see and do a
+getp okay now it is container creating
+okay it's
+running now let's do a watch on
+this let's wait for that 30 seconds to
+be over so that the file will be deleted
+and props will start failing okay let's
+wait
+for okay you see it is running but it
+says it restarted 2 seconds ago the Pod
+was restarted because the prop started
+to fail now if you do a describe on
+this describe
+pod liveness
+exac okay and you will see over
+here okay you see it says
+unhealthy liveness Prof pH
+can't open this file because it does not
+exist so it killed the container this
+killing cuet killed the container
+liveness Prof failed and it will be
+restarted so after that the container
+was restarted and it pulled the image
+again and it created the container again
+right and it will keep on happening so
+if you do get pods now and if you wait
+for few more seconds the application
+will be restarted again because the prop
+will be failed again for the next 10 10
+minutes as we have specified as sleep
+600 seconds okay so that's what it will
+do now let's clear the screen okay and
+let's look at the next example which is
+the HTTP prob now what we have seen is
+the command type of prob that we have
+used it will execute a command against
+the container and based on the response
+it will create restart the container or
+send the uh heal check status whether it
+is passed or failed so the way s TP prob
+works when within a liveness prob is
+syntax is same it just instead of exact
+we have HTTP get because we are issuing
+a HTTP get request against a path so
+this is the path FL healths there will
+be a folder or there'll be a file SL
+Health inside the container and we have
+opened port 8080 on that and it will
+have the same properties initial delay
+second for 3 seconds period seconds for
+3 seconds and if we don't get the
+response back from this it will fail
+right so um we are using a different
+image for this particular pod and rest
+all are the same so if we do c apply
+hyphen f liveness
+HTTP e get
+pod container
+creating okay it's running now so
+because we are getting response back
+from from the health endpoint it is
+showing the status as healthy and
+liveliness prob is working fine so if
+you do a describe on this not here sorry
+about that uh describe pod
+hello okay so it it says successfully
+assigned this to the node pulling image
+successful pulled image then cuet
+created container liveness then started
+container liveness and it was unhealthy
+in the beginning because it took some
+time the initial delay second was 3
+second but it took more than that that's
+why initially it was failed with the
+error code 500 but and then it says
+container will be restarted and then it
+started the container so if we do a get
+pod the heal check is not returning the
+response correctly that means there is
+no / heals file present in the folder
+that's why it is you know restarting the
+application you see we already have
+three restarts happened in the past 65
+seconds after every 3 second it props
+and it keeps on restarting the
+application because there is no file we
+can do that with you know let's do a
+cctl exec inside the folder oh sorry
+inside the
+container and H H
+message
+bash okay and if we
+do add/ healths there is no file present
+over over
+there okay file that is why it is not
+getting the response back let's say if
+we create a file touch oh uh the
+container exited because uh you know it
+restarted the container while we were
+doing it let's do uh it's again and
+let's do it quickly this
+time
+else okay so we have created the file
+now okay it exited again because it
+restarted it again if we do a get PA
+hello have gone now in Crash loop back
+because the prop failed for continuously
+for many times right that's why it is
+now in Crash loop back off
+status and if we check it now CTL
+describe
+pod okay it says it will be restarted
+because we are getting uh error code AS
+500 and it says the application is not
+healthy even though we created the file
+but because it is trying to open an HTTP
+connection with that endpoint the port
+might not be open that is why it is
+still failing so if we do a getp it will
+still fail and it is there in the crash
+loop back and our container is unhealthy
+right so uh that's uh how sttp props
+work with liveness and then we have the
+last one is TCP prob so in TCP prob
+unlike stdp or the command props in that
+we actually try to open a port with the
+container so over here we are opening a
+TCP port 8080 and if the port is open
+the application will will return the
+healthy response initial delay second is
+15 second that means it will wait for
+the first 15 seconds for the first prob
+and then after every 10 seconds it will
+try to attempt the connection again so
+let's reduce it to 5 seconds and again
+we are using a different image in this
+okay so let's apply this yaml
+i f liveness hyphen
+PCB created get pod okay it is running
+now and let's
+see because the p is open right it will
+not I think it will not restart but it
+hasn't done its first prob yet because
+the initial delay was 15 seconds so now
+it should be good let's see if we do a
+describe on this
+PCP pod and it says successfully
+assigned this container already present
+and started container no issues with
+that and get parts there are no restarts
+till now so we have the port open
+already and it is responding back
+because we have already exposed this
+container on port 8080 this should work
+fine okay now let's try to make the
+change let's try to put 3,000 and let's
+apply these changes again and let's see
+if it makes any change so I'm going to
+apply this CML
+again DCP okay it says I cannot change
+it or something okay it says invalid pod
+updates may not change okay so I have to
+force restart the Pod okay so for that
+what I can do is Cube CDL
+apply hyphen hyen
+Force okay it should delete the port and
+then restart the port forcefully so
+let's do a get pod now is running now
+but it hasn't done the uh prob yet so
+let's do a watch on this and let's
+see actually there was an issue with
+configuring the uh props over here so
+earlier I was doing the liveness prop
+check on port 8080 or application by
+default listen on Port 8880 so that's
+why it was showing as success response
+but now I have swapped it so now I am
+exposing the application on port 8080
+but I doing the liveness prop TCP port
+check on Port 3000 and I've created the
+port again and now you see uh the
+application is getting restarted because
+the props are getting filed so if we see
+cctl describe
+pod okay it says it is unhealthy
+liveness
+prop failed connection refus right and
+it will be restarted so that's what we
+wanted to see also I would like to show
+you a few more things for example if you
+do K get pod and the Pod name was any
+any part like whatever we have run so
+far so let's
+say liveness hyphen TCP hyphen o yaml to
+generate a yaml of it uh what was the
+name of it
+oh it was TCP
+B TCP
+part okay so in the liveness prop we
+have specified only two properties one
+is initial delay second and another one
+was um period seconds right but if we
+look at to many fields so let me go to
+liveness prop section okay over here so
+you see we have initial delay seconds we
+have period second but we have a few
+more fields we have failure threshold
+and successful threshold so because we
+did not set it it took the default
+values so failure threshold is three and
+success threshold is one as the default
+value what it means as soon as the prop
+gets failed it will not restart the
+container instantly it will wait for at
+least three failed attempts right three
+consecutive failed attempts so it will
+prob once if it's getting failed it will
+prob again after 10 seconds it will prop
+again and as soon as it gets three
+consecutive failed attempt only then it
+will be failed and in case of a success
+threshold so as soon as it is getting
+one successful reply it will uh make the
+application healthy like it will shows
+the liveness prob is healthy so so these
+two Fields also you can add uh along
+with initial delay seconds and period
+seconds so these are the other
+properties of livess prop and other
+thing that I want
+to uh discuss over here
+is uh so you see we have some Toleration
+added to this part but we did not added
+any Toleration right so these
+tolerations were automatically added by
+the kubernetes so what it did it added a
+not not ready and not unreachable
+Toleration to the P that means if the
+node is not ready so these two taints
+will be added to the node and these OD
+will be evicted from the node why
+because the node is not ready or the
+node is not unreachable it will be moved
+to another node so that's the high
+availability feature of kubernetes it
+will automatically add the Toleration to
+the Pod and it will make sure that it
+will only serve the healthy Parts on the
+healthy nodes okay so that was all about
+liveness props read props have the exact
+same syntax it just instead of liveness
+we write readiness and rest of the
+details are same so let's have a look at
+one of the
+example
+so let's take this HTP prob and I will
+go back to the
+documentation okay over here you can
+search props and it will show you as the
+first results so um let's see an example
+over
+here we
+have this is TCP and
+and we have livess okay we can add that
+TCP doesn't matter so uh okay here is
+the Readiness
+prop copy
+this
+and just after this at the same level of
+liveness I can add
+Readiness okay so it should be something
+like this liveness prop and at the same
+level is r prop instead of okay I've
+added that in stdp
+ml but you can replace it with that
+that's not an issue so instead of TCP
+socket we can do sttp get and specify
+path and port 8080 initial delay seconds
+and period seconds so this is how you
+can configure a Readiness prop Readiness
+prop makees sure the difference between
+both of these Rus prop does not restart
+the application on the failed attempt as
+soon as the rinus prop is healthy only
+then the application will be start
+serving the workload right so you can
+just apply this
+EML so now I can apply this
+CML liveness
+HTTP okay I have to I guess force it
+again CU we are adding the additional
+prop
+okay let's do a forceful apply on
+that okay get
+pods I made the changes in liveness prop
+and which file did I
+apply yeah this is this is good so it
+should
+be uh the Pod name is hello
+and you see it is running even though
+the container is not active because the
+riness prob is not active yet we'll wait
+for some
+time and if we do a describe on
+that so you see Readiness prob is
+getting failed with 500 error and
+liveness prob was failed
+again so bu is is failing
+because we are doing a health check on
+port 8080 and uh that end point of that
+path is not available on the container
+we saw that and it's not open on port
+8080 so that is why uh the container is
+not ready okay and now it has went in
+Crash loop back because there were
+already three restart which is the
+maximum attempt that it could make
+before it start failing the Pod so yeah
+that's uh that's all about Readiness
+prop and you see the syntax is almost
+the same in both of this it just uh they
+work a little different from each other
+plus uh riness prop does not restart the
+Pod it will just ensure that application
+is healthy only then it will start
+serving traffic livess prob on the other
+end will restart the p on a number of
+failed attempts right all right so
+that's it about this video I'm sure
+Readiness prop liveness prop uh these
+are no more troubling you and you have a
+solid understanding of how to work with
+those and make sure to complete the
+Hands-On that we did in this video as
+well as I have a task for you in the
+GitHub repository of day 18 folder
+please try to complete that and if you
+face any issues you know you can reach
+out to me on the YouTube comments over
+here or you can reach out to us on the
+Discord community and someone will help
+you but make sure you try to attempt it
+yourself first and then ask for
+assistance if you need anything and try
+to complete the comments and like Target
+of this video as well so that I can
+publish the next video in the next 24
+hours and the next video will be about
+config maps and secrets uh ideally we
+should have covered it earlier but
+somehow I missed it so now I'm covering
+it so in the next video I'll be covering
+that so thank you so much for watching
+and I hope you have a good day uh Happy
+learning and I will see you soon

@@ -1,0 +1,46 @@
+{
+  "lecture_no": 5,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "준비 실습: Jenkinsfile에 Node.js 앱에서 'npm ci'를 실행하는 'Build' 스테이지를 추가하라. 'package.json'을 일시적으로 삭제해 의도적으로 실패를 유발하고, Jenkins가 빌드를 FAILED로 표시하고 이후 스테이지로 진행하지 않는지 확인하라. 그런 다음 파일을 복원하고 스테이지가 초록색이 되는지 확인하라.",
+      "starter": "// 현재 Jenkinsfile (강의 4 버전):\npipeline {\n    agent any\n    stages {\n        stage('Checkout') { steps { checkout scm } }\n        // 아래에 Build 스테이지를 추가한다:\n        stage('___') {\n            steps {\n                sh '___'\n            }\n        }\n    }\n}",
+      "solution": "// 1단계: Build 스테이지 추가\npipeline {\n    agent any\n    stages {\n        stage('Checkout') { steps { checkout scm } }\n        stage('Build') {\n            steps {\n                sh 'npm ci'\n            }\n        }\n    }\n}\n\n// 2단계: 의도적으로 실패 유발\n// package.json을 _package.json으로 이름 바꾸기(또는 삭제)하고 푸시한다.\n// Jenkins가 웹훅을 받아 'npm ci'를 실행하면\n// package.json이 없어 0이 아닌 종료 코드로 종료된다.\n// Stage View에 빨간색 'Build' 박스가 나타난다.\n// Console Output이 'npm error enoent'와 'Build FAILURE'로 끝난다.\n// Build 이후의 스테이지는 실행되지 않는다 — 빠른 실패 게이트가 작동한 것이다.\n\n// 3단계: 복원\n// _package.json을 다시 package.json으로 이름 바꾸고 다시 푸시한다.\n// 'Checkout'과 'Build' 박스가 모두 초록색이 된다.",
+      "explanation": "'sh' 스텝의 0이 아닌 종료 코드는 해당 스테이지를 즉시 실패시키고 파이프라인 전체를 중단한다 — 이후 스테이지는 실행되지 않는다. 이것이 '빠른 실패' 원칙이 실제로 작동하는 모습이다. 의존성조차 설치하지 못한 코드를 테스트하거나 패키징할 의미가 없다. 의도적으로 실패를 유발함으로써 프로덕션에서 그 게이트에 의존하기 전에 게이트가 실제로 존재한다는 것을 확인한다.",
+      "hints": [
+        "'npm ci'가 'npm: command not found'를 반환하면 Jenkins 에이전트에 Node.js가 설치되지 않은 것이다. 에이전트에 Node.js를 설치하거나 Docker 기반 에이전트를 사용한다. 'agent any'를 'agent { docker { image \"node:20-alpine\" } }'로 바꾸면 Node 컨테이너 안에서 스테이지를 실행할 수 있다.",
+        "package.json을 삭제했는데 푸시 후 빌드가 트리거되지 않는다면 GitLab 웹훅이 여전히 활성 상태인지 확인한다(Settings → Webhooks). 브랜치도 일치해야 한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습: Build 스테이지 다음에 'Test' 스테이지를 추가하라. 앱에 의도적으로 실패하는 테스트를 작성하고(예상값이 틀린 단언문), 푸시해서 Jenkins가 테스트 스테이지를 빨갛게 표시하고 'Build Image' 스테이지 앞에서 파이프라인을 중단하는지 확인한다. 그 다음 테스트를 수정하고 다시 푸시해 세 스테이지가 모두 초록색이 되는지 확인하라.",
+      "starter": "// package.json에 테스트 스크립트 추가:\n// \"scripts\": { \"test\": \"node test.js\" }\n\n// test.js 파일을 만들어 간단한 단언문 작성:\nconst assert = require('assert');\nfunction greet(name) { return 'Hello, ' + name + '!'; }\n// 하나는 통과, 하나는 의도적으로 실패하도록 작성:\nassert.strictEqual(greet('World'), 'Hello, World!');   // 통과\nassert.strictEqual(greet('World'), '___');             // 실패하게 만들기\nconsole.log('All tests passed.');\n\n// Jenkinsfile에 추가할 Test 스테이지:\nstage('Test') {\n    steps {\n        sh '___'\n    }\n}",
+      "solution": "// test.js — 실패 버전:\nconst assert = require('assert');\nfunction greet(name) { return 'Hello, ' + name + '!'; }\nassert.strictEqual(greet('World'), 'Hello, World!');\nassert.strictEqual(greet('World'), 'Hello, CI/CD!')  // 실패: 실제 값은 'Hello, World!'\nconsole.log('All tests passed.');\n\n// package.json scripts 섹션:\n\"scripts\": {\n  \"start\": \"node index.js\",\n  \"test\": \"node test.js\"\n}\n\n// Test 스테이지가 포함된 Jenkinsfile:\npipeline {\n    agent any\n    stages {\n        stage('Checkout')    { steps { checkout scm } }\n        stage('Build')       { steps { sh 'npm ci' } }\n        stage('Test')        { steps { sh 'npm test' } }\n        stage('Build Image') { steps { sh 'echo Image build placeholder' } }\n    }\n}\n\n// 실패 테스트로 푸시: Stage View에서 Build=초록, Test=빨강, Build Image=건너뜀.\n// Console Output에 AssertionError와 'Build FAILURE'가 표시된다.\n\n// 수정: 두 번째 단언문의 기댓값을 올바른 값으로 변경한다:\nassert.strictEqual(greet('World'), 'Hello, World!');\n// 다시 푸시: 네 스테이지가 모두 초록색이 된다.",
+      "explanation": "Test 스테이지는 CI 품질 게이트를 실제로 보여 준다. 파이프라인은 첫 번째 실패 스테이지에서 멈추므로, 테스트가 실패하면 'Build Image'가 절대 실행되지 않는다. 나쁜 이미지가 레지스트리에 들어갈 수 없다. 강의에서 정확히 설명한 시나리오다. 개발자가 인사말 문자열을 바꿨지만 단언문 업데이트를 잊은 것을 파이프라인이 즉시 잡아냈다. 수정은 테스트(또는 코드)에 있는 것이지 파이프라인을 약화시키는 것이 아니다.",
+      "hints": [
+        "실패하는 단언문이 있어도 'npm test'가 종료 코드 0으로 끝난다면, 'node test.js'가 AssertionError 종료 코드를 실제로 전파하는지 확인한다. Node는 처리되지 않은 AssertionError에서 기본적으로 코드 1로 종료한다 — try/catch로 감싸고 다시 던지지 않으면 종료 코드가 0으로 유지된다.",
+        "Jenkins에서 테스트 결과를 그래픽으로 보려면 Mocha 같은 JUnit XML 리포트를 생성하는 프레임워크로 교체하고 Test 스테이지에 'post { always { junit \"reports/*.xml\" } }'를 추가한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습: Jenkinsfile에 'Build Image' 스테이지를 추가하라. Jenkins BUILD_NUMBER 환경변수로 이미지를 태그한다. 전체 파이프라인(Checkout → Build → Test → Build Image)을 실행하고 Jenkins 호스트의 'docker images'에 빌드 번호가 태그된 이미지가 나타나는지 확인하라.",
+      "starter": "// Jenkinsfile의 Test 스테이지 다음에 추가:\nstage('Build Image') {\n    steps {\n        sh 'docker build -t myapp:___ .'\n    }\n}",
+      "solution": "stage('Build Image') {\n    steps {\n        sh 'docker build -t myapp:${BUILD_NUMBER} .'\n    }\n}\n\n// 참고: 'docker build'를 실행하려면 Jenkins가 Docker 데몬에 접근할 수 있어야 한다.\n// Jenkins를 Docker 컨테이너로 실행 중이라면 호스트 소켓 접근 권한을 부여한다:\n// docker run -d --name jenkins \\\n//   -p 8080:8080 -p 50000:50000 \\\n//   -v jenkins_home:/var/jenkins_home \\\n//   -v /var/run/docker.sock:/var/run/docker.sock \\\n//   jenkins/jenkins:lts\n// 그 다음 Jenkins 컨테이너 안에 Docker CLI를 설치한다:\n// docker exec -u root jenkins apt-get update\n// docker exec -u root jenkins apt-get install -y docker.io\n\n// 파이프라인 실행 후:\n// docker images | grep myapp\n// 예상 출력:\n// myapp   5   a1b2c3d4e5f6   2 minutes ago   145MB\n// (여기서 5는 해당 실행의 BUILD_NUMBER)",
+      "explanation": "BUILD_NUMBER는 빌드마다 자동으로 증가하는 Jenkins 내장 환경변수다. 'latest' 대신 이것을 태그로 사용하면 각 이미지에 고유하고 순서가 있는 식별자가 부여된다. 어느 빌드가 어떤 이미지를 만들었는지 항상 알 수 있다. 다음 강의에서는 더 강력한 추적 가능성을 위해 Git 커밋 SHA로 전환한다. '/var/run/docker.sock'을 Jenkins 컨테이너에 마운트하면 Jenkins 프로세스가 호스트의 Docker 데몬을 사용할 수 있다 — 이미지를 빌드해야 하는 CI 파이프라인에서 편리하고 흔한 설정이다.",
+      "hints": [
+        "'docker build'가 'permission denied while trying to connect to Docker daemon socket' 오류로 실패하면 Jenkins 프로세스가 Docker 소켓에 접근하지 못하는 것이다. '-v /var/run/docker.sock:/var/run/docker.sock' 플래그를 추가해 Jenkins 컨테이너를 다시 만들고 그 안에 Docker CLI를 설치한다.",
+        "이미지는 빌드되지만 'docker images'가 로컬 머신에서만 보인다면, Jenkins를 로컬에서 실행 중인 경우 이미지도 같은 머신에 있는 것이다. 원격 에이전트를 사용하는 경우 해당 에이전트에 접속해 확인한다."
+      ]
+    },
+    {
+      "prompt": "응용 실습: 동료의 Jenkinsfile에 심각한 순서 문제가 있다. 아래 파이프라인을 분석하고 왜 잘못됐는지 설명한 뒤 올바르게 재작성하라.\n\n문제 있는 Jenkinsfile:\n```groovy\npipeline {\n    agent any\n    stages {\n        stage('Checkout')    { steps { checkout scm } }\n        stage('Build Image') { steps { sh 'docker build -t myapp:latest .' } }\n        stage('Test')        { steps { sh 'npm test' } }\n        stage('Build')       { steps { sh 'npm ci' } }\n    }\n}\n```",
+      "starter": "// 수정된 버전을 작성하기 전에 다음을 먼저 답한다:\n// 1. 이 스테이지들이 어떤 순서로 실행되고 무엇이 잘못되는가?\n// 2. 'latest' 태그가 나중에 무엇을 불가능하게 만드는가?\n// 3. 올바른 스테이지 순서와 더 나은 이미지 태그를 적용한 수정된 Jenkinsfile을 작성하라.",
+      "solution": "// 문제점:\n// 1. 스테이지 순서: Checkout → Build Image → Test → Build\n//    'docker build'가 'npm ci'보다 먼저, 'npm test'보다도 먼저 실행된다.\n//    결과: 설치되지 않고 테스트도 거치지 않은 코드에서 이미지가 만들어진다.\n//    테스트가 실패하면 'Test' 스테이지에서 파이프라인이 멈추지만\n//    'Build Image' 스테이지에서 이미 나쁜 이미지가 만들어진 뒤다.\n//    테스트 게이트가 이미지를 전혀 보호하지 못한다.\n//\n// 2. 'latest' 태그는 변경 가능하다. 동시에 또는 빠르게 연속으로 두 빌드가 실행되면\n//    각각이 'latest' 태그를 덮어쓴다.\n//    롤백이 불가능해진다. 실행 중인 컨테이너가 어느 빌드에서 왔는지 알 수 없다.\n//\n// 수정된 Jenkinsfile:\npipeline {\n    agent any\n    stages {\n        stage('Checkout')    { steps { checkout scm } }\n        stage('Build')       { steps { sh 'npm ci' } }\n        stage('Test')        { steps { sh 'npm test' } }\n        stage('Build Image') { steps { sh 'docker build -t myapp:${BUILD_NUMBER} .' } }\n    }\n}\n// 이제: npm ci와 npm test가 모두 성공했을 때만 이미지가 만들어진다.\n// 태그에 BUILD_NUMBER(빌드별 고유값)를 사용해 각 이미지를 구분할 수 있다.",
+      "explanation": "CI 파이프라인에서 스테이지 순서는 단순한 형식이 아니다. 품질 게이트가 무엇을 보호하는지를 정의하는 것이다. 테스트 전에 이미지를 빌드하는 것은 CI의 목적 전체를 무효화한다. 테스트를 거치지 않고 잠재적으로 나쁜 코드가 레지스트리 산출물을 만들 수 있다는 뜻이기 때문이다. '빠른 실패' 보장은 위험한 산출물(이미지)이 검증 검사(테스트) 뒤에 올 때만 유효하다. 'latest' 태그 문제도 마찬가지로 실용적이다. 고유하고 불변하는 태그 없이는 롤백이 추측 게임이 되고, 다중 빌드 환경에서 동시에 진행되는 두 빌드가 서로의 태그를 덮어쓸 수 있다.",
+      "hints": [
+        "문제를 시각화하려면: 스테이지 순서를 흐름도로 그린다. 'Test가 실패하면 이미 무엇이 만들어졌는가?'를 묻는다. 잘못된 버전에서 답은 'Docker 이미지'이고 그것이 문제다.",
+        "'latest' 태그 위험을 실제로 보려면: 두 개의 커밋을 빠르게 연속으로 푸시하고 두 빌드가 모두 'myapp:latest'를 태그하려 할 때 두 번째가 첫 번째를 덮어쓰는 것을 지켜본다."
+      ]
+    }
+  ]
+}

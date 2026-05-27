@@ -1,0 +1,39 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "Use the kafka-topics.sh command to create an 'orders' topic with 3 partitions, then use the --describe option to verify the topic details.",
+      "starter": "# Assume Kafka is running at localhost:9092\n# Fill in the blanks to complete the topic creation command, and also write the describe command\n\nkafka-topics.sh --create \\\n  --topic ______ \\\n  --bootstrap-server ______ \\\n  --partitions ______ \\\n  --replication-factor 1\n\n# Verify creation\nkafka-topics.sh ______ --topic orders --bootstrap-server localhost:9092",
+      "solution": "kafka-topics.sh --create \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 3 \\\n  --replication-factor 1\n\n# Verify creation\nkafka-topics.sh --describe --topic orders --bootstrap-server localhost:9092",
+      "explanation": "--topic is the name of the topic to create, --bootstrap-server is the Kafka broker address (default port 9092), --partitions is the number of partitions, and --replication-factor is the number of replicas. In a local single-broker environment, replication-factor is set to 1. The --describe option shows per-partition details including leader and replica information.",
+      "hints": [
+        "Enter the topic name 'orders' after --topic, and set --bootstrap-server to localhost:9092.",
+        "Specify the number of partitions with --partitions 3. In a local environment, use --replication-factor 1.",
+        "To verify after creation, use --describe instead of --create."
+      ]
+    },
+    {
+      "prompt": "Publish 3 messages to the 'orders' topic using the console producer without a key. The messages to enter are: 'order-1001 created', 'order-1002 created', and 'order-1003 created'.",
+      "starter": "# Write the command to run the console producer\n# Once running, enter the three lines below at the > prompt and exit with Ctrl+C\n\nkafka-console-producer.sh \\\n  --topic ______ \\\n  --bootstrap-server ______",
+      "solution": "kafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092\n\n# Enter at the prompt:\n> order-1001 created\n> order-1002 created\n> order-1003 created\n# Exit with Ctrl+C",
+      "explanation": "kafka-console-producer.sh is a tool that lets you type messages directly from the terminal and publish them. After running the command, the > prompt appears — type one line and press Enter to publish one message. Without a key, the default partitioner distributes the 3 messages evenly across the 3 partitions.",
+      "hints": [
+        "Specify --topic orders and --bootstrap-server localhost:9092 as options.",
+        "Once the command is running, type a message at the > prompt and press Enter to publish it.",
+        "Press Ctrl+C to exit. If you get an error, check that Kafka is running first."
+      ]
+    },
+    {
+      "prompt": "This time, publish messages with a key. Configure a colon (:) as the key separator so that events with the same order ID (key) always go to the same partition, then publish the following 3 messages:\n- 1001:order created\n- 1001:order shipped\n- 1002:order created\n\nAfter publishing, run a consumer with the --from-beginning option and print both key and value to directly verify that the two messages with key 1001 ended up in the same partition.",
+      "starter": "# Step 1: Run producer with key support (add parse.key and key.separator options)\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --property \"______=true\" \\\n  --property \"______=:\"\n\n# Step 2: Run consumer that prints both key and value\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning \\\n  --property \"______=true\" \\\n  --property \"______=:\"",
+      "solution": "# Step 1: Run producer with key support\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --property \"parse.key=true\" \\\n  --property \"key.separator=:\"\n\n# Enter at the prompt:\n> 1001:order created\n> 1001:order shipped\n> 1002:order created\n# Exit with Ctrl+C\n\n# Step 2: Run consumer that prints both key and value\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning \\\n  --property \"print.key=true\" \\\n  --property \"key.separator=:\"",
+      "explanation": "parse.key=true tells Kafka to split each input line on the key.separator and treat the prefix as the key and the remainder as the value. Since the same key (1001) always produces the same hash, it always routes to the same partition number. On the consumer side, print.key=true prints the key alongside the value, so you can verify that the two messages with key 1001 appear in order from the same partition.",
+      "hints": [
+        "The producer options are --property \"parse.key=true\" and --property \"key.separator=:\".",
+        "To print the key on the consumer side, add --property \"print.key=true\" and --property \"key.separator=:\".",
+        "If the two messages with key 1001 appear consecutively from the same partition number, key-based partition routing worked correctly."
+      ]
+    }
+  ]
+}

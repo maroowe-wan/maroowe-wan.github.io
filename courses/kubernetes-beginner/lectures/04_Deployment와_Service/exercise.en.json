@@ -1,0 +1,63 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "env_note": "All tasks assume a local environment with Minikube running. Before you begin, verify that the cluster is up with 'minikube start' and 'kubectl cluster-info'.",
+  "tasks": [
+    {
+      "id": 1,
+      "level": "Warm-up",
+      "title": "Create a Deployment and Verify the Pod List",
+      "prompt": "With a single kubectl command, create a Deployment named 'web' using the 'nginx' image with 3 replicas. After creating it, query both the Deployment status and the list of Pods that were created, and confirm the 'READY 3/3' state.",
+      "starter": "# Start from a state where no Deployment exists yet.\n# Run the two commands below in order.\n\nkubectl create deployment web --image=nginx --replicas=___\nkubectl get deployments\nkubectl get pods",
+      "solution": "# 1. Create the Deployment\nkubectl create deployment web --image=nginx --replicas=3\n\n# 2. Check Deployment status\nkubectl get deployments\n# Expected output:\n# NAME   READY   UP-TO-DATE   AVAILABLE   AGE\n# web    3/3     3            3           15s\n\n# 3. Verify the actual Pods\nkubectl get pods\n# Expected output (the hash portion of the names will differ per environment):\n# NAME                   READY   STATUS    RESTARTS   AGE\n# web-<hash>-aaaaa       1/1     Running   0          20s\n# web-<hash>-bbbbb       1/1     Running   0          20s\n# web-<hash>-ccccc       1/1     Running   0          20s",
+      "explanation": "'kubectl create deployment web --image=nginx --replicas=3' declaratively registers a Deployment object with the Kubernetes API server instructing it to always maintain 3 Pods labeled app=web. The Deployment controller reads this declaration and creates 3 Pods via a ReplicaSet. 'READY 3/3' means the desired count (3) matches the number of Pods that are actually ready (3). Pod names take the form 'web-<random-hash>-<random-hash>' because the Deployment assigns names automatically — which is also why names change whenever a Pod is recreated.",
+      "hints": [
+        "Omitting '--replicas=3' creates only 1 replica (the default). Always specify it explicitly.",
+        "Pods may briefly sit in 'ContainerCreating' while the image is pulled for the first time, which can take tens of seconds. Run 'kubectl get pods' repeatedly and wait until they reach Running status.",
+        "To inspect the Deployment in detail, run 'kubectl describe deployment web' — it includes the event log."
+      ]
+    },
+    {
+      "id": 2,
+      "level": "Core Exercise 1",
+      "title": "Observe Self-Healing in Action",
+      "prompt": "From the Pod list of the 'web' Deployment created in Task 1, copy one Pod name and force-delete it. Immediately after deletion, query the Pod list again to watch Kubernetes automatically create a replacement Pod, then confirm that the total count returns to 3.",
+      "starter": "# Step 1: Check current Pod names.\nkubectl get pods\n\n# Step 2: Copy a Pod name from the list, paste it into the command below, and run it.\nkubectl delete pod <paste-Pod-name-here>\n\n# Step 3: Query the Pod list repeatedly right after deletion.\nkubectl get pods",
+      "solution": "# 1. Check Pod names\nkubectl get pods\n# Example: web-5d4f8c7b9c-7k2lp, web-5d4f8c7b9c-q8xvr, web-5d4f8c7b9c-zm4tn\n\n# 2. Force-delete one Pod (replace with the actual name in your environment)\nkubectl delete pod web-5d4f8c7b9c-7k2lp\n\n# 3. Query the Pod list immediately after deletion\nkubectl get pods\n# Expected output — a new Pod with a different name appears in ContainerCreating:\n# NAME                   READY   STATUS              RESTARTS   AGE\n# web-5d4f8c7b9c-q8xvr   1/1     Running             0          3m\n# web-5d4f8c7b9c-zm4tn   1/1     Running             0          3m\n# web-5d4f8c7b9c-rt9wd   0/1     ContainerCreating   0          2s\n\n# 4. Query again after a moment to confirm 3 Pods are Running\nkubectl get pods",
+      "explanation": "Deleting a Pod causes the Deployment controller to immediately detect a mismatch between the desired state (replicas=3) and the current state (2 Running). The controller asks the ReplicaSet to resolve the difference (1 short) by creating a new Pod, restoring the count to 3. The fact that the new Pod has a different name hash shows it was *created fresh*, not restarted. This is the core reason to use a Deployment instead of managing Pods by hand.",
+      "hints": [
+        "Pod names are easy to mistype. Drag to select the name from 'kubectl get pods' output and paste it into the terminal.",
+        "You need to run 'kubectl get pods' within 0–2 seconds of deletion to catch the new Pod in ContainerCreating state. If you miss the window, it may already be Running — just verify the total count is still 3.",
+        "Run 'kubectl get pods -w' to stream Pod status changes in real time. Press Ctrl+C to exit."
+      ]
+    },
+    {
+      "id": 3,
+      "level": "Core Exercise 2",
+      "title": "Expose via NodePort Service and Verify with curl",
+      "prompt": "Expose the 'web' Deployment as a NodePort Service, find the assigned NodePort number, and send a curl request to the Minikube IP and that port to receive the nginx default page HTML. Then use 'kubectl scale' to scale the replicas up to 5, and confirm that the Service URL remains unchanged.",
+      "starter": "# Step 1: Create the Service\nkubectl expose deployment web --type=___ --port=80\n\n# Step 2: Query the created Service\nkubectl get service web\n\n# Step 3: Get the access URL from Minikube\nminikube service web --url\n\n# Step 4: Receive the nginx page with curl\ncurl <URL-from-above>\n\n# Step 5: Scale out to 5 replicas\nkubectl scale deployment web --replicas=___\nkubectl get pods",
+      "solution": "# 1. Create the NodePort Service\nkubectl expose deployment web --type=NodePort --port=80\n\n# 2. Verify the Service (the NodePort number varies by environment)\nkubectl get service web\n# Expected output:\n# NAME   TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE\n# web    NodePort   10.96.142.31    <none>        80:31845/TCP   5s\n\n# 3. Get the full URL from Minikube\nminikube service web --url\n# Example: http://192.168.49.2:31845\n\n# 4. Retrieve the nginx default page with curl\ncurl http://192.168.49.2:31845\n# Expected output:\n# <!DOCTYPE html>\n# <html>\n# <head><title>Welcome to nginx!</title></head>\n# ...\n\n# 5. Scale out to 5 replicas\nkubectl scale deployment web --replicas=5\nkubectl get pods\n# 5 Pods should appear in Running state\n\n# 6. Confirm the Service URL is still the same after scaling\ncurl http://192.168.49.2:31845\n# Same nginx page responds → Service address is stable",
+      "explanation": "'kubectl expose' creates a Service object that inherits the Deployment's label selector (app=web). Specifying type NodePort causes Kubernetes to automatically assign an unused port in the range 30000–32767 and open it on every node. Because the Service has a fixed ClusterIP, the access address does not change even when Pod IPs change due to Pod replacement. When you scale up with 'kubectl scale', the Service automatically adds the new Pods to its endpoints via the label selector — no additional configuration needed. The Minikube-specific 'minikube service --url' command resolves the node IP and prints the full URL for you.",
+      "hints": [
+        "Omitting '--type=NodePort' creates a ClusterIP Service by default, which is not reachable from outside the cluster. Always specify the type explicitly.",
+        "If curl returns 'Connection refused', the Pods may still be in ContainerCreating state. Run 'kubectl get pods' to confirm all Pods are Running before retrying.",
+        "If Minikube is running in docker driver mode, NodePort addresses may not be directly reachable without 'minikube service web --url'. Use the URL this command outputs — it is the safest approach."
+      ]
+    },
+    {
+      "id": 4,
+      "level": "Applied",
+      "title": "Perform a Rolling Update and Then Roll Back",
+      "prompt": "Update the nginx image version of the 'web' Deployment to 'nginx:1.25' to trigger a rolling update, and observe the progress with 'kubectl rollout status'. After the update completes, intentionally update to a non-existent image tag ('nginx:99.99.99') to create a stuck rolling update scenario, then use 'kubectl rollout undo' to recover to the last working version. Confirm that all Pods are in Running state after recovery.",
+      "starter": "# Step 1: Perform a successful rolling update to nginx:1.25\nkubectl set image deployment/web nginx=nginx:___\nkubectl rollout status deployment/web\n\n# Step 2: Update to a non-existent image (intentional failure)\nkubectl set image deployment/web nginx=nginx:99.99.99\n\n# Step 3: Repeatedly query Pod status to observe the ImagePullBackOff state\nkubectl get pods\n\n# Step 4: Roll back to the previous version\nkubectl rollout undo deployment/web\n\n# Step 5: Verify Pod state after recovery\nkubectl get pods\nkubectl rollout status deployment/web",
+      "solution": "# 1. Rolling update to nginx:1.25\nkubectl set image deployment/web nginx=nginx:1.25\nkubectl rollout status deployment/web\n# Expected output:\n# Waiting for deployment \"web\" rollout to finish: 2 out of 5 new replicas have been updated...\n# deployment \"web\" successfully rolled out\n\n# 2. Update to a non-existent image (failure scenario)\nkubectl set image deployment/web nginx=nginx:99.99.99\n\n# 3. Observe new Pods failing with ImagePullBackOff\nkubectl get pods\n# Expected output:\n# NAME                   READY   STATUS             RESTARTS   AGE\n# web-<new-hash>-aaaaa   0/1     ImagePullBackOff   0          15s\n# web-<old-hash>-bbbbb   1/1     Running            0          3m\n# web-<old-hash>-ccccc   1/1     Running            0          3m\n# ...\n# → Rolling update stalls; old Pods remain alive\n\n# 4. Immediately roll back to the previous version\nkubectl rollout undo deployment/web\n# Output: deployment.apps/web rolled back\n\n# 5. Verify state after rollback\nkubectl rollout status deployment/web\n# Output: deployment \"web\" successfully rolled out\n\nkubectl get pods\n# All Pods should be Running 1/1\n\n# 6. Confirm the current image version (should be back to nginx:1.25)\nkubectl describe deployment web | grep Image\n# Output: Image: nginx:1.25",
+      "explanation": "A rolling update adds new Pods one at a time and tears down old Pods only after the new ones are Ready. If the new image tag does not exist, the new Pods fail with 'ImagePullBackOff' and never become Ready. Because the existing Pods remain alive within the maxUnavailable limit, the service continues uninterrupted. 'kubectl rollout undo' reactivates the previous ReplicaSet recorded in the Deployment's revision history, cancelling the change. The reversion also uses a rolling strategy, so there is no service interruption during recovery. This scenario mirrors a real-world emergency rollback after a bad image is pushed to production.",
+      "hints": [
+        "The container name in 'kubectl set image' defaults to the image name. For a Deployment using the nginx image, the container name is also 'nginx'. Verify it with 'kubectl describe deployment web | grep -A5 Containers'.",
+        "ImagePullBackOff may not appear immediately. The status first shows 'ErrImagePull' and switches to 'ImagePullBackOff' after a few seconds. Use 'kubectl get pods -w' to stream the transition in real time.",
+        "Run 'kubectl rollout history deployment/web' to see the Deployment's revision history. You can also roll back to a specific revision with 'kubectl rollout undo deployment/web --to-revision=1'."
+      ]
+    }
+  ]
+}

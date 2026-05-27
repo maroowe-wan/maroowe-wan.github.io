@@ -1,0 +1,293 @@
+Kind: captions
+Language: en
+hi I'm Julius in this video we're going
+to take a super quick look at the
+Prometheus monitoring system we're going
+to talk about what Prometheus is what
+the system architecture looks like and
+what some of the main features are that
+make Prometheus so useful
+so what is Prometheus it's a
+metrics-based monitoring system that
+helps you ensure that your systems and
+services are healthy and behaving well
+it gives you a whole tool chain of
+libraries and server components that
+allow you to expose metrics from the
+things you care about collect and record
+those metrics and then do useful things
+with them such as alerting dashboarding
+ad hoc debugging or automation
+aside from that Prometheus is written in
+the go programming language and it's
+hosted by the cloud native Computing
+Foundation under an open governance
+all right with that out of the way let's
+have a look at the system architecture
+of a basic Prometheus monitoring setup
+The Big Box in the middle here is the
+Primitive server depending on your needs
+and the size of your organization you
+can run one or many of these now
+Prometheus is a pull-based monitoring
+system that pulls or scrapes metrics
+over HTTP from a set of systems and
+services that you want to monitor in
+Prometheus lingo we call each of these
+monitored endpoints a Target these
+targets can either be your own services
+and applications that you can directly
+instrument with Prometheus metrics for
+example using one of the official client
+libraries or if they're a third party
+system like a database or Linux host or
+anything else that doesn't expose
+Prometheus metrics natively you can run
+a so-called exporter process next to
+their target to allow Prometheus to pull
+metrics through that exporter now you
+can configure the list of targets to be
+monitored statically in your Prometheus
+configuration file or premises can also
+talk to a wide variety of different
+service Discovery mechanisms like DNS or
+the kubernetes API server to to
+automatically discover all the targets
+that it should monitor on an ongoing
+basis Prometheus then pulls metrics from
+all of its Targets on a periodic basis
+and builds up a view of the metrics over
+time on local disk in its time series
+database also called the tsdb
+you can then use that collected metrics
+data either to generate alerts which are
+rooted aggregated and dispatched through
+a separate component called the alert
+manager or you can query the data
+externally either through prometheus's
+own web UI a dashboarding tool like
+grafana a query Builder like prom lens
+or any other tool you can also
+optionally configure Prometheus to
+forward the samples that it collects to
+a remote storage system or processing
+endpoint that might have totally
+different trade-offs and characteristics
+than prometheus's own local storage
+implementation to understand Prometheus
+even better let's have a look at its
+core features the dimensional data model
+the metrics transfer format the query
+language integrated alerting and support
+for service Discovery first let's talk
+about the data model since everything
+else in Prometheus depends on that so on
+a fundamental level Prometheus tracks
+and stores time series time series are
+numeric values that change over time and
+that are sampled at specific points in
+time usually whenever Prometheus pulls
+metrics from a Target
+there's two questions that come up here
+first of all how do we model a single
+sample and which values can I take and
+secondly we want to be able to track and
+query multiple time series at the same
+time so we need a way to identify each
+series and tell them apart from each
+other
+so in Prometheus every time Series has
+an identifier and an ongoing stream of
+samples that gets built up over time
+over multiple successive scrapes
+those samples store the actual numeric
+values belonging to a Time series
+now each time series is uniquely
+identified by a metric name and a set of
+labels
+the metric name is the aspect of a
+system or service that you're measuring
+this could be the number of HTTP
+requests that a server has handled since
+it started a temperature memory usage or
+anything else that you can track
+numerically
+the labels are key value pairs that
+allow you to partition a metric name
+into many individual time series so that
+you can track in more detail where
+something is actually coming from now
+Prometheus automatically attaches some
+of these labels to tell you which
+targets these time series came from
+those labels are called Target labels
+but the target itself can also choose to
+split up a metric by any other labels
+for example in HTTP server might split
+up its request counters by the HTTP
+method and the status code
+okay let's have a look at the sample
+stream here each individual sample
+consists of a timestamp and a value the
+timestamp is usually the time of the
+scrape and is stored as a 64-bit integer
+timestamp in milliseconds
+the sample value can be any valid 64-bit
+floating Point number now this is going
+to change just a little bit in the near
+future with the upcoming edition of a
+native histogram data type in Prometheus
+where a sample value can actually be a
+full-blown histogram as well but today
+that's not quite officially part of
+Prometheus yet
+now in order for Prometheus to be able
+to pull metrics from a service you care
+about that service needs to expose an
+HTTP endpoint that serves a text-based
+metrics transfer format that Prometheus
+understands here's an example of what
+two simple metrics look like in this
+text-based format each line that's not a
+comment represents the current value for
+a given time series along with its
+metric name and labels so for example
+you have an HTTP request counter here
+that is split up by the status code as
+well as a metric that tells you the
+current number of open file descriptors
+in the process that's being monitored
+what's important to understand here is
+that each scrape or pull only transfers
+the current value of each tracked Series
+so the sampling frequency is completely
+up to Prometheus and there's no history
+being transferred here the idea behind
+this text-based metrics transfer format
+is that it's supposed to be as easy to
+generate as possible so this makes it
+possible to get Prometheus metrics out
+of almost anything even if you can't use
+a dedicated client library for tracking
+and exposing metrics and since
+Prometheus is pull based you can also
+manually navigate to any metrics
+endpoint of a Target in the browser to
+view the current state of all of its
+metrics after collecting and storing all
+of these metrics you'll probably want to
+do something useful with them for that
+Prometheus comes with its own prom query
+language which allows you to query and
+process the collected data for alerting
+dashboarding ad hoc debugging or any
+other use case
+PromptCare is really geared towards time
+series based calculations that even
+allow you to perform complex arithmetic
+between entire sets of Time series
+we won't really go into all of the
+details here but let's just have a quick
+look at a few simple examples of what
+promptql allows you to do imagine you
+had a counter metric named HTTP requests
+total that told you how many requests
+the servers handled since it was started
+and it's split up by a path label a
+method label and a status code label now
+you could query for the current value of
+all time series with that metric name
+and where the status quote was 500 by
+just writing the metric name itself with
+a set of labeled matches in curly braces
+appended to it that constrain which time
+series should be selected
+to get from an absolute count to a rate
+of increase you could then use the rate
+function over an averaging time window
+of 5 minutes to see how many of these
+request errors are happening per second
+you can now also use dimensional
+aggregation operators to aggregate away
+some of the label them engines and keep
+only certain labels in this case we're
+summing over all the individual rates
+and throwing away all labels except the
+path label this gives you a per path
+total request rate now if you wanted to
+know all paths that had a 500 error rate
+larger than five percent we could use a
+binary division operator to divide the
+per path error rates by the total rates
+for equivalent paths multiply the
+resulting ratios by a hundred to get to
+a percentage and then use a filter
+operator to only return those paths with
+an error rate over five percent
+you could use this for alerting for
+example and get an alert for each
+problematic path now you can do way more
+with prompt ql but these were just some
+introductory examples to give you an
+idea of what the language looks like and
+what it can do one really cool thing
+about Prometheus is that it bases
+alerting on the same prompt ql query
+language that you would use for
+dashboarding and other use cases so to
+make Prometheus detect and alert on
+problems in your infrastructure you can
+configure it to load a set of alerting
+rules from files with each rule
+providing a prompt curl expression and a
+set of metadata Fields about the alert
+this example alerting rule consists of
+an alert name the primeql expression
+that forms the heart of the rule and
+that determines if anything is wrong as
+well as a few other yaml metadata fields
+that allow you to add a time tolerance
+and additional information to the
+resulting alerts
+finally let's talk about service
+Discovery integration since Prometheus
+is a pull-based monitoring system it
+needs to know which targets it should
+monitor how to fetch metrics from them
+and how to identify each of them
+correctly so that it can attach the
+right labels to the pull Time series
+now you could manually configure a
+static list of Targets in your
+Prometheus configuration file but that
+becomes really unfeasible in many of
+today's large and dynamic Computing
+environments where both machines and
+service processors just come and go all
+the time fortunately Prometheus can
+automatically discover and update its
+list of targets for you using a variety
+of service Discovery mechanisms such as
+DNS kubernetes console and others you
+can even build your own file or HTTP
+based Discovery integration if
+Prometheus doesn't support the one you
+need out of the box alright I hope this
+video gave you a good idea of the basics
+of Prometheus in my next videos I'll
+dive deeper into the topics we covered
+today as well as discuss best practices
+current developments and other
+Prometheus related topics if you found
+this video helpful and want to learn
+more be sure to check out my self-paced
+training courses at
+training.promlabs.com these courses go
+into more depth and cover a wider range
+of topics from the basics of Prometheus
+to advance Advanced features and
+Integrations so if you're looking to
+take your perimeter skills to the next
+level check them out today thanks for
+watching and I'll see you in the next
+video

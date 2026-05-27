@@ -1,0 +1,132 @@
+Kind: captions
+Language: en
+hi there danica fine here up until now
+we've learned a ton about kafka connect
+its components and how to interact with
+it
+but now let's see how to deploy it
+in this module you'll learn about the
+distributed and standalone deployment
+methods for kafka connect but the
+requirement to deploy kafka connect
+infrastructure only applies if you're
+implementing self-managed kafka connect
+if you use confluent managed connectors
+all infrastructure deployment is taken
+care of by confluent so now that we've
+learned a bit about the components
+within kafkaconnect let's now turn to
+how we can actually run a connector
+when we add a connector instance we
+specify its logical configuration
+it's physically executed by a thread
+known as a task
+in this diagram we see two logical
+connectors each with a single task
+the execution of a connector's ingest or
+egress of data can also be parallelized
+if the connector supports it
+in that case additional tasks are
+spawned
+this could mean that when ingesting from
+a database multiple tables are read at
+once or when writing to a target data
+store the data is read concurrently from
+multiple partitions of the underlying
+kafka topic to increase throughput
+but where do the tasks actually run
+kafka connect runs under the java
+virtual machine or jvm as a process
+known as a worker
+each worker can execute multiple
+connectors
+when you look to see if kafka connect is
+running or want to look at its log file
+it's the worker process that you're
+looking at
+tasks are executed by kafka connect
+workers a kafka connect worker can be
+run in one of two deployment methods
+standalone or distributed
+now each has its pros and cons which
+we'll now discuss
+the way in which you configure and
+operate kafka connect in these two modes
+is different despite its name this
+deployment mode is equally valid for a
+single worker deployed in a sandbox or
+development environment
+in the distributed mode kafka connect
+uses kafka topics to store state
+pertaining to connector configuration
+connector status and more
+the topics are configured to retain this
+information indefinitely known as
+compacted topics
+connector instances are created and
+managed via the rest api that kafka
+connect offers
+the distributed mode is the recommended
+best practice for most use cases
+since all offsets configs and status
+information for the distributed mode
+cluster is maintained in kafka topics
+this means that you can add additional
+workers pretty easily as they can read
+everything that they need from kafka
+when you add workers from a kafka
+connect cluster the tasks are rebalanced
+across the available workers to
+distribute the workload and if you
+decide to scale down your cluster or
+even if something outside your control
+happens and a worker crashes
+kafka connect will rebalance again to
+ensure that all the connector tasks are
+still being executed the minimum number
+of workers recommended is 2 so that you
+have fault tolerance but of course you
+can add additional workers to the
+cluster as your throughput needs
+increase
+you can opt to have fewer bigger
+clusters of workers or you may choose to
+deploy a greater number of smaller
+clusters in order to physically isolate
+your workloads
+now both of these are valid approaches
+and are usually dictated by
+organizational structure and
+responsibility for the respective
+pipelines implemented in kafka connect
+on the other hand in standalone mode the
+kafka connect worker uses files to store
+its state the connectors are created
+from local configuration files not using
+the rest api
+consequently you cannot cluster workers
+together meaning that you cannot scale
+for throughput or have fault tolerant
+behavior
+because there's no clustering you can
+know for certain on which machine the
+connectors task will be executing it's
+just going to be on the machine that
+you've deployed the standalone worker on
+this means that standalone mode is
+appropriate if you have a connector that
+needs to execute with server locality
+for example reading from files on a
+particular machine or ingesting data
+sent to a network port at a fixed
+address
+you can satisfy this same requirement
+using kafka connect in the distributed
+mode with a single worker connect
+cluster
+this provides the benefit of having
+offsets configurations and status
+information stored in a kafka topic and
+with that now you know how to deploy
+self-managed kafka connect
+you

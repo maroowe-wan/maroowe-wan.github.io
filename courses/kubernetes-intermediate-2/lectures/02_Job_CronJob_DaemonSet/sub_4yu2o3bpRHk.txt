@@ -1,0 +1,190 @@
+Kind: captions
+Language: en
+hello and welcome to building a batch
+platform on kubernetes my name is Mofi
+I'm a developer Advocate at Google
+focusing on kubernetes and my name is
+Ali and I'm a Solutions architect at
+Google I partner with mie on high
+performance Computing and AI
+infrastructure in the last video we saw
+a traditional architecture of an HPC
+platform built on kubernetes in this
+video we're going to look at the
+fundamental Block in kubernetes that
+allows us to run batch workload on it
+and that fundamental block is the job
+API a job creates one or more pods which
+are basically one or more containers and
+will continue to retry execution of
+those pods until a specified number of
+them successfully
+terminate so let's go ahead and look at
+an example of a simple job you'll notice
+that we're inside our Cloud shell and
+we're defining the yaml template for
+this one simple job you'll notice that
+the API version is back version one the
+kind of this entity is a job metadata
+contains uh simple identifiers like name
+or a name space where uh this job can
+exist and then inside the spec template
+spec you can Define your containers that
+run as a part of this job since we don't
+Define any counts it's assumed that this
+is going to be a one pod job in which
+it's going to run the Pearl 5340 image
+with the command shown in line number 11
+you'll notice that line 12 also talks
+about the fact that this job must never
+be restarted so let's go ahead and apply
+this manifest we're going to say cute
+control apply DFS simple job. yo as we
+can see the job has been created so
+let's go ahead and check the status of
+this job we'll notice that there is one
+job that is still running at this time
+and here we can see the pods that
+contribute themselves to this now that
+we know the name of our pod let's take a
+look at the logs from it as you can see
+this is pi to the 2 th000 decimal place
+and if we take a look at the jobs you'll
+notice that this job is now complete the
+example we just looked at is an example
+of a nonparallel job where we only
+started one pod and the job was
+considered complete when that job was
+completed if the job somehow failed
+kubernetes will try to restart the job
+unless we set restart policy to never in
+this case which we did in many cases we
+actually want to run the job multiple
+times to complete a larger task in those
+cases you want to set completions to
+greater than zero let's quickly take a
+look at example here we have a job that
+is very similar to the job that we just
+looked at the only difference being on
+line six completions is set to four
+let's apply this job with Cube
+control apply DF completions job EML we
+will see a job completions was created
+if we do keep control get pods we'll see
+I have one of these jobs running if I
+check again we should see the the one
+has completed and the second one is
+running because our job has a
+completions number set to four we'll
+have to run four parts to complete this
+job because the value of parallelism is
+not set our job can only execute one
+part at a time in the end we should see
+all four of our pods has completed and
+by looking at their timestamp we can
+tell they run one after another you can
+also see keep control get jobs that our
+job has a completion of four out of four
+so now that we've seeing how a job with
+completion Works let's take a look at a
+job where we can Define the number of
+parallel pods that get processed at the
+same time you'll notice that in line
+number seven we Define parallelism as
+two and the rest The yamama Remains the
+Same as example before with a completion
+set to four so let's go ahead and say
+Cube control apply this manifest to run
+this job taking a look at the pods
+you'll notice that two are running at
+the same time you'll notice the two of
+them are now completed and the other two
+have started just now as you can see all
+four of those workers have been
+completed processing two in parallel at
+the same time in batch processing often
+we have workloads that needs to
+communicate with each other to
+coordinate a certain task for those kind
+of workloads we can take advantage of
+indexed completion mode in which each of
+the pod in the job will start with a
+static index that we can refer to to
+communicate and identify the specific
+pod we can set spec completions and
+parallelism to a specific number and
+exact number number and have a service
+for interpod network communication let's
+look at an example here we have a
+service definition of a headless service
+where cluster IP is set to none this is
+a intra cluster service where we do not
+need a cluster IP for the service
+because we're only using this to get a
+domain name for our pods to communicate
+with each other in our job definition we
+have of kind job name index job in our
+spec we set completions and parallelism
+to the same value of three and
+completion mode to index in index job
+each of the Pod within the job gets a
+static index starting from zero up to n
+minus one in this case our indexes will
+be zero one and two because we have
+three copies of this pod in our template
+we set a subdomain of headless service
+the name of our service we set restart
+policy to never and in our container we
+run a bash script that for each of those
+pod tries to Ping the other pods within
+the same job when all of those succeeds
+we considered this job done and the job
+successful this is a simplified version
+of jobs where pods need to communicate
+with each other to complete a job for
+example like MPI jobs let's apply this
+job with Cube control apply dasf index
+job we'll see that headless service and
+index jobs was created control get pods
+we'll see three of our pod actually
+started and completed almost immediately
+we could take a look at the log of this
+pod by running Cube control
+logs this pod we'll see that our pod
+managed to Ping itself and two of the
+other pod that's running we could check
+that for some of the other pods as well
+we'll see the same log because each of
+them are trying to Ping each other
+including themselves to recap in
+kubernetes jobs are the fundamental
+building block of running batch workload
+the most basic configuration the job
+only consists of about 10 lights of yaml
+where we Define our job name and the
+container that should execute for the
+job to complete we then look at a very
+similar job where we Define completions
+for example a workload that might
+require multiple workers to complete
+their work for the job to be considered
+successful if we want to take advantage
+of using our resources to do the job
+quicker we can set parallelism to a
+number higher than one to speed up our
+job execution time by running multiple
+copies of the Pod to complete the job
+quicker in the last example we saw an
+index job paired with a headless cluster
+IP service this service is local to the
+cluster and provides a domain name for
+the workers that will participate in
+this indexed job each worker pod will
+have an index associated with this job
+as a part of their host name and this is
+useful for those workers to be able to
+reliably find each other and communicate
+with each other as a part of this job's
+workflow in this video we saw several
+different ways of configuring jobs as
+has batch workloads on kubernetes

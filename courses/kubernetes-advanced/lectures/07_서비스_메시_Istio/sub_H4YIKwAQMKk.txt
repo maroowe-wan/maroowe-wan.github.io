@@ -1,0 +1,582 @@
+Kind: captions
+Language: en
+Hello and welcome to my channel!
+In this video, we'll explore what Istio is,
+how it works, and how it can benefit your
+microservices architecture.
+First, we'll talk about istio architecture
+and how it works under the hood.
+Then I'll show you multiple methods on how
+to install istio on Kubernetes cluster, including
+helm installation.
+I'll walk you through a few examples of how
+to manage traffic, request routing, and canary
+deployment.
+And we'll talk about multiple ways to inject
+sidecars into the pod.
+One of the biggest topics of this tutorial
+is how to use an ingress gateway to expose
+applications running in Kubernetes to the
+internet.
+We'll install cert-manager and use letsencrypt
+to automatically obtain TLS certificates and
+secure our APIs.
+Finally, I'll show you how to use Prometheus
+and grafana to monitor latency, traffic, and
+availability not only of the services exposed
+to the internet but also of internal applications.
+And, of course, we'll use kiali to visualize
+the service mesh inside our cluster.
+In the end, we'll talk about Gateway API and
+how to use it for both service mesh and instead
+of your typical ingress.
+So what istio is?
+Istio is an open-source service mesh that
+provides a unified platform to connect, manage,
+and secure microservices.
+It was created by Google, IBM, and Lyft in
+2017 and has since gained significant traction
+in the cloud-native community.
+Istio is built on top of Envoy - a high-performance
+proxy that handles all the traffic between
+microservices.
+Istio works by deploying a sidecar container
+alongside each microservice instance in your
+environment.
+The sidecar container intercepts all traffic
+to and from the microservice, handling traffic
+routing, load balancing, service discovery,
+and other important networking tasks.
+Istio also provides advanced traffic management
+features like canary deployments, A/B testing,
+and fault injection.
+Now, why would you want to use Istio?
+Istio provides several benefits to modern
+Firstly, it simplifies network management
+by abstracting away the complexity of service
+discovery, load balancing, and traffic routing.
+Secondly, Istio provides advanced security
+features like mutual TLS authentication, role-based
+access control, and traffic encryption.
+Finally, Istio provides observability features
+like distributed tracing, metrics collection,
+and logging.
+Since the istio operator is deprecated, most
+people would prefer helm installation.
+It's pretty easy to include in your deployment
+pipeline with other terraform resources.
+You can use istioctl to try it out, but realistically
+you'd probably still use helm to deploy it
+in production environments.
+This step is optional only to show you how
+to get default helm values.
+Let's go ahead and add the official helm repo.
+Now let's search for the base helm chart that
+includes the custom resource definitions,
+which are mandatory to install before you
+can deploy istiod.
+I highly recommend using the same version
+for the first try; otherwise, the ingress
+gateway may not work for you.
+We can use helm show values to get defaults
+for this helm chart and pipe it to the file.
+Let's call it istio-base-defaults.yaml.
+You can open it and find values that you want
+to customize.
+It's pretty basic.
+For this video, I'm going to be using the
+EKS cluster that you can create using my terraform
+code.
+Now I'll use terraform as well to deploy the
+istio helm chart.
+You can put it in the same folder or follow
+along.
+First of all, we need to declare the helm
+provider.
+To authenticate with Kubernetes cluster such
+as EKS, we can dynamically obtain a temporary
+token and then use it to install helm.
+Another way is just to point the provider
+to Kubernetes config on your local machine.
+Next, create a new file for the first istio
+base helm chart.
+You don't have to use terraform; you can copy
+a command that exactly matches terraform and
+execute it in the terminal.
+I prefer to use terraform to make it easily
+reproducible.
+Let's call this release my-istio-base.
+Point to the remote helm repository.
+Specify what helm chart you want to use.
+Then the Kubernetes namespace.
+If it does not exist, let's create it.
+Also, make sure to use the same version.
+Just in case if you want to override any variables,
+you can use set statements.
+For example, set the default namespace for
+the istio deployment.
+Recently istio team combined the pilot, citadel,
+and gallery into a single executable called
+istiod.
+Let's get the default values for it as well
+and use the same version.
+We would need to override a few variables
+for the ingress gateway to work.
+Create another terraform file to deploy the
+istiod helm chart.
+You can also find the helm command to deploy
+it manually.
+Telemetry and namespace are default values,
+but we need to override the ingress service
+and ingress selector for the cert-manager
+to work correctly and be able to solve the
+http01 challenge from letsencrypt.
+Also, we need to explicitly depend on the
+previous helm chart since istiod requires
+custom resources.
+In the terminal, you need to initialize terraform
+first.
+Then run apply to deploy both helm charts.
+Let's check if the istio custom resources
+were created.
+Also, we need to make sure that the istiod
+pod is running.
+Alright, istio is deployed to our cluster,
+and we're ready to start managing traffic
+using the istio control plane.
+Let's create a dedicated namespace for our
+first example and call it staging.
+If you want istio to inject sidecars to all
+pods in this namespace, you add an injection
+enabled label.
+In order for istio to manage traffic, each
+service must have an istio sidecar.
+We'll have two deployments to simulate a canary.
+This deployment is version v1.
+Also, when we get to the kiali, you would
+want these labels to show up in the UI.
+It's a simple golang app that is uploaded
+to the docker hub.
+Since it's a public image, you can use it
+as well.
+The second deployment is identical, except
+that it uses the v2 version label.
+When we create this standard service in Kubernetes,
+since it uses a single label app: first-app,
+it randomly routes traffic to both versions
+v1 and v2.
+To manage and shift traffic, we actually need
+a couple of istio custom resources.
+The destination rule defines what backend
+applications are used.
+They call it subsets.
+We have a subset for the v1 version, which
+is also called v1, and another one for v2.
+You also need to add a target host; in this
+case, it's a service name first-app.
+You can get all the values from the official
+istio documentation.
+The second custom resource is virtual service.
+First, we also need to use the same target
+host.
+Same as in the previous example, it will target
+Kubernetes service first-app.
+Then we can intelligently route traffic to
+different backends.
+For this example, we'll simulate a typical
+application upgrade when you need to roll
+out a new version of the app, in this case,
+v2, and start shifting traffic to it.
+Sometimes it's called canary deployment.
+When the traffic hits the new version, you
+can monitor status codes and decide if you
+want to proceed or abort.
+Alright, let's start routing traffic to only
+version v1.
+Now to test, we need a client inside Kubernetes,
+which also have a sidecar. Port forward won't
+work in this case.
+Later we'll use a gateway.
+Let's go ahead and apply the example-1 folder.
+Check the status of the pods in the staging
+namespace.
+If you add a wide flag, you can get the internal
+IP addresses of the pods.
+Take note of those two.
+We also have a single Kubernetes service in
+that namespace.
+If you check endpoints on that service, you'll
+get two pods.
+So if you access this service without a sidecar,
+you would randomly receive traffic from both
+versions, v1, and v2.
+For the test, ssh to the client in the backend
+That pod is based on a curl image and has
+an infinite loop to prevent it from exiting.
+Let's use curl in the loop to hit our first-app
+service in the staging namespace.
+Since we used istio virtual service, traffic
+is only routed to v1 version.
+Later I'll show you how to visualize this
+traffic in the UI.
+Now let's say we want to upgrade our app to
+version v2.
+First, we want to route a small percentage
+of the traffic to that version and make sure
+it's healthy.
+Add weight attribute with 90% value.
+Also, add another destination rule that will
+send traffic to the v2 version but only 10%
+of the traffic.
+Everything is ready; let's apply the new destination
+rules.
+On the bottom window, you can see that v2
+versions rarely appear.
+Since we only route 10% of traffic to that
+version.
+Without istio to implement the same task,
+you would scale version v1 to 9 pods and create
+a single pod for v2.
+Well, you can have any number of pods just
+need to keep the ratio.
+With istio, it does not matter how many pods
+you have.
+You can still intelligently route traffic.
+Let's say we are now confident that the v2
+version has no bugs.
+Now we can start routing half of the traffic
+to the new version.
+And of course, you can automate this in your
+pipeline, but first, you need to understand
+how it works.
+Let's apply it again.
+Now we receive an equal amount of traffic
+on both versions.
+Also, you can implement similar routing with
+Gateway API but with experimental custom resources
+only.
+We'll talk about technics at the end of the
+video.
+At this point, we are confident in our new
+version, and we want to route all the traffic
+to it.
+Apply it again, and you'll see immediately
+that all the traffic is now routed to the
+v2 version.
+In this section, I want to talk about multiple
+ways you can inject sidecars into your pods.
+The first one and most common is to use inject
+label.
+You can also set the value to disable, and
+other methods won't work either.
+The second method is to use a pod inject enabled
+Now the third one is to inject manually.
+But you should use it only when you are trying
+to test something.
+For example, this deployment does not have
+labels, and istio, should not inject the sidecar.
+Let's apply and see the result.
+Alright.
+the first deployment has a sidecar, and the
+second one does not.
+To manually inject sidecar, you need to use
+istioctl cli and specify the path to that
+If you get the pods in a few seconds, you
+should see that the istio sidecar was injected
+into the second pod.
+In the following section, I want to show you
+how to expose an application running in Kubernetes
+to the internet using the istio ingress gateway.
+We'll also use the helm chart to deploy it
+in our cluster.
+Similar to the previous charts, let's save
+the default values locally.
+Just in case if you want to override some
+of them.
+I'll keep all default values for the gateway.
+For example, you can use service annotations
+to specify what kind of load balancer you
+want.
+In AWS, you probably want to upgrade classic
+LB to a network load balancer.
+Create another terraform file for gateway
+As you can see, I'm not going to override
+any values in this deployment.
+Keep a note that we'll deploy it to the istio-ingress
+Let's run terraform apply to install the helm
+chart.
+Now we can check if the load balancer was
+created.
+If it's in the pending state, try to describe
+it and find any errors.
+You can also get events in that namespace.
+For the third example, we'll use the production
+namespace and also inject the sidecar to all
+pods in that namespace.
+Then identical deployments for version v1
+and v2.
+The same service, just a different name.
+Same destination rule that defines two subsets
+for both versions.
+Now the virtual service must have the external
+DNS name under the hosts.
+In my case, I have app.devopsbyexample.com
+and the second one for internal Kubernetes
+routing.
+In this case, we have an additional attribute
+gateway that uses the name of the gateway
+that we're going to create next.
+Similar to the previous example, we'll route
+90% of the traffic to v1 and 10% to v2.
+You can also use different prefixes if multiple
+services hide under your api, similar to a
+typical ingress.
+To expose the application to the internet,
+we need to create a gateway object.
+This is an istio custom resource and not a
+gateway api from Kubernetes.
+Keep this in mind; they are very similar on
+purpose.
+On line 9 selector uses pods labels to identify
+what gateway to use.
+To route plain http traffic, you select port
+80 and http protocol.
+As a host, you put your dns name.
+You can use the same gateway to route multiple
+domains just list them here.
+Let's check the pod labels on the ingress
+gateway to make sure that it will match our
+label under the selector.
+Istio gateway looks like it should work.
+Let's go ahead and apply the example-3 folder.
+Check the status of pods.
+I want to show you a trick that you can use
+to verify Ingress before you update DNS.
+Hostname is just a header.
+You can use curl and pretend that you already
+have a proper dns.
+For the address, you specify the load balancer
+hostname.
+Alright, it works; we got a response from
+the app deployed in Kubernetes.
+Now let's create a CNAME record for our domain.
+I use google domains, but it does not matter.
+Just create a CNAME if it points to another
+hostname or A record if you need to point
+to the IP address.
+In a few minutes, check if the DNS is updated.
+Finally, we can use our custom domain name
+to reach the app.
+That was pretty simple.
+The next step is to secure our application
+with a TLS certificate.
+First of all, we need to deploy a cert-manager,
+including all custom resources that come with
+it.
+In some environments like GCP, you would also
+need to create an additional firewall rule.
+In aws, it should work out of the box.
+Let's apply it.
+To automatically obtain TLS certificates from
+letsencrypt, we need to create a cluster issuer.
+You can also create just Issuer, which is
+namespace specific.
+When you are just getting started with cert-manager,
+you should use a staging environment.
+It's almost identical to production, just
+different URLs.
+Also, you must specify what ingress class
+will be used to solve the http01 challenge.
+That's why we had to override some defaults
+when we deployed istiod.
+When you test and be able to obtain a certificate,
+you can switch to the production Issuer.
+They have a strict quota for certificates.
+Let's apply both staging and production cluster
+issuers.
+Check if both of them are ready before creating
+certificates.
+To automatically get certificates on a typical
+ingress, you would use annotation.
+At this time, it's not supported on the istio
+Ingress, but it works on gateway api.
+As a workaround, we can create certificate
+resources separately.
+Use your domain name.
+To test certificates, update the name to staging
+issuer.
+Also, it must be created in the istio-ingress
+namespace, where you have your gateway pods.
+When you create these certificates, the cert-manager
+will obtain a certificate from let's encrypt
+and store it in Kubernetes secret.
+The certificate is valid only for 90 days,
+and the cert-manager will automatically renew
+it and update the secret.
+If you get the certificate immediately, you
+can see it's not ready.
+In case it is stuck in not ready state, you
+can describe that certificate and find that
+the certificate request was created.
+Then you can describe the certificate request.
+You can see that order was created.
+Let's describe it as well.
+Then the challenge was created.
+Describe the challenge.
+In my case certificate was issued, and the
+challenge was deleted already.
+If you get a certificate, it should be in
+a ready state by now.
+Check that the Kubernetes secret was also
+Now to secure the api, you can add another
+rule for port 443 and use the https protocol.
+You also must specify the secret name that
+was created by the certificate resource and
+a host.
+Let's apply it again to update the gateway.
+To check the certificate, you can use the
+openssl tool.
+This is your certificate.
+You can try to access your api from the browser.
+It looks like it works.
+The certificate is valid and issued from letsencrypt.
+In the following section, we'll use prometheus
+and grafana to monitor istio and applications.
+I'm not going to spend a lot of time on deploying
+all monitoring components; you can watch the
+previous video for that.
+First, we need to create prometheus operator
+Then deploy the prometheus operator itself.
+Prometheus.
+And grafana.
+You can use either create or server-side to
+apply custom resources.
+Then create a monitoring namespace.
+Deploy Prometheus operator.
+And finally, grafana.
+In the monitoring namespace, you should have
+two pods.
+And a single pod for grafana.
+To monitor istio, we need to create a podmonitor
+and use istio sidecar labels.
+For example, let's get one of the pods that
+we want to monitor.
+First of all, to create a podmonitor Prometheus
+object, we need a named port, in this case,
+http-envoy-prom.
+In the second part, we need to select those
+pods based on the label, such as istio monitoring.
+Based on these two pieces, we can start monitoring
+the istio service mesh.
+You need to specify the namespace where your
+applications are deployed, staging, and production,
+as an example.
+Then use the selector and the port name.
+On line 8 prometheus main label must match
+the one on the Prometheus resource.
+Let's go ahead and apply it.
+Since I don't have Ingress for prometheus,
+I'll use port forward to access Prometheus
+UI.
+In a few seconds, maybe up to a minute, you'll
+see that the prometheus operator converted
+podmonitor object to the native prometheus
+config and reloaded the server.
+Under targets, you should have a new target
+with a few pods.
+The next step is optional.
+I just want to show you how to use a service
+monitor instead of a pod monitor.
+For example, to monitor the ingress gateway.
+Let's get the pod in yaml format.
+For example, you have a port, but the name
+is missing, and you cannot add it for some
+reason.
+In this case, you cannot use podmonitor since
+you need a named port.
+Instead, you can create a service and a service
+monitor to target this port.
+Let's define a new Kubernetes service that
+only uses prometheus port and give it a name
+metrics.
+Now we can create a service monitor and use
+that endpoint and metrics port name.
+It's a useful workaround when you don't have
+a port name and are not able to add it but
+still want to monitor the application with
+prometheus.
+Let's apply both service and service monitor.
+If you refresh the prometheus UI, you should
+get a new target with the gateway.
+There are a lot of metrics exposed by istio
+sidecars, but we'll focus on requests metrics.
+Since we used podmonitor for internal metrics
+and service monitor for the gateway, you can
+use a job label to filter them out.
+I'll use port-forward as well to access the
+grafana dashboard.
+If you used my code to deploy grafana, the
+username is admin, and the password is devops123.
+I prepared a dashboard to monitor Ingress
+and mesh inside Kubernetes.
+You can copy json and import it to the grafana.
+Now let's simulate some traffic.
+On the top graph, you can find latency measured
+in percentiles.
+The second one is traffic in requests per
+second, and the bottom one is the ratio between
+successful and failed requests.
+Let's generate some failed requests by sending
+requests to the not supported path.
+In the graph, you can see that availability
+drops below 80%.
+For the second test, to monitor the service
+mesh inside the Kubernetes, ssh to the pod
+and run another script.
+In the next section, we'll deploy kiali to
+visualize the service topology inside Kubernetes.
+You can also deploy it using helm or yaml
+files.
+You just need to watch out for external services,
+especially you need to provide a valid prometheus
+URL.
+The topology graph is built based on prometheus
+Let's apply.
+And verify that kiali is up.
+You may see some errors that you need to fix
+by updating the config, but the main functionality
+is based on prometheus.
+It still should work.
+Since some of the requests are sent to the
+wrong URL, you can see red lines that represent
+failed requests.
+In a large microservice deployment, it is
+useful to find out what service is failing
+quickly.
+If we stop our script, in a couple of minutes,
+you should see that the service is recovered.
+We have the gateway, internal service, and
+different versions of our application.
+You can use UI to monitor traffic distribution
+when you perform canary deployments.
+Istio has become the de facto service mesh
+for modern microservices.
+With its advanced networking, security, and
+observability features, Istio provides a unified
+platform to connect, manage, and secure your
+If you're building cloud-native applications,
+Istio is a must-have tool in your toolkit.
+If you want to use Istio in production in
+the next couple of months, you should use
+istio custom resources such as destination
+rules, virtual services, and others.
+Istio also has betta support for Gateway API
+to use as Ingress.
+But keep in mind that it won't work with the
+virtual service.
+Also, istio has experimental support to use
+Gateway API in a service mesh.
+I have two other tutorials on how to implement
+both.
+Thank you for watching, and I'll see you in
+the next video.

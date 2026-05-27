@@ -1,0 +1,584 @@
+## 영상 1: Kafka Streams 101: Basic Operations (2023) (https://www.youtube.com/watch?v=DoLIvp1CRJg)
+
+hi i'm sylvia blee goldman with
+confluent in this module we're going to
+be talking about some basic operations
+of kafka streams
+kafka streams works on unbounded
+sequence of events called event streams
+event streams are like the topics that
+you have
+on the brokers in kafka they are a
+sequence of records which are like key
+value pairs
+in kafka and therefore also in kafka
+streams so in this example we have
+two records with key a and two records
+with key b
+now normally in a key value store you
+might think of subsequent records as
+overwriting the previous record with
+that same key
+now the difference is with an event
+stream each record is a standalone event
+and that means that two records with the
+same key
+don't really have any relationship to
+each other so in this example we have a
+total of four events and not just two
+events in total
+so what does coffee streams actually do
+with those event streams well when you
+define a kafka stream's application what
+you're really doing is defining a
+processor topology
+a kafka stream's processor topology is
+just a directed acyclic graph
+or dag where you have processing nodes
+and edges that represent
+the streams or the flow of the event
+stream each
+processor topology is typically going to
+have source nodes
+user processor nodes and sync processor
+nodes
+the source nodes are where the data is
+coming in when it's consumed from the
+topic
+on the broker gets passed into the
+source node
+the source node then forwards it through
+one or more user processor nodes
+which are just defined by some custom
+logic and finally
+they get sent to the sync processor node
+where the producer
+sends the data back to kafka to a new
+that's what's actually happening when
+you write a kafka streams application
+but how do you actually write that
+application the kafka stream topology is
+going to be defined using this
+streams builder class so to define a
+stream
+you're going to first create an instance
+of this stream builder class
+then you can use this builder to create
+a case stream which is just the kafka
+streams abstraction over the event
+and kind of the fundamental building
+unit of kafka streams
+and you can create this case stream
+using the builder.stream
+now the builder.stream is going to just
+take in an input topic
+which is just the name of the topic that
+you want to stream these events from
+and a consumed configuration object
+now we're going to get a bit more into
+this in later modules but for now
+all you need to know is that this
+consumed is just specifying the type of
+the key and
+of the value of the record so in this
+case we have a key and a value that are
+both strings
+and now we have our string string k
+stream so now that you have your case
+what can you actually do with it one of
+the things that people usually like to
+do is transform
+their data and kafka streams provides a
+mapping operation for that
+so kafka streams provides the typical
+functionality that you expect for a map
+it takes an input record and it lets you
+produce a new key or value or even a new
+type entirely
+and for this map in kafka streams we
+have two map
+operators we have the map values and the
+map itself
+so the map values operator takes in a
+value mapper
+now value mapper is just a functional
+interface defines a
+map method with a single input which is
+the value
+and the output is of course the value
+that you would like to produce
+after the mapping so because it's a
+functional interface you can
+express it with just the lambda as we
+have here and so all you need to do to
+map the values of this event stream
+is pass in something like this where you
+take
+the substring and extract out the first
+five characters
+of your string so this could be useful
+in the case you have some
+personal data like credit card
+transactions and you want to
+scrub out those first five characters in
+that string
+map values is the way to go for you
+similarly the map
+takes the key and the value and lets you
+produce a new key and value
+the difference being of course that the
+keys change the important thing to note
+here is that
+any time in kafka streams when you can
+use the map values you should prefer it
+unless you really have to change the key
+the reason for this we'll get into a
+little bit later it has to do with
+repartitioning
+but you can think of it as a performance
+optimization that you should always
+prefer map values over map
+whenever it's possible so another
+operator that we have in kafka streams
+is the filter
+so you can define a filter on a k stream
+and it
+defines which events should be filtered
+out of the
+event stream and which one should be
+kept so a filter really creates a new
+event stream with only those events
+which you care about
+similar to the red widgets in our
+previous module in the filter you have
+access to the key and the value
+and you define a predicate on these
+values
+and return just a true or false whether
+or not you want to keep them
+so for example you might have a long
+value and you only care about values
+that are greater than 1000
+and in this case you can drop all the
+events you don't care about and
+continue on with only those values which
+you do it's important to note that you
+should not actually
+modify anything on the key or the value
+in the filter operator
+or in any of the other operators you
+should be thinking of this as creating a
+new event stream
+not as modifying an existing one we'll
+go into more detail on how to build a
+coffee streams application in this first
+exercise
+you
+
+## 영상 2: Kafka Streams 101: KTable (2023) (https://www.youtube.com/watch?v=C9aXtOy5pPc)
+
+hi i'm sylvia goldman with confluent and
+in this module we're going to talk about
+k tables
+so in the previous module we talked
+about event streams
+which are series or sequences of key
+value pairs
+which are independent of each other in
+contrast to that an update stream
+is also sequences of key value pairs
+but instead of complementary events that
+each
+represent a single physical event
+and an update stream is an update that
+is applied to a previous value
+so in this case records that come in
+with the same key
+are actually updating the value of the
+previous record with that same key
+here we see two updates
+one for the key a and one for the key b
+now in this update stream
+as opposed to the event stream earlier
+we do actually only have
+two final events at the end one is the
+latest value of a
+and one is the latest value of b so each
+incoming event replaces the previous one
+so how do we actually define a k table
+it's similar to a case stream but it is
+a table
+and again you can use the streams
+builder so the stream builder can be
+used for any number of k streams
+and it can also be used for any number
+of k tables in the same application
+the the difference with the k stream
+versus the k table is that we will now
+be using the builder.table
+syntax now again you pass in the name of
+a topic
+and this is the topic that the table
+will be representing
+so unlike a case stream a key table can
+only be subscribed to a single topic at
+once and that is the topic
+that the table really represents so like
+we said a table is representing the
+latest value
+of each record and so unlike a stream it
+needs to be storing all of those
+values somewhere so that it knows uh
+what was the latest value
+at any given time that means the k table
+is going to be backed by a state store
+and we'll get into that a little bit in
+a later module state store is just
+a copy of the events that are in the
+topic that the tables built from
+a store on disk so that you can look up
+and track the latest value of
+each of the records in that topic so to
+build a k table
+you just call builder.table pass in the
+topic and again pass in a
+a configuration object that just tells
+kafka streams what the type is
+and how to read the events in that input
+topic
+now an interesting thing with the k
+table that is different from the case
+stream
+is that a key table by default does not
+forward
+every change so in the case of a case
+every event is its own event and every
+event has its own meeting so we always
+new events whereas with the k table all
+we really care about is what is the
+uh for this key for a k table it doesn't
+really matter
+what each event is that's coming in all
+we care about is what is the latest
+value
+for that key for that record we might
+buffer the
+updates for that table in a cache like
+you might have with any other key value
+store
+and that cache only when it gets flushed
+do these
+updates get uh forwarded further down
+the processor topology now by default
+the cache gets flushed every 30 seconds
+which is the commit interval
+that's something that you the user would
+define and that just determines
+uh how quickly you might see updates
+from this k table you can set it to zero
+and see every update or you can set it
+to longer and only really get the
+updates
+uh when you need them and you'll see an
+example of the k table
+in the exercise later now like the k
+stream many of the same
+simple operators apply you can map
+values or map entire key value records
+similarly the map values in the map
+operator do this
+you specify how the value changes or how
+the entire key value changes
+and you can change the type but you
+should not be changing the
+original record itself and again there's
+also a filter operator for k tables as
+well
+where you can choose to completely drop
+any updates as they come in
+for example if you think the data is
+corrupted or
+invalid for whatever reason a filter
+might be an appropriate way to
+filter out anything that you don't want
+to cause an update
+now unlike the case stream there's
+actually a special kind of k table
+and this is called a global k table to
+understand the difference between a k
+table and a global k table
+you really need to dig down a little
+deeper into the kafka streams
+architecture and this really has to do
+with partitioning
+so a topic that we discussed earlier
+lives on a broker
+now a topic can be anything that
+contains events that are related that
+the user defines so this might be
+anything from just a few events
+to hundreds of thousands or even
+millions or more events
+and that's kind of a lot of data so what
+kafka does
+is divide these topics up into
+partitions a partition is just a
+logical subset of the data in a topic
+that is going to be partitioned by key
+and that just means that
+all events with the same key end up in
+the same partition so in kafka streams
+partitions are important because
+kafka streams will only deal with one
+partition at a time
+a typical k table will only see the
+subset of data
+for one partition of that topic at a
+time
+and this allows kafka streams to scale
+it gives it that
+property because you can increase your
+number of instances
+and each one of them will handle only
+some subset of the total data
+as opposed to trying to handle all one
+million records on
+a single node or on your local laptop
+so that's what a k table does a global k
+table on the other hand
+actually does hold all the records
+across all partitions
+so this can be useful when you want to
+actually get a view of
+all the data across the entire topic
+usually this is for data that is
+smaller in size and something that is
+static and not updated that frequently
+so this might be something like
+zip codes country codes things like that
+which don't really
+change in a continuous way the way that
+event streams do
+so now we'll see a exercise about how to
+use k tables
+in kafka streams
+you
+
+## 영상 3: Kafka Streams 101: Stateful Operations (2023) (https://www.youtube.com/watch?v=wztNQy1ESwU)
+
+hi i'm sophie bley goldman with
+confluent in this module we'll talk
+about stateful operations
+so far we've discussed only stateless
+operations stateless operations are
+great for when you don't need to
+remember the previous state of an event
+stream
+so for example a filter you just provide
+a predicate
+just returns true or false or a map of
+map values where you just define a
+transformation on
+a value or a key but
+sometimes you might need to actually
+remember the state
+of this event stream and by that we just
+mean what was the previous
+value for this key in this event stream
+uh so this might be something like how
+many times has a particular customer
+logged in to your browser session what
+is the total sum of tickets
+sold for cases like this you really need
+to keep track of the
+state and kafka streams offer stateful
+operations for you to do that
+so for all staple operations you are
+required to first group by the key
+under the covers this is a somewhat more
+complicated operation where kafka
+streams will re-partition the data
+which just means making sure that all of
+the keys all of the events with the same
+key end up on the same partition
+for kafka streams users most of this
+goes on under the hood so you don't
+really need to
+care about how to specify what's
+happening you just need to
+tell kafka streams to group by key
+before these staple operations
+so what are these staple operations we
+have things like
+count which just counts how many times
+have we seen a key
+in this event stream until now things
+like reduce which let you
+combine events in your stream into some
+other event
+and an aggregate which is just a
+superset of
+the reduce really which allows you to
+aggregate data
+that you've seen for this topic until
+now into whatever type
+or whatever result you want so what does
+this actually look like
+the reduce operator for example will
+take values
+in a stream and combine them in some way
+such that the
+input type is preserved so you can see
+here we
+first start by creating our stream as
+usual this time from topic a
+and then we define a reducer so the
+reducer again is a lambda
+it takes in a value 1 and a value 2 and
+defines how they get combined so in this
+case
+we just define a simple sum operation
+it's important to note that value
+1 and value 2 aren't necessarily any
+specific values it could be that
+the first value is literally the first
+value in this event that we've seen so
+far
+it could also be that value 1 represents
+the previous result
+produced by this reducer whereas value
+two is the latest event
+in all those cases they're still the
+same type so for example if you're
+taking a sum like this
+the sum operator is the same regardless
+of whether you're summing a previous sum
+with the new value or just the first two
+values in the sum so once you've defined
+that reducer you're going to take your
+and call group by key which as we said
+is important before any
+staple operation to make sure that
+everything is in its right place so that
+all keys are matched together
+and then you can just call reduce reduce
+just takes the reducer
+and again a materialized so the
+materialized we've seen before
+and it tells the kafka streams operator
+how to
+actually store your data in the state
+store your materialized
+state store if you will in this case the
+key is a string
+and the value of this reducer is going
+to be a long so we need to tell kafka
+to use these sures string and long
+survey
+to actually store this data in the local
+state store since it will be serialized
+and deserialized from the bytes
+and lastly we might want to actually
+write these results somewhere so we can
+use them
+so we call twostream on the result of
+this reduce which is a k table
+and this turns it back into a case
+stream so once we have our case stream
+again we can call the two operator
+and we will write the results to this
+output topic now the aggregation
+as we said is really a superset of the
+reduce
+like the reduce it lets you combine
+events within the same stream
+but unlike the reduce it does not have
+this restriction that they have to be
+the same type so in an aggregation
+you basically can take any events with
+the same key and combine them however
+you like
+into a completely different type if you
+want this means that you have to specify
+a few different things for the
+aggregation
+as you'll see here we have first
+testified the aggregator itself
+the aggregator takes in the key the
+value and
+the current aggregation value in this
+case we are counting the number of
+characters that we've seen so far
+so we are calling that the char count
+and the aggregator itself is just going
+to add the
+value length to this current char count
+to give us the total sum of characters
+that we've seen so far
+so again like the reduce we start by
+calling group i key to make sure all of
+the events are
+grouped by key and then we call
+aggregate now
+the first argument to the aggregate
+function is actually going to be the
+initializer and the initializer just
+tells the aggregate how to start the
+value
+what should the initial character count
+value be in this case you probably
+wouldn't start counting from some random
+number so you have to tell streams to
+start counting from
+zero then after that you pass in just
+this character
+count aggregator and again a
+materialized
+and then you have your output k table so
+you can write it to the output topic
+so that you can actually do something
+with these results
+so those are some of the stateful
+operations that kafka streams provides
+there are some considerations that you
+should think of when you are using a
+staple operation however most
+importantly that
+the staple operations don't always emit
+results immediately
+there's actually an internal caching
+layer that will buffer these results
+these updates and only forward them when
+they are evicted from this cache
+so there's a few factors that control
+how this cache emission works
+there is the size which is just a config
+that you would set it's 10 megabytes by
+default
+and there is the commit interval so
+every commit interval
+which is 30 seconds by default kafka
+streams will flush all of the caches
+and do some other things such as
+forwarding the records to the producer
+itself
+and this will cause all the current
+buffering
+records to be fully sent out to
+their output topic in kafka so
+that means if you're not seeing all the
+updates that you expect to
+or they're taking a long time to get to
+you you might want to try setting the
+cache size to zero
+and possibly also the commit interval
+this is useful for debugging this is
+useful for just
+general development and for testing it
+really helps to see all the updates and
+to do so you'll have to fiddle with
+these configs a bit
+so now that you know a little bit about
+staple operations in kafka streams
+let's go over them in this next exercise
+you

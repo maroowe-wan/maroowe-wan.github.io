@@ -1,0 +1,183 @@
+Kind: captions
+Language: en
+Hi everyone, my name is Sai Vennam
+and I'm with the IBM Cloud team.
+Today we want to talk about operators,
+and no, I'm not actually talking about operations teams,
+but instead the operators framework
+which can be used on Kubernetes or OpenShift.
+CoreOS actually introduced the operator framework back in 2016.
+CoreOS is now a part of Red Hat and IBM.
+Operator framework is quickly picking up traction
+as it's a great way of managing complex Kubernetes applications.
+Now, before I jump into this,
+we want to actually introduce what the Kubernetes control loop is
+because it's a core part of the operators framework.
+In this video, we're going to be talking about things like deployments and pods,
+so if you're not familiar with those
+be sure to check out the"Kubernetes Explained" video
+that I've done on those topics.
+But let's get started with exactly what the control loop is
+in Kubernetes.
+Now, essentially the way it starts,
+the control loop is the core part of Kubernetes,
+it observes the state of what's in your actual cluster.
+So, that's the first step: "observe".
+Next, what it's going to do,
+Kubernetes is going to double-check
+that the state in the actual cluster
+versus the state that you want it to be.
+So it's going to do a diff.
+And finally, it wants to resolve that diff by acting on it.
+So, the last phase of the control loop is
+"act".
+Now, the control loop is core to how Kubernetes works
+and there's a controller that basically acts on that
+for every default resource.
+Kubernetes comes with a number of default resources.
+Let's see an example of deploying an application without operators
+using these default resources.
+So, as an end user,
+essentially the first thing you're going to want to do
+is write up some YAML,
+the specification for that actual application.
+And, for our particular example, let's say that
+we're doing a deployment.
+And in this deployment, we'll have to define some configuration.
+Things like, "What's the image?", and maybe
+the replicas, and maybe some other configuration.
+So, that's one Kubernetes resource.
+And, essentially what you would do, is take that
+and deploy it into your Kubernetes cluster
+at which point a deployment is made.
+Here's where the control loop kicks in:
+so Kubernetes observes the state of your cluster,
+so we've got a Kubernetes cluster here,
+and checks for the difference between what you want versus what's there.
+First thing it notices: there's no pods.
+So, it's gonna act on that difference,
+and it's gonna create some pods.
+Now, let's say for a fairly complex application
+we don't just have  one YAML
+but we have a second YAML, maybe it's for the backend,
+and so that deploys in the second deployment,
+and that in turn deploys a pod
+using the controllers in the control loop.
+Now, it's a simple example, but say you want to go through here,
+scale up the application, make some changes,
+set up some secrets, environment variables,
+- every single time you have to either create new Kubernetes resources,
+or go in here and edit the existing ones.
+That can start to get fairly difficult.
+Now, let's see how that's done in a world where we're using operators.
+Now, the first thing you would need to do
+is install the operator itself.
+So, someone on your team has to create the operator,
+or maybe you can use one of the many that are out there on OperatorHub,
+or the community is building on the operators that are available.
+So, the first thing you need in your Kubernetes cluster
+is the OLM,  which is the "Operator Lifecycle Manager",
+which basically manages operators that you have installed.
+Next, you deploy your actual operator into the cluster.
+The operator is made up of two major components.
+The first component in an operator is going to be the CRD.
+The other one is going to be the controller.
+Now, the CRD is basically a "Custom Resource Definition".
+So, we've talked about default resources -  things like deployments and pods.
+A custom resource is something that you define as a user in Kubernetes,
+or maybe an operator defines, it so that you can create YAML
+to work against that custom config.
+The controller is basically a custom control loop
+which runs as a pod in your cluster
+and runs this control loop against your custom resource definition.
+So, let's say that an operator is created for our custom application deployment here,
+so instead  of having to write multiple deployments
+and setting up config maps and secrets for whatever our cluster needs,
+we instead, as an end user, we'll just deploy one YAML.
+Maybe we called this operator MyApp.
+It could be a little bit more meaningful  - we can call it "stateful app", "front-end app",
+whatever we want it to be.
+And then, we could define some config here,
+or we can use the defaults that are set.
+We of have a choice of options here.
+Then we take this operator
+and we deploy it directly into the cluster.
+At this point the operator takes over,
+and this is actually responsible for running that control loop,
+and figuring out exactly what needs to be running.
+So, it's going to realize that
+we need a couple of deployments and the pods.
+Now, this is a kind of a format, or an approach
+to managing applications
+that's inherently easier - and scales better - than this approach,
+because, as an end-user, you really only have to worry about
+the config that's been exposed to you,
+and the operator itself manages the control  loop
+and the state of the application - how it needs to look.
+Now, there are great operators out there already,
+things like managing etcd, or various databases,
+or even IBM Cloud Services.
+So, all of those operators currently exist on OperatorHub.
+But say you want to develop your own, maybe a custom operator for
+for something that is native to your application architecture,
+kind of like what we sketched out here.
+Well, there's a number of ways you can do that.
+And there's something called Operator SDK that allows you
+to start building out operators yourself.
+Now, I'd say the easiest way to get started with an operator,
+is to use the Helm operator.
+So, Helm.
+As you may already know,
+there is a video that where David Okun goes over exactly how Helm works.
+Be sure to check that one out.
+The Helm approach allows you to take a Helm chart
+and apply that towards an operator, expose config -
+so, it allows you to get to a fairly mature level of an operator.
+Kind of something like this for a chart that's already there.
+Now the maturity of operators, what I've sketched out down here,
+falls into 5 different levels.
+Now, Helm actually hits the first 2 levels of maturity.
+Let's talk about what  those levels are.
+The first one is a basic install.
+Essentially, the first level is basically going to allow you to do
+just provisioning of the resources  required.
+Now, the second phase goes a little bit further
+it's gonna allow you to do upgrades.
+So, this supports minor and patch version upgrades
+to whatever is defined in your operator.
+Now Helm gets you that far,
+what about for the next 3 levels of maturity?
+For these, you're going want to use either Go,
+or, you can also use Ansible.
+Now, these will allow you to actually get to
+all 5 levels of maturity with operators.
+Let's quickly talk about what those are.
+At the third level, we've got full lifecycle support.
+So, this is storage lifecycle, app lifecycle.
+It's also going to allow you to do things like backup and failure recovery.
+So, that's something that would be configured
+and developed into the operator,
+who ever developed that one.
+Fourth, what we've got here is insights.
+This is going to allow you to get deep metrics, and analysis,
+logging, that kind of thing, from your actual operator.
+And finally, what we have is something called "autopilot".
+And just as the name implies,
+this is going to have a lot more functionality built into operator itself.
+Basically it's going to allow you to do automatic scaling,
+- horizontal and vertically.
+It's going to do automatic config tuning.
+If your operator-based app gets into a bad state,
+it's gonna identify that automatically.
+So, these are the 5 levels of maturity that operators can have.
+By looking on OperatorHub, you can see
+the ones that the community has developed
+and see what level of maturity that they hit,
+and then, again, by using operator SDK,
+you can build your own operators using either Helm, Go, or Ansible.
+Thanks for joining me for this  video on operators.
+If you have any questions be sure to drop us a line  below.
+If you want to see more videos like this in the future,
+please "like' and subscribe.
+And don't forget, you can always get started on the cloud at no cost
+by signing up for a free IBM Cloud account.

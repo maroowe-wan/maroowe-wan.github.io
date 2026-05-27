@@ -1,0 +1,188 @@
+Kind: captions
+Language: en
+hi i'm sylvia goldman with confluent and
+in this module we're going to talk about
+k tables
+so in the previous module we talked
+about event streams
+which are series or sequences of key
+value pairs
+which are independent of each other in
+contrast to that an update stream
+is also sequences of key value pairs
+but instead of complementary events that
+each
+represent a single physical event
+and an update stream is an update that
+is applied to a previous value
+so in this case records that come in
+with the same key
+are actually updating the value of the
+previous record with that same key
+here we see two updates
+one for the key a and one for the key b
+now in this update stream
+as opposed to the event stream earlier
+we do actually only have
+two final events at the end one is the
+latest value of a
+and one is the latest value of b so each
+incoming event replaces the previous one
+so how do we actually define a k table
+it's similar to a case stream but it is
+a table
+and again you can use the streams
+builder so the stream builder can be
+used for any number of k streams
+and it can also be used for any number
+of k tables in the same application
+the the difference with the k stream
+versus the k table is that we will now
+be using the builder.table
+syntax now again you pass in the name of
+a topic
+and this is the topic that the table
+will be representing
+so unlike a case stream a key table can
+only be subscribed to a single topic at
+once and that is the topic
+that the table really represents so like
+we said a table is representing the
+latest value
+of each record and so unlike a stream it
+needs to be storing all of those
+values somewhere so that it knows uh
+what was the latest value
+at any given time that means the k table
+is going to be backed by a state store
+and we'll get into that a little bit in
+a later module state store is just
+a copy of the events that are in the
+topic that the tables built from
+a store on disk so that you can look up
+and track the latest value of
+each of the records in that topic so to
+build a k table
+you just call builder.table pass in the
+topic and again pass in a
+a configuration object that just tells
+kafka streams what the type is
+and how to read the events in that input
+topic
+now an interesting thing with the k
+table that is different from the case
+stream
+is that a key table by default does not
+forward
+every change so in the case of a case
+every event is its own event and every
+event has its own meeting so we always
+new events whereas with the k table all
+we really care about is what is the
+uh for this key for a k table it doesn't
+really matter
+what each event is that's coming in all
+we care about is what is the latest
+value
+for that key for that record we might
+buffer the
+updates for that table in a cache like
+you might have with any other key value
+store
+and that cache only when it gets flushed
+do these
+updates get uh forwarded further down
+the processor topology now by default
+the cache gets flushed every 30 seconds
+which is the commit interval
+that's something that you the user would
+define and that just determines
+uh how quickly you might see updates
+from this k table you can set it to zero
+and see every update or you can set it
+to longer and only really get the
+updates
+uh when you need them and you'll see an
+example of the k table
+in the exercise later now like the k
+stream many of the same
+simple operators apply you can map
+values or map entire key value records
+similarly the map values in the map
+operator do this
+you specify how the value changes or how
+the entire key value changes
+and you can change the type but you
+should not be changing the
+original record itself and again there's
+also a filter operator for k tables as
+well
+where you can choose to completely drop
+any updates as they come in
+for example if you think the data is
+corrupted or
+invalid for whatever reason a filter
+might be an appropriate way to
+filter out anything that you don't want
+to cause an update
+now unlike the case stream there's
+actually a special kind of k table
+and this is called a global k table to
+understand the difference between a k
+table and a global k table
+you really need to dig down a little
+deeper into the kafka streams
+architecture and this really has to do
+with partitioning
+so a topic that we discussed earlier
+lives on a broker
+now a topic can be anything that
+contains events that are related that
+the user defines so this might be
+anything from just a few events
+to hundreds of thousands or even
+millions or more events
+and that's kind of a lot of data so what
+kafka does
+is divide these topics up into
+partitions a partition is just a
+logical subset of the data in a topic
+that is going to be partitioned by key
+and that just means that
+all events with the same key end up in
+the same partition so in kafka streams
+partitions are important because
+kafka streams will only deal with one
+partition at a time
+a typical k table will only see the
+subset of data
+for one partition of that topic at a
+time
+and this allows kafka streams to scale
+it gives it that
+property because you can increase your
+number of instances
+and each one of them will handle only
+some subset of the total data
+as opposed to trying to handle all one
+million records on
+a single node or on your local laptop
+so that's what a k table does a global k
+table on the other hand
+actually does hold all the records
+across all partitions
+so this can be useful when you want to
+actually get a view of
+all the data across the entire topic
+usually this is for data that is
+smaller in size and something that is
+static and not updated that frequently
+so this might be something like
+zip codes country codes things like that
+which don't really
+change in a continuous way the way that
+event streams do
+so now we'll see a exercise about how to
+use k tables
+in kafka streams
+you

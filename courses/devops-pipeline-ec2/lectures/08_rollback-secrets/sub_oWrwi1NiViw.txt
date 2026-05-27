@@ -1,0 +1,150 @@
+Kind: captions
+Language: en
+this one is about swarm secrets and
+configs and how you update them in
+production without taking down your
+services what is the best way to update
+configs in docker swarm at the moment I
+remove the stack and redeploy it
+I am hoping there is a better way there
+are much better ways definitely you do
+not need to remove the stack because
+that would break everything right so you
+what you can do now is you can
+essentially change the name in your
+stack files and there's several ways to
+do it
+but if you go let's see let's go look at
+the compose file format because that
+you're using a stack you're going to be
+using a compose file to build that stack
+right and if we look in here at config
+see
+I
+figs
+so under configs one of the newer
+options is see
+are we in version three yet
+can
+oh you know what we're in the partly the
+wrong part of the file this is in the
+service so when you go down
+here we go okay this is what I'm looking
+for if you go down and you
+change where you're defining your
+configs and secrets at the very bottom
+of your file there's a newer attribute
+here called name and what that can allow
+you to do is essentially let's say you
+have one config and it's is you actually
+are using it in multiple services right
+so you've got those services and you've
+got the definition in each service right
+where you're mapping the config into a
+file inside of the service right and
+you're you have the name in there so
+what happens is if you've already
+created a config and swarm through a
+stack file and then you change that
+config file on your deployment machine
+so maybe it's let's say it's an Apache
+config right because we were talking
+about that and then you've dumped it
+into your config file you change that
+and then you try to do a stack update
+the stack will correctly look at the
+file realize it that Apache config file
+has changed and try to re-create the
+config inside the swarm but it will then
+fail saying I can't do this because the
+file already exists in swarm the swarm
+already has this config and it will
+prevent you from updating the way that
+you fixed that is you simply change the
+name here and you that way you can only
+you know only need to change the the
+file the actual swarm file so I mean
+that's one father you can the compose
+file and I'm trying think about having a
+good example of this where I can show
+you I might actually be able to show you
+in dogs versus cats
+so if you go to my dog vs cat repo that
+I want to put that into the chat HTTP
+notice it's HTTP dog versus cat this is
+a place where I have some stack file
+demos and let's see I'm gonna look at
+one real quick for
+look at this one
+okay so you see down here at the bottom
+down here where I have the secret name
+and I had so I have the actual object
+name here which is DB password and that
+is referred to up here at the top inside
+of here it's also referred to in this
+service up at the top
+somewhere
+hmm actually I don't have any
+have it up there and in the in the the
+top there it should be referred to
+multiple time so it's a bad example but
+the point is is that what I can do is I
+can simply go down here and just add an
+incremental number here and then the
+rest of the file will work it will
+update properly you can do a duck or
+stack deploy and it will all work and if
+you're thinking uh I have to edit my
+config files might my compose files
+every single time no you don't have to
+another thing you can do is use an
+environment variable here and then set
+that environment variable before you run
+the stack deploy so maybe you have an
+environment variable that automatically
+is the date or something and you can
+sort of look at this I think I've
+actually seen people that write a script
+that will set an environment variable
+and it'll intelligently change it based
+on the file date of the config file or
+the secret file and it'll go look at
+those see if they've changed it'll do
+essentially a diff on them and then if
+they haven't changed it won't update it
+here right because you only want to
+update them in the stack if they've
+actually truly changed and I don't have
+that script handy at least I don't think
+I might have thrown it in here oh there
+we go hash config secret look at that so
+if you jump into there this is I didn't
+actually invent this someone else showed
+me a good example and you could run this
+command this this shell script which
+would set a value and that would be used
+by your stack file so you'd always need
+to make sure you'd run this before you
+do a docker stack deploy but essentially
+what this does is across many different
+stack files it will set an environment
+variable so that if I do a bunch of
+stack updates it will intelligently
+decide when to update that config so I
+hope that makes sense I get you a little
+bit farther
+the short answer here is just go change
+that name attribute which is optional
+down at the very bottom of your
+configure compose file and that should
+do it for you you won't have to change
+your stack by deleting it which is a lot
+of work right that you wouldn't want to
+do that in production thanks for
+watching click to subscribe and the
+notification bell down there will let
+you know when I go live every week to
+take your questions on docker and DevOps
+you can watch these videos over here or
+you can just go watch those cat videos
+you've been meaning to watch

@@ -1,0 +1,50 @@
+{
+  "lecture_no": 5,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "워밍업: EKS의 2계층 접근 모델을 정리하라. 아래 네 가지 시나리오 각각에 대해 문제가 IAM(1계층) 문제인지, RBAC(2계층) 문제인지, 또는 둘 다인지 답하고 이유를 한 문장으로 설명하라.\n\n시나리오 A: 'aws eks update-kubeconfig' 실행은 성공했지만 모든 'kubectl' 명령이 'Error from server (Forbidden): pods is forbidden'을 반환한다.\n시나리오 B: 'aws eks update-kubeconfig' 실행이 'ResourceNotFoundException: No cluster found'로 실패한다.\n시나리오 C: 'kubectl get pods'는 동작하지만 'kubectl delete deployment my-app'이 'deployments.apps is forbidden'을 반환한다.\n시나리오 D: Jenkins가 'default' 네임스페이스에서는 'kubectl get pods'를 실행할 수 있지만 'production' 네임스페이스에서는 실행할 수 없다.",
+      "starter": "# 각 시나리오에 대해 계층(IAM / RBAC / 둘 다)과 한 문장 이유를 채우라.\n\n# 시나리오 A:\n# 계층: ________\n# 이유: ________\n\n# 시나리오 B:\n# 계층: ________\n# 이유: ________\n\n# 시나리오 C:\n# 계층: ________\n# 이유: ________\n\n# 시나리오 D:\n# 계층: ________\n# 이유: ________",
+      "solution": "# 시나리오 A:\n# 계층: RBAC (2계층)\n# 이유: update-kubeconfig가 성공했으므로(IAM 인증 통과) IAM 아이덴티티는\n#       클러스터에 도달했지만, 쿠버네티스 RBAC 권한이 전혀 부여되지 않아\n#       클러스터 내부에서 아무것도 실행할 수 없다.\n\n# 시나리오 B:\n# 계층: IAM (1계층)\n# 이유: AWS CLI가 클러스터를 찾지 못했다는 것은 IAM 아이덴티티에\n#       eks:DescribeCluster 권한이 없거나 클러스터 이름/리전이 잘못된 것으로,\n#       요청이 쿠버네티스에 도달하지도 못했다.\n\n# 시나리오 C:\n# 계층: RBAC (2계층)\n# 이유: 읽기 권한('get pods')은 허용되었지만 파괴적인 쓰기 권한\n#       ('delete deployment')은 허용되지 않아, RBAC Role이 'get/list/watch'만\n#       부여하고 'delete'는 포함하지 않은 세분화된 RBAC 권한 부족이다.\n\n# 시나리오 D:\n# 계층: RBAC (2계층)\n# 이유: RBAC은 Role/RoleBinding을 통해 네임스페이스 범위로 적용되므로,\n#       Jenkins 아이덴티티에 'default'에는 'get pods' RoleBinding이 있지만\n#       'production' 네임스페이스에는 RoleBinding이 없어 접근이 거부된다.",
+      "explanation": "2계층 모델에서 'Unauthorized' 오류는 수정 전에 올바른 계층을 파악해야 한다. IAM 오류(1계층)는 클러스터에 전혀 도달하지 못하게 한다 — update-kubeconfig가 실패하거나 kubectl이 API 서버에 연결할 수 없다. RBAC 오류(2계층)는 인증 성공 후에 발생한다. 아이덴티티는 인식됐지만 허용되는 동사나 리소스가 제한된다. 시나리오 D는 흔한 프로덕션 패턴을 보여준다. RoleBinding은 네임스페이스 범위이므로, 같은 RBAC Role이 아이덴티티가 접근해야 하는 모든 네임스페이스에 바인딩되어야 한다(또는 클러스터 전체 접근을 위해 ClusterRoleBinding을 사용한다).",
+      "hints": [
+        "'kubectl auth can-i <verb> <resource> --namespace <ns>'를 사용해 추측 없이 특정 권한을 테스트하라.",
+        "'Error from server (Forbidden)' 오류 메시지는 항상 2계층(RBAC)을 의미한다. API 서버에 도달할 수 없으면 연결 오류가 발생한다.",
+        "'aws eks describe-cluster --name my-cluster --region us-east-1'은 빠른 IAM 계층 테스트다 — 이 CLI 호출이 성공하면 IAM 아이덴티티가 EKS 컨트롤 플레인과 상호작용할 충분한 권한이 있다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습 A — kubectl을 사용해 EKS 클러스터에 연결하라. 'us-east-1'의 'my-cluster' 클러스터에 대한 kubeconfig를 업데이트하는 명령을 실행하고, 두 가지 확인 명령으로 접근을 확인하라. 플레이스홀더를 실제 클러스터 이름과 리전으로 교체하라.",
+      "starter": "# 1단계: kubeconfig 업데이트\naws eks update-kubeconfig \\\n  --region ________ \\\n  --name ________\n\n# 2단계: 클러스터 노드 확인\nkubectl ________\n\n# 3단계: 모든 네임스페이스의 Pod 목록 확인\nkubectl ________",
+      "solution": "# 1단계: kubeconfig 업데이트\naws eks update-kubeconfig \\\n  --region us-east-1 \\\n  --name my-cluster\n\n# 2단계: 클러스터 노드 확인\nkubectl get nodes\n\n# 3단계: 모든 네임스페이스의 Pod 목록 확인\nkubectl get pods -A",
+      "explanation": "'aws eks update-kubeconfig'는 클러스터의 API 엔드포인트, TLS 검증을 위한 CA 인증서, 현재 AWS 아이덴티티(IAM 사용자 또는 역할)로 인증하는 명령을 ~/.kube/config에 기록한다. 실행 후 kubectl은 요청을 어디로 보낼지, 어떻게 인증할지 알게 된다. 'kubectl get nodes'는 클러스터와 통신하고 노드 리소스에 최소한의 읽기 권한이 있는지 확인한다. 'kubectl get pods -A'('-A' 플래그는 --all-namespaces)는 더 넓은 확인이다 — 결과가 반환되면 클러스터 전체 Pod 읽기 권한이 있고, 아이덴티티가 올바르게 매핑되고 권한이 부여된 좋은 지표다.",
+      "hints": [
+        "'kubectl get nodes'가 'Unauthorized'를 반환하면, IAM 아이덴티티는 클러스터에 도달했지만(IAM 계층 통과) 아직 RBAC 권한이 없다. EKS 액세스 항목 또는 IAM 아이덴티티를 쿠버네티스 그룹에 매핑하는 aws-auth ConfigMap 항목이 필요하다.",
+        "kubectl이 현재 어떤 클러스터를 가리키는지 확인하려면: kubectl config current-context",
+        "여러 클러스터를 관리한다면 'aws eks update-kubeconfig'는 새 컨텍스트를 추가한다. 'kubectl config use-context <context-name>'으로 전환할 수 있다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습 B — Jenkins IAM 역할에 대한 IAM-RBAC 매핑을 설정하라. Jenkins EC2 인스턴스에 IAM 역할 'arn:aws:iam::111122223333:role/jenkins-deploy-role'이 있다고 가정하고 다음을 작성하라: (1) 해당 역할을 쿠버네티스 그룹 'deploy-group'에 매핑하는 EKS 액세스 항목을 생성하는 AWS CLI 명령, (2) 'deploy-group'이 모든 네임스페이스에서 Deployment를 get, list, update, patch할 수 있는 권한을 부여하는 쿠버네티스 ClusterRoleBinding YAML('deployment-updater'라는 ClusterRole에 바인딩).",
+      "starter": "# 1부: EKS 액세스 항목 생성\n# Jenkins IAM 역할을 쿠버네티스 그룹 'deploy-group'에 매핑\naws eks create-access-entry \\\n  --cluster-name ________ \\\n  --principal-arn ________ \\\n  --kubernetes-groups ________\n\n# 2부: ClusterRole + ClusterRoleBinding YAML\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: deployment-updater\nrules:\n  - apiGroups: [________]\n    resources: [________]\n    verbs: [________]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: deployment-updater-binding\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ________\n  name: ________\nsubjects:\n  - kind: ________\n    name: ________\n    apiGroup: rbac.authorization.k8s.io",
+      "solution": "# 1부: EKS 액세스 항목 생성\naws eks create-access-entry \\\n  --cluster-name my-cluster \\\n  --principal-arn arn:aws:iam::111122223333:role/jenkins-deploy-role \\\n  --kubernetes-groups deploy-group\n\n# 2부: ClusterRole + ClusterRoleBinding YAML\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: deployment-updater\nrules:\n  - apiGroups: [\"apps\"]\n    resources: [\"deployments\"]\n    verbs: [\"get\", \"list\", \"update\", \"patch\"]\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\nmetadata:\n  name: deployment-updater-binding\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: deployment-updater\nsubjects:\n  - kind: Group\n    name: deploy-group\n    apiGroup: rbac.authorization.k8s.io",
+      "explanation": "EKS 액세스 항목('aws eks create-access-entry')은 aws-auth ConfigMap의 현대적 대체다. EKS에 알린다. 'jenkins-deploy-role' IAM 역할이 서명한 요청이 오면, 쿠버네티스 그룹 'deploy-group'의 구성원으로 취급하라. ClusterRole은 그 그룹이 할 수 있는 것을 정의한다. 'apps'는 Deployment의 API 그룹이고, 허용된 동사는 'kubectl apply'와 'kubectl set image'에 필요한 최솟값이다. ClusterRoleBinding이 역할을 그룹에 연결한다. 합쳐서 체인은 이렇다. IAM 역할 → EKS 액세스 항목 → 쿠버네티스 그룹 'deploy-group' → ClusterRoleBinding → ClusterRole → Deployment에 대한 허용 동사. 네임스페이스 범위 제한이 필요하면 ClusterRole + ClusterRoleBinding 대신 Role + RoleBinding을 사용하라.",
+      "hints": [
+        "Deployment는 'apps' API 그룹에 속한다. 핵심 리소스(pods, services, configmaps)는 빈 문자열 apiGroup: [\"\"]을 사용한다.",
+        "RBAC YAML 적용 후 그룹을 가장해서 Jenkins 권한을 테스트하라: kubectl auth can-i update deployments --as-group=deploy-group --as=jenkins",
+        "EKS 액세스 항목의 '--kubernetes-groups' 플래그는 ClusterRoleBinding의 subjects 'name' 필드와 정확히 일치해야 한다 — 대소문자 구분이 있다."
+      ]
+    },
+    {
+      "prompt": "응용 도전 — 권한 오류를 디버깅하라. 이전 실습의 액세스 항목과 RBAC 바인딩을 설정한 후, Jenkins 파이프라인이 다음 오류로 실패한다.\n\n  Error from server (Forbidden): deployments.apps \"my-app\" is forbidden:\n  User \"system:anonymous\" cannot update resource \"deployments\"\n  in API group \"apps\" in the namespace \"production\"\n\n오류 메시지를 분석하고 근본 원인을 파악한 다음, Jenkins가 배포 스테이지에서 kubectl을 실행하기 전에 올바르게 인증하기 위한 수정된 'aws eks update-kubeconfig' 호출과 파이프라인 스니펫을 작성하라.",
+      "starter": "# 오류 분석:\n# Q1: 'User: system:anonymous'는 무엇이 잘못됐다는 뜻인가?\n# 답: ________\n\n# Q2: Jenkins 파이프라인에서 빠진 단계는 무엇인가?\n# 답: ________\n\n# 수정: Jenkins EC2 인스턴스 IAM 역할을 자동으로 사용해\n# kubectl을 실행하기 전에 올바르게 인증하는 수정된 배포 스테이지 스니펫을 작성하라.\n\nstage('Deploy to EKS') {\n    steps {\n        sh \"\"\"\n          # 인증 단계\n          ________\n          # 배포\n          kubectl apply -f deployment.yaml\n        \"\"\"\n    }\n}",
+      "solution": "# Q1: 'User: system:anonymous'는 쿠버네티스가 인증되지 않은 요청을 받았다는 뜻이다.\n#     kubectl 명령이 유효한 kubeconfig나 토큰 없이 실행됐으므로,\n#     API 서버가 익명 사용자로 취급한 것이다. Jenkins 에이전트에\n#     kubeconfig가 없거나, 유효한 AWS 인증 토큰을 제공하지 않는 것이다.\n\n# Q2: Jenkins 파이프라인에서 kubectl을 실행하기 전에\n#     'aws eks update-kubeconfig' 호출이 빠져 있다.\n#     이 명령 없이는 kubectl이 클러스터 엔드포인트나 자격증명을 알 수 없다.\n\n# 수정된 배포 스테이지:\nstage('Deploy to EKS') {\n    steps {\n        sh \"\"\"\n          aws eks update-kubeconfig --region us-east-1 --name my-cluster\n          kubectl apply -f deployment.yaml\n        \"\"\"\n    }\n}",
+      "explanation": "'system:anonymous'는 인증되지 않은 요청에 대한 쿠버네티스 아이덴티티다 — kubectl에 kubeconfig가 없거나, 유효하지 않거나, 토큰이 만료됐을 때 나타난다. 수정 방법은 배포 스테이지 시작 시 'aws eks update-kubeconfig'를 실행해 Jenkins 빌드 워크스페이스에 대한 kubeconfig를 생성(또는 갱신)하는 것이다. Jenkins EC2 인스턴스에 IAM 역할 'jenkins-deploy-role'이 연결되어 있으므로, AWS CLI가 인스턴스 메타데이터 서비스에서 자격증명을 자동으로 가져온다 — 정적 키가 불필요하다. update-kubeconfig 후 kubectl 요청은 유효한 STS 토큰으로 서명되고, EKS가 액세스 항목을 통해 'deploy-group'으로 매핑하며, ClusterRoleBinding이 업데이트 권한을 부여한다. 'aws eks update-kubeconfig'는 매 빌드마다 실행해도 안전하다 — 멱등적이다.",
+      "hints": [
+        "오류에 'namespace production'이 나온다 — 이전 실습의 ClusterRoleBinding이 'default' 네임스페이스만 커버한다면(RoleBinding을 사용했다면), Jenkins는 'production'에서도 거부된다. ClusterRoleBinding과 RoleBinding을 사용했는지 확인하라.",
+        "빌드 내에서 Jenkins가 사용하는 AWS 아이덴티티를 확인하려면: aws sts get-caller-identity — 가정된 역할의 ARN이 출력된다.",
+        "update-kubeconfig 후에도 'system:anonymous'가 나오면 kubeconfig 파일이 올바른 경로에 기록됐는지 확인하라. Jenkins 에이전트에서 $HOME/.kube/config가 예상과 다를 수 있다."
+      ]
+    }
+  ]
+}

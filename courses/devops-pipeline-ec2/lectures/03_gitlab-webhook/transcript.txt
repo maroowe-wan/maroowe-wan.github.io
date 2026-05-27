@@ -1,0 +1,161 @@
+## Video 1: Trigger Jenkins Jobs From GitLab (https://www.youtube.com/watch?v=_8YjWDmLvAE)
+
+Hello and welcome. In this video I will show you how you can trigger Jenkins jobs from GitLab.
+
+Before we can get started setting things up in Jenkins, what we want to do is we need to have an access token in order to trigger Jenkins jobs. You can use three different types of tokens: a personal access token, a group access token or a project access token.
+
+In the GitLab free subscription, you unfortunately will not be able to create a group or project access token, so for this demo I will be using a personal access token.
+
+To create your personal access token, you would go in the upper left hand corner on your user icon, drop that down, click on edit profile. In edit profile, then on the left hand side in the user settings menu, go on to access tokens. Click on here, give your token a name, set an expiration date or delete it.
+
+Important to note here is the scope of the token needs to be API, so select API and then create your token. Once the token is being created you will be able to retrieve it. Take note of it because we will need it and use it in Jenkins.
+
+Once you have then left this page and your token has been created, there is no way for you to retrieve the token again, and you would need to create a new one. So just on a side note, make sure once you create it, take note of it.
+
+Now we'll hop over into Jenkins and see what we need to set up there.
+
+Here I have signed into my Jenkins instance. The first thing we need to do here is we will need to install an additional plugin and that plugin is called GitLab. In order for you to install a plugin, once you've signed into Jenkins, just go to manage Jenkins then to manage plugins.
+
+Once you're in manage plugins, go to available plugins and search for GitLab. The plugin that you want to install is GitLab. This plugin allows GitLab to trigger Jenkins builds and to display their results in the GitLab UI.
+
+Now we will need to go ahead and create a connection and we will need to go ahead and configure the plugin.
+
+To configure the plugin, we will first need to create a connection and make Jenkins aware of our connection to GitLab. So go back to manage Jenkins and then click on configure system.
+
+Once that page loads, scroll down and after the plugin has been installed, you will see that you have a new section here called GitLab.
+
+Here you will be able to just put in the connection name. You can give it whatever name you would like. The GitLab host URL, seeing that we're on GitLab SaaS, it's https://gitlab.com. And then the credentials, you would need to here create a new credential saved within Jenkins where we're using the API token that we've previously created.
+
+To add credentials, click on ADD. The credentials provider in this case here will be just Jenkins. Then we can go ahead and make our selections here.
+
+Domain, I leave it at Global credentials. The kind, you want to drop this down and here you want to select GitLab API token.
+
+The scope you can go either Global Jenkins, the nodes items all child items will have access to it, or just the system. I'll leave it at Global. Here is where you want to paste the API token in that we've previously created.
+
+The ID, you can take a look here, internal unique ID which these credentials identified from jobs and other configurations, typically left blank. I'll leave it blank. And then description, you can type something in here if you'd like or not.
+
+Once you're done, you just click on ADD and you will have your connection name to GitLab setup. To make sure your connection was set up correctly, what you want to do here is just click on test connection.
+
+Testing the connection and everything is set up successfully. Now you want to click on save to save your connection settings that you've set up for GitLab.
+
+Once we have everything set up, we can set up a project. If you want to set up a new project in Jenkins, once you're back on the dashboard, click on new item, give your new item a name and select freestyle project.
+
+When you create your new freestyle project, go ahead and put in a description. Because we have installed our plugin, when I go ahead and I'm setting up my new project in Jenkins, you will have this GitLab connection available here as well.
+
+Once you drop this down and we have created our previous GitLab connection, the name of that connection should show up in here and you would select that GitLab connection that we've previously created.
+
+For my build triggers, I have set up that when something changes, something is being pushed to my GitLab repo, I'm triggering this job here on push events and on open merge request events.
+
+Scrolling further down in our Jenkins project, you have the build steps here. All I'm doing right now, because I do not have any Agents set up, is just executing a shell script.
+
+Once you've set everything up, click on Save and we're all set on the Jenkins side.
+
+Now we need to go back to GitLab and actually tell our project that we have an integration, a project in Jenkins that we would like to use.
+
+To set up the integration for your project, you want to go into the project into settings and then you want to go on Integrations. What you want to select in here is, in the add-in integration, you want to go ahead and select Jenkins.
+
+It's active, my trigger is for push and merge requests. You want to give the Jenkins URL where your Jenkins server is running. You want to give it the project name, this is the Jenkins project name, so whatever name you gave your project in Jenkins, this is what you put in here.
+
+Please note it's important that you type it in here URL encoded. Then you want to give it the username, the user to log into your Jenkins instance, and then you want to go ahead and type in the password for that user.
+
+Once you've saved it, it will show blank here but I did provide that particular password for this user. Then you can click on test settings once you're done and it will tell you connection was successful.
+
+Then you want to save and you have created your integration.
+
+Now let's see if this whole thing works all together the way that we want to.
+
+Here I've split my screen. On the left hand side we have GitLab. On the right hand side we have Jenkins.
+
+In Jenkins, I will go into my project. Once I'm in here, you see the last run. On the left hand side in my GitLab repo, I will go ahead and go to my dev branch and I will make a change to my readme.
+
+Let's commit this change and let's watch over here it will trigger my job.
+
+There goes my job in Jenkins. So my pipeline has been triggered in Jenkins. If I go into the output of this one, you can see here started GitLab push by the user. I made a push here on my GitLab instance and it triggered my job.
+
+You can now see here too that these are the variables that are available in Jenkins when we trigger our job through the integration here in Jenkins.
+
+Next, I will show you how you also can set up triggering a Jenkins job through a webhook rather than the integration.
+
+Even though using the GitLab integration for Jenkins is the recommended way, you can also trigger a job in Jenkins using a webhook.
+
+In Jenkins, I will be reusing my demo job that I had created. Going into configure, for my GitLab connection, I will remove the GitLab connection here.
+
+I will leave my build triggers at build when changes are pushed to GitLab. What we want to do is under the build triggers, once you have selected build, we want to go into advanced.
+
+Once you drop down advanced, scroll down and then on the bottom here you see in the section secret token. What you want to do here is you want to generate the secret token. You want to take that secret token and copy it and then you want to go to your GitLab instance.
+
+Once your project has been created, I will go ahead and create a new branch. I want to create a dev branch.
+
+Now I have my branch here and I have my main branch. Everything is great and now I want to create a webhook.
+
+If you want to create a webhook, just go into the project settings and then webhooks.
+
+Here I'll paste the URL that we copied from Jenkins. The secret token that we have copied from over here, we want to paste in here.
+
+Here is the secret token and the URL that you want to use is actually given to you already. It's shown in the build trigger section. This is the URL that you need to use.
+
+We want to trigger this on push events and on all branches and we are good to go.
+
+We have our URL, we do have our secret token, I want to trigger this on push events and on all branches.
+
+Let's see if this works. Let me go ahead and go to files, go into my dev branch again and here we'll just make a change to the readme.
+
+Let's push this to our dev branch and let's see if it triggers.
+
+And here it is triggered through my webhook. It triggered my job and it ran.
+
+If we now go over here and we're going to the console output, you'll see that my Jenkins job was triggered through a webhook in GitLab.
+
+This is another way that you can trigger jobs from GitLab in Jenkins.
+
+This was just a brief and quick demo of how you can trigger Jenkins jobs from GitLab, either through the Jenkins integration in GitLab or through webhooks.
+
+## Video 2: GitLab Webhook Integration with Jenkins CI/CD | Step-by-Step DevOps Guide (https://www.youtube.com/watch?v=SObrdM1ev3M)
+
+Demonstrating how to integrate GitLab with Jenkins using webhooks.
+
+For that, there are certain steps involved. I'm having my Jenkins available in one server and running in port 8080 and GitLab is another server.
+
+The total seven steps are involved.
+
+The first one is we need to download the Jenkins plugin. For that, go to the Jenkins dashboard, then manage Jenkins. Here, manage plugins. Under available plugins, you will find your plugins. The first one is GitLab plugin itself. This is mandatory. Another one is GitLab API plugin. So this plugin will help us to connect with GitLab.
+
+The second step is in GitLab, generate personal access token. For that, go to your profile and click on edit profile. Here, tokens. Create the token, give the token any name and the expiration date, and select scopes. Select the API. I have already created my token. My token name is gitlab. This scope is API and write repository also I have given but API is sufficient.
+
+The third step is in Jenkins. In the configure, go to the Jenkins dashboard, then manage Jenkins, configure system section. Here we need to add the GitLab connection.
+
+Under GitLab you will see the GitLab connections option. Here you can provide the connection name as any relevant name and here you need to provide the GitLab host URL. This is the GitLab host URL. My GitLab is running in this server and this is my GitLab host URL.
+
+So you, this URL you need to provide and these credentials. Here you will need to add your credentials. First of all, click on ADD and go to Jenkins. Instead of kind, just select the GitLab API token and here provide your API token which you have generated here in personal access tokens section.
+
+Give it any name and a description. Then once it is done click on apply and save.
+
+The fourth step in Jenkins itself is create access token. That access token would be used in GitLab. So go to your profile again and click on configure.
+
+In configure section, in configure, this API token section. Here you can create your new token. Create your new token. I have created my token Jenkins with the name Jenkins webhook. Give it any name, click on generate. So this token would be generated. Copy this token for the reference and save it somewhere.
+
+The fifth step is in Jenkins, let's create one job. I have created one test hook job. So this job created and if I show you the configuration of this job.
+
+In source code management, you need to select the git and in repository URL, you will need to provide your the repository URL. Here I will need to provide the URL of this test hook repository. And the credentials, your GitLab credentials, you can simply add your credentials from here.
+
+Here you can select the kind as username and password. Here provide the username and the password. And ID, you can give it any name so that that can be used there.
+
+In the build trigger section, when do you want to trigger this build? This web build, when a change is pushed to GitLab. Whenever we are having a change in the GitLab repository, this job should get triggered.
+
+So I have applied it, triggers on push events and accepted merge request. Whenever there is a merge request created by developers. And that is must. So in both the cases, this build should get triggered. And apply and save simply apply and save it.
+
+The sixth step, you go to the GitLab and this time in the project itself. Let me go to the project here. This is the project where I want to apply my hooks. Web hooks and in the settings, select the webhooks.
+
+Here in the webbooks, you need to provide the URL and the URL will be in this format. This is the HTTP, then column double slash. This is the user of my Jenkins. Then this is the token which I have which I had created in the Jenkins itself at the rate. This is my URL of Jenkins.
+
+And then the project, so if I show you here, this is my Jenkins IP and the running port is 8080. Then here the job, instead of job, you need to provide the project and then test hook.
+
+Just simply copy it. Here in this URL section, just paste this one. And either you can provide a token here or you can provide a token yet. Both are fine. And I want to trigger it on a push event, so select the push events.
+
+All branches is fine. Just uncheck this and add the hook. This is the same thing I have done here. Push events I have applied and SSL verification is disabled here.
+
+Let me show you by using the test. Click on push events. The hook executed successfully. If I go to the Jenkins job, this particular job, you can see this trigger has happened.
+
+So in that way, we can integrate our Jenkins with the GitLab using webhooks.
+
+For now I have tested for push events only. Generally, which type of requirement we get, whenever the merge request is created by developers and that merge request is merged to the particular branch, so we can configure accordingly and we can integrate our GitLab with Jenkins.

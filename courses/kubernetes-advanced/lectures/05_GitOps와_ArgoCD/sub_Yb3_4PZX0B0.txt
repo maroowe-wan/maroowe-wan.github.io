@@ -1,0 +1,494 @@
+Kind: captions
+Language: en
+in previous videos we have used many
+tools to deploy resources on kubernetes
+we have used terminal tools graphical
+tools automation tools and today it
+feels like we are going The Next Step
+hey everybody this is Christian and in
+today's video we will take a look at
+Argo CD a continuous delivery tool that
+automatically deploys kubernetes
+applications and resources from git
+repositories I've tested this tool now
+for a couple of weeks and it entirely
+changed the way how I'm managing my
+kubernetes deployments now it's really
+amazing and of course I want to show it
+to you we will deploy Argo CD and a
+kubernetes cluster connect a git
+repository and use it to deploy an
+application we will also talk a bit
+about continuous delivery in general and
+how it fits into a modern software
+development processes and devops which
+is in my opinion an extremely important
+topic in it these days so I hope you
+will enjoy this tutorial and you can
+learn something useful
+before we start I also want to mention
+today's sponsor.3 which is another
+fantastic open source devops tool that
+we will also use in this video to
+validate our kubernetes manifests so we
+make sure we have no config issues in
+our files but before we do that I want
+to give you some more background about
+Argo CD and how it fits into devops
+processors because believe it or not
+it's not only important to know about
+the tools but also instead to see the
+bigger picture and understand why we're
+actually doing all of this let's first
+start with continuous delivery which
+I've already mentioned in the beginning
+of this video that's what the CD in Argo
+CD stands for by the way when we talk
+about continuous delivery we also need
+to talk about continuous integration
+these two terms are often used together
+and are also shortly called CI CD both
+are part of devops and the goal is to
+shorten and optimize the software
+development process life cycles so they
+are often used together in one coherent
+development process
+this graphic which I bet you have
+already seen somewhere shows how these
+separate processes fitted in together
+while the left side mainly covers
+continuous integration processes and the
+right side covers continuous delivery
+processes continuous integration aims to
+optimize the coding building and testing
+of software so whenever an application
+is deployed CI tools can automatically
+compile the program and test if there
+are any bugs issues or security
+vulnerabilities and they can also lead
+into continuous delivery processes so
+whenever a new version is released and
+should be deployed on an infrastructure
+CD tools can help to automate that
+that's exactly where Argo CD fits into
+the whole CI CD process of devops when
+you want to deploy an application in
+kubernetes you can use Argo CD to
+automatically do that you just need to
+create a git repository where you push
+your kubernetes manifests soon and Argo
+CD can then automatically watch on this
+specific it repository and deploy all
+these resources this can be done
+manually or even fully automatic there
+are of course many different devops and
+continuous delivery tools out there that
+do these things Argo City is just one of
+them but the part that I like so much
+about Argo CD is that it has a very
+intuitive web interface so it's easy to
+use while you still have the option to
+use CLI tools overall Argo CD seems to
+be a very versatile solution and that
+also might be the reason why you often
+see this in the devops world it's
+undoubtedly one of the most popular
+tools for continuous delivery on
+kubernetes but I know it's always more
+interesting to see it in action than
+just talk about it so let's start
+installing Argo CD in my demo kubernetes
+cluster and use it to deploy a simple
+test application by the way if you enjoy
+watching my videos and you'd like to
+watch more content for it Professionals
+in home lab enthusiasts make sure you
+leave a like And subscribe that would be
+so cool because it's telling YouTube to
+push this video out to more people and
+it really helps the channel grow to
+install Argo City on kubernetes is you
+just need to follow the official
+documentation on the getting started
+guide first you have to create a new
+namespace Argo CD and then apply the
+installation manifest in this namespace
+if you would want to skip the
+installation of the web interface you
+could also use the second command here
+then you can only use the rocli tool to
+administrate it but I personally don't
+see a reason why we would skip that the
+web interface is really useful so I'll
+be using the First Command that will
+just install the full Argo CD deployment
+The Next Step describes how to install
+the aggro CLI tool for those who want to
+use the terminal tool instead of this
+web interface we are not doing it in
+this tutorial yeah maybe this could be a
+topic for an upcoming video the
+following step instead is something you
+want to have a closer look at because by
+default Argo CD does not expose itself
+with an external IP but that's of course
+needed if you want to access it from
+outside the cluster so here you have a
+couple of options and what you should
+use now depends on your setup the
+documentation describes how to train
+changed the service type to a load
+balancer but I will instead expose it
+with an Ingress controller I'm already
+using traffic on this demo cluster that
+has some advantages because I can get a
+trusted SSL certificate and a host name
+on my local network that's what I want
+to do Argo CD has a pretty great
+documentation page called Ingress where
+you can find templates for nginx and
+traffic so here I will just copy the
+template for an Ingress route that is
+what you can use in traffic I will just
+change the host name to match it with
+the DNS name in my home lab and I also
+want to create a new trusted SSL
+certificate managed by search manager by
+the way if you want to know how to do
+that in your local kubernetes cluster
+without having a public DNS record
+available I've recently made a tutorial
+about self-signed certificates in your
+local network on kubernetes I will leave
+you a link to that video in the
+description down below and let's add
+this new certificate secret to the TLs
+section of the Ingress route so that
+should be all let's now apply the two
+fights
+okay so the website returns something
+but it's still not working yet because
+when you make Argo City accessible via
+Ingress you will likely run into this
+same issue the website will show too
+many redirects when you're accessing the
+website when we inspect this response in
+the terminal 2 like curl you can see the
+website https Argo CD wants to make a
+temporary redirect to the same address
+this is what's called an https
+redirection Loop and that can happen in
+some cases when the application that
+your reverse proxy is redirecting to is
+not aware of the reverse proxy in front
+of it and it tries to make another
+redirection to the same address so the
+reverse proxy makes a redirection to the
+pot and the port makes a redirection to
+another address that's picked up by the
+reverse proxy redirected to the part
+again and then it's going on and on
+forever it's an infinite Loop the only
+solution to this problem is to make sure
+the application is aware of the proxy
+and turn off the redirection and here
+they are cargo City documentation
+describes a very simple solution that is
+to start the Yargo CD server with
+disabled TLS and that will turn off the
+redirection what we need to do is we
+just need to edit the deployment
+manifest of Argo City's server with this
+command this opens up a simple text
+editor notepad might not be the best
+Editor to do these things but hey it is
+what it is let's go into this section
+and that's described in the
+documentation and add the insecure flag
+in the containers command section so now
+we just need to save these changes and
+close the notepad window and the
+deployment should be restarted now with
+TLS turned off and if we now reload the
+page you get the login page of rocd we
+have no a valid certificate for it
+that's perfect and everything is ready
+now we can log in with a username admin
+and the password should be either the
+name of the server Port so just get all
+the server ports in the Argo CD
+namespace and copy paste it
+however in my case that does not work
+but there is another command where you
+can get the initial passport that might
+also be the case so you just need to
+query the content of the secret object
+that's holding the initial password and
+pipe this into a base64 decoder and then
+we also get our password so when we now
+log in with this it's working and we can
+now administrate Argo CD and start
+deploying our first application with an
+automated continuous delivery process it
+took me quite some time to go through
+the documentation and fix a problem with
+the https redirection Loop but I would
+always do it right and use an Ingress
+controller like traffic or nginx to
+expose services on kubernetes it's just
+so much better because you get a trusted
+SSL cert in this setup you can
+absolutely use in a production system
+and this is a web interface of Argo CD
+the main view shows all applications
+that you have deployed of course this is
+still empty because we haven't added any
+projects yet and in the settings view
+you can do some general configurations
+for example where when we need to add a
+git repository where Argo CD pulls down
+the kubernetes Manifest from apart from
+that you can also configure certificates
+here Keys additional kubernetes clusters
+you want to manage and add projects or
+accounts
+Okay cool so we now have deployed Argos
+CD in our kubernetes cluster and we can
+start adding a git repository where we
+upload a demo project that we like to
+deploy if you don't have a git
+repository yet and you just don't know
+where to do that you can just get a free
+one on a public git Service website
+something like GitHub or gitlab I
+personally have all my stuff on GitHub
+and I have created a new example project
+in my git repository videos where you
+will find all of my example files what's
+cool in Argo CD you don't need to create
+a new git repository for every
+application you can also just create one
+git repository that you call apps for
+example and then you can put every
+application in a separate folder so in
+my git repository videos we have a
+folder called Argo CD tutorial this is
+where you will find all the necessary
+files for this video Let's copy the
+project URL and go back to Argo CD in
+the web UI of argocd let's go into the
+settings menu and then add a new git
+Repository paste the URL in here if you
+need some kind of authentication you can
+also add a username and password or TLS
+certificates but because this is a
+public git repository we don't need to
+add it
+once argocd connects to the git
+repository you should have as successful
+in the connection status so now we can
+create a new application in this git
+Repository
+okay that was the preparation part for
+this example project let's now open this
+git repository in vs code and create a
+new folder here where we want to add our
+kubernetes manifests for a test
+application that we'd like to deploy
+I've thought a lot about what we should
+actually do here but honestly you know I
+just like to deploy nginx web servers as
+an example that's probably the easiest
+project you can deploy let's now do this
+and I will copy the necessary resources
+in a manifest file called apptest one
+dot yaml so let's start with the
+namespace object because we need a new
+namespace for our test nginx application
+and the next part will deploy a simple
+nginx web server in this namespace
+nothing too special here we also need a
+service object of course with a type
+cluster IP because I want to put this
+behind a reverse proxy so I also added
+an Ingress object that now makes it
+available on the hostname app test1 Cube
+demo 1 in my local home network Okay
+cool so that should be everything I
+wanted to deploy it for now let's first
+validate this manifest before we upload
+it to the git repository to avoid any
+mistakes I will use a free and open
+source tool that tree to validate it and
+by the way if you're new to that tree
+you can get more information about it on
+the website.3.io it's a terminal tool
+that you can install on Windows Linux
+and Mac OS and check kubernetes manifest
+against best practice rules or security
+policies here I want to test all
+resources against my new demo policy
+which I have just created to do a few
+basic tests and these are all successful
+so I've not done anything stupid here in
+my ml file that's good just a few words
+more to the tree I've created separate
+policies here to check my manifests in
+different environments like production
+demo and testing because in production
+setups I want to be a bit more
+restrictive and follow all the best
+practices that are useful like resource
+limitations health checks and so on
+what's also pretty cool you could even
+automate this step in a CI process for
+example with GitHub actions that's
+something I still have on my to-do list
+so there might be a video about GitHub
+actions in that tree in the future I
+hope that will be interesting as well
+but for now I've just done it manually
+and because we have our manifests now
+validated everything is okay let's now
+push this to GitHub so just add a commit
+message in vs code and then push it
+and that's everything so now you can see
+in GitHub the files are there agrocity
+should be able to find them let's now go
+back into Argo CD and add a new
+application to automate the deployment
+of these resources what we need to do
+now is somehow tell Argo CD to watch
+this repository and how to apply the
+resources and that's done by creating a
+new application in a web interface let's
+give this application the name app test1
+and add this to a project and now we
+have to choose how changes will be
+deployed manually or automatically I'm
+going to select automatic here and there
+are also some other options how you can
+fine tune the update behavior of your
+resources for example Auto create
+namespaces and other things however we
+won't go into too much detail in this
+video let's now scroll down here because
+we need to select our git repository
+that we've added before in the settings
+and enter the path so just like I told
+you an application can deploy all
+resources in just a specific folder
+let's copy the folder where I've placed
+the Manifest file for our project
+resources in and paste it into the path
+field and of course we also need to
+select our kubernetes cluster and the
+namespace where we'd like to deploy our
+resources
+okay so that should be all let's save
+this application and once you have saved
+it you can see a new application where
+Argo CD immediately starts deploying the
+resources it only takes one or two
+seconds and the application seems to be
+healthy already when you click on it it
+opens up a detailed view where you can
+see all the resources and the relation
+between them for example here we have
+the service object
+here the deployment the replica set and
+the actual Port you can also inspect
+details of these objects so here you can
+see the Manifest and the live manifest
+so what is present in the file and
+what's actually the status on the
+kubernetes cluster you can even quickly
+open events and logs from the pods so
+you get a lot of information about
+what's actually happening in the
+background and that is visible in a nice
+and intuitive interface I absolutely
+love it because it makes the complex
+architecture of kubernetes somehow
+easier to grasp when you're working on
+big projects with large deployments and
+manifests it can get quite overwhelming
+and this graphical view of the resources
+definitely helps to stay on top of
+things that's something I'm missing in a
+lot of other kubernetes tools they give
+you a lot of information but a diagram
+like this makes it easier to understand
+but I also want to show you another cool
+feature of the automatic synchronization
+between the git repository and the Argo
+CD application and my opinion this is a
+real benefit of CD and git Ops where it
+gets interesting and because our
+application is now deployed we can
+access the nginx web server in our
+browser but as you can see we get a
+certificate warning here because I
+missed to deploy a trusted SSL
+certificate
+adding it to the Manifest file and here
+I will create a new value certificate
+that is managed by search manager and
+add the TLs secret to the Ingress object
+so here we have created a new kubernetes
+resource and changed an existing one
+that should add a trusted SSL server to
+our project and get rid of the browsers
+wanting let's first validate these
+changes in the tree again you can see
+everything has passed the test that is
+good and because we have created our
+application in Argo CDs automatic we
+just need to commit this change to
+GitHub so add a commit message and push
+it to the main branch Argo CD should now
+monitor this change and apply it
+automatically when we now check the
+application on Argo CD after a few
+seconds you can see that it has
+automatically updated the deployment
+here is a certificate resource that was
+added and a corresponding Certificate
+request in the logs everything seems
+okay as well the cert manager is
+managing this certificate it was
+successfully applied to the Ingress
+object let's now go in into our web
+browser and open a new request to the
+nginx test page and that's it as you can
+see everything was updated correctly we
+now got a valid certificate for our test
+deployment this is really really cool
+but my excitement doesn't stop here
+because if you think about it because
+we're using a git repository to store
+our deployments that means we can't only
+apply upcoming changes we can also use
+all the benefits of git for example if
+we have applied a change and it turns
+out that something does not work we can
+simply revert the changes in the git
+repo and then Argo CD reverts the
+changes as well on the infrastructure
+and everything is documented and when
+you're working with other people on a
+project you can see who has made changes
+you can make pull requests that are
+reviewed by other people you can
+document everything that is a real power
+of githubs in my opinion and as you can
+imagine agar OCD is not everything in
+this space we will cover a lot more
+tools and git features in the future
+just like I mentioned with CI pipelines
+GitHub actions and so on I'm really
+excited about it and I hope you are too
+but that should be all for now as always
+many thanks for watching everybody I
+will catch you in the next video take
+care bye bye

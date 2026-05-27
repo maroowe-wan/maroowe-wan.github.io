@@ -1,0 +1,288 @@
+Kind: captions
+Language: en
+in this video we're going to talk about
+what kubernetes operator is
+why did this operator concept even
+emerge
+and when you should use operators to
+give you an overview
+operators are used mainly for stateful
+applications
+so we'll first compare how kubernetes
+manages
+stateless and stateful applications and
+then compare deploying
+and managing stateful applications
+without an operator
+versus deploying it with a kubernetes
+operator
+by the way i have a separate video where
+i show you how to use kubernetes
+operator in practice
+using prometheus operator example so
+that you have a theoretical
+understanding of the concepts
+and also see how it's used in practice
+let's go through an example use case
+let's say we are deploying an example
+web application in a kubernetes cluster
+so you create a deployment a config map
+with some configuration attributes for
+your application
+a service and application starts maybe
+you scale the application up to three
+replicas
+if one replica dies kubernetes
+automatically recovers
+it using its built-in what's called a
+control loop mechanism
+and creates a new one in its place if
+you release a new version
+you just adjust the deployment
+configuration
+and all replicas get restarted with
+new version backups you don't need
+backups because
+your web application is stateless so
+basically once you deploy the
+application
+you don't have to sit there and control
+that your application is running
+properly
+and when you carry out these small
+adjustments and changes
+like update or scale up it works pretty
+much
+without problems and the reason is
+because all these tasks that i mentioned
+are automated by kubernetes using this
+control loop mechanism so kubernetes
+knows
+what your desired state is because you
+stated
+using configuration files and it knows
+what the actual state is and it
+automatically tries to match
+the actual state always to your desired
+state
+and that's why it automatically
+recreates a
+pod that just died or restarts the pods
+with the updated
+image version etc so all this works
+pretty much without problems that's
+great
+now for that web application you need a
+database
+so that you have some data persistence
+for your application but for stateful
+like databases this whole process isn't
+as straightforward
+these applications need more hand
+holding when you create them
+while they're running and when you
+destroy them so
+throughout its whole life cycle so
+kubernetes
+cannot automatically do all this stuff
+with stateful applications why because
+when you create three replicas of a
+mysql application for example
+all of these three replicas are
+different they
+aren't identical replicas each has its
+own
+state and identity and that makes things
+a little bit more complicated
+this means they need to be updated and
+destroyed in a certain order
+there must be a constant communication
+between these replicas
+or synchronization so that the data
+stays consistent
+and a lot of other details need to be
+considered as well and these details
+will vary for each application so mysql
+will have its own
+specific way of doing this postgres will
+have its own
+elastic search will have its own and so
+on so you can really have a standard
+solution
+for all of these applications and put it
+in kubernetes to automate the
+whole process if you want to learn more
+details
+about comparison between stateless and
+stateful applications in kubernetes
+i have a more detailed comparison video
+on that topic
+so you can check it out here typically
+that's why
+stateful applications require manual
+intervention
+no matter whether they run on kubernetes
+or
+on a traditional server environment so
+they require
+people who operate these applications
+so human operators however in kubernetes
+this could be a problem because having
+to manually update and maintain an
+application in kubernetes
+kind of goes against the main kubernetes
+concept which is automation
+less human intervention self-healing
+attributes
+etc and this could be a reason to say
+you know what i don't have the one thing
+that kubernetes promises which is
+automation here so i might as well host
+my stateful application
+outside the kubernetes cluster but there
+are also applications that you need in
+like prometheus monitoring or etsy store
+which are stateful applications so in
+any case
+there is a need for an alternative to
+managing stateful applications
+and that alternative is supposed to be
+the operator
+so what is an operator and how does it
+solve this problem
+operator basically replaces this human
+with a software operator so all the
+manual tasks that devops team
+or devops person would do to operate a
+stateful application is now
+packed into a program that has the
+knowledge and intelligence
+about how to deploy that specific
+like postgres or prometheus and so on
+how to create a cluster of multiple
+replicas of that application
+how to recover when one replica fails
+etc
+this means that tasks are automated and
+of course
+reusable so if you have two kubernetes
+clusters with
+the same setup you don't have to
+manually
+configure and then maintain these
+applications on both environments
+but rather you have one standard
+automated tool
+that does this on both environments
+which means that
+the benefit of having this automated or
+software operator versus the human
+scales and becomes bigger the more
+complex your application
+and the more environments you deploy
+that application in
+so how does operator do this at its core
+it has the same control loop mechanism
+that kubernetes has
+that watches for changes in the
+application state
+did a replica die then it creates a new
+one
+did an application configuration change
+it applies
+the up-to-date configuration did the
+application image version get updated it
+restarts it with a new image version
+so you can think of an operator as a
+custom
+control loop in kubernetes
+it also uses crds which stand for
+custom resource definitions in
+which is basically a custom kubernetes
+component
+so by default you have these default
+components in kubernetes which are
+deployment stateful set
+configmap etc on top of that
+you can create your own custom
+kubernetes components
+and that is crds i will explain the
+concept of crds and how to use them
+in more detail in a separate video but
+this is just for basic understanding
+so operator takes the basic kubernetes
+resources
+and its controller concept as a
+foundation to build
+upon and on top of that it includes the
+domain
+or application specific knowledge
+to automate the entire life cycle of
+the application it manages or operates
+so to summarize kubernetes can manage
+the complete life cycle of stateless
+applications in a fully automated way
+because these applications do not have
+business logic for deployment
+or for running and maintaining them so
+kubernetes doesn't need to know
+any application specific logic to
+automatically
+create update delete and maintain these
+whereas for stateful applications
+natively or internally doesn't have all
+the knowledge required
+to automate the process of deploying
+every single stateful application
+and because of that it uses these
+extensions
+which are the operators and it uses
+its own operator for each different
+now who creates these operators
+operators are
+built for each application as i
+mentioned by
+those that are experts in the business
+logic of installing
+running and updating that specific
+so for example if you want to create a
+cluster of for
+mysql replicas and deploy and run them
+in kubernetes
+a team that has a domain specific
+knowledge about
+mysql application creates an operator
+that contains all this knowledge about
+how to
+create a mysql cluster how to run it how
+to synchronize the replicas how to
+update
+maybe even how to do backups and all
+this stuff
+and that package becomes an operator and
+for each
+such application could be elasticsearch
+prometheus
+at cd store there will be a separate
+this means there are already operators
+out there for many applications
+created by the community which you can
+use so you don't have to create them
+yourself
+there is an operator hub website where
+you can look them up
+there are github repositories and other
+places where you can
+search them and look them up but if you
+wanted to create your own operator
+there is an operator sdk that allows
+developers or these
+expert teams to create an operator
+themselves
+so this was the operator concept shortly
+explained
+let me know in the comments if you have
+any other questions regarding the
+kubernetes operators
+thank you for watching and see you in
+the next video

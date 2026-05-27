@@ -1,0 +1,176 @@
+Kind: captions
+Language: en
+hi i'm sylvia blee goldman with
+confluent in this module we're going to
+be talking about some basic operations
+of kafka streams
+kafka streams works on unbounded
+sequence of events called event streams
+event streams are like the topics that
+you have
+on the brokers in kafka they are a
+sequence of records which are like key
+value pairs
+in kafka and therefore also in kafka
+streams so in this example we have
+two records with key a and two records
+with key b
+now normally in a key value store you
+might think of subsequent records as
+overwriting the previous record with
+that same key
+now the difference is with an event
+stream each record is a standalone event
+and that means that two records with the
+same key
+don't really have any relationship to
+each other so in this example we have a
+total of four events and not just two
+events in total
+so what does coffee streams actually do
+with those event streams well when you
+define a kafka stream's application what
+you're really doing is defining a
+processor topology
+a kafka stream's processor topology is
+just a directed acyclic graph
+or dag where you have processing nodes
+and edges that represent
+the streams or the flow of the event
+stream each
+processor topology is typically going to
+have source nodes
+user processor nodes and sync processor
+nodes
+the source nodes are where the data is
+coming in when it's consumed from the
+topic
+on the broker gets passed into the
+source node
+the source node then forwards it through
+one or more user processor nodes
+which are just defined by some custom
+logic and finally
+they get sent to the sync processor node
+where the producer
+sends the data back to kafka to a new
+that's what's actually happening when
+you write a kafka streams application
+but how do you actually write that
+application the kafka stream topology is
+going to be defined using this
+streams builder class so to define a
+stream
+you're going to first create an instance
+of this stream builder class
+then you can use this builder to create
+a case stream which is just the kafka
+streams abstraction over the event
+and kind of the fundamental building
+unit of kafka streams
+and you can create this case stream
+using the builder.stream
+now the builder.stream is going to just
+take in an input topic
+which is just the name of the topic that
+you want to stream these events from
+and a consumed configuration object
+now we're going to get a bit more into
+this in later modules but for now
+all you need to know is that this
+consumed is just specifying the type of
+the key and
+of the value of the record so in this
+case we have a key and a value that are
+both strings
+and now we have our string string k
+stream so now that you have your case
+what can you actually do with it one of
+the things that people usually like to
+do is transform
+their data and kafka streams provides a
+mapping operation for that
+so kafka streams provides the typical
+functionality that you expect for a map
+it takes an input record and it lets you
+produce a new key or value or even a new
+type entirely
+and for this map in kafka streams we
+have two map
+operators we have the map values and the
+map itself
+so the map values operator takes in a
+value mapper
+now value mapper is just a functional
+interface defines a
+map method with a single input which is
+the value
+and the output is of course the value
+that you would like to produce
+after the mapping so because it's a
+functional interface you can
+express it with just the lambda as we
+have here and so all you need to do to
+map the values of this event stream
+is pass in something like this where you
+take
+the substring and extract out the first
+five characters
+of your string so this could be useful
+in the case you have some
+personal data like credit card
+transactions and you want to
+scrub out those first five characters in
+that string
+map values is the way to go for you
+similarly the map
+takes the key and the value and lets you
+produce a new key and value
+the difference being of course that the
+keys change the important thing to note
+here is that
+any time in kafka streams when you can
+use the map values you should prefer it
+unless you really have to change the key
+the reason for this we'll get into a
+little bit later it has to do with
+repartitioning
+but you can think of it as a performance
+optimization that you should always
+prefer map values over map
+whenever it's possible so another
+operator that we have in kafka streams
+is the filter
+so you can define a filter on a k stream
+and it
+defines which events should be filtered
+out of the
+event stream and which one should be
+kept so a filter really creates a new
+event stream with only those events
+which you care about
+similar to the red widgets in our
+previous module in the filter you have
+access to the key and the value
+and you define a predicate on these
+values
+and return just a true or false whether
+or not you want to keep them
+so for example you might have a long
+value and you only care about values
+that are greater than 1000
+and in this case you can drop all the
+events you don't care about and
+continue on with only those values which
+you do it's important to note that you
+should not actually
+modify anything on the key or the value
+in the filter operator
+or in any of the other operators you
+should be thinking of this as creating a
+new event stream
+not as modifying an existing one we'll
+go into more detail on how to build a
+coffee streams application in this first
+exercise
+you

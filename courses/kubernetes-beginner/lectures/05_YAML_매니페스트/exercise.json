@@ -1,0 +1,59 @@
+{
+  "lecture_no": 5,
+  "mode": "practical",
+  "env_note": "모든 과제는 minikube 또는 kind로 구성한 로컬 단일 노드 클러스터를 전제로 한다. kubectl이 해당 클러스터를 바라보도록 컨텍스트가 설정돼 있어야 한다. minikube 기준 시작 명령: `minikube start`.",
+  "tasks": [
+    {
+      "id": "warmup",
+      "title": "워밍업: YAML 뼈대 빈칸 채우기",
+      "prompt": "아래는 'hello-pod'라는 이름의 Pod 매니페스트인데, 필수 필드 4개 중 일부가 빠져 있습니다. 빈칸(_____)을 올바르게 채우고, `kubectl apply -f hello-pod.yaml` 로 적용한 뒤 `kubectl get pod hello-pod` 로 STATUS가 Running인지 확인하세요.\n\n```yaml\n_____: v1          # Pod는 core API 그룹\nkind: _____\nmetadata:\n  name: hello-pod\nspec:\n  containers:\n    - name: hello\n      image: _____\n```",
+      "starter": "# hello-pod.yaml (빈칸 채우기용)\n_____: v1\nkind: _____\nmetadata:\n  name: hello-pod\nspec:\n  containers:\n    - name: hello\n      image: _____",
+      "solution": "# hello-pod.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: hello-pod\nspec:\n  containers:\n    - name: hello\n      image: nginx:1.27",
+      "explanation": "`apiVersion`은 자원 종류에 따라 다릅니다. Pod와 Service는 쿠버네티스 core API 그룹에 속하므로 `v1`을 씁니다. `kind`는 만들 자원의 종류로 `Pod`라고 정확히 씁니다(대소문자 구분). `image`는 실제로 존재하는 공개 이미지를 지정해야 합니다. 여기서는 Docker Hub의 공식 `nginx:1.27`을 사용합니다.\n\n적용 후 `kubectl get pod hello-pod -w` 로 STATUS 변화를 실시간으로 관찰할 수 있습니다. ContainerCreating → Running 순으로 바뀌면 정상입니다. 정리: `kubectl delete pod hello-pod`.",
+      "hints": [
+        "모든 매니페스트는 `apiVersion`, `kind`, `metadata`, `spec` 네 가지 최상위 필드가 필요합니다. 첫 번째 빈칸은 그중 하나입니다.",
+        "`kind: Pod`에 대응하는 `apiVersion`은 `v1`입니다. Deployment는 `apps/v1`, Pod·Service는 `v1`이라고 기억하세요.",
+        "이미지는 `nginx:1.27` 처럼 '이미지명:태그' 형식으로 씁니다. 태그 없이 `nginx`만 써도 되지만 버전을 명시하는 것이 실무 관행입니다."
+      ]
+    },
+    {
+      "id": "core-1",
+      "title": "핵심 실습 1: Deployment YAML 직접 작성 후 적용·검증",
+      "prompt": "아래 요구사항에 맞는 Deployment 매니페스트(`my-deployment.yaml`)를 처음부터 작성하고 클러스터에 적용하세요.\n\n요구사항:\n- 이름: `my-nginx`\n- 복제본 수: 3\n- 컨테이너 이름: `nginx-container`, 이미지: `nginx:1.27`, 컨테이너 포트: 80\n- Pod 라벨: `app: my-nginx`\n\n적용 후 다음 명령으로 상태를 검증하세요.\n```bash\nkubectl get deployment my-nginx\nkubectl get pods -l app=my-nginx\n```\n\n예상 결과: READY 칼럼이 `3/3`, Pod 3개가 모두 Running이어야 합니다.",
+      "starter": "# my-deployment.yaml — 아래부터 직접 작성하세요\n# 힌트: 최상위 필드 4개(apiVersion, kind, metadata, spec)로 시작",
+      "solution": "# my-deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-nginx\n  labels:\n    app: my-nginx\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: my-nginx\n  template:\n    metadata:\n      labels:\n        app: my-nginx\n    spec:\n      containers:\n        - name: nginx-container\n          image: nginx:1.27\n          ports:\n            - containerPort: 80",
+      "explanation": "Deployment 매니페스트에서 가장 중요한 규칙은 `spec.selector.matchLabels`와 `spec.template.metadata.labels`가 반드시 일치해야 한다는 점입니다. Deployment 컨트롤러는 이 라벨 셀렉터로 '내가 관리해야 할 Pod'를 찾기 때문에, 불일치하면 `kubectl apply` 시점에 오류가 발생합니다.\n\n`kubectl get pods -l app=my-nginx` 는 `-l`(label selector) 옵션으로 해당 라벨을 가진 Pod만 필터해서 보여 줍니다. 세 Pod 이름이 모두 `my-nginx-<해시>-<해시>` 형태인 것도 확인하세요. 이것이 Deployment가 ReplicaSet을 통해 자동 생성한 이름입니다.\n\n정리: `kubectl delete deployment my-nginx`",
+      "hints": [
+        "Deployment의 `apiVersion`은 `apps/v1`입니다. `v1`만 쓰면 `no kind 'Deployment' is registered...` 오류가 납니다.",
+        "`spec.selector.matchLabels` 아래 라벨값과 `spec.template.metadata.labels` 아래 라벨값을 동일하게 맞추세요. 둘이 다르면 쿠버네티스가 적용 단계에서 즉시 오류를 돌려줍니다.",
+        "컨테이너 목록(`containers`)은 YAML 리스트이므로 `-`(하이픈)으로 시작합니다. 들여쓰기는 스페이스 2칸씩, 탭 문자는 금지입니다."
+      ]
+    },
+    {
+      "id": "core-2",
+      "title": "핵심 실습 2: Service YAML 작성 후 nginx 응답 확인",
+      "prompt": "핵심 실습 1에서 만든 `my-nginx` Deployment가 실행 중인 상태에서 NodePort 타입의 Service 매니페스트(`my-service.yaml`)를 작성하고 적용하세요.\n\n요구사항:\n- 이름: `my-nginx-svc`\n- 타입: NodePort\n- 셀렉터 라벨: `app: my-nginx`\n- port: 80, targetPort: 80, nodePort: 30090\n\n적용 후 다음 명령으로 검증하고, minikube 환경이라면 curl로 응답을 확인하세요.\n```bash\nkubectl get service my-nginx-svc\n# minikube 환경에서 실제 접속 확인\ncurl http://$(minikube ip):30090\n```\n\n`Welcome to nginx!` 문자열이 응답에 포함돼 있으면 성공입니다.",
+      "starter": "# my-service.yaml — 아래부터 직접 작성하세요\n# apiVersion, kind, metadata, spec 순으로 작성\n# spec.type, spec.selector, spec.ports 필드가 필요합니다",
+      "solution": "# my-service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: my-nginx-svc\nspec:\n  type: NodePort\n  selector:\n    app: my-nginx\n  ports:\n    - port: 80\n      targetPort: 80\n      nodePort: 30090",
+      "explanation": "Service의 `apiVersion`은 `v1`입니다(Deployment와 달리 `apps/v1`이 아님). `spec.selector`의 라벨(`app: my-nginx`)은 Deployment가 Pod에 붙인 라벨과 일치해야 합니다. 이 라벨 매칭이 곧 'Service가 어떤 Pod에 트래픽을 전달할지'를 결정합니다.\n\nNodePort 타입에서 세 포트 필드의 역할을 구분하면:\n- `port: 80` — 클러스터 내부에서 Service의 ClusterIP로 접속할 때 쓰는 포트\n- `targetPort: 80` — 실제 컨테이너(Pod)가 수신하는 포트\n- `nodePort: 30090` — 클러스터 외부에서 노드 IP로 접속할 때 쓰는 포트 (30000~32767 범위)\n\n`kubectl get service my-nginx-svc`의 PORT(S) 컬럼에 `80:30090/TCP`가 보이면 정상입니다.\n\nminikube 환경에서는 `minikube ip`가 노드 IP(보통 192.168.x.x 대역)를 반환하고, 그 IP의 30090 포트로 nginx에 접속됩니다.\n\n정리: `kubectl delete -f my-service.yaml -f my-deployment.yaml`",
+      "hints": [
+        "Service의 `apiVersion`은 `v1`입니다. `spec.type: NodePort`를 빠뜨리면 기본값인 ClusterIP 타입이 되어 외부에서 접속할 수 없습니다.",
+        "`spec.selector`의 라벨값이 핵심 실습 1에서 정한 `app: my-nginx`와 정확히 일치해야 합니다. 오타 한 글자만 달라도 Pod로 트래픽이 전달되지 않습니다.",
+        "curl 응답이 없거나 `Connection refused`가 뜨면 `kubectl get endpoints my-nginx-svc` 를 실행하세요. ENDPOINTS 열에 Pod IP가 표시되면 Service가 Pod와 연결된 것이고, `<none>`이면 라벨 셀렉터 불일치입니다."
+      ]
+    },
+    {
+      "id": "apply",
+      "title": "응용: replicas 변경 후 무중단 업데이트 확인",
+      "prompt": "핵심 실습 1에서 작성한 `my-deployment.yaml`의 `replicas`를 3에서 5로 수정한 뒤 `kubectl apply`를 다시 실행하세요. 기존 클러스터 자원을 지우지 말고 그대로 두고 파일만 수정해서 apply하는 것이 핵심입니다.\n\n단계:\n1. `my-deployment.yaml`의 `replicas: 3`을 `replicas: 5`로 수정\n2. `kubectl apply -f my-deployment.yaml`\n3. 아래 명령으로 Pod 수가 5개로 늘었는지 확인\n\n```bash\nkubectl get deployment my-nginx\nkubectl get pods -l app=my-nginx\n```\n\n예상 결과: READY `5/5`, Running Pod 5개.\n\n추가 도전: Pod 하나를 강제로 삭제(`kubectl delete pod <pod-name>`)한 뒤, 잠시 기다렸다가 `kubectl get pods -l app=my-nginx`를 다시 실행해 Pod가 5개로 자동 복구되는지 확인하세요.",
+      "starter": "# 수정 대상: my-deployment.yaml (핵심 실습 1에서 작성한 파일)\n# replicas 필드값만 3 → 5로 변경 후 저장\n# 변경 전:\n#   replicas: 3\n# 변경 후:\n#   replicas: 5",
+      "solution": "# my-deployment.yaml (replicas만 변경한 최종본)\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-nginx\n  labels:\n    app: my-nginx\nspec:\n  replicas: 5\n  selector:\n    matchLabels:\n      app: my-nginx\n  template:\n    metadata:\n      labels:\n        app: my-nginx\n    spec:\n      containers:\n        - name: nginx-container\n          image: nginx:1.27\n          ports:\n            - containerPort: 80\n\n# 적용 명령\n# kubectl apply -f my-deployment.yaml\n\n# 검증 명령\n# kubectl get deployment my-nginx\n# kubectl get pods -l app=my-nginx\n\n# 자가 치유 확인 (pod 이름은 실제 환경에 맞게 변경)\n# kubectl delete pod <my-nginx-xxx-yyy>\n# kubectl get pods -l app=my-nginx   # 잠시 후 재실행 → 5개 유지 확인",
+      "explanation": "이 응용 과제는 선언형 방식의 핵심 장점 두 가지를 직접 체험합니다.\n\n첫째, **멱등성(idempotency)**: `kubectl apply`는 파일의 현재 상태와 클러스터의 현재 상태를 비교해 차이나는 부분만 반영합니다. `replicas: 3 → 5` 로 변경하면 쿠버네티스는 기존 3개 Pod는 그대로 두고 새로운 2개만 추가합니다. 서비스 중단 없이 스케일 아웃이 이루어집니다.\n\n둘째, **자가 치유(self-healing)**: Deployment 컨트롤러는 조정 루프를 통해 항상 '복제본 5개'라는 목표 상태를 유지하려 합니다. Pod 하나를 강제 삭제하면 컨트롤러가 즉시 감지하고 새 Pod를 생성해 5개를 맞춥니다. 이것이 운영 환경에서 Deployment를 쓰는 핵심 이유입니다.\n\n`kubectl get deployment my-nginx` 출력에서 `UP-TO-DATE` 값이 5로 바뀌고 `AVAILABLE`이 5에 도달하는 시점을 지켜보세요.\n\n전체 정리: `kubectl delete deployment my-nginx && kubectl delete service my-nginx-svc`",
+      "hints": [
+        "파일에서 `replicas: 3` 줄만 `replicas: 5`로 바꾸면 됩니다. 다른 필드는 수정하지 않아도 됩니다. 저장 후 `kubectl apply -f my-deployment.yaml`을 실행하세요.",
+        "`kubectl apply` 실행 직후 `kubectl get pods -l app=my-nginx -w` 를 실행하면 새 Pod가 ContainerCreating → Running 상태로 올라오는 과정을 실시간으로 볼 수 있습니다 (종료: Ctrl+C).",
+        "Pod 이름을 모른다면 `kubectl get pods -l app=my-nginx` 로 확인한 뒤 아무 Pod 이름 하나를 복사해 `kubectl delete pod <이름>` 으로 삭제하세요. 약 5~10초 뒤 다시 조회하면 새 Pod가 Running 상태로 올라와 있을 것입니다."
+      ]
+    }
+  ]
+}

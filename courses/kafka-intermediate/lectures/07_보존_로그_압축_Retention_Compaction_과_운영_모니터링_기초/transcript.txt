@@ -1,0 +1,1134 @@
+## 영상 1: Apache Kafka Topic Compaction (https://www.youtube.com/watch?v=VAkhYxu1qII)
+
+hi everyone welcome back this is junior
+from confluent in this module i want to
+talk about how compaction works in
+apache cop
+well most people will be maybe mostly
+familiar with time-based retention
+encounter in this case you set up the
+cleaning policy to be
+deletion and then you set an amount of
+time how long you want to keep the data
+in kafka then as those new log segments
+are generated the oldest set of log
+segments will be deleted over time if
+they pass that retention time
+now what's
+compaction
+compaction is a different way of
+retaining data instead of retaining data
+by time it will be retained by key let's
+take a look at this example in this
+example all the records are published
+with keys as you can see some of the
+records some other keys are duplicated
+over time
+so with
+compaction you basically set a cleaning
+policy to be compact and then what's
+gonna happen is over time only the
+records with the latest record will be
+kept
+if you have some older records with the
+same key those will be garbage collected
+over time like those in the pink
+there's a special payload if you if the
+payload is set to now
+that's an indication that you want to
+delete this particular key then at some
+point this is what we call a tombstone
+it will also be cleaned up over time so
+this is actually how how the compaction
+works it's a key base retention what are
+some of the use cases for compaction
+it's actually pretty useful concept it's
+very useful to capture all those event
+changes for something that's updatable
+like in the database table for example
+if you have a profile for the customers
+or you have a catalog for all the
+product descriptions as those customer
+profiles and the product description
+changes you may want to keep getting the
+latest changes of what's happening
+but what compaction gives you is in
+addition to keeping track with latest
+changes it can also bound the total
+amount of space that you need to sort in
+this topic
+because over time
+all the old red cars
+with the same key they can be garbage
+collected
+this is actually pretty useful for
+applications keep up with the
+incremental changes but also
+do some boots trapping occasionally so
+in this case let's say if you have
+applications starting from the very
+beginning you may want to bootstrap the
+state by getting the latest value from
+all the keys particular topic you can do
+this by consuming from the very
+beginning of the offset in a compacted
+topic and once this process is done you
+can continue with newer changes to this
+topic so it's actually a pretty
+convenient way of doing this this kind
+of thing because there's only a single
+kafka topic you need to deal with
+instead of having to have two systems
+when dealing with bootstrap the other
+dealing with incremental consumption now
+let's look at how compaction works in
+kafka
+this is a compactor log
+so over time this compact lock will be
+divided into two parts on the left side
+these are the smaller offsets in the log
+these will be the portion of what we
+call the cleaned log in this case in
+this portion of the log there are no
+duplicate keys all the duplicates have
+been removed
+on the right hand side these over time
+these are accumulated 30 stack segments
+this is the 30 portion of the log in
+those segments the data can have
+duplicates among themselves they can
+also duplicate with some of the cleaned
+records as well
+so the first step during cleaning is we
+have to determine a subset of those 30
+segments to clean the exact number of
+segments that you can choose depends on
+how much memory you have in the broker
+and also how many keys you have in this
+particular topic once we have decided
+the segments to clean what we'll do is
+we'll scan through all the selected
+dirty segments and then build an
+in-memory offset map in this map we'll
+be keeping the key as the key entry for
+the map and
+for each of the key we'll be keeping
+track of the latest offset we have seen
+for this particular key this will be
+used for cleaning subsequently
+after this all the segments have loaded
+and then this offset has been built
+we'll be going through the actual
+cleaning phase
+in this cleaning phase we'll be scanning
+from the very beginning of this log
+including all those clean the portion of
+the log
+and those previously loaded 30 segments
+as we are scanning through each of those
+records will be using the key in the
+record do a lookup
+in this offset map if the key is not
+present in the map we know this record
+is still the latest for this key and
+will be retaining this record
+if this key is present in a map we'll be
+comparing the red cos offset with the
+offset stored associated with the key in
+this offset map
+if the record offset is higher or equal
+we know this record is still the latest
+record for this particular key and it
+will be retaining this record otherwise
+this record will be deleted so once we
+know which records need to be retained
+we'll be copying over those retained
+records into a new set of segments
+when we are copying those them over to
+new segments we'll be preserving the
+exact offsets of those records as they
+are in the old segments
+this means
+between sum up between two consecutive
+records there could be some holes in
+offset
+because some of the records in the
+middle could have been deleted this is
+fine because the consumer application
+knows how to skip those holes in the
+offset gap
+once those new segments have been
+generated
+we will be doing a swap of the old
+segments with the newest one now if you
+have a consumer that try to ask for
+consuming some of the data within this
+offset range if they will be directed to
+the new set of segments and over time
+will be deleting the old segments
+once the cleaning process is done we
+will also save the position which is the
+offset of the last
+30 segments we have loaded into the map
+so that if the broker fails and and
+start over again it will be resuming the
+cleaning from this particular offset
+afterwards for subsequent cleaning
+okay now let's take a look how we can
+clean tombstone this can be a little
+tricky because if we are not very
+careful we can get into a situation
+where
+some of the delete records will never be
+propagated to the application so this
+example shows this so let's say we have
+this record at offset 50 this record is
+subsequently
+deleted because we have a key within our
+payload at offset 57.
+so
+when when we try to clean this segment
+the naive way is
+we can remove both records at 50s and
+record at 57 because the key is
+subsequently deleted
+but
+if we do that it's possible for an
+application who has just finished
+reading
+the record at offset 50 and then took a
+pause and then when it resumed
+consumption it will no longer
+find the record the delete record at
+offset 57
+then in this particular case this means
+this application will never realize that
+particular key has been deleted
+similar issue can happen if we are
+deleting a transactional marker too
+early
+so in this case for example
+we have this record as part of
+transaction which is avoided and if we
+remove this aborted record and a
+transaction a border marker together too
+quickly then we can have the same
+situation where a consumer may have
+written may have read this aborted
+record but without reading the marker so
+it doesn't know this actually is about
+it
+so to solve this issue what we are
+dealing with the tombstone deletion is
+we are clean that in two step arounds in
+the first round of cleaning we will only
+remove the record at 50 but we'll leave
+the tombstone marker at offset 57 as it
+is when we keep it we also set a time
+for when it can be safely deleted and
+that time is set
+from the time when we clean the record
+plus a configured amount of retention
+time so the expectation is an
+application within this amount of time
+is expected to finish consuming all the
+way of this this partitions data all the
+way to the end
+by retaining this data uh for long
+enough now we will give we'll allow the
+applications enough time to finish
+resuming the consumption of this uh
+delete marker and after that we can
+safely delete the tombstone and we can
+do the same thing for the transaction
+marker as well
+now
+when is compaction triggered
+this is controlled with a few of the
+parameters by default we don't want
+the cleaning to happen like too
+frequently because it can be resource
+intensive so instead what we want to do
+is to balance the
+the cleaning with the amount of dirty
+data we have accumulated so we'll be
+measuring how much additional dirty
+portion of the data we have accumulated
+and compare that over the total amount
+of data we have accumulated in this log
+if that exceeded a certain threshold by
+default it's like 50
+then we'll be triggering a cleaning
+some applications may want to defer the
+cleaning a little bit because they may
+want to see every record if possible so
+in this case they can set like a minimum
+number of
+delay for compaction and then the claim
+will happen after that
+some applications they don't want to see
+duplicates too much so they want to be
+able to clean the data as aggressively
+as possible for them they can also set a
+max compaction lag
+in this case we'll be cleaning the data
+if it's older than this amount of time
+to summarize
+compaction is a very effective way of
+retaining the data by keys and it's very
+important for applications that want to
+keep track with updatable
+red course by key the guarantees we have
+when you use compaction is you are
+always guaranteed to see the latest
+record for a particular key but you are
+just not always guaranteed to see every
+update of the of the record for every
+key
+and that's it for this module thanks for
+listening
+you
+
+## 영상 2: In-depth intuition on Topic Log Compaction in Apache Kafka (https://www.youtube.com/watch?v=NlIHCP65xzg)
+
+Hello friends Welcome to our Channel
+knowledge amplifier so today in this
+particular video we are going to discuss
+a very important property for our Kafka
+topic especially for production system
+and that is low compacted Kafka topic
+okay what is this particular concept how
+to get in-depth intuition on this
+particular concept using programming all
+these Concepts today in this particular
+video we are going to discuss but before
+going ahead with further discussion you
+should have a clear idea on Kafka logs
+okay in one way we can say Kafka
+basically acts like if I system within
+our broker the topics are nothing but
+folders within folders in different
+files we can call that files are nothing
+but Kafka segments within that the
+messages are getting stored so the
+notion of Kafka as fi system on this
+piece will have a clear idea which I
+already covered in my previous video in
+detail the prerequisite links I'll be
+providing in the description box or in
+the comment section if you want you can
+go through that because those videos
+will see only YouTube to understand
+today's Topic in a much clearer way
+so without any further delay let's start
+our discussion so suppose here we are
+having our Kafka server okay so this is
+called broker and within this Brokers we
+are having multiple topics so suppose
+here we are having a topic a and the
+producer is publishing real-time data in
+a very high speed in this particular
+topic now Kafka basically acts like a
+buffer right so when suppose you are
+having a consumer the consumer is not
+able to process the data in such speed
+in what the producer is publishing then
+also no problem in this particular topic
+the messages will be queued up and in
+first screen first out format the
+consumer will be keep on processing the
+messages so one thing you can understand
+that within this particular Kafka server
+the messages are stored right even
+suppose one particular consumer has
+consumed the messages then the messages
+will not be deleted automatically you
+can maybe consume the same messages
+using some other consumers belonging
+from some other consumer group right so
+here in this particular topic the
+messages are not getting erased or
+removed as soon as it is consumed it
+stays for a certain amount of time
+ideally it stays for seven days after
+seven days is the messages get deleted
+now think about a particular situation
+where the producers are publishing the
+messages in a very high speed and the
+broker is not having that much High
+configuration with respect to memory
+okay so what problem will happen that
+producers are continuously publishing
+the messages in this particular topic
+within the broker although the broker
+don't have that much space remaining so
+obviously after a particular amount of
+time the system will crash because there
+will be no space remaining whole system
+will be done for that sometime we reduce
+the retention period of messages within
+a particular topic from 7 days to some
+particular day maybe one day or two day
+we keep that messages so these things we
+can configure in topic creation or in
+server level let me show you that how it
+is configured generally so here I can go
+to my folder where Kafka is installed
+and I can go inside config folder here
+if you see Server
+just search with retention
+and here you will see log retention
+policy right and if you see the first
+property is logged retention hours the
+minimum age of log file to be eligible
+for deletion due to age so whenever the
+messages are old enough the Kafka
+automatically delete those messages
+right or logs so log retention hours by
+default is 168 hours that is after 7
+Days the messages get deleted from our
+Kafka system or this particular
+configuration also you can do which is
+indicating log retention pipes that is
+if this much bytes of data is
+accumulated after that if further
+messages are coming then the old
+messages the Kafka will start removing
+or it will try to delete from the system
+then here lock segment bytes log segment
+bytes is anyway a separate topic which I
+covered that is within topic we are
+having partitioned within partition the
+data is divided into multiple segments
+so that in one single file huge amount
+of messages will not be stored okay
+right this is not having so much
+importance with respect to retention but
+yeah this also plays a very vital role
+in dividing the messages into different
+files right and here if you see another
+property's log retention check interval
+image that is basically indicating the
+interface at which the log segments are
+checked to see if they can be deleted
+according to the retention policies that
+is here we have configured after this
+much hours the old files can be deleted
+or after this much bytes of accumulation
+of data the older files can be deleted
+but when we will do that check that we
+will check only after this much entire
+help okay so these are few properties
+based on which from Kafka the old
+messages are getting deleted okay right
+so that is one way that we can delete
+the message which are older than a
+certain time right apart from that there
+is another option and that is coming
+under this topic that is log compacted
+Theory what is that let us try to
+understand
+so to understand the log compacted topic
+let us try to consider the real-time
+scenario okay
+so here we are having Kafka offset
+here we are having key and here we are
+having fun suppose initially it will
+start from upset 0 obviously and suppose
+the key is employee ID the value part is
+storing employee salary suppose for
+employee ID 1 the value is 100 the
+salary is 100 then for offset one
+suppose for employee 2 the value is 200
+so these data are continuously coming
+from Source system in real time the
+producer is publishing and the offsets
+are gradually increasing as and when the
+producer is publishing the messages in
+computer topic right so suppose for
+offset 2 for employee ID free the
+information came and suppose his or her
+salary is 300 for offset three employee
+id4 came and the salary is 400 like that
+it is coming okay now obviously in the
+back end after a certain number of
+accumulation of messages segments will
+be created right so here maybe let's
+consider this is segment zero like then
+the messages are continuously coming
+suppose currently the offset is running
+at offset 45 and here suppose for
+employee ID 5 is the salary game that is
+500 and then offset 46 the employee ID
+with one that employs salary suppose got
+Revisited and that salary got increased
+to 400 okay
+and suppose these informations are
+available in segment one
+so in this case you can understand that
+employee with id1 that employs initial
+salary was 100 and the current salary is
+400 okay so this is basically the latest
+information now suppose your system is
+built such way that your system don't
+bother about employees fast salary okay
+that is this particular value for
+employee ID one the initial salary was
+100 that is no longer important in our
+case the important is current salary for
+employee one is 400 okay right so what
+in log compacted topic it does it
+basically maintain the most recent entry
+for a unique key so what will happen in
+the back end one particular program will
+run and that will compact this
+particular segments and will create a
+new segment where the offset will be
+like this offset and then key and then
+value
+and then here see for 2 3 4 it is not
+repetitive so offset will be 1 2 3 for
+employee ID 2 3 4 whatever was there
+that will be coming that is 200 300 and
+400 okay now here for this particular
+employee five suppose this first time
+this record arrived so that will be also
+remaining so offset is 45 the key is 5
+and the value is 500 okay now offset 46
+the employee ID once data will be coming
+with the updated salary that is 400 so
+in this particular new segment what you
+are getting that the employees older
+salary that is this particular row is no
+longer available okay because this is
+not required in our system that's why
+after performing log compaction we
+particular integral deleted so in simple
+words here in this particular case the
+messages are not not getting deleted
+based on time that is older messages
+Beyond a particular time just delete
+those what we observed in the server
+properties based on that the messages
+are not getting deleted in this case
+Kafka basically maintained the most
+recent entry point for every unique key
+division are not based on time only when
+the unique key gets over written like
+for example the key is one one got
+overwritten in this case that means for
+that employee ID 1V salary got increase
+to 400 or decreased whatever activity
+happening if you are bothered about that
+then no need to store that older record
+right so that's why we are deleting that
+from the system so that's what the log
+compacted topic does and another very
+important point to note in this
+particular case log compaction only
+removes the messages but does not
+reorder the messages like if you see
+here for the offset 0 for the employee
+ID one the value is 100 that got removed
+because here we are having at offset 46
+the updated value right but the rest
+entity TUC offset 1 offset two offset 3
+that is having same information then
+here offset 45 that is also same for
+employee ID 1 in offset 46 it got
+Revisited so here it came so actually it
+is not reordering the messages it is
+just keeping the latest unique key
+related entity that's all right so type
+of understood the fundamental concept of
+log compaction even for example in
+change data capture you can implement
+this kind of log compaction based
+deletion in case of your Kafka topic so
+that your whole system will not be over
+abundant like for example suppose for
+one particular primary key one the
+current name is a okay then after some
+time for that same primary key one the
+name tends to B so in case of change
+data capture what will happen this
+message will come to Kafka topic again
+this message will come to Kafka do B now
+suppose you are creating a destination
+system where in the source system
+whatever changes happens that same thing
+has to be replicated in that case in the
+Target system for the primary key one
+the latest information should be present
+that is here one comma B should be
+available in the Target system so here
+in this particular CDC case also we can
+Implement log compaction based topic
+that is one a it will be deleting if for
+the same unique key or primary key one
+if if it is getting one more record
+right so this lock compaction based
+division or cleanup you can Implement in
+various places whenever the complete
+tracking or complete history no need to
+maintain just the latest information
+that much only required then in that
+case you can follow this particular
+technique instead of time destination
+okay and the same concept is shown in
+this particular diagram suppose this is
+within a particular topic within a
+particular partition the offsets are
+continuously increasing 0 1 2 and so on
+now here we are having p and here we are
+having Value First the key K1 came with
+the value V1 when the K2 came with
+fellow V2 then the key again K1 came
+with fellow V3 and so on now see after
+log complexion we are getting this
+particular output how it is coming
+observe carefully here key K1 value V1
+is available right but it is not coming
+in the output why because here again for
+the same key K1 another value came so
+this is basically the latest one right
+so that one is coming here for the key
+K1 value is V3 and the offset is 2 that
+is coming now you might ask why this
+particular record is not coming before
+the reason is this particular K2 also
+got Revisited at offset four okay so for
+K2 after log complexion only these
+particular entity is there right so
+that's why this particular record has
+not came now see here K3 for that key
+there is no new unique value here so
+here K3 is coming in the output okay
+then here K2 for K2 this is the latest
+record so that K2 is coming here right
+and then for K4 see K4 is not repeated
+so for K4 this is the latest state that
+only came for K5 see offset 6 is not the
+latest State okay because at offset 7
+also K5 km that's why it is coming in
+the output after log complexion and for
+ks6 it is the latest state so that's why
+after log complexion it is coming so in
+simple words you can think that if the
+unique key is again getting repeated
+then the older ones log compacted topic
+will be deleting and it will be keeping
+only the latest state but while doing
+this duration it will not reorder our
+messages ordering of the messages are
+kept as it is like here you can see that
+here K1 is there after that k3k after
+that K2 came so that same thing is
+maintained here okay the offset two
+three four five seven eight like that it
+is maintained in between offset after
+compaction there can be discontinuity
+but the offsets are continuously
+gradually increasing that's the point
+okay right so now let's fill this
+particular concept with practical and we
+are going to implement this particular
+practical by launching a Kafka cluster
+in an ec2 instance all the codes I'll be
+the comment section please try to
+parallely practice and get the idea out
+of it when you will do the lab
+experiment simultaneously the concept
+will be much more cleared okay so here I
+will go to my AWS Management console in
+the ec2 and here I will launch one ec2
+instance for this demo okay
+instance
+dog
+compaction dim that is done and then
+here key I'll be selecting one existing
+key networking setting I can keep as it
+is maybe I will check this HTTP traffic
+and then here I will launch the instance
+so here our instance is launched let us
+go to that
+and yes it is in pending State let's
+watch for few seconds to spin up so here
+see the instance is running I will take
+the public IP and I will make sure that
+all ipv4 traffic it is allowing so I'll
+edit the inbound rule from Security
+Group
+all traffic
+from anywhere ipv4 I want to allow for
+this particular ec2 because just we are
+doing for demo podcast and then here I
+can open put the
+I will take the key file what we already
+having
+and then here I will do login as this
+is to make sure it is not having timeout
+issue I will change the setting to
+10 second and apply it okay I will just
+also increase the font size little bit
+I'll go to
+appearance and then maybe change
+and then I will keep this 20. like that
+now it is looking better now what I will
+do I will first download Kafka and unzip
+it
+so using third comment we are unshipping
+that is done now let's check whether
+Java is there or not
+it's Java hyphen version see Java
+command not found so we will install
+Java and then you can execute Java
+version
+okay
+yes let's continue
+then I will check Java version
+so now when you are doing we are able to
+see the Java version now I will go to
+that particular directory where Kafka
+unzip happen and then here I will start
+the Zookeeper first okay
+so here our zookeeper is started now in
+a new terminal I will start my Kafka
+Brokers so I will duplicate this session
+and login as PC2 user only and then
+before starting the broker obviously I
+need to make sure that in Sulfur
+properties in listener we are
+configuring the ec2 public IP
+already we discussed several times on
+this particular Topic in advertising
+scenario we need to configure that
+so here I will copy the public IP and I
+will use winscp to go inside the dc2
+the username is easy to user
+and then here I will open the
+PPK file using that we will enter in
+this
+and then here we will go to this
+directory
+and then here we will go to config
+and then here server dot properties in
+that we need to do a change
+and that is basically the public IP we
+need to put
+in
+advertise listener
+thank you
+and your host name I need to paste that
+I will save this one okay and I will
+keep this somewhere saved in my notepad
+file also okay maybe here
+right so this is our PC to public IP now
+here to run the broker we need to
+execute these three piece of code first
+we need to set up the environmental
+variable then we need to go to this
+directory and then we can run servers.sh
+file
+let us seek entered
+so here our Kafka server is also started
+I will duplicate this session
+and I will enter
+in the terminal using ec2 user okay now
+what we need to do we need to create the
+topic to create the topic I need the
+bootstrap server or broker URL so I will
+use that particular command Okay first I
+need to go to this particular directory
+I will go there
+right and then I need to execute this
+particular comment Kafka topics.sh Now
+to create a log contacted Kafka topic we
+need to do little configuration while
+creating the topic see here Kafka
+topic.sh and then here topic name we are
+configuring the bootstrap server we have
+configured whatever we are having
+replication Factor only one keeping
+partition also one keeping just for demo
+now cleanup policy is generally delete
+type that is folder messages get deleted
+based on time but in this case we want
+to create a log compacted Kafka topic so
+here we need to write clean up policy
+equal to contact okay here this is very
+important mean cleanable dirty ratio
+that is 0.001 this value we have
+configured so this basically controls
+the threshold so suppose mean cleanable
+ratio is 0.5 then it is indicating that
+at least 50 percent of your topic or
+partition data should contain platy
+entry for complexion to run when I say
+data entry that is basically meaning
+that for one particular key multiple
+entries are there so in that case we are
+having a scope to compact that
+particular topic and keep only the
+latest messages for The Unique keys and
+delete the older ones right so to do
+that how much thatiness in your data you
+should be having that you can configure
+using this particular threshold okay
+that initial 0.5 means at least 50
+percent that data you should be having
+in your topic or partition suppose I am
+configuring 0.001 why I am keeping this
+small value just to show you that the
+log compact is happening if we are
+keeping 0.5 then we need to wait little
+bit more time right that is our data
+need to be 50 percent dirty but because
+I am keeping her very less value so we
+can visualize block compaction very
+quickly and then here segment.ms we are
+keeping 5000 so anyway this already we
+discussed in our previous video that is
+with each five thousand millisecond
+interval in new segment will be created
+within a particular partition within a
+topic in our class so here most
+important property related to log
+compact Kafka topic is cleaner policy
+should be Compact and mean cleanable
+dirty ratio should be listed on what
+percentage you want to contact okay
+right so here I will create this
+particular topic
+and here see the topic got created
+successfully okay cool now here we will
+start producer and we will start
+consumer sum Keys we will be repeating
+and you will see for that same key
+holder values get deleted from this
+topic or not automatically right so for
+this particular demo what I will do I
+will just
+make this particular screen little bit
+smaller so now these values are looking
+bit bigger so I will just change the
+setting
+maybe I will reduce this value to
+12 okay
+and apply it
+so this is our producer side and then I
+will duplicate this session for Consumer
+okay I will start Kafka console producer
+and Kafka console consumer here right so
+here I will go to this particular
+and then here I will start the console
+consumer with the proper broker
+configuration so our broker URL is this
+one so that I will update in the
+producer as well as in the consumer side
+okay so here these two ports will be
+executing for our consumer console so
+what is this this is nothing but our
+normal Kafka console consumer.sh file
+from this particular topic we want to
+concern the data from beginning
+bootstrap server we are mentioning and
+we are saying that print the keys part
+also and the key should be separated by
+comma okay generally the consumer only
+print the value part but I want to print
+the key part also with comma separated
+part okay and now I will start the
+producer following the same way
+foreign
+producer started and here our console
+consumer running okay in the back end
+our broker is running here
+so here what I will do first suppose for
+employee ID 1 the message got published
+with the salary 100 then employee ID 2
+is having salary 200 okay when you are
+publishing messages here see in the
+consumer side the messages are coming
+okay suppose for employer D3 the message
+is 300 okay
+and suppose for employee ID for the
+message is 400 right and then for
+suppose employee ID 1 the salary got
+Revisited and one salary is now 200 okay
+so because our consumer is running from
+beginning so here all the messages are
+getting consumed but we will see if we
+start this particular console consumer
+again from beginning we will see that
+older employee information for employee
+id1 that is employee ID one was having
+salary 100 rupees right based on our
+production of data that should be
+deleted due to log contraction we will
+see that suppose for example another
+salary got published suppose for
+employee 5 the salary is 500 okay right
+now let's see whether log complexion
+happen or not and what I will do to see
+that I will just stop the console
+consumer and then I will start it again
+from beginning okay and now from
+beginning when I will try to consume the
+data if log compaction happens then we
+should not see for the employee ID one
+the salary because it should be deleted
+because already for the employee ID one
+the new salary came and that is 200
+right so let's run it
+here you see that employee ID 2 salary
+200 three celery 300 or salary 400km
+employee ID one salary which was 100 in
+the beginning that got deleted
+automatically that's the beauty of Kafka
+log complexion for the same unique key
+if multiple records are there then the
+older one will be deleted okay right but
+see order is not changed right list
+order is completely maintained suppose
+now free salary also got Revisited and
+free salary became 600 okay right then
+employee ID 6 is having salary 600
+employee D7 is having salary 700 suppose
+like that the messages are getting
+published in the back end here basically
+our task of broker is running If You
+observe the logs there also you will get
+some idea what is happening like I told
+you right while discussing the theory
+part that is here suppose segment zero
+segment one we are having after lock
+complexion in new segment will be
+created so Here If You observe logs that
+some particular snapshots are getting
+deleted or some particular segments are
+getting deleted in new segment got
+United a new snapshot get generated all
+these things are getting printed but
+anyway we can check simply from this
+console producer console consumer only
+so what we did we basically got
+Revisited salary for the employee with
+employee ID3 earlier the salary was 300
+but now for the same employee 83 the
+salary got increased to 600 but because
+we are continuously running our consumer
+so in this particular consumer here if
+you see the employee ID 3 is having 300
+as well as the updated salary both are
+present but due to lock compaction the
+older one should be deleted
+automatically and only the new value
+should be present so let's run this
+particular consumer again from beginning
+and see here the employee ID3 earlier
+was having salary 300 that got deleted
+two four one five three 6 7 and for the
+employee ID3 whatever latest salary we
+are having that only it is showing why
+because here we have configured such a
+way that key value both we are passing
+from console producer that is key
+separated in console producer is comma
+so Kafka is understanding okay the first
+part is key the second part is value
+whatever we are passing right now here
+for this particular key it is repeated
+so the latest information related to a
+repeated unique key it will be keeping
+older one little bit irriting that way
+instead of time this duration it is
+deleting based on repetition of unity
+and that's the central concept of log
+compacted topics and I hope what is the
+use case of this that also you
+understood that is in whatever situation
+we no need to keep the complete history
+or all the changes just we are bothered
+about the latest changes like for
+example CDC or these kind of scenarios
+then you can go with this particular
+technique right I will be providing the
+course in this description box or in the
+comment section please try to implement
+that you will be getting much more
+feeling out of it this is all for my
+this video If you find this video
+helpful then please like share and
+comment subscribe our Channel if you
+have not subscribed till now and don't
+forget to press the Bell icon to get the
+notification of our latest videos thank
+you for watching
+
+## 영상 3: Which Metrics to Monitor in Kafka? (https://www.youtube.com/watch?v=XXLe0KNEbR4)
+
+okay so now we're getting into the very
+important topics of which metrics you
+need to monitor and because there are so
+many Kafka metrics you don't really know
+where to start first so here is my
+answer you need to start and the whole
+internet is agreeing with this by a few
+metrics that are extremely important to
+have number one is number of active
+controllers and that should always be
+one so in Kafka one of the broker is an
+active controller and all the ones are
+not controllers so the controller
+basically allows to do a lot of stuff
+including you know leader election
+assignments of consumer groups ericeira
+and so you only need one to manage
+everything otherwise you have huge
+issues so zero means that your calf
+cluster is not working and to them means
+that there's a huge bug so that's number
+should always be one and it's something
+super important to have in your
+dashboard number two is the number of
+under replicated partitions or it's
+called you RP and that should always be
+zero so you basically don't want your
+partitions to be lagging behind the rest
+of your clusters so if for example there
+is a producer it's producing a very very
+high writes and the replication that is
+not fast enough then you're going to
+start seeing on the replicated
+partitions and that may mean that your
+brokers are being overloaded or
+misconfigured or that your network is
+struggling anyway that may mean
+something so number of underrepresented
+partitions or you are peas should always
+be zero and then you have a number of
+line partitions so this is really bad if
+an offline if a partition is offline
+that means that all the partitions are
+down and that's not good because that
+means that your topic is partially down
+and so that number should always be zero
+as well okay something very very
+important to monitor on top of
+monitoring these metrics is really good
+to set alerts on them because you get to
+know better when these happen you get
+you get an email and can fix the problem
+right away now there's tons of metrics
+that say you can find online and there's
+gonna be the Kafka documentation that
+we'll see in a second and also the
+conference documentation on calf gap
+which provides good advice
+finally word of advice it's always
+better to have more metrics monitor than
+less because you want to be easily able
+to travel shoot issues when they happen
+so very very important so let's go ahead
+and see the documentation now so as we
+can see here in our graph on a dashboard
+we don't have any of these three metrics
+which is mentioned from the slide and
+we'll have this in the next lecture
+during the hands-on we'll see how we can
+create these metrics in this dashboard
+so you can get started with graph Anna
+and have the dashboard just as you want
+but for now let's go to the CAF cat
+documentation and then in the CAF car
+documentation we're going to find the
+section it's called point six point six
+and it's called monitoring and this time
+of recording so we can scroll down wait
+for it to load and six point six right
+here monitoring so it explains how Kefka
+works and so kefka uses Yammer metrics
+to expose their metrics and they expose
+by JMX we know this already and so here
+is the list of all the metrics that are
+given by kafka so as you can see there's
+a ton of them you can really look at
+them and it's a very exhaustive
+documentation so these are metrics that
+you definitely want to monitor so just
+have a look at like do you want to see
+error rates you wanna see request rights
+you want to see bytes out right in half
+has the luggage flushed on the
+replicated partitions we'll just talk
+about them main is our and so there's a
+recommendation normal value thing to
+look out for so as we said on the
+replicated partition should be one a
+zero mean is our zero of lime
+Laboratories zero controller active only
+one etc etc etc so these are really
+really good values to monitor and so for
+example let's take a mystic for example
+is is are right on the replicated
+partition so if you look at this metric
+it's called under replicated partitions
+so if you go to Prometheus and type
+under replicated partitions as you can
+see now we have Catholic cluster
+partition under replicated or Kefka
+server replicas manager on the
+replicated partitions so one of these
+metrics is going to help and you can
+always you can always execute a query
+not a de Graaff to see how this works
+and see the value of it so this is by
+the partition to tell you how many we
+partition is under replicated and then
+the other one under replicated
+partitions execute we only get by server
+how many under replicated actions they
+are so it's two different kind of
+metrics one is at the server level and
+one is that the partition level but
+that's really really helpful so that's
+the idea here and it's gonna need to get
+this whole list but you can also type in
+Kafka monitoring confident documentation
+and so when you do this you get this
+page that we saw before in the slide
+dark stuff confirm that IO and so this
+page gives you more advice on how you
+should monitor Kafka and so this is a
+better organized page in my opinion
+there's server metrics broker and
+zookeeper producer metrics consumer
+metrics and all consumer metrics so if
+we scroll down and go to broker metrics
+basically it advertises the coffin could
+fall Center which you can get but it's
+paid license but otherwise it tells you
+which metrics Nietzsche gets and so
+again we under replicate a partition
+definitely something you want to have
+offline partition counts active
+controller by its in per second by its
+out per second number of requests per
+second not or reproduce request etc etc
+you can scroll down but it gives you a
+lot of good insight into what each
+metric does and so on and then you get
+the zookeeper metrics if you wanted to
+explore this and so on I'll let you
+explore this with the whole
+documentation okay but this is quite
+nice to have these two documentation and
+so in the next lecture we'll go ahead
+and play a bit big Ravana just so I can
+show you how to add these metrics to
+graph Anna and then you're on your own
+to add as many metrics as you want
+alright alright I'll see you in the next
+lecture
+you

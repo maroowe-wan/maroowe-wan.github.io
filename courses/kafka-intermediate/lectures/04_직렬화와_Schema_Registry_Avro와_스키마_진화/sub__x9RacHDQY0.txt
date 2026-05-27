@@ -1,0 +1,235 @@
+Kind: captions
+Language: en
+- Hey, Tim Berglund with Confluent
+to talk to you about a
+Confluent Schema Registry.
+(upbeat music)
+Now once applications are busily
+producing messages to Kafka
+and consuming messages from it,
+two things are gonna happen.
+First, new consumers of existing topics
+are going to emerge.
+These are brand new applications.
+They might be written by the same team
+that wrote the original
+producer of those messages,
+maybe by another team, maybe
+by people you don't even know,
+that just depending on how
+your organization works.
+That's a perfectly normal thing
+for new consumers to emerge
+written by new people.
+And they're going to need to understand
+the format of the messages in the topic.
+Second, the format of those messages
+is going to evolve as
+the business evolves.
+For example, order objects,
+that's an object that represents an order,
+customer places an order,
+and here's an object
+representing that order.
+They might gain new status field
+or usernames might be split into first
+or last from full name or the reverse.
+And so on, things change.
+There is no such thing as
+getting it all right up front,
+the world changes.
+And so the schema of our stuff
+has to change with it.
+The schema of our domain objects
+is a constantly moving target.
+And we have to have a way
+of agreeing on that schema,
+the schema of those messages
+in whatever topic we're
+thinking about at the moment.
+The Confluent Schema Registry
+exists to solve precisely this problem.
+So, Schema Registry is a
+standalone server process
+that runs on a machine
+external to the Kafka brokers.
+So it looks like an application
+to the Kafka cluster,
+it looks like a producer or a consumer.
+And there's a little bit
+more to it than that,
+but at minimum it is that.
+Its job is to maintain a
+database of all of the schemas
+that have been written
+into topics in the cluster
+for which it is responsible.
+Now that database is persisted
+in an internal Kafka topic,
+this should come as no surprise to you,
+and it's cached in the Schema Registry
+for low latency access.
+This is very typical, by the way,
+for an element of the Kafka ecosystem
+to be built out of Kafka,
+you know, we needed a distributed
+fault tolerant data store,
+well, here's Kafka presenting itself.
+So we use it, we use a topic
+to store those schemas.
+A Schema Registry can be run
+in a redundant high
+availability configuration
+if you like.
+So it remains up if one instance fails.
+Now, Schema Registry is also an API
+that allows producers
+and consumers to predict
+whether the message they're
+about to produce or consume
+is compatible with previous versions
+or compatible with the version
+that they're expecting.
+When a producer is configured
+to use the Schema Registry,
+it calls at produce time,
+an API at the Schema
+Registry REST endpoint.
+So Schema Registry is up there,
+maintaining this database,
+also has a REST interface.
+Producer calls that REST endpoint
+and presents the schema
+of the new message.
+If it's the same as the
+last message produced,
+then the produce may succeed.
+If it's different from the last message,
+but matches the compatibility
+rules defined for the topic,
+the produce may still succeed.
+If it's different in a way
+that will violate the compatibility rules,
+the produce will fail in a way
+that the application code can detect.
+There'll be a failure
+condition it can detect
+and, you know,
+dutifully of course produce
+that exception stacktrace
+to the browser, no way don't do that,
+you could responsibly
+handle that condition.
+But you are made aware of that condition,
+rather than producing data
+that is gonna be
+incompatible down the line.
+Likewise, on the consumer side,
+if a consumer reads a message
+that has an incompatible
+schema from the version
+that the consumer code expects,
+Schema Registry will tell it
+not to consume the message.
+It doesn't fully automate the
+problem of schema evolution,
+and frankly, nothing does.
+That's always a challenge in any system
+that serializes anything,
+regardless of the tooling.
+But it does make a difficult
+problem much easier
+by keeping the runtime failures
+from happening when possible.
+Also, if you're worried about
+all these rest round trips,
+and that sounds really slow.
+Of course, all this stuff
+gets cached in the producer
+and the consumer when you're
+using Schema Registry.
+So these schemas have immutable IDs,
+and once I've checked once,
+you know, that's gonna be cached locally,
+and I don't need to keep
+doing those round trips.
+That's usually just a warm up thing
+in terms of performance.
+A Schema Registry currently supports
+three serialization formats,
+JSON, schema, Avro and protobuf.
+And depending on the format
+you may have available to you
+an IDL, an Interface Description Language
+where you can describe in a
+source controllable text file,
+the schema of the objects in question.
+And in some cases, there's also tooling
+that will then take that IDL,
+for example, an Avro you
+can write an avsc file.
+That's this nice simple JSON format
+where you're describing
+the schema of the object
+and say if you're using Java,
+there's a Maven and a Gradle plugin
+where you can turn that
+into a Java object.
+So then not only do you have
+the ability to eliminate certain
+classes of runtime failures
+due to schema evolution,
+but you've got now a tooling pathway
+that drives collaboration
+around schema change
+to a single file.
+So if you want to change what an order is,
+and add a new status field to an order,
+well, technically what that means is,
+you change the IDL, you edit avsc file.
+And the process that you now have
+for collaborating around
+that schema change,
+well, that's the same process you have
+any schema change.
+For most of us, that's
+a pull request, right?
+You do that thing in a
+branch and you submit a PR
+and people talk about it,
+and then it gets done and
+everybody has that change,
+and the tooling updates the object
+and the Schema Registry at runtime
+tells you whether that's gonna work,
+there's even a way to do it at build time,
+before you deploy the
+code to find out whether
+this is gonna be a breaking change or not,
+if it's not, obvious in the
+case of complex domain objects.
+So, all kinds of very,
+very helpful things.
+I would go so far this is a
+slightly opinionated statement
+to say that in any non-trivial system,
+using Schema Registry is non negotiable.
+Again, there are going to
+be people writing consumers
+at some point, that maybe
+you haven't talked to them,
+you haven't had a chance to
+fully mind meld with them
+on what's going on with
+the schema in that topic.
+They need a standard and automated
+way of learning about it.
+Also, no matter how good
+of a job you do up front
+to defining schema, the
+world out there changes,
+your schemas are gonna change.
+You need a way of managing
+those evolutions internally,
+and Confluence Schema Registry
+helps you with these things.

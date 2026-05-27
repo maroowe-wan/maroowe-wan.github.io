@@ -1,0 +1,39 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "kafka-topics.sh 명령으로 파티션 3개짜리 'orders' 토픽을 생성하고, --describe 옵션으로 생성된 토픽 정보를 확인하라.",
+      "starter": "# Kafka가 localhost:9092에서 실행 중이라 가정\n# 아래 빈 칸을 채워 토픽 생성 명령을 완성하고, describe 명령도 작성하라\n\nkafka-topics.sh --create \\\n  --topic ______ \\\n  --bootstrap-server ______ \\\n  --partitions ______ \\\n  --replication-factor 1\n\n# 생성 확인\nkafka-topics.sh ______ --topic orders --bootstrap-server localhost:9092",
+      "solution": "kafka-topics.sh --create \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 3 \\\n  --replication-factor 1\n\n# 생성 확인\nkafka-topics.sh --describe --topic orders --bootstrap-server localhost:9092",
+      "explanation": "--topic은 만들 토픽 이름, --bootstrap-server는 접속할 Kafka 브로커 주소(기본 포트 9092), --partitions는 파티션 개수, --replication-factor는 복제본 수입니다. 로컬 단일 브로커 환경이므로 replication-factor는 1로 설정합니다. --describe 옵션을 사용하면 파티션별 리더/복제본 정보를 확인할 수 있습니다.",
+      "hints": [
+        "--topic 옵션 뒤에 토픽 이름 'orders'를 입력하고, --bootstrap-server는 localhost:9092로 지정합니다.",
+        "파티션 개수는 --partitions 3으로 지정합니다. 로컬 환경에서는 --replication-factor 1을 씁니다.",
+        "생성 후 확인은 --create 대신 --describe 옵션을 사용합니다."
+      ]
+    },
+    {
+      "prompt": "키 없이 console producer로 'orders' 토픽에 메시지 3건을 발행하라. 각 메시지는 'order-1001 created', 'order-1002 created', 'order-1003 created'로 입력하라.",
+      "starter": "# console producer를 실행하는 명령을 작성하라\n# 실행 후 > 프롬프트가 나타나면 아래 세 줄을 입력하고 Ctrl+C로 종료한다\n\nkafka-console-producer.sh \\\n  --topic ______ \\\n  --bootstrap-server ______",
+      "solution": "kafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092\n\n# 프롬프트에서 입력:\n> order-1001 created\n> order-1002 created\n> order-1003 created\n# Ctrl+C로 종료",
+      "explanation": "kafka-console-producer.sh는 터미널에서 직접 메시지를 입력해 발행하는 도구입니다. 명령 실행 후 나타나는 > 프롬프트에서 한 줄 입력 + Enter = 메시지 1건 발행입니다. 키를 지정하지 않으면 기본 파티셔너가 3개 파티션에 메시지를 고르게 분산합니다.",
+      "hints": [
+        "--topic orders와 --bootstrap-server localhost:9092를 옵션으로 지정합니다.",
+        "명령 실행 후 > 프롬프트에서 메시지 내용을 입력하고 Enter를 누르면 발행됩니다.",
+        "종료는 Ctrl+C를 누릅니다. 오류가 나면 Kafka가 실행 중인지 먼저 확인합니다."
+      ]
+    },
+    {
+      "prompt": "이번에는 키와 함께 메시지를 발행하라. 같은 주문 ID(키)를 가진 이벤트가 항상 같은 파티션으로 가도록, 키 구분자를 콜론(:)으로 설정한 뒤 다음 메시지 3건을 발행하라.\n- 1001:order created\n- 1001:order shipped\n- 1002:order created\n\n발행 후, 키 1001을 가진 두 메시지가 같은 파티션에 들어갔는지 직접 확인하기 위해 --from-beginning 옵션으로 consumer를 실행하고 키와 값을 함께 출력하라.",
+      "starter": "# 1단계: 키 포함 producer 실행 (parse.key와 key.separator 옵션 추가)\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --property \"______=true\" \\\n  --property \"______=:\"\n\n# 2단계: 키와 값을 함께 출력하는 consumer 실행\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning \\\n  --property \"______=true\" \\\n  --property \"______=:\"",
+      "solution": "# 1단계: 키 포함 producer 실행\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --property \"parse.key=true\" \\\n  --property \"key.separator=:\"\n\n# 프롬프트에서 입력:\n> 1001:order created\n> 1001:order shipped\n> 1002:order created\n# Ctrl+C로 종료\n\n# 2단계: 키와 값을 함께 출력하는 consumer 실행\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning \\\n  --property \"print.key=true\" \\\n  --property \"key.separator=:\"",
+      "explanation": "parse.key=true는 입력 줄을 key.separator 기준으로 나눠 앞부분을 키로, 뒷부분을 값으로 처리하라는 옵션입니다. 키가 같으면(1001) 해시 결과가 동일하므로 항상 같은 파티션 번호로 라우팅됩니다. consumer 쪽에서 print.key=true를 주면 키와 값을 함께 볼 수 있어, 같은 키의 메시지가 같은 파티션에서 순서대로 나오는 것을 확인할 수 있습니다.",
+      "hints": [
+        "producer 쪽 옵션은 --property \"parse.key=true\"와 --property \"key.separator=:\"입니다.",
+        "consumer 쪽에서 키를 출력하려면 --property \"print.key=true\"와 --property \"key.separator=:\"를 추가합니다.",
+        "키가 1001인 메시지 두 건이 같은 파티션 번호에서 연속으로 나타나면 키 기반 파티션 분배가 성공한 것입니다."
+      ]
+    }
+  ]
+}

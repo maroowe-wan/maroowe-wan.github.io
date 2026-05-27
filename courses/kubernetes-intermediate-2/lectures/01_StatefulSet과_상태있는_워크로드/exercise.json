@@ -1,0 +1,62 @@
+{
+  "lecture_no": 1,
+  "mode": "practical",
+  "tasks": [
+    {
+      "step": 1,
+      "title": "워밍업: Headless Service 생성하고 ClusterIP 확인하기",
+      "goal": "clusterIP: None 을 선언한 Headless Service가 실제로 가상 IP 없이 만들어지는 것을 확인한다. 일반 ClusterIP Service와 비교해 차이를 체험한다.",
+      "prompt": "아래 두 Service를 각각 생성하라.\n\nService A (일반): name=nginx-normal, selector=app:nginx, port 80, type 생략(ClusterIP 기본값)\nService B (Headless): name=nginx-headless, selector=app:nginx, port 80, clusterIP: None\n\n생성 후 kubectl get svc 로 CLUSTER-IP 컬럼 값을 비교하고, 두 Service의 차이를 설명한다.",
+      "starter": "# nginx-normal-svc.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: nginx-normal\nspec:\n  selector:\n    app: nginx\n  ports:\n    - port: 80\n      name: web\n\n---\n# nginx-headless-svc.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: nginx-headless\nspec:\n  clusterIP: ____    # Headless로 만드는 핵심 한 줄\n  selector:\n    app: nginx\n  ports:\n    - port: 80\n      name: web",
+      "solution": "# nginx-normal-svc.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: nginx-normal\nspec:\n  selector:\n    app: nginx\n  ports:\n    - port: 80\n      name: web\n\n# nginx-headless-svc.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: nginx-headless\nspec:\n  clusterIP: None\n  selector:\n    app: nginx\n  ports:\n    - port: 80\n      name: web\n\n# 적용\nkubectl apply -f nginx-normal-svc.yaml\nkubectl apply -f nginx-headless-svc.yaml\n\n# 비교 확인\nkubectl get svc nginx-normal nginx-headless\n# 기대 출력 예:\n# NAME             TYPE        CLUSTER-IP      PORT(S)   AGE\n# nginx-normal     ClusterIP   10.96.xxx.xxx   80/TCP    10s\n# nginx-headless   ClusterIP   None            80/TCP    8s",
+      "explanation": "clusterIP: None 한 줄이 Headless Service의 전부다. 일반 Service는 iptables/IPVS 규칙과 함께 가상 IP(ClusterIP)를 받아 로드밸런서로 동작한다. Headless Service는 가상 IP 대신 DNS에 개별 Pod 각각의 A 레코드를 등록한다. StatefulSet이 이 Service를 사용하면 web-0.nginx-headless.default.svc.cluster.local 처럼 Pod별 고정 DNS 주소가 생겨 특정 Pod를 직접 가리킬 수 있다.",
+      "hints": [
+        "clusterIP 필드는 Service spec 바로 아래에 위치한다. selector 나 ports 와 같은 레벨이다.",
+        "kubectl get svc 출력에서 CLUSTER-IP 컬럼이 None 으로 표시되면 정상이다. 값이 IP 주소로 나오면 clusterIP: None 이 제대로 들어갔는지 다시 확인한다.",
+        "이미 만들어진 Service의 clusterIP 는 변경이 불가능하다. 수정이 필요하면 kubectl delete svc nginx-headless 로 지우고 다시 apply 한다."
+      ]
+    },
+    {
+      "step": 2,
+      "title": "핵심 실습 1: StatefulSet 배포 및 순서 보장 관찰",
+      "goal": "volumeClaimTemplates 를 포함한 StatefulSet을 직접 작성하고 배포한다. Pod가 web-0 → web-1 → web-2 순서로 하나씩 생성되는 동작을 -w(watch) 로 직접 확인한다. 생성된 PVC 이름 규칙도 검증한다.",
+      "prompt": "1단계에서 만든 nginx-headless Service를 활용하는 StatefulSet 매니페스트(web-statefulset.yaml)를 작성하라.\n- name: web, replicas: 3, serviceName: nginx-headless\n- 컨테이너: nginx:1.25, 포트 80, /usr/share/nginx/html 에 data 볼륨 마운트\n- volumeClaimTemplates: name=data, accessModes=ReadWriteOnce, storage=1Gi\n\n적용 후 아래 두 가지를 확인한다.\n(a) kubectl get pods -l app=nginx -w 로 Pod가 순서대로 생성되는 것을 관찰한다.\n(b) kubectl get pvc 로 data-web-0, data-web-1, data-web-2 PVC 3개가 자동 생성되었는지 확인한다.",
+      "starter": "# web-statefulset.yaml (빈칸을 채워라)\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: web\nspec:\n  serviceName: ____          # Headless Service 이름\n  replicas: ____\n  selector:\n    matchLabels:\n      app: nginx\n  template:\n    metadata:\n      labels:\n        app: nginx\n    spec:\n      containers:\n        - name: nginx\n          image: nginx:1.25\n          ports:\n            - containerPort: 80\n              name: web\n          volumeMounts:\n            - name: ____      # volumeClaimTemplates 의 name 과 일치해야 함\n              mountPath: /usr/share/nginx/html\n  volumeClaimTemplates:\n    - metadata:\n        name: ____\n      spec:\n        accessModes: [\"____\"]\n        resources:\n          requests:\n            storage: ____",
+      "solution": "# web-statefulset.yaml\napiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: web\nspec:\n  serviceName: nginx-headless\n  replicas: 3\n  selector:\n    matchLabels:\n      app: nginx\n  template:\n    metadata:\n      labels:\n        app: nginx\n    spec:\n      containers:\n        - name: nginx\n          image: nginx:1.25\n          ports:\n            - containerPort: 80\n              name: web\n          volumeMounts:\n            - name: data\n              mountPath: /usr/share/nginx/html\n  volumeClaimTemplates:\n    - metadata:\n        name: data\n      spec:\n        accessModes: [\"ReadWriteOnce\"]\n        resources:\n          requests:\n            storage: 1Gi\n\n# 적용\nkubectl apply -f web-statefulset.yaml\n\n# (a) 순서 보장 관찰 (다른 터미널에서 실행)\nkubectl get pods -l app=nginx -w\n# 기대 출력 예:\n# NAME    READY   STATUS              AGE\n# web-0   0/1     ContainerCreating   2s\n# web-0   1/1     Running             8s   <- web-0 Ready 후에만\n# web-1   0/1     ContainerCreating   9s\n# web-1   1/1     Running             15s  <- web-1 Ready 후에만\n# web-2   0/1     ContainerCreating   16s\n# web-2   1/1     Running             22s\n\n# (b) PVC 자동 생성 확인\nkubectl get pvc\n# 기대 출력 예:\n# NAME        STATUS   VOLUME       CAPACITY   ACCESS MODES\n# data-web-0  Bound    pvc-xxxxxxx  1Gi        RWO\n# data-web-1  Bound    pvc-xxxxxxx  1Gi        RWO\n# data-web-2  Bound    pvc-xxxxxxx  1Gi        RWO",
+      "explanation": "StatefulSet spec 에서 volumeClaimTemplates 는 volumes 가 아니라 '설계도(template)'다. 쿠버네티스가 이 설계도를 보고 Pod를 만들 때마다 <템플릿이름>-<Pod이름> 규칙으로 PVC를 자동 발급한다. watch 출력에서 직접 확인할 수 있듯, web-0 이 Running·Ready 상태가 된 뒤에야 web-1 생성이 시작된다. 이것이 Deployment와 가장 다른 순서 보장(Ordered) 동작이다. serviceName 은 DNS 레코드 생성을 위해 반드시 기존 Headless Service 이름과 정확히 일치해야 한다.",
+      "hints": [
+        "volumeMounts.name 과 volumeClaimTemplates[].metadata.name 은 반드시 동일한 문자열이어야 한다. 둘이 다르면 Pod 생성 시 volume not found 오류가 발생한다.",
+        "kubectl get pvc 에서 STATUS 가 Pending 으로 머물면 StorageClass 가 없거나 동적 프로비저닝이 비활성화된 것이다. kubectl get storageclass 로 기본(default) StorageClass 가 있는지 확인한다. minikube 환경에서는 minikube start 후 자동으로 standard StorageClass 가 생성된다.",
+        "kubectl get pods -l app=nginx -w 에서 web-0 이 Running 이 되기 전에 web-1 이 나타나면 StatefulSet 이 아니라 Deployment 를 잘못 만든 것이다. apiVersion 이 apps/v1 이고 kind 가 StatefulSet 인지 재확인한다."
+      ]
+    },
+    {
+      "step": 3,
+      "title": "핵심 실습 2: 안정적 식별자와 데이터 보존 검증",
+      "goal": "특정 Pod(web-1)에만 표시 파일을 기록하고 Pod를 강제 삭제한 뒤, 재생성된 Pod가 동일한 이름(web-1)과 동일한 PVC(data-web-1)를 다시 사용해 데이터가 그대로 남아 있음을 확인한다.",
+      "prompt": "1. kubectl exec 로 web-1 컨테이너 안에 파일을 만든다.\n   - /usr/share/nginx/html/id.txt 에 'I am web-1' 을 기록한다.\n2. kubectl delete pod web-1 로 Pod를 삭제한다.\n3. kubectl get pods -l app=nginx -w 로 web-1 이 재생성되어 다시 Running 이 되는 것을 확인한다.\n4. kubectl exec 로 재생성된 web-1 의 /usr/share/nginx/html/id.txt 를 읽어 내용이 유지되는지 확인한다.\n5. 같은 방법으로 web-0 의 /usr/share/nginx/html/id.txt 를 읽어 파일이 없음을 확인한다 (web-0 에는 쓰지 않았으므로).",
+      "starter": "# 1. web-1 에 표시 파일 기록\nkubectl exec web-1 -- sh -c '____'\n\n# 파일이 기록되었는지 바로 확인\nkubectl exec web-1 -- cat ____\n\n# 2. Pod 삭제\nkubectl delete pod ____\n\n# 3. 재생성 관찰\nkubectl get pods -l app=nginx -w\n\n# 4. 재생성된 web-1 의 데이터 보존 확인\nkubectl exec web-1 -- cat ____\n\n# 5. web-0 에는 파일이 없어야 함\nkubectl exec web-0 -- cat /usr/share/nginx/html/id.txt",
+      "solution": "# 1. web-1 에 표시 파일 기록\nkubectl exec web-1 -- sh -c 'echo \"I am web-1\" > /usr/share/nginx/html/id.txt'\n\n# 기록 직후 확인\nkubectl exec web-1 -- cat /usr/share/nginx/html/id.txt\n# 출력: I am web-1\n\n# 2. Pod 삭제\nkubectl delete pod web-1\n# 출력: pod \"web-1\" deleted\n\n# 3. 재생성 관찰\nkubectl get pods -l app=nginx -w\n# 출력 예:\n# web-0   1/1   Running             ...\n# web-1   0/1   Terminating         ...\n# web-1   0/1   ContainerCreating   ...\n# web-1   1/1   Running             ...\n\n# 4. 재생성된 web-1 의 데이터 보존 확인\nkubectl exec web-1 -- cat /usr/share/nginx/html/id.txt\n# 기대 출력: I am web-1  (삭제 전과 동일)\n\n# 5. web-0 에는 파일이 없어야 함\nkubectl exec web-0 -- cat /usr/share/nginx/html/id.txt\n# 기대 출력: cat: can't open '/usr/share/nginx/html/id.txt': No such file or directory\n# -> web-0 의 data-web-0 볼륨은 별개이므로 파일이 없는 것이 정상",
+      "explanation": "StatefulSet 이 web-1 을 재생성할 때 반드시 data-web-1 PVC를 다시 붙인다. PVC 에 저장된 파일은 Pod 수명과 무관하게 볼륨에 그대로 남아 있으므로 id.txt 가 보존된다. 반면 web-0 에는 파일을 기록하지 않았으므로 data-web-0 볼륨에는 id.txt 가 없다. 이 두 결과를 함께 확인함으로써 Pod별 볼륨이 완전히 분리되어 있음을 증명할 수 있다. Deployment 에서는 재생성된 Pod가 같은 볼륨을 보장받지 못하므로 데이터 보존을 이런 방식으로 기대할 수 없다.",
+      "hints": [
+        "kubectl exec 에서 sh -c '...' 를 사용할 때 리다이렉션( > )이 포함된 명령은 반드시 따옴표로 전체를 감싸야 한다. 감싸지 않으면 리다이렉션이 로컬 쉘에서 처리된다.",
+        "web-1 삭제 후 kubectl get pods 에 web-1 이 보이지 않는 짧은 순간이 있을 수 있다. -w 플래그로 watch 하면 Terminating → ContainerCreating → Running 전환을 놓치지 않고 볼 수 있다.",
+        "4번 단계에서 cat 출력이 비어 있다면 Web-1 이 재생성되면서 아직 컨테이너가 완전히 준비되지 않았을 수 있다. kubectl get pod web-1 에서 STATUS 가 Running 이고 READY 가 1/1 인지 확인한 뒤 다시 exec 한다."
+      ]
+    },
+    {
+      "step": 4,
+      "title": "응용: StatefulSet 축소 후 PVC 잔존 및 재확장 시 데이터 복구 확인",
+      "goal": "replicas를 3 → 1로 줄일 때 높은 번호 Pod부터 역순으로 삭제되는 것을 확인한다. StatefulSet을 삭제해도 PVC가 남아 있음을 확인하고, replicas를 다시 3으로 늘렸을 때 이전 데이터가 복구되는 것을 검증한다.",
+      "prompt": "1. web-0, web-1, web-2 각각에 서로 다른 파일을 기록한다.\n   - web-0: echo \"pod0\" > /usr/share/nginx/html/id.txt\n   - web-1: echo \"pod1\" > /usr/share/nginx/html/id.txt\n   - web-2: echo \"pod2\" > /usr/share/nginx/html/id.txt\n2. kubectl scale statefulset web --replicas=1 로 축소한다. kubectl get pods -l app=nginx -w 로 web-2 → web-1 순서로 종료되는 것을 확인한다.\n3. kubectl get pvc 로 StatefulSet 축소 후에도 PVC 3개가 모두 남아 있는지 확인한다.\n4. kubectl scale statefulset web --replicas=3 으로 다시 확장한다.\n5. 재생성된 web-1, web-2 에서 각각 id.txt 를 읽어 축소 전에 기록했던 pod1, pod2 값이 복구되었는지 확인한다.",
+      "starter": "# 1. 각 Pod 에 표시 파일 기록\nkubectl exec web-0 -- sh -c 'echo \"pod0\" > /usr/share/nginx/html/id.txt'\nkubectl exec web-1 -- sh -c 'echo \"pod1\" > /usr/share/nginx/html/id.txt'\nkubectl exec web-2 -- sh -c 'echo \"pod2\" > /usr/share/nginx/html/id.txt'\n\n# 2. replicas 1로 축소 (다른 터미널에서 watch 동시 실행 권장)\nkubectl scale statefulset web --replicas=____\nkubectl get pods -l app=nginx -w\n\n# 3. PVC 잔존 확인\nkubectl get pvc\n\n# 4. replicas 3으로 재확장\nkubectl scale statefulset web --replicas=____\n\n# 5. 재생성 후 데이터 복구 확인\nkubectl exec web-1 -- cat ____\nkubectl exec web-2 -- cat ____",
+      "solution": "# 1. 각 Pod 에 표시 파일 기록\nkubectl exec web-0 -- sh -c 'echo \"pod0\" > /usr/share/nginx/html/id.txt'\nkubectl exec web-1 -- sh -c 'echo \"pod1\" > /usr/share/nginx/html/id.txt'\nkubectl exec web-2 -- sh -c 'echo \"pod2\" > /usr/share/nginx/html/id.txt'\n\n# 2. replicas 1로 축소\nkubectl scale statefulset web --replicas=1\n\n# 축소 watch (역순 종료 확인)\nkubectl get pods -l app=nginx -w\n# 기대 출력 예:\n# web-2   1/1   Terminating   ...  <- 가장 먼저 종료\n# web-2   0/1   Terminating   ...\n# web-2         (사라짐)\n# web-1   1/1   Terminating   ...  <- 그 다음 종료\n# web-1   0/1   Terminating   ...\n# web-1         (사라짐)\n# web-0   1/1   Running       ...  <- web-0 만 남음\n\n# 3. PVC 잔존 확인 (StatefulSet이 삭제하지 않음)\nkubectl get pvc\n# 기대 출력: data-web-0, data-web-1, data-web-2 모두 Bound 유지\n\n# 4. replicas 3으로 재확장\nkubectl scale statefulset web --replicas=3\n\n# 재생성 완료 대기\nkubectl wait pod -l app=nginx --for=condition=Ready --timeout=120s\n\n# 5. 데이터 복구 확인\nkubectl exec web-1 -- cat /usr/share/nginx/html/id.txt\n# 기대 출력: pod1\n\nkubectl exec web-2 -- cat /usr/share/nginx/html/id.txt\n# 기대 출력: pod2\n\n# web-0 도 동일하게 확인\nkubectl exec web-0 -- cat /usr/share/nginx/html/id.txt\n# 기대 출력: pod0",
+      "explanation": "StatefulSet 축소는 가장 높은 번호(web-2)부터 역순으로 하나씩 종료한다. 이 순서는 마스터 역할을 하는 0번 Pod를 마지막까지 보호하기 위한 설계다. volumeClaimTemplates 로 만들어진 PVC는 데이터 보호를 위해 StatefulSet 축소 또는 삭제 시에도 자동으로 지워지지 않는다. 따라서 재확장 시 web-1, web-2 는 기존 data-web-1, data-web-2 를 그대로 다시 마운트해 이전 데이터를 복구할 수 있다. PVC를 완전히 정리하려면 kubectl delete pvc data-web-0 data-web-1 data-web-2 처럼 직접 삭제해야 한다(데이터가 영구 삭제되므로 주의).",
+      "hints": [
+        "kubectl scale 후 watch 에서 종료 순서가 web-1 → web-2 (낮은 번호부터) 라면 StatefulSet 이 아닌 Deployment 를 잘못 조회하고 있을 가능성이 크다. kubectl get statefulset 으로 web StatefulSet 이 존재하는지 확인한다.",
+        "재확장 후 kubectl exec web-1 이 'error: pod not found' 오류를 내면 Pod 가 아직 Running 상태가 아닌 것이다. kubectl get pod web-1 로 상태를 확인하고 READY 1/1 이 된 뒤 다시 시도한다.",
+        "5번에서 id.txt 내용이 비어 있거나 다른 값이 나오면 kubectl get pvc data-web-1 -o yaml 에서 spec.volumeName 을 확인한다. PVC 가 축소 전과 동일한 볼륨을 가리키고 있어야 데이터가 복구된다. minikube 환경에서는 hostPath 볼륨이라 PVC 재연결 후 데이터가 그대로 남는 것을 쉽게 확인할 수 있다."
+      ]
+    }
+  ]
+}

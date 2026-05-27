@@ -1,0 +1,37 @@
+{
+  "lecture_no": 3,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "준비 실습: GitLab 프로젝트를 만들고 강의 2에서 작성한 Dockerfile이 포함된 앱을 푸시하라. GitLab 웹 UI의 'main' 브랜치에 코드가 나타나는지 확인하라.",
+      "starter": "# 앱 디렉터리(Dockerfile이 있는 폴더) 안에서 실행한다\ngit init\ngit remote add origin https://gitlab.com/<your-namespace>/<your-project>.git\ngit add .\ngit commit -m \"Initial commit with Dockerfile\"\ngit push -u origin main",
+      "solution": "# 전체 과정:\ngit init\ngit remote add origin https://gitlab.com/yourname/myapp.git\ngit add .\ngit commit -m \"Initial commit with Dockerfile\"\ngit push -u origin main\n\n# 확인: 브라우저에서 https://gitlab.com/yourname/myapp 를 열어\n# main 브랜치에 Dockerfile, index.js, package.json, .dockerignore가 보이면 성공\n\n# 실험용 dev 브랜치도 만들어 둔다:\ngit checkout -b dev\ngit push -u origin dev",
+      "explanation": "GitLab 저장소는 모든 자동 파이프라인 실행의 출발점이다. 'main' 브랜치는 배포 가능한 상태를 유지하고, 'dev'(또는 feature 브랜치)는 일상적인 작업을 위한 공간이다. 두 브랜치를 지금 만들어 두면 나중에 파이프라인 트리거를 'dev' 푸시에만 걸어 배포 브랜치에 영향을 주지 않고 자유롭게 실험할 수 있다.",
+      "hints": [
+        "'git push'가 'remote: The project you were looking for could not be found' 오류로 거부되면, remote URL의 네임스페이스와 프로젝트 이름이 정확히 일치하는지 확인한다.",
+        "2단계 인증(2FA)을 사용하는 GitLab 계정이라면 'git push' 시 비밀번호 대신 개인 액세스 토큰을 사용해야 한다. 일반 비밀번호는 HTTPS + 2FA 환경에서 작동하지 않는다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습: GitLab과 Jenkins를 연결해 코드 푸시가 파이프라인 빌드를 자동으로 트리거하도록 설정하라.\n\n아래 5단계를 모두 완료한다.\n1. 범위가 'api'인 GitLab 개인 액세스 토큰을 만든다.\n2. Jenkins에 GitLab 플러그인을 설치한다.\n3. Jenkins에 GitLab 연결을 생성한다(Manage Jenkins → System → GitLab 섹션). 'Test Connection'이 성공하면 된다.\n4. Jenkins 파이프라인 잡의 Build Triggers에서 'Build when a change is pushed to GitLab'을 활성화하고 Push Events를 선택한다.\n5. GitLab 프로젝트(Settings → Webhooks)에서 Jenkins의 Build Triggers 섹션에 표시된 URL과 시크릿 토큰을 사용해 웹훅을 만든다.\n\nGitLab의 'Test → Push events' 버튼을 사용해 빌드가 Jenkins에 나타나는지 확인하라.",
+      "starter": "# 이 실습은 설정 중심이다. 아래 체크리스트로 진행 상황을 추적한다:\n# [ ] GitLab 개인 액세스 토큰 생성 (범위: api)\n# [ ] Jenkins에 GitLab 플러그인 설치\n# [ ] Jenkins에 GitLab 연결 생성 및 'Test Connection' 성공\n# [ ] Jenkins 파이프라인 잡에 'Build when pushed to GitLab' 활성화\n# [ ] Jenkins에서 복사한 Webhook URL과 시크릿 토큰을 GitLab에 입력\n# [ ] GitLab 'Test > Push events' 실행\n# [ ] Jenkins 잡 빌드 기록에 새 빌드 등장",
+      "solution": "# 1단계 — GitLab 개인 액세스 토큰\n# 아바타(좌상단) → Preferences → Access Tokens → Add new token\n# 이름: jenkins-integration  만료: 90일  범위: api\n# 토큰을 즉시 복사한다 — 한 번만 표시된다.\n\n# 2단계 — Jenkins GitLab 플러그인\n# Manage Jenkins → Plugins → Available → 'GitLab' 검색 → Install\n# (GitLab API Plugin이 의존성으로 자동 설치됨)\n\n# 3단계 — Jenkins에 GitLab 연결 생성\n# Manage Jenkins → System → 'GitLab' 섹션 찾기\n# Connection name: gitlab-saas\n# GitLab host URL: https://gitlab.com\n# Credentials: Add → Kind: GitLab API token → 1단계 토큰 붙여넣기\n# 'Test Connection' 클릭 → 'Credentials verified' 메시지 확인\n\n# 4단계 — Jenkins 잡 Build Trigger 설정\n# 파이프라인 잡 열기 → Configure → Build Triggers\n# 'Build when a change is pushed to GitLab' 체크\n# Events: Push Events 체크\n# Jenkins가 표시하는 웹훅 URL 메모 (예: https://<jenkins-host>/project/<job-name>)\n# Secret Token 옆 'Generate' 클릭 → 생성된 토큰 복사\n\n# 5단계 — GitLab 웹훅\n# GitLab 프로젝트 → Settings → Webhooks → Add new webhook\n# URL: 4단계의 Jenkins 웹훅 URL 붙여넣기\n# Secret token: 4단계에서 생성한 시크릿 붙여넣기\n# Trigger: Push events 체크 → Add webhook\n# 'Test' → 'Push events' 클릭 → HTTP 200 응답 확인\n# Jenkins로 전환 — 잡의 빌드 기록에 새 빌드 등장",
+      "explanation": "연결은 양쪽에서 일치해야 하는 두 가지 사실로 이루어진다. GitLab에 HTTP POST를 어디로 보낼지 알려주는 URL, 그리고 요청이 신뢰할 수 있는 곳에서 왔음을 증명하는 공유 시크릿 토큰. Jenkins가 push 이벤트를 받으면 요청 헤더의 토큰을 검증하고 일치하면 빌드를 시작한다. 따라서 Jenkins에서 GitLab으로 토큰을 정확히 복사하는 것이 중요하다. 불일치하면 403 오류가 반환되고 빌드가 실행되지 않는다. GitLab 플러그인은 빌드 결과를 GitLab 머지 리퀘스트에 다시 보고하는 기능도 제공해 피드백 루프를 닫아 준다.",
+      "hints": [
+        "GitLab 'Test → Push events'가 비 200 상태 코드를 반환하거나 타임아웃된다면, Jenkins 호스트가 인터넷에서 접근 가능한지 확인한다. GitLab SaaS는 Jenkins에 POST를 보낼 수 있어야 한다. Jenkins를 로컬에서 실행 중이라면 ngrok 같은 터널링 도구가 필요하다. 'ngrok http 8080'을 실행하면 공개 URL을 받을 수 있다.",
+        "'Test Connection'이 실패하면 GitLab host URL에 슬래시가 없는지, Credential 종류가 'GitLab API token'인지 확인한다('Username with password'가 아니어야 함).",
+        "테스트 이벤트 후 빌드가 나타나지 않으면 GitLab에서 Settings → Webhooks → Edit으로 이동해 'Recent deliveries'를 확인한다. Jenkins가 반환한 응답이 403이면 시크릿 토큰이 일치하지 않는다는 의미다."
+      ]
+    },
+    {
+      "prompt": "응용 실습: 실제 코드 푸시로 웹훅 트리거가 엔드투엔드로 작동하는지 증명하라. 'dev' 브랜치에 사소한 변경을 만들어 푸시하고, Jenkins가 빌드를 자동으로 시작하며 콘솔 출력에 'Started by GitLab push'가 표시되는지 확인하라.",
+      "starter": "# dev 브랜치에서 작업:\ngit checkout dev\n# 사소한 변경:\necho \"webhook trigger test\" >> README.md\ngit add README.md\ngit commit -m \"Test webhook trigger\"\ngit push\n# 그 다음 Jenkins를 열어 잡의 빌드 기록을 확인한다.",
+      "solution": "git checkout dev\necho \"webhook trigger test\" >> README.md\ngit add README.md\ngit commit -m \"Test webhook trigger\"\ngit push\n\n# 푸시 후 1~2초 안에 Jenkins에서 기대할 동작:\n# 1. 잡의 빌드 기록에 새 빌드(#N)가 나타남\n# 2. 빌드 클릭 → Console Output\n#    첫 줄에 다음과 비슷한 내용이 나와야 함:\n#    'Started by GitLab push by <your-username>'\n# 3. Jenkinsfile이 저장소에 없으면 빌드가 실패할 수 있음 —\n#    이 단계에서는 정상이다. 중요한 것은 트리거가 작동했다는 사실이다.",
+      "explanation": "콘솔 출력에 'Started by GitLab push'가 보이면 웹훅 연결이 엔드투엔드로 작동한다는 확실한 증거다. GitLab이 push 이벤트를 감지하고, Jenkins에 HTTP POST를 전달했고, Jenkins가 시크릿 토큰을 검증하고 빌드를 시작했다는 뜻이다. 이 시점에서 Jenkinsfile이 없어 빌드가 실패하는 것은 완전히 정상이다. 트리거 메커니즘이 작동하는지 확인하는 것이 이번 강의의 핵심이고, 파이프라인 내용은 다음 강의에서 채운다.",
+      "hints": [
+        "푸시 후 빌드가 나타나지 않으면 GitLab → Settings → Webhooks → Recent deliveries에서 POST 시도 여부와 Jenkins의 응답을 확인한다.",
+        "'dev' 대신 'main'에 푸시했다면 Build Trigger에 설정된 브랜치가 무엇인지 확인한다. 푸시한 브랜치와 일치해야 트리거가 실행된다."
+      ]
+    }
+  ]
+}

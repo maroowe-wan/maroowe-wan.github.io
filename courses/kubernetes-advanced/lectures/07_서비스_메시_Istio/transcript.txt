@@ -1,0 +1,1768 @@
+## 영상 1: Istio & Service Mesh - simply explained in 15 mins (https://www.youtube.com/watch?v=16fgzklcF7Y)
+
+in this video you will learn about
+service mesh and one of its
+implementations
+which is istio in order to understand
+the concepts
+we will first look at the challenges of
+a microservices application
+and then we will see how different
+features of a service mesh
+solve these challenges we will look at
+how istio implements service mesh
+and learn about istio architecture as
+well as how to configure
+istio for our microservices application
+istio is
+a service mesh so in order to understand
+istio we need to understand what service
+mesh is
+service mesh is a popular solution for
+managing communication between
+individual microservices in a micro
+service application
+so why do we need a dedicated tool for
+microservices communication
+and what are the challenges here
+now when we move from monolith to
+microservices application
+we introduced a couple of new challenges
+that we didn't have
+with a monolith application and let's
+say we have
+an online shop application which is made
+up of several micro services
+we have the web server that gets the ui
+requests
+payment microservice that handles the
+payment logic
+let's say we have a shopping cart
+product inventory
+and database and probably some more
+services
+and we're deploying our micro service
+application inside a kubernetes cluster
+now what does our micro service
+application setup need
+to run successfully or what are some of
+the required
+configurations for such an application
+first of all each micro service has its
+own business logic right
+payment service handles the payment
+logic web server handles ui requests
+database persist data and so on now
+services need to talk to each other
+when user puts stuff in the shopping
+cart request is received by the web
+server
+which hands it over to the shopping cart
+microservice
+which will talk to the database to
+persist the data so how do services
+know how to talk to each other what is
+the endpoint of each
+service all the service endpoints that
+web server talks to
+must be configured for web server so
+when we add a new micro service
+we need to add the endpoint of that new
+service to all the microservices
+that need to talk to it so we have that
+information as part of the application
+deployment
+code now what about security in our
+microservice application setup
+generally a common environment in many
+projects will look like this
+you have firewall rules set up for your
+kubernetes cluster
+maybe you have a proxy as entry point
+that gets the request first so cluster
+can't be
+accessed directly so you have security
+around the cluster
+however once request gets inside the
+cluster the communication is insecure
+microservices talk to each other over
+http or some other insecure protocol
+also services talk to each other freely
+every service inside the cluster can
+talk to any other service so there are
+no restrictions on that
+so this means that from security
+perspective
+if an attacker gets inside the cluster
+it can do anything because we don't have
+any additional security inside
+and maybe for small applications they
+don't really have any sensitive user
+data
+it may be okay but for more important
+applications like
+online banks or apps with lots of
+personal user data
+a higher level of security is very
+important
+so you want everything to be as secure
+as possible
+so again additional configuration inside
+each application is needed to secure
+communication between
+services within the cluster you also
+need
+retry logic in each microservice to make
+the whole application
+more robust if one microservice is
+unreachable or you lose connection for a
+bit you want to retry the connection
+so developers will add this retry logic
+also to the services what about metrics
+for your services you want to be able to
+monitor how the services are performing
+what http errors are you getting how
+many requests are your microservices
+receiving
+or sending or how long does a request
+take
+to identify the bottlenecks in your
+application
+so development team may add a monitoring
+logic
+for prometheus for example using
+prometheus client library
+and collect tracing data using a tracing
+library like zipkin for example
+so as you see teams of developers of
+each microservice
+need to add all this logic to each
+service
+and maybe configure some additional
+stuff in the cluster to handle
+all these very important challenges in
+the microservices application
+and this means that developers of
+microservices are not working
+on the actual service logic but are busy
+adding network logic for metrics and
+security and communication etc
+for each microservice which also adds
+complexity to the services instead of
+keeping them simple and lightweight
+now wouldn't it make more sense to
+extract all the non-business logic
+out of the microservices and into its
+own
+small sitecar application that handles
+all these logic and acts as a proxy and
+this small application
+is a third party application the cluster
+operators
+can easily configure through a simple
+api without worrying about how the logic
+is implemented and developers can now
+focus on developing the
+actual business logic and note that you
+don't have to add this sidecar
+configuration to your
+micro service deployment yaml file
+because
+service mesh has a control plane that
+will automatically
+inject this proxy in every microservice
+pod
+so now the microservices can talk to
+each other
+through those proxies and the network
+layer
+for service to service communication
+consisting of
+control plane and the proxies is a
+service mesh
+in addition to the above features one of
+the most important features of a service
+mesh
+is traffic split configuration so what
+is a traffic split
+when changes are made to a payment
+microservice for example
+a new version is built tested and
+deployed to a production environment
+right
+now of course you can rely on tests to
+validate
+the new version but what if the new
+version has a bug that you couldn't
+catch with the tests
+happens very often depending on the test
+coverage so in this
+case you don't want to end up with a new
+version of payment service in production
+that doesn't work it may cost your
+company a lot of money
+so you want to send maybe only one
+percent or 10
+traffic to the new version for a period
+of time
+to make sure it really works so with
+you can easily configure a web server
+micro service
+to direct 90 of traffic to the payment
+version 2.0 and 10 of traffic
+to the version 3.0 which is also known
+as
+canary deployment
+and as i mentioned at the beginning
+is just a pattern or a paradigm
+and istio is one of its implementations
+and in istio architecture the proxies
+are invoice proxies which is an
+independent open source project
+that istio as well as many other service
+mesh implementations also use
+and the control plane component in istio
+is
+istio d which manages and injects the
+envoy proxies
+in each of the microservice pods
+now note here that in earlier versions
+of
+istio up to version 1.5
+istio control plane was a bundle of
+multiple
+components you had the citadel
+mixer galley and some other components
+so you had multiple pods when you
+deployed istio
+however in version 1.5 all of these
+separate components were combined back
+into
+one single stod component to make it
+easier
+for the operators to configure and
+operate istio so if you have read
+articles or watch videos where all these
+components are explained
+separately note that this is only
+relevant for the earlier versions now
+you only worry about
+one single istio d component
+so istio architecture is comprised of
+the control
+plane which has esteod component and
+control plane manages a data plane
+which is group of all the invoice
+proxies
+so now the question is how do we
+configure all these above features
+for our micro services in istio as i
+mentioned
+you don't have to adjust deployment and
+service dml files for your micro
+so all the configuration for easter
+components will be done in istio itself
+again having a clear separation between
+the application logic
+and configuration and the service mesh
+logic and configuration
+and the great thing is that istio can be
+configured
+with kubernetes yaml files because it
+uses
+crds by extending kubernetes api
+crd is basically a custom resource or
+custom component in kubernetes that can
+be used
+to allow configuring these third-party
+technologies like istio
+prometheus etc using the same kubernetes
+yaml files
+and apply them using cube ctl without
+having to learn a technology specific
+configuration language
+and adjusting that configuration
+directly inside istio for example
+so using a few sdo crds
+we can configure different traffic
+routing rules
+between our microservices like which
+services can talk to each other
+traffic split configuration the retry
+rules
+timeouts and many other network
+configurations
+and there are two main crds for
+configuring
+service to service communication virtual
+which configures how to route the
+traffic to a specific service
+and once that traffic is actually routed
+to that service
+on top of that using destination rule
+component
+we can configure some policies on that
+traffic light what kind of load
+balancing to use
+to talk to the pods behind the
+destination service
+so overall as you see we create
+these crds custom resource definitions
+in kubernetes
+that istiod component which is is the
+control plane
+will read and convert into
+invoice specific configuration and send
+that configuration
+out to all the invoice proxies so we
+don't configure
+proxies we configure control plane and
+control plane itself
+will then push that configuration out to
+all individual
+invoice proxies and the proxies
+themselves
+can now communicate with each other by
+applying this configuration
+that we define without having
+to go back to the easter control plane
+so they can independently talk to each
+other
+because they have all the logic and
+configuration they need
+without talking to the control plane
+in addition to configuring the proxies
+stod also has a central registry for all
+the
+microservices so instead of statically
+configuring the endpoints
+for each microservice when a new
+gets deployed it will automatically get
+registered
+in the service registry without the need
+of any additional configuration from our
+site because
+istio automatically detects the services
+and endpoints in the cluster
+and using this service registry the
+envoy proxies can now
+query the endpoints to send the traffic
+to the relevant services
+in addition to this dynamic service
+discovery feature
+istiod also acts as a ca as a
+certificate authority
+and generates certificates for all the
+microservices
+in the cluster to allow secured tls
+proxies of those microservices and
+finally sdod gets metrics and tracing
+from the invoice proxies that it
+gathers they can be later consumed by
+monitoring server like
+prometheus or tracing servers etc
+to have out-of-the-box metrics and
+tracing
+data for your whole microservice
+istio has another component called istio
+ingress gateway
+that basically is an entry point into
+your kubernetes cluster
+you can think of the istio ingress
+gateway as an alternative
+to nginx ingress controller so istio
+gateway
+runs as a pod in your cluster and
+acts as a load balancer by accepting
+incoming traffic in your cluster
+and gateway will then direct traffic to
+one of your microservices inside the
+cluster
+using virtual service component
+and you can configure istio gateway
+using
+a gateway crd
+so now the traffic flow in your
+with all these istio components will
+look like this
+so user will initiate a request to
+a web server microservice in your
+the request will first hit the gateway
+because it's that entry point
+of the cluster gateway will then
+evaluate
+the virtual service rules about how to
+route the traffic
+and will send it to web server
+microservice and finally that request
+will reach
+the proxy the invoice proxy inside your
+web server
+micro service the invoice proxy will
+evaluate the request
+and forward it to the actual
+web server container within the same pod
+using localhost now the web server will
+initiate another request to a payment
+so the request will move from
+web server container to the web server
+proxy
+which will then by applying the virtual
+service rules as well as
+destination rules and maybe some other
+configuration
+will communicate with the proxy
+envoy proxy of payment microservice
+using mutual tls and the same will
+repeat for communication between the
+payment service and
+database and all the way back the
+response will be
+returned to the ui and during this
+overall request flow
+the proxies will gather all the metrics
+and tracing information
+about the requests and send it back to
+the control plane
+so we automatically have monitoring for
+our application
+so that's it for this video subscribe to
+my channel for
+more content like this and if you want
+to see
+behind the scenes content and previews
+follow me on instagram as well
+thank you and see you in the next video
+
+## 영상 2: Istio Tutorial (Service Mesh - Ingress Gateway - Virtual Service - Gateway - Ingress - mTLS) (https://www.youtube.com/watch?v=H4YIKwAQMKk)
+
+Hello and welcome to my channel!
+In this video, we'll explore what Istio is,
+how it works, and how it can benefit your
+microservices architecture.
+First, we'll talk about istio architecture
+and how it works under the hood.
+Then I'll show you multiple methods on how
+to install istio on Kubernetes cluster, including
+helm installation.
+I'll walk you through a few examples of how
+to manage traffic, request routing, and canary
+deployment.
+And we'll talk about multiple ways to inject
+sidecars into the pod.
+One of the biggest topics of this tutorial
+is how to use an ingress gateway to expose
+applications running in Kubernetes to the
+internet.
+We'll install cert-manager and use letsencrypt
+to automatically obtain TLS certificates and
+secure our APIs.
+Finally, I'll show you how to use Prometheus
+and grafana to monitor latency, traffic, and
+availability not only of the services exposed
+to the internet but also of internal applications.
+And, of course, we'll use kiali to visualize
+the service mesh inside our cluster.
+In the end, we'll talk about Gateway API and
+how to use it for both service mesh and instead
+of your typical ingress.
+So what istio is?
+Istio is an open-source service mesh that
+provides a unified platform to connect, manage,
+and secure microservices.
+It was created by Google, IBM, and Lyft in
+2017 and has since gained significant traction
+in the cloud-native community.
+Istio is built on top of Envoy - a high-performance
+proxy that handles all the traffic between
+microservices.
+Istio works by deploying a sidecar container
+alongside each microservice instance in your
+environment.
+The sidecar container intercepts all traffic
+to and from the microservice, handling traffic
+routing, load balancing, service discovery,
+and other important networking tasks.
+Istio also provides advanced traffic management
+features like canary deployments, A/B testing,
+and fault injection.
+Now, why would you want to use Istio?
+Istio provides several benefits to modern
+Firstly, it simplifies network management
+by abstracting away the complexity of service
+discovery, load balancing, and traffic routing.
+Secondly, Istio provides advanced security
+features like mutual TLS authentication, role-based
+access control, and traffic encryption.
+Finally, Istio provides observability features
+like distributed tracing, metrics collection,
+and logging.
+Since the istio operator is deprecated, most
+people would prefer helm installation.
+It's pretty easy to include in your deployment
+pipeline with other terraform resources.
+You can use istioctl to try it out, but realistically
+you'd probably still use helm to deploy it
+in production environments.
+This step is optional only to show you how
+to get default helm values.
+Let's go ahead and add the official helm repo.
+Now let's search for the base helm chart that
+includes the custom resource definitions,
+which are mandatory to install before you
+can deploy istiod.
+I highly recommend using the same version
+for the first try; otherwise, the ingress
+gateway may not work for you.
+We can use helm show values to get defaults
+for this helm chart and pipe it to the file.
+Let's call it istio-base-defaults.yaml.
+You can open it and find values that you want
+to customize.
+It's pretty basic.
+For this video, I'm going to be using the
+EKS cluster that you can create using my terraform
+code.
+Now I'll use terraform as well to deploy the
+istio helm chart.
+You can put it in the same folder or follow
+along.
+First of all, we need to declare the helm
+provider.
+To authenticate with Kubernetes cluster such
+as EKS, we can dynamically obtain a temporary
+token and then use it to install helm.
+Another way is just to point the provider
+to Kubernetes config on your local machine.
+Next, create a new file for the first istio
+base helm chart.
+You don't have to use terraform; you can copy
+a command that exactly matches terraform and
+execute it in the terminal.
+I prefer to use terraform to make it easily
+reproducible.
+Let's call this release my-istio-base.
+Point to the remote helm repository.
+Specify what helm chart you want to use.
+Then the Kubernetes namespace.
+If it does not exist, let's create it.
+Also, make sure to use the same version.
+Just in case if you want to override any variables,
+you can use set statements.
+For example, set the default namespace for
+the istio deployment.
+Recently istio team combined the pilot, citadel,
+and gallery into a single executable called
+istiod.
+Let's get the default values for it as well
+and use the same version.
+We would need to override a few variables
+for the ingress gateway to work.
+Create another terraform file to deploy the
+istiod helm chart.
+You can also find the helm command to deploy
+it manually.
+Telemetry and namespace are default values,
+but we need to override the ingress service
+and ingress selector for the cert-manager
+to work correctly and be able to solve the
+http01 challenge from letsencrypt.
+Also, we need to explicitly depend on the
+previous helm chart since istiod requires
+custom resources.
+In the terminal, you need to initialize terraform
+first.
+Then run apply to deploy both helm charts.
+Let's check if the istio custom resources
+were created.
+Also, we need to make sure that the istiod
+pod is running.
+Alright, istio is deployed to our cluster,
+and we're ready to start managing traffic
+using the istio control plane.
+Let's create a dedicated namespace for our
+first example and call it staging.
+If you want istio to inject sidecars to all
+pods in this namespace, you add an injection
+enabled label.
+In order for istio to manage traffic, each
+service must have an istio sidecar.
+We'll have two deployments to simulate a canary.
+This deployment is version v1.
+Also, when we get to the kiali, you would
+want these labels to show up in the UI.
+It's a simple golang app that is uploaded
+to the docker hub.
+Since it's a public image, you can use it
+as well.
+The second deployment is identical, except
+that it uses the v2 version label.
+When we create this standard service in Kubernetes,
+since it uses a single label app: first-app,
+it randomly routes traffic to both versions
+v1 and v2.
+To manage and shift traffic, we actually need
+a couple of istio custom resources.
+The destination rule defines what backend
+applications are used.
+They call it subsets.
+We have a subset for the v1 version, which
+is also called v1, and another one for v2.
+You also need to add a target host; in this
+case, it's a service name first-app.
+You can get all the values from the official
+istio documentation.
+The second custom resource is virtual service.
+First, we also need to use the same target
+host.
+Same as in the previous example, it will target
+Kubernetes service first-app.
+Then we can intelligently route traffic to
+different backends.
+For this example, we'll simulate a typical
+application upgrade when you need to roll
+out a new version of the app, in this case,
+v2, and start shifting traffic to it.
+Sometimes it's called canary deployment.
+When the traffic hits the new version, you
+can monitor status codes and decide if you
+want to proceed or abort.
+Alright, let's start routing traffic to only
+version v1.
+Now to test, we need a client inside Kubernetes,
+which also have a sidecar. Port forward won't
+work in this case.
+Later we'll use a gateway.
+Let's go ahead and apply the example-1 folder.
+Check the status of the pods in the staging
+namespace.
+If you add a wide flag, you can get the internal
+IP addresses of the pods.
+Take note of those two.
+We also have a single Kubernetes service in
+that namespace.
+If you check endpoints on that service, you'll
+get two pods.
+So if you access this service without a sidecar,
+you would randomly receive traffic from both
+versions, v1, and v2.
+For the test, ssh to the client in the backend
+That pod is based on a curl image and has
+an infinite loop to prevent it from exiting.
+Let's use curl in the loop to hit our first-app
+service in the staging namespace.
+Since we used istio virtual service, traffic
+is only routed to v1 version.
+Later I'll show you how to visualize this
+traffic in the UI.
+Now let's say we want to upgrade our app to
+version v2.
+First, we want to route a small percentage
+of the traffic to that version and make sure
+it's healthy.
+Add weight attribute with 90% value.
+Also, add another destination rule that will
+send traffic to the v2 version but only 10%
+of the traffic.
+Everything is ready; let's apply the new destination
+rules.
+On the bottom window, you can see that v2
+versions rarely appear.
+Since we only route 10% of traffic to that
+version.
+Without istio to implement the same task,
+you would scale version v1 to 9 pods and create
+a single pod for v2.
+Well, you can have any number of pods just
+need to keep the ratio.
+With istio, it does not matter how many pods
+you have.
+You can still intelligently route traffic.
+Let's say we are now confident that the v2
+version has no bugs.
+Now we can start routing half of the traffic
+to the new version.
+And of course, you can automate this in your
+pipeline, but first, you need to understand
+how it works.
+Let's apply it again.
+Now we receive an equal amount of traffic
+on both versions.
+Also, you can implement similar routing with
+Gateway API but with experimental custom resources
+only.
+We'll talk about technics at the end of the
+video.
+At this point, we are confident in our new
+version, and we want to route all the traffic
+to it.
+Apply it again, and you'll see immediately
+that all the traffic is now routed to the
+v2 version.
+In this section, I want to talk about multiple
+ways you can inject sidecars into your pods.
+The first one and most common is to use inject
+label.
+You can also set the value to disable, and
+other methods won't work either.
+The second method is to use a pod inject enabled
+Now the third one is to inject manually.
+But you should use it only when you are trying
+to test something.
+For example, this deployment does not have
+labels, and istio, should not inject the sidecar.
+Let's apply and see the result.
+Alright.
+the first deployment has a sidecar, and the
+second one does not.
+To manually inject sidecar, you need to use
+istioctl cli and specify the path to that
+If you get the pods in a few seconds, you
+should see that the istio sidecar was injected
+into the second pod.
+In the following section, I want to show you
+how to expose an application running in Kubernetes
+to the internet using the istio ingress gateway.
+We'll also use the helm chart to deploy it
+in our cluster.
+Similar to the previous charts, let's save
+the default values locally.
+Just in case if you want to override some
+of them.
+I'll keep all default values for the gateway.
+For example, you can use service annotations
+to specify what kind of load balancer you
+want.
+In AWS, you probably want to upgrade classic
+LB to a network load balancer.
+Create another terraform file for gateway
+As you can see, I'm not going to override
+any values in this deployment.
+Keep a note that we'll deploy it to the istio-ingress
+Let's run terraform apply to install the helm
+chart.
+Now we can check if the load balancer was
+created.
+If it's in the pending state, try to describe
+it and find any errors.
+You can also get events in that namespace.
+For the third example, we'll use the production
+namespace and also inject the sidecar to all
+pods in that namespace.
+Then identical deployments for version v1
+and v2.
+The same service, just a different name.
+Same destination rule that defines two subsets
+for both versions.
+Now the virtual service must have the external
+DNS name under the hosts.
+In my case, I have app.devopsbyexample.com
+and the second one for internal Kubernetes
+routing.
+In this case, we have an additional attribute
+gateway that uses the name of the gateway
+that we're going to create next.
+Similar to the previous example, we'll route
+90% of the traffic to v1 and 10% to v2.
+You can also use different prefixes if multiple
+services hide under your api, similar to a
+typical ingress.
+To expose the application to the internet,
+we need to create a gateway object.
+This is an istio custom resource and not a
+gateway api from Kubernetes.
+Keep this in mind; they are very similar on
+purpose.
+On line 9 selector uses pods labels to identify
+what gateway to use.
+To route plain http traffic, you select port
+80 and http protocol.
+As a host, you put your dns name.
+You can use the same gateway to route multiple
+domains just list them here.
+Let's check the pod labels on the ingress
+gateway to make sure that it will match our
+label under the selector.
+Istio gateway looks like it should work.
+Let's go ahead and apply the example-3 folder.
+Check the status of pods.
+I want to show you a trick that you can use
+to verify Ingress before you update DNS.
+Hostname is just a header.
+You can use curl and pretend that you already
+have a proper dns.
+For the address, you specify the load balancer
+hostname.
+Alright, it works; we got a response from
+the app deployed in Kubernetes.
+Now let's create a CNAME record for our domain.
+I use google domains, but it does not matter.
+Just create a CNAME if it points to another
+hostname or A record if you need to point
+to the IP address.
+In a few minutes, check if the DNS is updated.
+Finally, we can use our custom domain name
+to reach the app.
+That was pretty simple.
+The next step is to secure our application
+with a TLS certificate.
+First of all, we need to deploy a cert-manager,
+including all custom resources that come with
+it.
+In some environments like GCP, you would also
+need to create an additional firewall rule.
+In aws, it should work out of the box.
+Let's apply it.
+To automatically obtain TLS certificates from
+letsencrypt, we need to create a cluster issuer.
+You can also create just Issuer, which is
+namespace specific.
+When you are just getting started with cert-manager,
+you should use a staging environment.
+It's almost identical to production, just
+different URLs.
+Also, you must specify what ingress class
+will be used to solve the http01 challenge.
+That's why we had to override some defaults
+when we deployed istiod.
+When you test and be able to obtain a certificate,
+you can switch to the production Issuer.
+They have a strict quota for certificates.
+Let's apply both staging and production cluster
+issuers.
+Check if both of them are ready before creating
+certificates.
+To automatically get certificates on a typical
+ingress, you would use annotation.
+At this time, it's not supported on the istio
+Ingress, but it works on gateway api.
+As a workaround, we can create certificate
+resources separately.
+Use your domain name.
+To test certificates, update the name to staging
+issuer.
+Also, it must be created in the istio-ingress
+namespace, where you have your gateway pods.
+When you create these certificates, the cert-manager
+will obtain a certificate from let's encrypt
+and store it in Kubernetes secret.
+The certificate is valid only for 90 days,
+and the cert-manager will automatically renew
+it and update the secret.
+If you get the certificate immediately, you
+can see it's not ready.
+In case it is stuck in not ready state, you
+can describe that certificate and find that
+the certificate request was created.
+Then you can describe the certificate request.
+You can see that order was created.
+Let's describe it as well.
+Then the challenge was created.
+Describe the challenge.
+In my case certificate was issued, and the
+challenge was deleted already.
+If you get a certificate, it should be in
+a ready state by now.
+Check that the Kubernetes secret was also
+Now to secure the api, you can add another
+rule for port 443 and use the https protocol.
+You also must specify the secret name that
+was created by the certificate resource and
+a host.
+Let's apply it again to update the gateway.
+To check the certificate, you can use the
+openssl tool.
+This is your certificate.
+You can try to access your api from the browser.
+It looks like it works.
+The certificate is valid and issued from letsencrypt.
+In the following section, we'll use prometheus
+and grafana to monitor istio and applications.
+I'm not going to spend a lot of time on deploying
+all monitoring components; you can watch the
+previous video for that.
+First, we need to create prometheus operator
+Then deploy the prometheus operator itself.
+Prometheus.
+And grafana.
+You can use either create or server-side to
+apply custom resources.
+Then create a monitoring namespace.
+Deploy Prometheus operator.
+And finally, grafana.
+In the monitoring namespace, you should have
+two pods.
+And a single pod for grafana.
+To monitor istio, we need to create a podmonitor
+and use istio sidecar labels.
+For example, let's get one of the pods that
+we want to monitor.
+First of all, to create a podmonitor Prometheus
+object, we need a named port, in this case,
+http-envoy-prom.
+In the second part, we need to select those
+pods based on the label, such as istio monitoring.
+Based on these two pieces, we can start monitoring
+the istio service mesh.
+You need to specify the namespace where your
+applications are deployed, staging, and production,
+as an example.
+Then use the selector and the port name.
+On line 8 prometheus main label must match
+the one on the Prometheus resource.
+Let's go ahead and apply it.
+Since I don't have Ingress for prometheus,
+I'll use port forward to access Prometheus
+UI.
+In a few seconds, maybe up to a minute, you'll
+see that the prometheus operator converted
+podmonitor object to the native prometheus
+config and reloaded the server.
+Under targets, you should have a new target
+with a few pods.
+The next step is optional.
+I just want to show you how to use a service
+monitor instead of a pod monitor.
+For example, to monitor the ingress gateway.
+Let's get the pod in yaml format.
+For example, you have a port, but the name
+is missing, and you cannot add it for some
+reason.
+In this case, you cannot use podmonitor since
+you need a named port.
+Instead, you can create a service and a service
+monitor to target this port.
+Let's define a new Kubernetes service that
+only uses prometheus port and give it a name
+metrics.
+Now we can create a service monitor and use
+that endpoint and metrics port name.
+It's a useful workaround when you don't have
+a port name and are not able to add it but
+still want to monitor the application with
+prometheus.
+Let's apply both service and service monitor.
+If you refresh the prometheus UI, you should
+get a new target with the gateway.
+There are a lot of metrics exposed by istio
+sidecars, but we'll focus on requests metrics.
+Since we used podmonitor for internal metrics
+and service monitor for the gateway, you can
+use a job label to filter them out.
+I'll use port-forward as well to access the
+grafana dashboard.
+If you used my code to deploy grafana, the
+username is admin, and the password is devops123.
+I prepared a dashboard to monitor Ingress
+and mesh inside Kubernetes.
+You can copy json and import it to the grafana.
+Now let's simulate some traffic.
+On the top graph, you can find latency measured
+in percentiles.
+The second one is traffic in requests per
+second, and the bottom one is the ratio between
+successful and failed requests.
+Let's generate some failed requests by sending
+requests to the not supported path.
+In the graph, you can see that availability
+drops below 80%.
+For the second test, to monitor the service
+mesh inside the Kubernetes, ssh to the pod
+and run another script.
+In the next section, we'll deploy kiali to
+visualize the service topology inside Kubernetes.
+You can also deploy it using helm or yaml
+files.
+You just need to watch out for external services,
+especially you need to provide a valid prometheus
+URL.
+The topology graph is built based on prometheus
+Let's apply.
+And verify that kiali is up.
+You may see some errors that you need to fix
+by updating the config, but the main functionality
+is based on prometheus.
+It still should work.
+Since some of the requests are sent to the
+wrong URL, you can see red lines that represent
+failed requests.
+In a large microservice deployment, it is
+useful to find out what service is failing
+quickly.
+If we stop our script, in a couple of minutes,
+you should see that the service is recovered.
+We have the gateway, internal service, and
+different versions of our application.
+You can use UI to monitor traffic distribution
+when you perform canary deployments.
+Istio has become the de facto service mesh
+for modern microservices.
+With its advanced networking, security, and
+observability features, Istio provides a unified
+platform to connect, manage, and secure your
+If you're building cloud-native applications,
+Istio is a must-have tool in your toolkit.
+If you want to use Istio in production in
+the next couple of months, you should use
+istio custom resources such as destination
+rules, virtual services, and others.
+Istio also has betta support for Gateway API
+to use as Ingress.
+But keep in mind that it won't work with the
+virtual service.
+Also, istio has experimental support to use
+Gateway API in a service mesh.
+I have two other tutorials on how to implement
+both.
+Thank you for watching, and I'll see you in
+the next video.
+
+## 영상 3: [ Kube 57 ] Istio demo with Kiali and traffic management (https://www.youtube.com/watch?v=0w23AQ-hrF4)
+
+how are you to rivers welcome to this
+video
+I'm Venkat and this is just me an open
+source channel right in this video I
+want to show you a quick sto demo I'm
+saying quick demo but I'm not sure how
+long it's gonna take but few viewers
+asked me about this particular video so
+I'm doing this I've done a series of
+videos around each do topic so I think
+it was like six videos we covered the
+steel installation in your kubernetes
+cluster and then how to deploy the
+sample booking for application and then
+adding the graph on visualization
+Chiarelli visualization and couple
+videos around traffic management alright
+so viewers asked me some of them asked
+me instead of going with the sample
+booking for application why don't we
+just show us a sample application
+created by yourself so that's what I'm
+gonna do in this video so I've got some
+sample application that I've written
+myself I haven't completely returned the
+application I'm just using the nginx
+container with some custom code in it
+that's it I've got few slides here my
+custom notes the usual way of me
+explaining things alright so what I'm
+gonna do in this video is to deploy two
+microservice alright so the first micro
+service is called my web I've got one
+version of it version one of my web
+micro service and I've got another micro
+service B which is called my data
+alright so I've got two versions of this
+micro service version 1 and version 2 so
+how and what I'm actually doing in these
+micro service and how these micro
+services are integrated and how I'm
+going to use the e steel to manage the
+routing and how I do the traffic
+management between these micro services
+so that's what we're gonna see in this
+video let's go to the next one
+alright so my web micro service and my
+data micro service so my web micro
+service it's just a simple nginx
+container nothing fancy so I didn't want
+to
+my own application and published dr.
+docker hub and then pulled that from
+docker so I'm using the readily
+available public nginx container nginx
+image and what i'm doing here is i'm
+using a config map for the default nginx
+configuration so when i deploy this part
+i mounted this config map into the pod
+under this part EDC nginx constabie
+slash default comms that's the default
+configuration and for my data micro
+service i've got again the same nginx
+container I'm using config map for the
+index dot HTML so that's the actual web
+page so instead of baking that web page
+inside the container I'm using a config
+map to inject that index.html file under
+user share nginx HTML index dot HTML so
+I've got two versions of the my data
+micro service so these two versions
+differ with this index or HTML so you
+will see just just to show you some
+difference between these two versions
+I've created two index dot HTML maybe
+with a different background so how these
+microservices are related how am I going
+to call micro-service be from
+microservice eh all right so when you
+hit the my web micro service it is going
+to the index configuration that I've
+deployed as a conflict map is going to
+redirect you to HTTP : my data which is
+this service so basically you are
+accessing the my web micro service which
+is in turn accessing the my data web
+service so that's the link between micro
+service a and micro service B all right
+so let's look at what are the components
+involved in doing this bit all right so
+my web is just a single version I've got
+only one version version one and we've
+got the part the actual nginx part and
+we also have the sidecar container so
+when you deploy it along with each do
+you get the sidecar container so that's
+the NY proxy so all the communication it
+won't
+directly to the part as you have seen in
+all my previous history or videos you
+know that the sidecar is a proxy so all
+the traffic coming into the pod will go
+through the the sidecar proxy so you
+don't have to change any of your
+application code even with your existing
+application you can make use of the sto
+service mesh so all the configurations
+and all the routing logic are done in
+the proxies not on your application
+itself so that's very useful so I don't
+have to change a bit of code in your
+actual application so all is done on the
+sidecar itself right so my web contains
+a part and a sidecar when you deploy
+that and from my data micro web service
+I've got two versions again part sidecar
+Paul and sidecar so that is a deployment
+this is another deployment for version
+one and I've got a deployment for my web
+all right and I'm exposing a service I'm
+exposing this deployment my web
+deployment as a service so this one is a
+cluster IP it's not a node port it's not
+a load balancer or anything so it's just
+a plain simple cluster IP so still this
+service won't be accessible outside the
+cluster because it's a cluster IP
+service and again I'm exposing this
+deployment my data deployment both
+version 1 and version 2 using this
+service here that's again a cluster IP
+service all right so that's the
+architecture in addition to normal
+resources that you deploy so you already
+know about the deployment and if you
+want access your deployment you need to
+expose it as a service and in addition
+when it comes to STM we need couple more
+components so one is the gateway so we
+need to create a gateway service which
+is a custom resource definition when you
+install ISTE oh so that's one of the
+custom resource definition that gets
+deployed and all the traffic coming in
+to your cluster is through this gateway
+all the traffic going in going out of
+the cluster is through the Gateway and
+you
+also have a component called virtual
+service a resource or object called
+virtual service and virtual service is
+the resource or object that defines the
+routing basically when a request comes
+to a particular domain so where it needs
+to be rerouted so in my case I'm saying
+my web dot example.com so if a request
+comes in from my web tour example.com
+through gateway and I've got the routing
+logic here and I've set the destination
+so that it needs to go so when it comes
+to my web tour example.com the request
+should be routed to this service so
+that's it this is the service from my
+web and when you hit the service when we
+go to my web dot example.com and it
+knows to wrote the traffic the request
+to this service and when I hit here the
+part the index configuration proxies my
+request to this service and this service
+load balances between version 1 and
+version 2 of the my data micro service
+right I hope it's all clear now let's go
+to the practical part so we have covered
+all the boring theory stuff let's go to
+the exciting practical stuff what I'm
+gonna close that one let me open web
+browser
+I'm also gonna open my terminal here let
+me open another terminal alright okay so
+I've got cuban areas already provision
+so in order to follow this video
+basically what you need is a cuban a dis
+cluster and helm installed and then
+metal lb load balancing so that is very
+important so you need to have cuban at
+this cluster helm and metal lb I've done
+videos on all these alright cube serial
+version - - shot I'm on version 1.15 dot
+3 so that's there helm version - - shot
+I'm using version 2.14 and I'm also
+having metal lb installed ok the first
+thing is let's go ahead and install sta
+alright so this is gonna be the same
+step that I follow
+in all my sto related videos so you
+might be knowing all the commands by now
+and I'm gonna install this deal with the
+key ally add-on so key alias for
+visualizing your traffic flow it's very
+useful to detect any problems with your
+service visually all right so sto
+install sto setup now we go down here
+the first command S Curl get latest is
+do is tear version its 1.3 dot - at the
+time of this recording the latest
+version is 1.3 don't - but when you
+watch this video in the future go to the
+spare G steel set up and then check for
+the latest version all right so Carl let
+me go to my Play directory which is
+where I do all my stuff go I've got the
+command in my history let's do that so
+it's downloading sto it's going download
+the East year and it will have all the
+sample files as well so city to sto sto
+and then you have the bin directory here
+so it's do-si-do that's the command you
+need to move that command sudo move bin
+is toc TL to you sir local bin I've
+already done that which is toc-toc it's
+an user local bin is toc TL all right so
+now we are good to install sto the first
+command is so make sure you are in the
+sto directory that you downloaded he'll
+install in the install directory
+kubernetes helm this deal in it - - name
+is tio in it - - name space sto system
+alright watch
+let's see what resources has been
+deployed cube cereal get all nope I need
+to look in the steel system namespace
+sto system get oh all right so
+containers getting created basically
+it's it has created like three jobs and
+the jobs will get executed on these
+parts so it will set up or it will
+create all the customers those
+definitions alright so that's all done
+so now we are going to install the
+actual list here along with the key ally
+add-on so to install key ally are to use
+key ally with is do you need to create a
+secret containing your username and
+password which will be used when you
+login to the key ally web interface so
+for that go ahead and search for a steel
+key ally sto clearly visualizing your
+mesh and it will have instructions on
+how to install so basically you are
+creating a couple of variables clearly
+username key ally passphrase and you're
+setting that up if you're using bash use
+these two commands and if you're using
+seashell like me go ahead and use these
+two all right so clearly user name I'm
+gonna use admin key only phosphorus I'm
+gonna use phosphorus admin same admin
+alright so that's done namespace is a
+steal
+alright that's done cube serial create
+namespace we don't have to create
+namespace we have already created the
+east EO system namespace and now we are
+good to run this command here all right
+copy that and paste it all right so
+that's our key ally secret that that got
+created so now we are good install key
+ally sorry
+helm sorry sto have an installed install
+in the Cuban artists directory helm sto
+- - name is tio - - namespace we are
+again going to install that in the same
+namespace which is sto system
+- - set clearly enabled equals true all
+right let's look at what resources are
+being deployed watch - X cube CDL - M
+sto system get parts ok as you can see
+there are lots of parts deployments
+replica sets demon sets getting created
+so Citadel gali ingress gateway sidecar
+telemetry Prometheus and you can also
+see clearly here so it will take about a
+minute for all the parts to be ready and
+running so let's wait for that right
+let's wait for it and we've got few more
+to be completed running and let's wait
+for Prometheus alright so I think
+everything is now ready okay so alright
+I think our sto is completely ready and
+one more thing we shouldn't forget to do
+we need to label the namespace cube CDL
+label namespace default is tio injection
+equals enabled so unless you do that
+these to your site car on get deployed
+along with your part then you have to
+install or you have to inject the
+sidecar manually space cube city all get
+namespace show labels
+alright so default namespace as Tata
+Steel injection enabled so one of our
+associate apply or one of our deployment
+you put in the default namespace we'll
+get the history of sidecar so now I'm
+going to go to my play directly and I'm
+going to get clone my kubernetes
+repository I've got all the llamo files
+already created for you so let's go
+ahead and get clone git clone has two
+TPS giddyup comm just mean open source
+kubernetes
+alright city took kubernetes city to
+Yama's city to steal
+demo cool so here's where all my
+services are so in my notes I showed you
+what micro services are got so I've got
+my
+so that's one microservice and I've got
+two versions of my data microservice my
+data version 1 my data version 2 and
+I've got a virtual service and at
+Gateway if you remember my notes I
+shared just a while ago you will
+remember that's one micro service these
+two are another micro service and in
+order to access we need a gateway and we
+also need a virtual service all right
+ok so let's login to our Keala dashboard
+because it'll be easy for us to see how
+traffic is flowing between different
+micro services visually for that cube
+cereal - Yin HDL system get service or
+get parts get service ok get service I
+think it's key ally yeah so as you can
+see clearly service is exposed but it's
+only exposed to as a cluster IP so we
+won't be able to access it outside of
+the cluster what you can do is you can
+edit this key ally service and then
+change that to Northport so that he can
+access it from outside the cluster or
+the other way is you can use port
+forwarding so it's exposed on port 20001
+so what we can do is cube CDL - in sto
+system for forward the key ally port and
+the port that we are going to forward is
+20,000 1 to 20,000 1 or on our localhost
+let me put an ampersand so it goes in
+the background ok so now if I go to
+localhost colon 20,000 we will get our
+key ally dashboard cool so if you are
+using that if you're launching that for
+the first time then you will be greeted
+with this login screen admin admin so
+those are the credentials that we
+created when we deployed Istria all
+right
+log in and you will see default
+namespace is tears instead metal and B
+at the moment in the D for
+space we don't have any applications
+deployed all right so let's go ahead and
+deploy some applications and before that
+I'm gonna show you what each of these
+llamo files look like so first let's
+take a look at my web demo file
+all right so VI my web dot yeah mo and
+you can see here I talked about the
+config map so I'm using this config map
+and the configuration is proxy pass has
+TTP my data location is slash so that's
+the root URL so any requests coming to
+this index web server will be proxied to
+http my data so that's my micro service
+B so that's how my Microsoft is a and
+Microsoft is B are interconnected so
+when you hit the root URL of the my web
+micro service it will be proxied to
+hosta t be my date at the second micro
+service so that's the config map I'll
+show you where the config map how I'm
+mounting this config map inside the pod
+so next time creating a service the
+service is exposed on port 80 so that's
+for my web micro service looks just a
+simple service definition and here comes
+the deployment I'm using the normal
+nginx deployment with one replicas and
+if I scroll down so you can see here
+volumes I'm using a config map as a
+volume so the config map that I defined
+is nginx conflict if I go all the way up
+our the name of the config map is engine
+X config and that's what I'm using the
+config map and volume mounts inside the
+container
+I'm volume mounting it and the mount
+part is EDC nginx contour D so when this
+part comes up this engine x.com nginx
+config config map will get mounted under
+a TC nginx contour D slash default conf
+that's because the data key is default
+conf
+all right so that's the my web micro
+service a
+and if you look at my data version one
+me hi my data we want on Yama so that's
+my second micro-service version one of
+my second micro-service and if you look
+here again it's a config map and it's
+the index dot HTML it's just a plain
+simple index dot HTML nothing fancy it
+will show just a text saying just me an
+open source I'm version 1 with a font
+color of yellow with the background
+color of green so that's my Gaussian one
+and I've got these service exposed again
+it's a cluster IP service for my data
+micro service and now comes the
+deployment and the deployment is very
+similar to the other micro service I'm
+using the default nginx container here
+and the volume is from the config map
+and I'm mounting it under user share
+nginx HTML so that's the default
+document root for nginx so anything you
+put under user share and in XHTML index
+to an STM index dot PHP index dot HTML
+so that will be your default web page
+all right so I don't have to go through
+this my devotion to it's again same
+maybe I should show you my data be to
+dot your MOU and again everything is
+going to be the same and you don't have
+to define the service here because
+there's only one service for the whole
+my data deployment version 1 and version
+2 so no service definition here just the
+config map and the deployment and in the
+config map you see a slight difference
+in stuff background color green just to
+show you some difference I've changed
+the background color to gray that's it
+and there is no phone color the default
+black phone color will be used all right
+so now comes the interesting bit virtual
+service and Gateway dot yeah let's look
+at gateway first VI
+gateway dot llamo it's that simple
+that's it
+so it says host is my web tour
+example.com so access to my web girl
+example.com
+is allowed into the cluster and the
+selectors sto we want to use the east
+ingress gateway if you've got an engine
+X ingress controller or traffic ingress
+controller installed on your system on
+your Cuba Redis cluster we want to use
+the stos ingress gateway that's what we
+are using here selectors ingress gateway
+steals in gross gateway servers and this
+gateway will be listening on port 80 so
+when a request comes to my web that
+on port 80 it will be allowed in
+so that's gateway we need to have that
+increased gateway now let's look at the
+virtual service virtual service Don Yama
+again it says the gateway so we need to
+bind this virtual service with the
+gateway that we created previously so we
+are saying the gateway is going to be my
+web gateway host is my web dot
+example.com so when a request comes to
+my web dot example.com
+it's already let in by the gateways and
+now we need to decide where we are going
+to send the request to so what is going
+to be our back-end service so when a
+request comes to my web tour example.com
+the default destination will be my bed
+so my web is the service that be exposed
+VI my web yummo so the service here my
+web service so that's the one it will
+get all the traffic whenever you hit my
+web that example.com all right cool
+let's take a look at cube city I'll get
+all all right so the normal we don't
+have anything let's deploy all these
+resources cube City I'll create minus F
+dot enter so so all these have been
+created and on the bottom you can see
+two containers on each of the pod so one
+does the nginx container the other one
+is the actual sidecar on why sidecar and
+we have the my data service my web
+service deployments and replica sets
+part is initializing and it's running
+let's wait for all these okay we've got
+everything up and run
+and in here on the key le - body can see
+two applications and now two
+applications are healthy okay let's
+close that we don't need that anymore
+and what we can do now is let's take a
+look at this one and I've showed you
+I've explained you about the key early
+web interfaces so I don't think I need
+to go through that again
+so let's go to the graph our
+applications our workload services or
+Institute config you can also click here
+which will take you to all these things
+okay so let's go back and click on the
+go to graph alright so now we have this
+graph right let's okay no problem
+requests percentage version app graph
+you can look at various ways so that's
+the app graph and that's the service
+graph version app graph and we have the
+workload graph Russian aircraft that
+that will show you the actual that will
+show you in detail request percentage
+display everything is looking good
+alright so since we haven't accessed our
+endpoint yet we don't see any traffic
+here okay let's take a look at how to
+access our own application so the
+application is completely exposed now we
+can hit the URL my web tour example comm
+so how how does it know when you do my
+web for example.com to take you to the
+service cube CDL - n sto system get
+service sto ingress gateway and the load
+balancer is 1 7 to 17 let's copy that so
+that's the IP address of my load
+balancer so that's your entry point
+right sudo VI EDC host and put in here
+the IP address of your load balancer and
+then to my web dot example.com okay so
+now we should be able to access my web
+dot example.com my web dot example.com
+and there you go so that's version one
+and if I hit refresh
+that's version 2 version 1 version 2
+version 1 version 2 everything is
+looking fine let's go back to the Keala
+consult and we should be able to see the
+traffic flow in okay so what I actually
+will do is basically I will do a curl
+request to send the request periodically
+or while true do curl - yes as you can
+see here on the left we now see how the
+parts are the microservices are
+interrelated so one crew do curl I'm not
+interested about the output just send
+some requests to my Weber example.com
+sleep for once again done ok so now we
+are sending the request so shortly you
+should be able to see here the traffic
+flows let's uncheck the unused node so
+that the kubernetes thing goes away
+alright so now you should be able to see
+the traffic flow here ok I think that's
+your ingress gateway and the requests
+are coming to my web and my web is
+proxying the requests to my data and now
+we've got both version 1 and version 2
+so 50% of the traffic goes to version 1
+50% of the traffic goes to version 2 all
+right so how to change the traffic
+policy let's say we want to send 100
+percent of the traffic to be 1 and 0
+percent to be 2 something like that so
+for that what you got to do is click on
+this one here and click on the service
+my data and now I here you don't have
+any virtual service or destination rules
+let's create something action here you
+can create a weighted routing create
+matching routing suspect traffic and so
+on let's do a create wait order of thing
+so the moment it's 50% for version 1 and
+version 2 let's change that
+version 1 so version one will receive
+hundred percent of the traffic and
+version 2 will receive zero percent of
+the traffic let's create that so now you
+can see there is one virtual service and
+destination rule let's take on that one
+destination row you can see version 1
+and version 2 ok now if I go back to the
+graph and change that to versioned app
+graph hide that and now you should be
+able to see that the traffic will
+increase to be 1 and then decrease to
+read to eventually 100% of the traffic
+will go to v1 and 0% to veto as you can
+see here 70% to be 120 % to version 2 so
+now we can see 100% traffic going to
+version 1 and v2 doesn't have any
+traffic against look at the color of the
+the edge here so it's gray it's green
+here alright so similarly you can do
+whatever you want click on the my data
+service action if you want update
+waiting role you can update that can
+change that 100% or let's say my version
+1 will take like 80 or 90% and version 2
+you have just introduced your version 2
+of the microservice and you want just
+10% of the traffic to go to version 2
+just in case if you want to do some
+testing so update Shawn graph hide and
+look at the version graph hide that and
+we should be able to see like 90% of the
+traffic going to be one and some of the
+traffic will start to flow to version 2
+as well so this is a weight based
+routing he can also do match based
+routing alright and now I just want to
+show you some other things so we have
+done that in the key ally web interface
+right so it would have created a virtual
+service for that cube city I'll get
+virtual service so we've only created
+one virtual service my web
+yes so but now we can see there is my
+data virtual service which God created
+automatically because we did that from
+the key Holly web interface you can see
+a 97 percent and 2 percent going to I
+don't know why but we've said 90 percent
+of e1 and 10% to v2 okay don't worry
+about that cube city I'll get virtual
+service my data - OH
+yamo point that - less you can see here
+how the Yama file is defined so has to
+DP route destination is my data and
+subset is V 1 so that is version 1
+subset is V 2 which is version 2 so it
+says that's the virtual service so
+whenever we hit the my data service
+which is this one my data and the
+traffic needs to be split between these
+two destinations version 1 and version 2
+wait is 90% - version 1 and 10% -
+version 2 so that's weight based routing
+ok
+let's also look at a match based routing
+okay so for that just go to my data
+click on my data and I'm going to delete
+all the traffic routing delete that go
+to show on graph so now you will be able
+to see that since we've deleted the
+routing the traffic will flow evenly
+between version 1 and version 2 we don't
+have any virtual service cube City I'll
+get virtual service yes that my data
+virtual service is gone we only have the
+mindmap virtual service so the traffic
+will again get split equally so 7525 and
+eventually we'll see 50% 50% traffic we
+just deleted the rule that we just
+created
+alright so in order to create match
+based routing let's click on that again
+my data servers I'm gonna create a
+matching routing so here what I'm saying
+is you've got a few options headers URI
+scheme method
+tyranny so when I say hitter you sir is
+Venkat and it's not gonna work because
+I'm not posting the header my
+application the web application is not
+designed to include that header it's not
+looking for that hitter but this is just
+to show you if you've got a header field
+that says user and if you're looking for
+a banker in add match and I'm going to
+redirect them to version 1 and this is
+just a rule that matches this header so
+if a header matches this particular
+value the header name is user and the
+Hinderer value is when cat in the
+traffic will be routed to my data
+version 1 of the application so we also
+need to add the default rule add another
+rule so here it says match any request
+and I'm going to add v2 and delete v1
+okay and roll so in this case now you
+can see here if the header of the
+incoming request contains user and spent
+cat in then it will be routed to version
+1 of the my data microservice all other
+requests will get routed to version 2 of
+the my data micro-service let's create
+that show on graph change that to
+version ab graph hide that ok so now let
+me go to my web for example.com so I'm
+not passing any hitter so by default
+every time i refresh it will still show
+me version 2 of the app because only if
+the header contains user has been cat M
+it will show me version 1 because I'm
+not doing that all my requests will be
+routed to version 2 I won't be able to
+see version 1 at all so now we can see
+all the data a hundred percent of my
+traffic is going to be - because of that
+rule let me also show that rule in the
+command line cube CTL get virtual
+service so my data virtual services
+there
+cube city I'll get virtual servers my
+data and so llamo ness so now you can
+see here the same virtual service so
+this one is for the host my data so
+which is here so whenever a traffic or a
+connection comes to my data our
+destination rules are the first one has
+matched the header if they use the name
+field in the hinder matches when cut in
+route to the destination version 1 and
+we also have the second destination and
+for all others so basically it will be
+evaluated in the ordered all the rules
+here in any virtual service will be
+evaluated in a sequential order
+so the first request comes in it checks
+whether the header contains the user
+event @n if it contains that the traffic
+will be routed to the version 1 of my my
+data micro service if it doesn't contain
+user venkat n or if it contains any
+other user but if what it goes to the
+next role which will be routed to
+version 2 of my my data micro service
+all right cool so that's all I wanted to
+show in this video hopefully it might
+have answered some of your questions so
+this is to show you that how you can use
+your existing applications and you can
+make use of the histiocytes mesh
+capability to do traffic management
+routing policies and so on thank you for
+watching I'll see you all in my next
+video bye bye

@@ -1,0 +1,373 @@
+## 영상 1: Prometheus, Grafana & Kubernetes: Installation + Monitoring (https://www.youtube.com/watch?v=r45DkTMMouc)
+
+In this video we're going to use the kube Prometheus stack to install Prometheus and Grafana on Kubernetes. We're going to show you how Prometheus is already configured to monitor the underlying Kubernetes infrastructure and how we can configure Prometheus to monitor our own applications.
+
+Chapter one covers installation, chapter two covers infrastructure monitoring, and chapter 3 covers application monitoring. Let's jump right into it.
+
+To ensure that you have Helm installed on your machine, run the command helm version in your terminal. If you get a version, perfect. If you get something saying command not found, please check out the article where we show you how to install Helm on Mac or Windows. Links are in the description.
+
+Once you ensure that you have Helm installed, we're going to use it to simplify the deployment of what's considered a very sophisticated setup: the kube Prometheus stack.
+
+For those that aren't very familiar with Helm, let's discuss what it is at a high level. We have this concept of Helm repositories where a repository contains many Helm charts. A Helm chart is essentially a package that contains all of the configuration files needed to set up a particular software.
+
+A popular repository is Bitnami because it contains many Helm charts that simplify the deployment of very popular software like MongoDB, Redis, MySQL, and PostgreSQL in such a way where they can be made very highly available within your Kubernetes cluster.
+
+The Helm repository that we're interested in is the Prometheus Community Helm repo because it contains all of the Prometheus related Helm charts. One of them we're going to use to set up the kube Prometheus stack.
+
+To add this repository from our local Helm configuration, we say helm repo add and set an alias by which we can always refer to this Helm repo. We can call the alias whatever we want. For clarity, we call it prometheus-community and link this alias to the Prometheus Community Helm repository.
+
+Now that we've added this Helm repository, we can look at all of the Helm charts inside of it by saying helm search repo. There are many Helm charts available. If you scroll up, you'll find the kube Prometheus stack Helm chart, the one that we're going to use.
+
+If you want to search more specifically, you can say helm search repo prometheus-community/kube-prometheus-stack to zero in and refine your search. There it is. The latest chart version is 65.5.0.
+
+If we want to search for all of the versions that are available for this Helm chart, we can say --versions. If there's a version in particular that you're interested in installing, you can look through all of the chart versions. In this case, we're interested in installing the kube Prometheus stack version 45.7.1.
+
+When we say installing a Helm chart, we're essentially taking that package of configuration files and releasing it into your Kubernetes cluster. Every Helm chart installation is known as a Helm release.
+
+The command to install is: helm install. We're going to call the release prometheus. You can call the release whatever you want. The chart that we want to install is inside of the Prometheus Community Helm repository, and it's called kube-prometheus-stack. The version of the chart whose contents we want to release onto our cluster is 45.7.1.
+
+We want the contents of the kube Prometheus stack to be deployed within a particular namespace in the Kubernetes cluster. That namespace is typically called monitoring. We need to first make sure that that namespace gets created before the Helm installation proceeds. We can say --create-namespace.
+
+By installing the kube Prometheus stack Helm chart, we're releasing four main components into our Kubernetes cluster: the Prometheus operator, the node exporter, kube-state-metrics, and Grafana.
+
+The Prometheus operator is crucial because it automates the creation of your Prometheus instance as well as the alert manager. The Prometheus instance is essentially a time series database that's going to store all of the metric data, whether it's infrastructure related metric data or application related metric data. All of that data will reside inside of Prometheus.
+
+The Prometheus operator also automates the creation of the alert manager, which can create alerts based on the metric data that's inside of Prometheus.
+
+Two other components that get deployed are the node exporter and kube-state-metrics. These essentially work together to extract infrastructure related metrics from the Kubernetes platform itself. They're automatically set up to persist all of that data into Prometheus. So right there, we get infrastructure monitoring out of the box.
+
+Now you've got all of this metric data inside of Prometheus. How are you going to make sense of it? We also got Grafana for free. Grafana is a visualization tool that can query metric data from Prometheus and based on that data, create very insightful visualizations.
+
+We can look at all the pods that get deployed in the monitoring namespace. We see the Prometheus operator, which automates the creation of your Prometheus instance as well as the alert manager. We see kube-state-metrics, node exporter, and Grafana as well.
+
+If you've never heard about Helm or the concept of operators before, this might have been a bit overwhelming. In which case, we would suggest checking out the complete Kubernetes course where we cover all of these essential Kubernetes concepts in a lot of detail. But for the sake of this tutorial, just know that through a simple Helm release, we were able to deploy the entire monitoring stack.
+
+Now it's time for part two where we explore how the monitoring stack was already configured for infrastructure monitoring. The gist of it is Prometheus relies on exporters to extract metrics from particular targets.
+
+For example, a MySQL exporter would be designed to scrape metrics from MySQL, and a MongoDB exporter is designed to scrape metrics from MongoDB. In this particular case, by deploying the kube Prometheus stack, we get two exporters for free.
+
+The node exporter is designed to scrape metrics system level metrics from Kubernetes nodes like CPU, memory usage, and disk utilization. We've got the kube-state-metrics, which is another Prometheus exporter, and this one is designed to collect metrics that allow us to monitor the health, configuration, and availability of all of your Kubernetes objects like pods, deployments, and services.
+
+Because both of these exporters are already shipped as part of the kube Prometheus stack solution, the Prometheus instance is automatically configured to pull all of the metrics being collected by these exporters. If you think about it, we already have Kubernetes infrastructure related metrics being saved into our Prometheus database, and we can access all of them right now.
+
+We can say kubectl get all of the services that were deployed as part of our Helm release. The service we're interested in is the one that will allow us to access a Prometheus UI that we can use to make queries against the Prometheus database.
+
+We can port forward the following service. If you don't know what the concept of port forwarding means, we highly recommend checking out the Kubernetes course. kubectl port-forward the service in the monitoring namespace. The service is called prometheus-operated, and the port we want to forward is 9090. We'll just forward it to a host machine port of 9090.
+
+Now if we go to localhost:9090, we can access the Prometheus UI. For example, kube_pod_container_status_running is a metric that would be collected by the kube-state-metrics exporter. This gives us information about pretty much all the pods in our cluster. A value of one means the pods are running. A value of zero means whatever pod is failing for whatever reason. All our pods are good.
+
+It's really hard to kind of look at all of this data when it's in vector format. That's when something like Grafana is really handy because it allows us to create very insightful dashboards based on all of these Prometheus metrics.
+
+These queries that we're performing right here using the Prometheus UI would also be done from inside of Grafana, except Grafana has a way of converting these queries into insightful panels where we can see how these values are changing over time.
+
+What we're going to do is go back and say kubectl port-forward. This time the service we're interested in is the one that will allow us to open up the Prometheus Grafana UI. We want to port forward port 80 into port 3000 of our machine.
+
+Now if we go to localhost:3000, we can log into Grafana. The default username is admin. The default password is prom-operator. Let's try it out.
+
+If for some reason these credentials don't work for you, what you can do is say kubectl get secret -n monitoring. The credentials are saved inside of a secret. We can use the -o flag and format the output using json path. The field whose value we want to get is data.admin-password. We can pipe the output so that we can base64 decode it and then print out the value.
+
+If you use this command, you'll be able to extract the password.
+
+Go back and port forward Grafana localhost 3000. We're good. If we go to browse, notice how Grafana has been preconfigured with dashboards that query Prometheus. If we navigate to this dashboard, each panel over here is actually a query that's being made against the Prometheus database to visualize the metrics that were collected by Prometheus from both system level sources via the node exporter and Kubernetes specific metrics.
+
+This dashboard over here allows us to visualize all of the Kubernetes specific metrics like the amount of running pods in all of the namespaces and the amount of running containers.
+
+It's pretty cool how we get the ability of infrastructure monitoring out of the box without having to do anything.
+
+Now it's on to chapter 3 where we explore application specific monitoring. How do you monitor an application on Kubernetes? Well, first you need to develop your application in such a way that it can expose metrics in a format that Prometheus can understand.
+
+Many applications and many web frameworks like Spring Boot, Flask, and Nest all have dependencies with Prometheus clients that can instrument these apps to expose Prometheus metrics. It's actually very simple. We wrote four separate articles that describe how various types of apps can be instrumented to expose Prometheus metrics: Spring Boot apps, Flask apps, and Nest.js apps.
+
+But anyways, once you've developed your app to expose Prometheus metrics, then you deploy it in Kubernetes alongside a cluster IP service that can be used to access the application. Now, how do we configure Prometheus to find this application's endpoint where it's exposing all of these metrics and scrape this metric data every 10 or 15 seconds?
+
+This is where service monitors come into play. You'll remember that we used a Prometheus operator to automate the creation of our Prometheus instance. If you took our Kubernetes course, you'll know that an operator is a custom controller that extends the Kubernetes API and can therefore watch for custom resources that aren't native to Kubernetes.
+
+One such resource is the service monitor. What a service monitor does is bind to your service by matching its labels. As long as that service monitor is discoverable by Prometheus, it will configure the Prometheus instance to find your service, direct it to the application's endpoint, and scrape its metric data in regular intervals.
+
+That's enough theory. Let's put it all into practice. Here is a repository where we uploaded all of the configuration files you need to set all of this up. Links are in the description. Go to code and copy the URL that we need to clone this code on a separate terminal. Choose whatever directory you want in your local machine and clone the repo somewhere where you can easily access it.
+
+Then what we're going to do is apply every single configuration that's inside of this directory. kubectl apply -f will apply everything in the current directory.
+
+This just deploys a FastAPI application that is serving requests on port 8000. This cluster IP service allows us to access our FastAPI app. We can say kubectl get services -n monitoring. Everything is being deployed in the monitoring namespace.
+
+The service that we're interested in is the FastAPI app. We're going to say kubectl port-forward. We want to port forward the service object fastapi-app's internal port 8000 to a host machine port 8000. We need to specify that this Kubernetes object is in the monitoring namespace.
+
+Now if we go ahead and say localhost:8000, we see the FastAPI application. This application was programmed to expose metrics at the path /metrics.
+
+If you're interested in how to instrument an application to expose Prometheus metrics, whether that's Spring Boot, FastAPI, Flask, or whatever, all the articles are in the description.
+
+But anyways, here we see different types of metrics that give us various insights about what's happening in this app. One type of metric is the total number of requests that's being made on the empty path. If we make a few more requests to localhost:8000 and refresh, we'll see that the metrics get updated. 11 requests in total were made on the path slash, and 147 requests were made on the path /metrics.
+
+Because metric data is constantly being updated, we need Prometheus to regularly scrape this metric data so that it stays up to date on what's going on with this app.
+
+So, we have a service monitor. This part is really crucial because it matches the labels of our FastAPI service. The FastAPI service is what allows internal access to our FastAPI app. This basically configures Prometheus to find our application. Once it finds our app, this tells it which port our app is serving requests on: the port named web on the internal port 8000.
+
+We can just use the port name and the path where the app is serving requests is /metrics. Right there, the service monitor gives Prometheus all of the information that it needs to find our app and scrape all of the app's data at the appropriate endpoint, port 8000, path /metrics.
+
+This is really important as well. If we say kubectl get the Prometheus instance inside of the namespace monitoring and we want to output its labels in a yaml file, one important field is the service monitor selector. The Prometheus instance was installed in such a way that it can only discover service monitors that have this label: release=prometheus.
+
+In order for the service monitor to be discovered by Prometheus, you need to make sure that you give it this label. It must match the kube Prometheus stack release label. And that's basically all we need. We've already gone ahead and applied all of these configurations.
+
+Now what we want to do is ensure that Prometheus is actually able to discover the service monitor and therefore scrape all of the data from our FastAPI app. We can remember that port forward command from before where we access the Prometheus UI. Let's go ahead and say localhost:9090 and access the Prometheus UI.
+
+If you go to status targets, it found our service monitor and is monitoring the FastAPI app at port 8000 /metrics. A state of up means that our application is healthy because Prometheus is able to find it and collect metric data from it.
+
+By this logic, all of this metric data should be saved inside of Prometheus. We can copy one of the metrics: the total number of requests made to the path slash is 11. Are we going to see that in the Prometheus database? Let's run that same query from the Prometheus UI. Indeed, we do. So all the data is now being saved in Prometheus.
+
+How do we make sense of all this data? Well, that's where Grafana dashboards come into play. We already created a Grafana dashboard and exported its JSON. We've already deployed it as a config map, which will automatically get discovered by Grafana by virtue of having this field grafana_dashboard=1.
+
+Now if we go ahead and port forward the port that we need to access Grafana, we can see that we've got this FastAPI application dashboard. It's monitoring the request rate of our app. Let's do it in the last 5 minutes. Beautiful.
+
+This panel could be fixed, but we'll do it in an upcoming lesson. The take-home message is each of these panels is a query that's being made against the data in the Prometheus database.
+
+If we edit this panel, all this is is a PromQL query. We can perform that exact same query in our Prometheus UI if we were to rerun it. But anyways, Grafana will get the results of this query and allow you to visualize it over time.
+
+That's pretty much it. We hope you enjoyed this lesson. If you enjoy our teaching style, don't forget to check out the Kubernetes course, and we'll see you in the next one.
+
+
+## 영상 2: Introduction to the Prometheus Monitoring System | Key Concepts and Features (https://www.youtube.com/watch?v=STVMGrYIlfg)
+
+Hi, I'm Julius. In this video we're going to take a super quick look at the Prometheus monitoring system. We're going to talk about what Prometheus is, what the system architecture looks like, and what some of the main features are that make Prometheus so useful.
+
+What is Prometheus? It's a metrics-based monitoring system that helps you ensure that your systems and services are healthy and behaving well. It gives you a whole tool chain of libraries and server components that allow you to expose metrics from the things you care about, collect and record those metrics, and then do useful things with them such as alerting, dashboarding, ad hoc debugging, or automation.
+
+Aside from that, Prometheus is written in the Go programming language and it's hosted by the Cloud Native Computing Foundation under an open governance model.
+
+Let's have a look at the system architecture of a basic Prometheus monitoring setup. The big box in the middle here is the Prometheus server. Depending on your needs and the size of your organization, you can run one or many of these.
+
+Prometheus is a pull-based monitoring system that pulls or scrapes metrics over HTTP from a set of systems and services that you want to monitor. In Prometheus lingo, we call each of these monitored endpoints a target. These targets can either be your own services and applications that you can directly instrument with Prometheus metrics, for example using one of the official client libraries.
+
+Or if they're a third party system like a database or Linux host or anything else that doesn't expose Prometheus metrics natively, you can run a so-called exporter process next to the target to allow Prometheus to pull metrics through that exporter.
+
+You can configure the list of targets to be monitored statically in your Prometheus configuration file. Or Prometheus can also talk to a wide variety of different service discovery mechanisms like DNS or the Kubernetes API server to automatically discover all the targets that it should monitor on an ongoing basis.
+
+Prometheus then pulls metrics from all of its targets on a periodic basis and builds up a view of the metrics over time on local disk in its time series database, also called the TSDB.
+
+You can then use that collected metrics data either to generate alerts, which are routed, aggregated, and dispatched through a separate component called the alert manager. Or you can query the data externally either through Prometheus's own web UI, a dashboarding tool like Grafana, a query builder like ProMLens, or any other tool.
+
+You can also optionally configure Prometheus to forward the samples that it collects to a remote storage system or processing endpoint that might have totally different trade-offs and characteristics than Prometheus's own local storage implementation.
+
+To understand Prometheus even better, let's have a look at its core features: the dimensional data model, the metrics transfer format, the query language, integrated alerting, and support for service discovery.
+
+First, let's talk about the data model since everything else in Prometheus depends on that. On a fundamental level, Prometheus tracks and stores time series. Time series are numeric values that change over time and that are sampled at specific points in time, usually whenever Prometheus pulls metrics from a target.
+
+There's two questions that come up here. First of all, how do we model a single sample and which values can it take? Secondly, we want to be able to track and query multiple time series at the same time, so we need a way to identify each series and tell them apart from each other.
+
+In Prometheus, every time series has an identifier and an ongoing stream of samples that gets built up over time over multiple successive scrapes. Those samples store the actual numeric values belonging to a time series.
+
+Each time series is uniquely identified by a metric name and a set of labels. The metric name is the aspect of a system or service that you're measuring. This could be the number of HTTP requests that a server has handled since it started, a temperature, memory usage, or anything else that you can track numerically.
+
+The labels are key-value pairs that allow you to partition a metric name into many individual time series so that you can track in more detail where something is actually coming from. Prometheus automatically attaches some of these labels to tell you which targets these time series came from. Those labels are called target labels.
+
+But the target itself can also choose to split up a metric by any other labels. For example, an HTTP server might split up its request counters by the HTTP method and the status code.
+
+Let's have a look at the sample stream here. Each individual sample consists of a timestamp and a value. The timestamp is usually the time of the scrape and is stored as a 64-bit integer timestamp in milliseconds.
+
+The sample value can be any valid 64-bit floating point number. This is going to change just a little bit in the near future with the upcoming addition of a native histogram data type in Prometheus, where a sample value can actually be a full-blown histogram as well. But today, that's not quite officially part of Prometheus yet.
+
+In order for Prometheus to be able to pull metrics from a service you care about, that service needs to expose an HTTP endpoint that serves a text-based metrics transfer format that Prometheus understands.
+
+Here's an example of what two simple metrics look like in this text-based format. Each line that's not a comment represents the current value for a given time series along with its metric name and labels.
+
+For example, you have an HTTP request counter here that is split up by the status code as well as a metric that tells you the current number of open file descriptors in the process that's being monitored.
+
+What's important to understand here is that each scrape or pull only transfers the current value of each tracked series. So the sampling frequency is completely up to Prometheus, and there's no history being transferred here.
+
+The idea behind this text-based metrics transfer format is that it's supposed to be as easy to generate as possible. So this makes it possible to get Prometheus metrics out of almost anything, even if you can't use a dedicated client library for tracking and exposing metrics.
+
+And since Prometheus is pull-based, you can also manually navigate to any metrics endpoint of a target in the browser to view the current state of all of its metrics.
+
+After collecting and storing all of these metrics, you'll probably want to do something useful with them. For that, Prometheus comes with its own PromQL query language, which allows you to query and process the collected data for alerting, dashboarding, ad hoc debugging, or any other use case.
+
+PromQL is really geared towards time series based calculations that even allow you to perform complex arithmetic between entire sets of time series.
+
+Let's have a quick look at a few simple examples of what PromQL allows you to do. Imagine you had a counter metric named http_requests_total that told you how many requests the servers handled since it was started, and it's split up by a path label, a method label, and a status code label.
+
+Now you could query for the current value of all time series with that metric name and where the status code was 500 by just writing the metric name itself with a set of label matches in curly braces appended to it that constrain which time series should be selected.
+
+To get from an absolute count to a rate of increase, you could then use the rate function over an averaging time window of 5 minutes to see how many of these request errors are happening per second.
+
+You can now also use dimensional aggregation operators to aggregate away some of the labels and keep only certain labels. In this case, we're summing over all the individual rates and throwing away all labels except the path label. This gives you a per-path total request rate.
+
+Now if you wanted to know all paths that had a 500 error rate larger than five percent, we could use a binary division operator to divide the per-path error rates by the total rates for equivalent paths, multiply the resulting ratios by a hundred to get to a percentage, and then use a filter operator to only return those paths with an error rate over five percent.
+
+You could use this for alerting, for example, and get an alert for each problematic path.
+
+You can do way more with PromQL, but these were just some introductory examples to give you an idea of what the language looks like and what it can do.
+
+One really cool thing about Prometheus is that it bases alerting on the same PromQL query language that you would use for dashboarding and other use cases. So to make Prometheus detect and alert on problems in your infrastructure, you can configure it to load a set of alerting rules from files.
+
+Each rule provides a PromQL expression and a set of metadata fields about the alert. This example alerting rule consists of an alert name, the PromQL expression that forms the heart of the rule and that determines if anything is wrong, as well as a few other YAML metadata fields that allow you to add a time tolerance and additional information to the resulting alerts.
+
+Finally, let's talk about service discovery integration. Since Prometheus is a pull-based monitoring system, it needs to know which targets it should monitor, how to fetch metrics from them, and how to identify each of them correctly so that it can attach the right labels to the pulled time series.
+
+Now you could manually configure a static list of targets in your Prometheus configuration file, but that becomes really unfeasible in many of today's large and dynamic computing environments where both machines and service processes just come and go all the time.
+
+Fortunately, Prometheus can automatically discover and update its list of targets for you using a variety of service discovery mechanisms such as DNS, Kubernetes, Consul, and others. You can even build your own file or HTTP-based discovery integration if Prometheus doesn't support the one you need out of the box.
+
+I hope this video gave you a good idea of the basics of Prometheus. In future videos, we'll dive deeper into the topics we covered today as well as discuss best practices, current developments, and other Prometheus related topics.
+
+If you found this video helpful and want to learn more, be sure to check out the self-paced training courses at training.promlabs.com. These courses go into more depth and cover a wider range of topics from the basics of Prometheus to advanced features and integrations. If you're looking to take your Prometheus skills to the next level, check them out today. Thanks for watching, and we'll see you in the next video.
+
+
+## 영상 3: Creating Grafana Dashboards for Prometheus | Grafana Setup & Simple Dashboard (https://www.youtube.com/watch?v=EGgtJUjky8w)
+
+Hi, I'm Julius. So maybe you just got started with Prometheus monitoring and now you're wondering how to create dashboards based on the data you're collecting. That's where most people turn to the open source Grafana dashboard builder. Since Prometheus itself doesn't actually come with full dashboarding features.
+
+That's why in this video we're going to give you a quick intro to using Grafana with Prometheus. First, we're going to download and run Grafana just in case you don't have it yet. Then we're going to configure it to fetch data from a Prometheus server. And finally, we're going to create a demo dashboard.
+
+There's a billion things we could do with Grafana, but just to get started, we're going to create three types of panels: a time series chart, a gauge panel, and a table.
+
+By the way, you don't need a Prometheus server to follow along for this video. We're also just going to be using the publicly available ProMLabs demo server that you can reach at demo.promlabs.com.
+
+If you do want to use your own server and you don't have one yet, check out the setup video we made. Alright, let's go.
+
+First, let's set up Grafana. There's many different ways how you can do this, but two of the basic alternatives are to either run it using Docker or by using the pre-built binaries that you can run directly on your machine.
+
+If you want to go the Docker route, you can start Grafana using their public Docker image. This starts Grafana and makes it listen on port 3000. You can also run it in the background using the dash D flag, give the container a proper name, and a persistent data volume so that it remembers the dashboards that you build across restarts.
+
+The second alternative is to use the pre-compiled binaries that Grafana offers. Let's head to the Grafana homepage at grafana.com and go to the downloads page. Instead of cloud, we're going to select self-managed. And finally, we're going to click on the download button on Grafana itself.
+
+We're going to download the open source version, although it doesn't really matter as long as you're only using the free features.
+
+It already pre-selected Linux as the operating system here, which is great since we're on Linux.
+
+Now we'll just scroll down to the standalone binary section and click on the archive name to download it.
+
+Now we'll switch to a terminal here and go to the downloads folder and unpack the tarball and change into the unpacked directory.
+
+Let's have a look at what got unpacked here. The conf directory has the default configuration files for Grafana, which starts on port 3000. And the bin directory has the Grafana server binary, which we can use right now to start Grafana using the default config.
+
+Alright, Grafana is now listening on port 3000. Let's head there in the browser.
+
+The default username and password are admin and admin, so we can just log in with that.
+
+Now it asks to change the admin password, but for this demo, we will just skip that.
+
+As a first step before we can even start visualizing any data from Prometheus, we need to first tell Grafana about our Prometheus server and the URL that it's running on.
+
+To do that, we're going to click on add your first data source here and select Prometheus as the data source type.
+
+We only need to change two fields here. First, we're going to choose demo Prometheus as the data source name. And since this is the first data source that we are creating, it's already set to be the default.
+
+And secondly, as the URL of this Prometheus server, we're going to use the ProMLabs demo Prometheus server that is running publicly on the internet.
+
+There are many other settings here like HTTP and authentication options, but for this demo, we can leave all of them at their default values since that Prometheus server is not secured in any way.
+
+So now we scroll down and click save and test to check that the data source is working.
+
+Great, so now Grafana is all set up to send PromQL queries to Prometheus.
+
+So let's create our first dashboard by going to the dashboards menu on the left and selecting new dashboard.
+
+That drops us into an empty new dashboard where we can add panels like time series charts, tables, histograms, heat maps, and many other visualization types.
+
+So let's start out with just a time series chart showing some data from our Prometheus server. We'll click on add a new panel, which puts us into the edit view for that new panel.
+
+Now there's a lot going on here, but there's roughly three main sections. At the top, there's the actual visualization itself that will end up showing on the dashboard. Below that is where you input the queries to fetch the data to display above. And on the right, you can find a large number of options to configure what the panel should look like.
+
+Alright, so let's first set the time range for the graph to 30 minutes since that'll look better with the data that we're going to be selecting.
+
+Now let's add a query below. We can see that our demo Prometheus data source is already selected here since it was the default data source. So we can leave that as is.
+
+Now we can use this graphical PromQL query editor to select the latency histogram metric from a demo service that the Prometheus server is monitoring. And rather than showing that metric in its raw form, let's add some transformation steps to it to aggregate it and calculate the 95th percentile latency from it for every path and method label.
+
+And don't worry if you don't get all the PromQL details here. We'll definitely talk about those in later videos.
+
+By the way, in case you're finding this video useful and want to see more Prometheus content in the future, please consider liking the video and maybe even subscribing to the channel because that really helps out the YouTube algorithm and more people will be able to find these videos.
+
+So now let's run the query and you can see that the panel above shows the fetched time series data as a chart over the last 30 minutes.
+
+By the way, Grafana has two different modes for inputting PromQL queries. You can either use this graphical query builder or you can switch over to the code view to see and edit the textual PromQL query itself.
+
+Note that this generated query now contains a Grafana template variable that is not part of PromQL itself. Those template variables are replaced with concrete values by Grafana before sending a query to Prometheus.
+
+In this example, this rate interval variable helps us automatically select the rate averaging window that is suitable for the resolution of the PromQL query.
+
+If you look at the legend in the graph and hover over the series, you'll see that Grafana has automatically named the series as Prometheus_wood with label pairs in curly braces.
+
+If we want to format the legend differently, we can open the query options down here and change the legend option from auto to custom.
+
+That allows us to enter a custom legend format string where we can interpolate label values by referring to the label names in double curly braces.
+
+So for example, let's change the legend to only show the label values for the path and method labels and separate those by long dash.
+
+Now our legend already looks nicer.
+
+When looking at a panel on the dashboard, it's important to be able to quickly understand what the panel shows and what it means. So let's give this a panel a title of 95th percentile request latency, and we can see that the panel now shows this title.
+
+Another thing that's not clear yet by just looking at the panel is the unit. We might know that the underlying histogram metric is in seconds, but Grafana has no clue about that yet. So let's search for unit in the panel options on the right and select seconds to tell Grafana that our underlying data is in seconds.
+
+Now Grafana interprets our data correctly and automatically shows values in milliseconds on the y-axis.
+
+Finally, let's hit the apply button, which takes us back to the dashboard with our newly created graph panel.
+
+Okay, let's create a gauge panel next by hitting the add panel button and going to add a new panel again.
+
+And this time we're going to set the panel type to gauge.
+
+And we're going to enter a PromQL query that shows us CPU usage for three different demo service instances with the output values varying somewhere between 0 and 1 for each of the instances.
+
+We can explicitly tell Grafana about these minimum and maximum values so that it knows how large to make the big value bar in each gauge display.
+
+And let's also set the unit to be a percentage, but a percentage that is actually coming in as a ratio between 0 and 1.
+
+Now that looks a whole lot better already with a percentage being displayed in the panel.
+
+We can also add color coding to the different value thresholds. So let's say that we want to consider 80 percent CPU usage high and we want to display everything above that as red.
+
+For that, let's search for the thresholds options up here and change the default red threshold of 80 to 0.8, since that's the equivalent of 80 percent in our underlying ratio data.
+
+Alright, now we see where the red region would begin.
+
+And finally, let's clear the search bar up here and give the chart a title again. We're going to call it instant CPU usage, and hit apply to save this panel.
+
+As our third and last panel, let's display some data in a table. So we're going to create the new panel as before, but this time we're going to set the panel type to table.
+
+In our PromQL query, we're going to select the top three request rates that our demo service is getting, grouped by path and method labels.
+
+Now by default, this table won't look right yet. We see a bunch of different values over time for a single selected time series, and we can select which time series to show. But we would actually like to see all time series at once and only the latest value for each one of them.
+
+So first of all, let's switch the format option from time series to table. And secondly, let's change the query type from range to instant so that we only fetch one latest value for each series.
+
+If we run the query again now, the table looks much better already, showing us the top three request rates.
+
+However, maybe we don't want to show the timestamp column since that timestamp is always going to be the latest one.
+
+So there's actually multiple ways to get rid of that, and we'll just show you two alternatives.
+
+The first option is to add a query transform by going to the transform section and choosing the organize fields transform. In there, we can simply click the I icon next to the time field to hide it from the table.
+
+Now we'll just undo that and also remove the transform again so we can show you the other option.
+
+For this other option, we have to scroll down all the way in the panel options and add a field override. Then choose field width type for that override. Now that allows us to select a specific type of field to overwrite, and we're going to select time.
+
+We then add an override property to hide this kind of field in the table.
+
+And finally, we still need to enable the override we just created. Now, as you can see, it removed the time field in our table again.
+
+And finally, let's again choose a unit for our panel here, which in this case is requests per second or RPS. And we'll set the panel title to be top three rates.
+
+Great, now we have a dashboard with three panels. As a quick last thing, we'll show you how you can organize panels within a dashboard into thematic rows. For example, we might want to group together the two HTTP stats panels into one row and the CPU stats into another one.
+
+We are going to do that by clicking add panel as before, but instead of adding a new panel, we're going to add a new row instead.
+
+Let's repeat that one more time.
+
+And now we can rename the rows by hovering over them and hitting the settings icon.
+
+The first one we're going to call HTTP stats.
+
+And the second one we're going to call CPU stats.
+
+Now we can grab each panel by its title bar and drag it into the right row.
+
+You can collapse the rows by clicking on them and you can also drag them around using the right hand side handles to reorder them on the dashboard.
+
+Finally, let's save the dashboard by hitting the save icon and we're going to call it demo dashboard.
+
+Now we got the dashboard showing a chart, a gauge, and a table, and we organized our panels into rows.
+
+Alright, so that's how easy it is to get started with Grafana and Prometheus. We hope this was useful, and we're going to cover a lot more Prometheus topics in future videos that go beyond these basics.
+
+So be sure to like and subscribe if you want to get more of that. Also, if you would like to learn Prometheus in a structured way right now, we're making these self-paced training courses at training.promlabs.com. So check out those as well and see you soon.

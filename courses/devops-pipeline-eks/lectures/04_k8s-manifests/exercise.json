@@ -1,0 +1,50 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "워밍업: Deployment 매니페스트에서 Deployment가 자신의 Pod를 올바르게 관리하려면 서로 일관성을 유지해야 하는 라벨/셀렉터 필드 세 가지를 파악하라. 아래 부분 매니페스트에서 두 개의 빈 라벨을 채워 Deployment가 자신이 생성한 Pod를 찾고 관리할 수 있게 하라.",
+      "starter": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n  labels:\n    app: my-app\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: ________        # 빈칸 A — Deployment가 Pod에서 찾는 라벨\n  template:\n    metadata:\n      labels:\n        app: ________      # 빈칸 B — 각 Pod에 붙는 라벨\n    spec:\n      containers:\n        - name: my-app\n          image: nginx:1.25\n          ports:\n            - containerPort: 80",
+      "solution": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n  labels:\n    app: my-app\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: my-app        # 빈칸 A — Pod template 라벨과 일치해야 한다\n  template:\n    metadata:\n      labels:\n        app: my-app      # 빈칸 B — 위의 selector와 일치해야 한다\n    spec:\n      containers:\n        - name: my-app\n          image: nginx:1.25\n          ports:\n            - containerPort: 80",
+      "explanation": "Deployment의 'selector.matchLabels'는 쿼리다. 정확히 그 라벨을 가진 모든 Pod를 찾아 자신의 것으로 소유권을 주장한다. 'template.metadata.labels'는 Deployment가 생성하는 모든 Pod에 붙이는 라벨이다. Deployment가 자신의 Pod를 관리하려면 둘이 일치해야 한다. 다르면 Deployment가 잘못된 Pod를 소유하거나 자신의 Pod를 찾지 못한다 — 쿠버네티스는 실제로 Deployment 생성을 거부하고 유효성 검사 오류를 반환한다. 두 빈칸 모두 'app: my-app'이어야 한다. Deployment 자체의 최상위 'metadata.labels'는 별개다 — Pod가 아닌 Deployment 오브젝트에 라벨을 붙인다.",
+      "hints": [
+        "selector.matchLabels와 template.metadata.labels가 일치하지 않으면 'kubectl apply'가 오류를 반환한다: 'selector does not match template labels'.",
+        "셀렉터에 여러 라벨을 사용할 수 있다 (예: app: my-app AND tier: backend). 더 세밀한 그룹화를 위해 모두 Pod에 나타나야 한다.",
+        "kubectl describe deployment my-app은 셀렉터와 제어하는 Pod를 보여준다 — 적용 후 일치 여부를 확인하는 데 유용하다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습 A — 자신의 애플리케이션을 위한 완전한 Deployment 매니페스트를 작성하라. 다음 사양을 사용한다: 앱 이름 'web-api', 3개 레플리카, ECR 이미지 '111122223333.dkr.ecr.us-east-1.amazonaws.com/web-api:abc1234', 컨테이너 포트 8080. 필수 최상위 필드 네 가지(apiVersion, kind, metadata, spec)를 모두 포함하라. 실제 계정 ID, 리전, 리포지토리 이름, 커밋 태그로 대체하라.",
+      "starter": "# deployment.yaml\napiVersion: ________\nkind: ________\nmetadata:\n  name: ________\n  labels:\n    app: ________\nspec:\n  replicas: ________\n  selector:\n    matchLabels:\n      app: ________\n  template:\n    metadata:\n      labels:\n        app: ________\n    spec:\n      containers:\n        - name: ________\n          image: ________\n          ports:\n            - containerPort: ________",
+      "solution": "# deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web-api\n  labels:\n    app: web-api\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web-api\n  template:\n    metadata:\n      labels:\n        app: web-api\n    spec:\n      containers:\n        - name: web-api\n          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/web-api:abc1234\n          ports:\n            - containerPort: 8080",
+      "explanation": "모든 쿠버네티스 오브젝트는 동일한 네 가지 최상위 필드를 공유한다. apiVersion(어떤 API 버전을 사용할지 — Deployment는 'apps/v1'), kind(오브젝트 타입), metadata(오브젝트를 식별하는 이름과 라벨), spec(원하는 상태). Deployment의 핵심 spec 필드는 replicas(Pod 복제본 수), selector(소유한 Pod를 찾는 방법), template(Pod 청사진, selector와 일치하는 라벨을 가져야 한다)이다. image 줄 — ':abc1234'로 끝나는 — 이 파이프라인이 각 새 커밋 태그를 삽입하는 주입 지점이다. 배포 사이에 변경되는 값은 이것 하나다.",
+      "hints": [
+        "핵심 오브젝트(Pod, Service, ConfigMap)의 apiVersion은 'v1'이고, Deployment는 'apps/v1'이다. 'kubectl api-resources'로 지원되는 모든 kind와 apiVersion을 확인할 수 있다.",
+        "containerPort는 문서화 역할이다 — 실제로 포트를 공개하지 않는다. Service 매니페스트(다음 실습)가 실제 라우팅을 담당한다.",
+        "파일을 적용하지 않고 검증하려면: kubectl apply -f deployment.yaml --dry-run=client"
+      ]
+    },
+    {
+      "prompt": "핵심 실습 B — 'web-api' Deployment를 AWS 로드 밸런서를 통해 공개 인터넷에 노출하는 Service 매니페스트를 작성하라. Service는 80번 포트(외부)에서 8080번 포트(컨테이너)로 트래픽을 라우팅해야 한다. kubectl로 두 매니페스트를 모두 클러스터에 적용하고 Pod가 실행 중인지 확인하라.",
+      "starter": "# service.yaml\napiVersion: ________\nkind: ________\nmetadata:\n  name: web-api\nspec:\n  type: ________         # AWS 로드 밸런서를 프로비저닝하는 타입을 선택하라\n  selector:\n    app: ________        # Deployment의 Pod 라벨과 일치해야 한다\n  ports:\n    - port: ________     # 클라이언트가 연결하는 외부 포트\n      targetPort: ________ # 컨테이너의 포트\n\n---\n# 적용 및 확인 명령:\n# kubectl apply -f ________\n# kubectl apply -f ________\n# kubectl get pods\n# kubectl get svc web-api",
+      "solution": "# service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: web-api\nspec:\n  type: LoadBalancer\n  selector:\n    app: web-api\n  ports:\n    - port: 80\n      targetPort: 8080\n\n---\n# 매니페스트 적용:\nkubectl apply -f deployment.yaml\nkubectl apply -f service.yaml\n\n# Pod가 실행 중인지 확인 (3개의 Running Pod가 표시되어야 한다):\nkubectl get pods\n\n# 로드 밸런서 외부 IP/호스트명 확인:\nkubectl get svc web-api",
+      "explanation": "EKS에서 'type: LoadBalancer'인 Service는 AWS가 ELB(Elastic Load Balancer) 또는 NLB(Network Load Balancer)를 자동으로 프로비저닝하고 공개 DNS 호스트명을 할당하도록 한다. Service의 'selector' 필드는 Deployment가 Pod에 붙이는 것과 동일한 라벨('app: web-api')을 사용한다 — Pod IP를 하드코딩하지 않고 Service와 Pod를 연결하는 라벨 접착제다. 'port: 80'은 클라이언트가 로드 밸런서에서 접근하는 포트이고, 'targetPort: 8080'은 각 Pod에 전달되는 포트다. 'kubectl get svc web-api' 출력에서 AWS 로드 밸런서가 프로비저닝되면 EXTERNAL-IP(또는 호스트명)가 표시된다. 30~90초가 걸릴 수 있다.",
+      "hints": [
+        "EXTERNAL-IP 열이 AWS 로드 밸런서가 완전히 프로비저닝될 때까지 '<pending>'으로 표시된다. 약 1분 기다린 후 kubectl get svc를 다시 실행하라.",
+        "인터넷에 노출하지 않는 내부 전용 서비스는 'type: ClusterIP'를 사용하라 — 기본값이며 클러스터 내부에서만 접근 가능한 안정적인 IP를 제공한다.",
+        "Service가 올바른 Pod로 라우팅하는지 확인하려면: kubectl describe svc web-api — Pod IP:port 쌍이 나열되는 'Endpoints' 필드를 확인하라."
+      ]
+    },
+    {
+      "prompt": "응용 도전 — 동료가 Deployment를 이미지 태그 'abc5678'로 업데이트했지만, Service selector를 실수로 'app: web-backend'로 설정했고 Deployment는 여전히 Pod에 'app: web-api' 라벨을 붙이고 있다. kubectl 명령으로 문제를 진단하고 라벨 불일치와 이미지 태그 모두를 수정하라. 수정된 service.yaml과 파일을 편집하지 않고 실행 중인 Deployment의 이미지 태그만 업데이트하는 kubectl 명령을 보여라.",
+      "starter": "# 버그가 있는 service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: web-api\nspec:\n  type: LoadBalancer\n  selector:\n    app: web-backend   # <-- 버그: Deployment Pod 라벨과 일치하지 않음\n  ports:\n    - port: 80\n      targetPort: 8080\n\n# 1단계: 진단 — Service에 엔드포인트가 없음을 보여주는 kubectl 명령은?\n# kubectl ________\n\n# 2단계: service.yaml의 Service selector를 수정하고 다시 적용하라.\n# (수정된 service.yaml 작성)\n\n# 3단계: deployment.yaml을 편집하지 않고 실행 중인 Deployment의\n# 이미지 태그만 'abc5678'로 업데이트하라.\n# kubectl ________",
+      "solution": "# 1단계: 진단 — Service 엔드포인트가 없음을 확인하기 위해 describe\nkubectl describe svc web-api\n# 'Endpoints' 필드가 '<none>'이면 selector가 Pod를 찾지 못하는 것이다.\n# 추가로 확인:\nkubectl get endpoints web-api\n# 실제 Pod 라벨과 비교:\nkubectl get pods --show-labels\n\n# 2단계: 수정된 service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: web-api\nspec:\n  type: LoadBalancer\n  selector:\n    app: web-api    # 수정: Deployment Pod 라벨과 일치\n  ports:\n    - port: 80\n      targetPort: 8080\n\n# 수정된 Service 다시 적용:\nkubectl apply -f service.yaml\n\n# 3단계: kubectl set image로 이미지 태그만 업데이트\n# 형식: kubectl set image deployment/<deployment-name> <container-name>=<new-image>\nkubectl set image deployment/web-api web-api=111122223333.dkr.ecr.us-east-1.amazonaws.com/web-api:abc5678",
+      "explanation": "Service selector가 어떤 Pod 라벨과도 일치하지 않으면 'kubectl describe svc'에서 'Endpoints: <none>'이 표시된다 — 트래픽이 로드 밸런서에 도달하지만 갈 곳이 없어 연결 오류가 발생한다. 수정 방법은 selector를 실제 Pod 라벨과 맞추는 것이다. 'kubectl get pods --show-labels'는 실행 중인 Pod가 가진 라벨을 보여준다. Service selector와 직접 비교하면 된다. 이미지 업데이트는 'kubectl set image deployment/<name> <container-name>=<image>:<tag>'로 실행 중인 Deployment의 특정 컨테이너 이미지를 직접 업데이트한다. = 뒤의 컨테이너 이름('web-api')은 Deployment spec의 'containers:' 아래 'name:' 필드와 일치해야 한다. 이렇게 하면 즉시 롤링 업데이트가 트리거되지만, 디스크의 deployment.yaml 파일에는 여전히 이전 태그가 남아 있다. 파일과 클러스터 상태를 동기화하려면 파일을 편집하고 'kubectl apply -f'를 실행하는 방법이 더 낫다.",
+      "hints": [
+        "'kubectl get endpoints web-api'는 현재 Service를 백업하는 Pod IP를 보여준다. 비어 있으면 selector가 원인일 가능성이 높다.",
+        "kubectl get pods --show-labels는 모든 Pod 라벨을 읽기 쉬운 열로 출력한다 — Service selector와 직접 비교하라.",
+        "'kubectl set image' 실행 후 롤아웃을 확인하라: kubectl rollout status deployment/web-api"
+      ]
+    }
+  ]
+}

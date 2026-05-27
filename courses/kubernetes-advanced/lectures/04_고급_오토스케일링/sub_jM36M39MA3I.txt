@@ -1,0 +1,404 @@
+Kind: captions
+Language: en
+so you've deployed your first kubernetes
+cluster you've created a bunch of
+container images you've learned how to
+write yaml
+and you've started deployments you're
+mastering cube ctl
+you have three kubernetes nodes you
+start deploying pods
+one by one developers productivity goes
+up you add load balancers
+ingresses life is good until
+we run out of space
+so the whole point of the cloud and
+kubernetes is to have the ability to
+scale
+we want to be able to add new nodes as
+our existing ones become
+full and as the demands drop we want to
+be able to delete those nodes
+and scale them down but it's not always
+as simple as that
+kubernetes has a scheduler the
+scheduler's job is to schedule pods onto
+nodes
+let's say we have one machine four cores
+of cpu we start deploying pods now by
+default kubernetes uses best effort
+quality of service to schedule pods
+meaning that pods will be treated with
+lowest priority they can use
+all of the cpu and all of the memory but
+will be killed if the system runs out of
+memory and will take low priority when
+scheduling onto nodes
+on the surface this might seem okay when
+starting out but as the box gets full
+things get messy that's why it's
+important to add cpu and memory request
+and limits when you do this kubernetes
+will give you guaranteed quality
+of service high priority when you tell
+kubernetes that your service needs for
+example
+500 millicourse of cpu it'll make better
+informed scheduling decisions when
+placing your pod onto nodes kind of like
+tetris
+so if you're new to this channel
+everything i do is on github if you
+check out the source code i have a
+kubernetes folder and in the kubernetes
+folder i have an auto scaling folder and
+everything we're going to be doing in
+this video is in the readme file so as
+part of the series we're going to be
+taking a look at kubernetes auto scaling
+we're going to take a look at cluster
+auto scaling as well as horizontal pod
+auto scaling so remember to check out
+the link down below to the source code
+so you can follow along
+now as an engineer we like to deploy
+stuff to kubernetes so i have this
+example application that we're going to
+be deploying this is a small application
+written in golang that every time it
+receives a request it generates some cpu
+load so you can see i have a kubernetes
+cluster
+with one node and if we take a look at
+the source code i have a kubernetes auto
+scaling folder and inside that i have a
+components folder with an example
+application
+in here i have app.go with a docker file
+and a deployment file so to build this
+application i'm going to change
+directory to that applications folder
+and i'm gonna say docker build dot minus
+t and i'm gonna tag this as an
+cpu version one so that's gonna go ahead
+and build up a docker container with our
+example app that we're gonna deploy to
+kubernetes
+now to push it up to a registry i can
+run docker push
+and push the application to docker hub
+now if we take a look at our deployment
+yaml file it's a very simple
+file that describes a deployment to
+kubernetes so in here we just name it
+application.cpu we're
+going to be deploying one replica and
+here is the container spec we call it
+application cpu
+and we pass in our image and we also
+expose port 80. and the interesting part
+here is that we're going to be putting
+some resource requirements for our
+application so we're going to tell
+kubernetes that we request 50 megs
+of memory and 500 milli cores of cpu
+remember that one core of cpu equals a
+thousand milli cores so we should be
+able to deploy
+two of these instances per cpu core of
+our kubernetes node so to deploy that
+i'm going to say cube ct i'll apply
+minus
+f and i'm going to deploy that yaml file
+that's going to create our deployment
+and it's also going to create a service
+that will expose our application so we
+can access it in the browser
+so if we run cubectl getpodso wide we
+can see we have one pod
+up and running on our node now the
+interesting part is when we say cube ctl
+top pods we can see that our application
+is currently using
+zero milli cores and seven megabytes of
+memory if we say cube ctl top
+nodes we can see that our kubernetes
+node is using
+117 milli cores of cpu which is three
+percent and uses
+866 megabytes of memory that's 16
+of the total of memory available on the
+box so how does cube ctl know the
+metrics of our pods and also know the
+metrics of our node
+well this is where metric server comes
+in metric server is a component that
+runs in the kubernetes control plane
+that provides crucial metrics like cpu
+and memory
+back to the kubernetes api server
+kubernetes can then use this for
+built-in
+auto scaling pipelines like cluster auto
+scalers horizontal
+and vertical pod auto scalers so metric
+server is available on github and it's
+maintained by the community if you have
+a kubernetes cluster you can say cube
+ctl
+get pods in the cube system namespace
+and this will show you the metric server
+running in the cube system namespace if
+you have it installed already you can
+check out the documentation it's very
+straightforward to deploy
+you simply pick the release you want and
+and download the yaml file so as part of
+this demo i went over to the releases
+page
+and i've taken the 0.3.7 and i
+downloaded this components.yaml file
+under the kubernetes auto scanning
+components file i've created a metrics
+server folder and i've added the
+metrixserver.yaml in here so even though
+i already have it installed i'm going to
+install it anyway to show you the
+process but i just say cubectl apply and
+i apply that metricserver yaml file
+that'll go ahead and update the metric
+server running in our cluster once you
+have metric server deployed it may take
+a couple of minutes for pod metrics and
+node metrics to come available now
+there's two very important points when
+it comes to auto scaling
+the first one is to make sure you
+understand cpu and memory usage of your
+pods running in your cluster use your
+monitoring to get this information and
+number two it's important to set
+resource requests and limits on your
+pods and deployments this will help
+kubernetes make smart decisions that
+we're going to be looking at now in
+terms of auto scaling
+so if we take a look at our
+deployment.yaml we can see i've set
+resource requests and limits the request
+values is what's important to allow
+kubernetes to make those smart
+scheduling decisions so i've indicated
+here that i need 50 megabytes of memory
+and then i need
+500 milli cores of cpu so given i have a
+four
+core machine in my cluster one core
+equates to roughly 1024 milli cores
+i'm going to multiply this by four and
+this is the total number of milli cores
+that i should have
+in my cluster and if i divide this by
+500 we can see i can
+deploy roughly eight pods to a machine
+before that box will become full
+this means that the scheduler can make
+more informed decisions about where to
+place
+our pods if we have more than one node
+running in the cluster
+now to simulate us deploying
+applications to our node what i'm going
+to do is i'm going to scale up this
+deployment to two replicas now when i do
+this we can see that we're adding
+more pods to the same node when we say
+cube ctl
+top nodes we can see that the
+utilization on the node is still the
+same but when i say cube ctl describe
+node there's a little section that's
+very important which is about
+allocated resources we can see that we
+have requested 43 percent
+of the cpu on this box already and let's
+see what happens when i scale up to
+three pods if i do cube ctl describe
+node now
+and i take a look at the allocated
+resources we can see we're now using 56
+of cpu so as we scale up our pods given
+we have request values on cpu we're
+allocating more cpu
+to our pods so kubernetes is able to
+tell us exactly how much cpu it's using
+and how much it has left
+now what happens when our developer
+teams start deploying more and more
+applications to simulate that
+let's scale up to 12 and let's say cube
+ctrl get pods
+and we can see that all of these pods
+are now in pending state so this means
+we've run out of space
+on our node and if i say cube ctl
+describe pod and i describe one of these
+pods we can see
+zero out of one nodes are available in
+if sufficient cpu
+and if we say describe node we can also
+see that we're at capacity now given
+this has happened to our cluster
+this could have caused an outage also
+usually this is the time when everyone
+comes together
+and starts to make a decision on whether
+or not we should be adding the nodes to
+our cluster
+and then manually going and adding those
+machines and scaling up
+but not today
+now if we take a closer look at the cube
+ctl describe
+pod command on one of the pods that
+we're in a pending status
+and we scroll down to the events we can
+see that we have an event called
+triggered scale up
+by the cluster auto scanner and it says
+pod triggered scaling up from one to two
+maximum five nodes this is because we
+have the kubernetes cluster autoscaler
+deployed in our cluster so the scheduler
+has now triggered the cluster auto
+scaler since it requires more space in
+the cluster and just a few moments later
+if i go cube ct i'll get nodes we can
+see that a second
+node has been added to the cluster
+automatically and if i do cube ctl get
+pods we can now see that all the pods
+have been
+successfully scheduled across these two
+nodes so this means that no one had to
+get up at night to scale up our cluster
+we also did not have to
+have any form of human interaction to
+make that decision and manually scale
+that cluster up it's very important that
+we put resource requests and limits on
+our deployments so that the scheduler
+can make smart decisions when scheduling
+and also understand
+when it runs out of capacity and it's
+able to trigger the cluster auto scaler
+the cluster autoscaler is also part of
+the kubernetes community
+and it's also on github under the
+kubernetes auto scaler guitar brepo they
+have full documentation about the
+cluster auto scaler and what cloud
+providers are supported now it's also
+important to remember
+that there is logic in the cluster
+autoscaler that serves
+each different cloud provider so it's
+very important to deploy the right
+cluster autoscaler
+for your cloud provider so if we take a
+look at this they have an aws one so aws
+has a cluster auto scaler which you can
+deploy following the aws
+instructions here now the cluster
+autoscaler for amazon relies on the auto
+scaling groups for ec2 instances so
+basically the cluster autoscaler will
+talk to amazon
+auto scaling groups and trigger a scale
+up of the ec2
+instances whenever your cluster needs to
+scale up for microsoft azure it's pretty
+similar so there's multiple deployment
+manifests available for azure
+such as virtual machine scale sets
+standard virtual machines as well as aks
+so in my example here i've used a simple
+aks cluster i said a z aks create and i
+created a cluster and enabled the auto
+scaler with this flag so i just say
+enable cluster autoscaler set the
+minimum and maximum
+number of nodes so it's also very
+important to know that every cluster
+autoscaler has
+lower and upper bounds of how high it's
+allowed to scale
+now let's say demand has dropped and we
+scale that cluster back down to
+four now we can see that if i say cube
+ct i'll get pods
+the pods are terminating and we should
+be left with four pods the cluster auto
+scaler should follow suit
+and start scaling down the cluster nodes
+now this does take a while depending on
+the cloud provider you're using
+as well as depending on the settings you
+use for that cluster auto scaler the
+auto scanner will not aggressively scale
+down because there can be other
+parts running on that node that might be
+critical so it'll take anywhere between
+5 and 10 minutes for this node to scale
+down
+so if i say cube ctrl get pods we can
+see we now only have
+four pods and if we say cube ctrl get
+nodes we still have two nodes and if i
+describe that second node
+and we take a look at the pods running
+we can see that we only have the q
+proxy pod running on this node so given
+the demand has dropped the cluster
+autoscaler will take some time and then
+trigger to scale this node down
+and after about 10 minutes we can see if
+i run cube ctrl get nodes we now only
+have one node so the cluster autoscaler
+has removed
+the node we no longer need now the
+cluster autoscaler works really well
+with the pod autoscaler also known as
+the horizontal part autoscaler or hpa
+now usually folks will start adding pods
+to their cluster without
+auto scaling so the cluster auto scaler
+is a great place to start
+because a lot of folks don't always
+understand exactly how much cpu and
+memory the
+microservices and pods will need so
+number one always to keep an eye on your
+metrics like your prometheus monitoring
+to make sure you start understanding
+resource
+requirements for your pods number two is
+to start adding resource limits and
+request values to your deployments so i
+hope this video helps you with
+auto scaling your cluster nodes so in
+the next video we're going to be taking
+a look at the horizontal pod autoscaler
+that will allow you to scale
+pods automatically so remember to like
+and subscribe and hit the bell
+notification so you get notified when i
+upload
+also be sure to check out the community
+page in the link down below
+and if you want to support the channel
+even further you can hit the join button
+and become a member so as always thanks
+for watching and until next time
+peace
+you

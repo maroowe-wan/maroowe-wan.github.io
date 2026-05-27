@@ -1,0 +1,300 @@
+Kind: captions
+Language: en
+hey everyone general from confluent in
+this module we're going to talk about
+how kafka replicates data in the data
+plane
+earlier i mentioned that within the
+cluster we have this control plane and a
+data plane and in this particular case
+we're going to talk about how the data
+handles data replication replication is
+a pretty critical feature within kaka
+it's a critical feature to enable higher
+durability and availability and it's
+used for for build mission critical
+applications on top of kafka
+enabling replication is actually pretty
+easy so when you create a topic you can
+specify how many replicas you want you
+want to have once you specify the number
+then all the partitions within that
+topic will be great with the number of
+replicas if you create a replication
+factor with n in general we can tolerate
+n minus one failures here are a few key
+concepts with replication once you have
+created those replicas one of the
+replicas will be designated as the
+leader of that partition and the rest of
+replicas are core followers
+the producer will be first sending this
+data to the leader and from there
+all the followers will be retrieving the
+data from the leader and the consumer
+typically reads data from the leader but
+as we'll see later on it can be
+configured to consume data from the
+follow as well another key concept
+in kafka is called in-sync replicas or
+isr
+intuitively isr is a set of data that
+captures all the replicas that have
+fully caught up with the leader in the
+normal case when all the replicas are
+alive and are healthy all the replicas
+will be part of isr or this in-sync
+replicas
+each of the leader is also associated
+with a leader epoch so it is actually a
+unique number that's monotonic
+increasing and it's used to capture the
+generation or lifetime of a particular
+leader
+so every time when a leader takes the
+data from the producer requests right to
+its local lock it needs to attack all
+the records of this batch with its
+leader earpock as we'll see later on
+this liter epoch is pretty critical and
+important for doing log reconciliation
+among all the replicas
+so once the leader has appended the
+produced data into its local log
+all the followers will be trying to
+retrieve the new data from the leader
+the follower does that by issuing a
+fetch request the leader including the
+offset from which it needs to fetch data
+after the leader receives this data
+request the leader will be returning the
+new records from that particular offset
+to the follower once the follower
+receives a response it will be appending
+those new records in its own local log
+as you can see as the follower is
+appending the data to its local log it
+keeps the same leader epoch included in
+those record batches
+we need a way to commit the offsets
+meaning that those records have been
+considered safe
+in kafka the way we commit those records
+is defined by once a particular record
+is included in order in sync replicas
+then the record is considered committed
+and then can be safely returned to the
+consumer
+so now how does the leader know whether
+a particular follower has received a
+particular record this is actually
+piggybacked on the fast request from the
+follower so by
+sending a fast request from a particular
+offset in this case offset three the
+leader knows that the follower has
+received all the records up to offset
+three
+and in this case if both followers are
+doing the same thing of fetching issuing
+fetch requests at offset three then the
+leader will know that all the records
+zero one two have been received by order
+in replicas this in this in sync replica
+set and those records can be considered
+as committed the way we model committed
+records is through this concept called
+high watermark it marks the
+offset before which all the records are
+considered as committed in this case
+will be advanced the high water mark on
+the leader to offset three after the
+fetch requests have gone through
+at offset three
+all the
+records up to the high watermark are
+exposed to the consumer
+once the leader has advanced the high
+watermark you will also need to
+propagate this information to the
+followers this is done by piggybacking
+in the fetch response as you can see
+here in fact response the leader will
+also include the latest high watermark
+to the follower
+as you can see
+since this is done asynchronously the
+followers high water mark typically is a
+little bit behind of the true high water
+mark in the leader
+now let's talk about how we handle the
+leader failure let's say in this case
+the old leader broker 101 has failed we
+need a way to elect the new leader the
+leader election in kafka for the data
+plan is pretty simple
+because
+through the protocol we know
+all the replicas that's in isr all those
+in-sync replicas
+have all the previously committed
+records so we can pick any of those
+replicas in isr as the new leader in
+this case both controller 102 and 103
+can be the new leader let's say we
+picked 103 as the new leader
+this information will be propagated
+through the control plane once replica
+103 noticed that it's the new leader it
+can start taking new requests from the
+producer as you can see for the new
+produce request it will be tagged with a
+new bumped up leader epoch which is two
+if you are careful you will notice there
+is a subtle issue with the high
+watermark once a new leader is elected
+as you can see the
+high water mark in this new leader is
+actually
+less than the true high water mark in
+the previous leader now what happens if
+a consumer is issuing a fetch request in
+this time window asking for offsets in
+the middle let's say offset one
+in this case we don't want to send a
+response to give the consumer the wrong
+indication
+its request is invalid because this is a
+transient and a temporary so instead
+what we do is we will be issuing a
+retriable error back to the consumer
+client so that it can keep retrying
+until this high water mark catches up to
+the true high water mark this should be
+done pretty quickly
+once
+a new lease is elected some of the
+followers may need to reconcile his data
+with the new leader as you can see in
+this case
+the follower
+on broker 102 it actually has some data
+in offset three and four those are
+actually the records are never committed
+and you can see they are actually quite
+different from the corresponding records
+in the new leader so we need to have a
+way to clean those records this is done
+through the
+replication reconciliation logic
+the way we do that is through another
+detail in the fetch request when the
+follower is issuing fact requests in
+addition to the offset from which you
+want batch data it also includes the
+latest epoch it has seen its local log
+in this case it's epoch 1.
+once the leader received the fetch
+request it will use the epoch
+information to check the consistency
+with this local lock in this case it
+realized that within this local log
+epoch 1 really ends at offset two
+instead of offset four indicated by the
+follower so the leader will send a
+response indicating to the follower that
+you really need to make the log
+consistent with respect epoch one in
+this case it will tell epoch hand one
+really ends before offset three when the
+follower received this fetch response
+from a leader it will know it needs to
+truncate the data at offset three and
+four and at this point the data is
+consistent with the leader up to offset
+two next
+the follower issue an expat request
+starting with offset three with the last
+epoch one once the leader received it
+you notice this is actually consistent
+with this local log and this will cause
+its local high watermark to be advanced
+to offset three next the follower the
+leader will be returning new data back
+and the follower take this data and then
+panning that to its local log then the
+follower fetch again with latest offset
+on the offset seven this will cause the
+high water mark in the
+leader to be advanced to offset 7. now
+this completes the reconciliation
+between the follower log and the
+leader's log now you can see they're
+identical
+at this point we are still in this
+under-replicated mode because not all
+the replicas are in isr
+at some point this failed replica um
+unbroker 101 will come back
+and it will catch up from the leader and
+will go through a similar reconciliate
+logic as replica 102 and eventually it
+will catch up all the way to the end of
+the log and then it will be added back
+to isr now we are back into the fully
+replicated mode now let's take a look at
+how follow-up failures is handled
+and sometimes a follower can fail or
+sometimes maybe a follower is slow it
+can't catch up with leader in this case
+if we keep waiting for that follower
+then we'll never be able to advance the
+height watermark
+so what we do instead is the leader will
+keep monitoring the progress of the
+follower it will measure what's the last
+time this particular follower has caught
+up all the way with the leader
+and
+if
+it's lagging by more than a configured
+amount of time based on this property
+then this follower is considered out of
+sync then it will be dropped out of isr
+at that point the leader can now advance
+the height watermark based on the
+reduced in sync replica set
+this is how we handle the follow failure
+the last thing i want to talk about is
+balancing the load of the leaders
+as you can see the leader
+replica typically does a little bit more
+work than the followers because all the
+followers are fetching data directly
+from the leader
+so
+in the healthy cluster we want the load
+on all the leaders to be balanced
+this is achieved through a concept
+called preferred replica
+so when you create a topic we'll
+designate the first replica of each
+partition as the preferred replica
+so when we assign the preferred replica
+we try to assign in such a way the
+preferred replica will be distributed
+evenly among all those brokers
+when doing the lead election what we try
+to do is to periodically look at to see
+the preferred replicates heresy and then
+whether the current leader is on the
+preferred one if not we'll try to move
+the leader back to the preferred replica
+so in the end all the leaders were being
+moved onto the preferred replica and
+since these are even distributed among
+all the brokers we can achieve balanced
+load amount of leaders in the cluster as
+well yeah this end of this module and
+thanks for listening
+you

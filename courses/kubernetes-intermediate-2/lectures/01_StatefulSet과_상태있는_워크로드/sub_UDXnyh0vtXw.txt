@@ -1,0 +1,172 @@
+Kind: captions
+Language: en
+hey guys in this video I'm going to show you how&nbsp;
+to deploy a production grade database cluster in&nbsp;&nbsp;
+kubernetes I'm going to be using MySQL but&nbsp;
+the concepts you learn here can be used to&nbsp;&nbsp;
+deploy any other database if you're new to&nbsp;
+this Channel please hit the Subscribe button&nbsp;&nbsp;
+I release new devops and reliability videos&nbsp;
+every week and your support would be extremely&nbsp;&nbsp;
+helpful and now let's get started this is the&nbsp;
+architecture of the MySQL cluster we'll deploy&nbsp;&nbsp;
+the writer node handles all the writes all data&nbsp;
+gets replicated to three other readers all read&nbsp;&nbsp;
+requests are sent to these readers this way&nbsp;
+we're able to scale for both writes and reads&nbsp;&nbsp;
+here's the main tutorial from kubernetes&nbsp;
+documentation that I'm going to be following&nbsp;&nbsp;
+the link for this tutorial is in the&nbsp;
+description below I've also included&nbsp;&nbsp;
+links to all relevant kubernetes Concepts and my&nbsp;
+GitHub repository that contains the code used here&nbsp;&nbsp;
+these are few basic kubernetes&nbsp;
+concepts I'm assuming you already know&nbsp;&nbsp;
+it is also a plus if you have some familiarity&nbsp;
+with mySQL but this is not mandatory&nbsp;&nbsp;
+now let's learn a few advanced kubernetes concepts&nbsp;
+that will help us achieve our database setup&nbsp;&nbsp;
+a persistent volume is a piece of storage in the&nbsp;
+cluster a pod can use it to persist data even when&nbsp;&nbsp;
+you restart or delete the Pod the PV doesn't get&nbsp;
+deleted because it has an independent lifecycle&nbsp;&nbsp;
+so it is the ideal place for you to&nbsp;
+store data that you don't want to lose&nbsp;&nbsp;
+a PV abstracts away the underlying storage&nbsp;
+mechanism from the user an administrator could&nbsp;&nbsp;
+be using anything like a network file system,&nbsp;
+ceph, AWS EBS or even local hard disk underneath&nbsp;&nbsp;
+when an administrator manually Provisions a PV&nbsp;
+for you to use it's called Static provisioning&nbsp;&nbsp;
+Dynamic provisioning is when&nbsp;
+kubernetes creates a PV on demand&nbsp;&nbsp;
+here's an example configuration of a&nbsp;
+statically provisioned persistent volume
+a persistent volume claim is a request for storage&nbsp;
+by a user when you create a pod it consumes some&nbsp;&nbsp;
+node resources like CPU similarly when you create&nbsp;
+a PVC it consumes a persistent volume PVC is where&nbsp;&nbsp;
+you specify things like the disk size that you&nbsp;
+need access mode like read-only or read-write Etc&nbsp;&nbsp;
+your claim might end up getting bound to a PV that&nbsp;
+was statically provisioned or dynamically whatever&nbsp;&nbsp;
+satisfies the criteria specified a stateful set&nbsp;
+is for stateful applications what a deployment&nbsp;&nbsp;
+is for normal stateless applications it too&nbsp;
+manages pods based on a container specification&nbsp;&nbsp;
+so when you want to use storage volumes in&nbsp;
+your pod you deploy it using stateful set&nbsp;&nbsp;
+it ensures that pods are always mapped to the&nbsp;
+same persistent volume they were originally given&nbsp;&nbsp;
+every kubernetes service performs load&nbsp;
+balancing of requests if I perform a DNS&nbsp;&nbsp;
+lookup the service returns its cluster IP so&nbsp;
+my request gets forwarded to one of the pods&nbsp;&nbsp;
+this is great for the usual stateless services&nbsp;
+but it's not desirable in our case because what&nbsp;&nbsp;
+if a write request ends up going to a reader or&nbsp;
+vice versa this means I directly want the IP of&nbsp;&nbsp;
+the writer pod so how do we achieve this we use&nbsp;
+the concept of headless service when you declare&nbsp;&nbsp;
+a service to be headless performing a DNS lookup&nbsp;
+doesn't return the cluster IP instead it returns&nbsp;&nbsp;
+IPs of all the pods behind it the service creates&nbsp;
+DNS entries for each pod we use this method to&nbsp;&nbsp;
+specifically reach the writer pod for all our&nbsp;
+writes we can declare a service headless by simply&nbsp;&nbsp;
+setting cluster IP to none in the definition let's&nbsp;
+have a look at the setup now for this video I'm&nbsp;&nbsp;
+running minikube on a Linux virtual machine I&nbsp;
+gave it 8GB of memory and 50 GB of disk space
+my cluster has one control plane and&nbsp;
+two worker nodes all simulated inside&nbsp;&nbsp;
+the VM of course in a production setup you'd&nbsp;
+have a real kubernetes cluster with multiple&nbsp;&nbsp;
+servers and better configurations I've enabled&nbsp;
+Dynamic provisioning of persistent volumes so&nbsp;&nbsp;
+when I run the database pods my cluster&nbsp;
+automatically gives them new storage I'm&nbsp;&nbsp;
+using local disk for these storage volumes&nbsp;
+I've included the link on how to do this in&nbsp;&nbsp;
+the description but your configurations&nbsp;
+and drivers might be different from mine&nbsp;&nbsp;
+here are the configurations I'm&nbsp;
+going to apply for the MySQL cluster&nbsp;&nbsp;
+the code is slightly modified from the tutorial&nbsp;
+and also available in my GitHub repository
+the config map yaml lets us control configurations&nbsp;
+for the MySQL writer and readers for example&nbsp;&nbsp;
+we want the readers to reject any writes&nbsp;
+that don't come via writer replication log&nbsp;&nbsp;
+we configure in the stateful set&nbsp;
+whether a pod is a writer or a&nbsp;&nbsp;
+reader and based on that the Pod picks&nbsp;
+up the right configuration from here
+up next we declare two Services the first is a&nbsp;
+headless MySQL service so we can access the writer&nbsp;&nbsp;
+endpoint the second is a normal service that load&nbsp;
+balances our read requests amongst all mysql pods
+finally here's the stateful set that launches&nbsp;
+the pods a stateful set controller creates its&nbsp;&nbsp;
+pods one at a time in order of the&nbsp;
+pod index it also gives them stable&nbsp;&nbsp;
+DNS names like MySQL-0 MySQL-1 and&nbsp;
+so on we'll see this in action soon
+the init MySQL container creates&nbsp;
+custom configuration for each MySQL pod&nbsp;&nbsp;
+it generates a unique server ID based&nbsp;
+on pod index if the index is zero it&nbsp;&nbsp;
+applies the writer configuration else it&nbsp;
+simply applies the reader configuration
+when the service brings up a new pod&nbsp;
+the clone MySQL container copies data&nbsp;&nbsp;
+from an already existing pod into it so&nbsp;
+it doesn't have to replicate from scratch&nbsp;&nbsp;
+this cloning is skipped if&nbsp;
+we're bringing up a writer pod
+we Define the MySQL container and specify things&nbsp;
+like config paths, resources to allocate, health&nbsp;&nbsp;
+checks, Etc extra backup is a sidecar container&nbsp;
+that starts the replication in all readers at the&nbsp;&nbsp;
+bottom is our configuration for persistent volume&nbsp;
+claim this tells kubernetes to give a 5gb storage&nbsp;&nbsp;
+volume that satisfies all the criteria here&nbsp;
+to all our pods let's apply the configurations
+config Maps services
+stateful sets
+and let's watch the progress
+it creates one POD at a time notice the&nbsp;
+index 0 is the writer rest are all readers
+so the MySQL cluster is now running MySQL&nbsp;
+0 is the writer the rest are readers&nbsp;&nbsp;
+let's check the persistent volumes&nbsp;
+and claims that each pod received
+each got a 5gb storage volume let's now send some&nbsp;&nbsp;
+traffic to our database first I'm&nbsp;
+going to send a query to the writer
+I'm running a temporary MySQL client that sends a&nbsp;&nbsp;
+query to create a database&nbsp;
+and table and insert a row
+now let's run a read query to get our&nbsp;
+row back this time we send our request&nbsp;&nbsp;
+to the reader pool and the service&nbsp;
+forwards it to one of the replicas
+perfect we were able to fetch the data&nbsp;&nbsp;
+currently we have two readers let's add&nbsp;
+more replicas to scale out our read traffic
+after a while two new pods have been spun up
+stateful set also recreates a pod that crashes or&nbsp;
+gets deleted it ensures that the new pod is linked&nbsp;&nbsp;
+to the same persistent volume claim that was&nbsp;
+given to the original one let's see this in action
+I have five pods with me so how about I delete one
+as you can see a replacement was spun up so we&nbsp;
+have resilience built into our application perfect&nbsp;&nbsp;
+That's all folks these are the basics of how you&nbsp;
+can deploy databases to kubernetes in production&nbsp;&nbsp;
+depending on your specific use case there can be&nbsp;
+a lot more configurations involved so make sure&nbsp;&nbsp;
+you know beforehand what you're signing up for if&nbsp;
+you found this video insightful please like and&nbsp;&nbsp;
+share and if you want to stay on top of the world&nbsp;
+of devops and SRE hit the Subscribe button cheers

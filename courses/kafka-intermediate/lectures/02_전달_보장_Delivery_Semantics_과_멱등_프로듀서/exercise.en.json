@@ -1,0 +1,61 @@
+{
+  "lecture_no": 2,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "Which of the following correctly describes the behavior of a producer configured with `acks=0`?",
+      "options": [
+        "Messages are never lost, but duplicates can occur.",
+        "Messages can be lost, but duplicates never occur.",
+        "This is the safest mode — neither data loss nor duplicates are possible.",
+        "The broker writes to all ISR replicas before responding, giving the lowest throughput."
+      ],
+      "answer_index": 1,
+      "explanation": "acks=0 corresponds to the at-most-once guarantee. The producer sends the message and immediately moves on without waiting for a response (fire-and-forget). If the message is never written to the broker, no retry is issued, so data loss is possible. However, because there are no retries, duplicates never occur. 'No data loss but duplicates possible' describes at-least-once (option A). 'Neither loss nor duplicates' describes exactly-once (option C). acks=all — which waits for all ISR replicas to acknowledge — has the lowest throughput, the opposite of acks=0 (option D)."
+    },
+    {
+      "question": "What is the root cause of duplicate messages in the at-least-once delivery guarantee?",
+      "options": [
+        "The producer is intentionally designed to send the same message twice.",
+        "The broker's internal policy automatically stores every message twice.",
+        "If the message is written to the broker but the ack is lost in the network, the producer cannot distinguish success from failure and retries, causing the message to be written a second time.",
+        "The consumer re-processes the same message by not committing its offset."
+      ],
+      "answer_index": 2,
+      "explanation": "Duplicates in at-least-once arise from 'lost acknowledgments.' When a message is successfully written to the broker but the ack fails to reach the producer due to a network issue, the producer cannot tell the difference between a write failure and a lost ack. After a timeout, the producer retries, and the already-written message is recorded a second time. The producer never intentionally sends duplicates (option A), and there is no double-storage policy in the broker (option B). Uncommitted consumer offsets cause re-processing at the consumer side, which is a separate issue (option D)."
+    },
+    {
+      "question": "How does an idempotent producer prevent duplicates caused by retries?",
+      "options": [
+        "It sets the retry count to 0, preventing any retransmission.",
+        "It attaches a PID (Producer ID) and sequence number to each message; the broker remembers which sequences it has already received and does not re-record retransmitted messages.",
+        "It hashes the message content, and the broker rejects messages with identical content.",
+        "It requests a new PID for each retry so that the retransmitted message appears distinct from the original."
+      ],
+      "answer_index": 1,
+      "explanation": "The idempotent producer attaches a PID (Producer ID) and a monotonically increasing sequence number to each write request. The broker tracks the last successfully processed sequence number per PID. If a sequence that has already been processed is retransmitted, the broker does not write it to the partition again — it simply returns an ack. Setting retries to 0 prevents retransmission but leads to data loss (at-most-once, option A). Content hashing would incorrectly block legitimately identical messages and is not the actual implementation (option C). Retries must use the same PID for the broker to track duplicates; issuing a new PID on each retry would defeat the purpose (option D)."
+    },
+    {
+      "question": "What does setting `isolation.level=read_committed` on a consumer actually do?",
+      "options": [
+        "The consumer automatically commits its offset as soon as it reads a message.",
+        "It skips messages from transactions that are still in-flight (pending) or have been aborted, and reads only data from fully committed transactions.",
+        "The consumer reads only transactional messages and ignores regular non-transactional messages.",
+        "It blocks consumer polling until the producer calls commit."
+      ],
+      "answer_index": 1,
+      "explanation": "With the read_committed isolation level, the consumer uses the Last Stable Offset (LSO) and abort metadata provided by the broker to skip messages from pending transactions (not yet committed) and skip messages from aborted (rolled-back) transactions. Only data from successfully committed transactions is processed. Automatic offset commit is a separate concern controlled by enable.auto.commit (option A). Regular, non-transactional messages are also visible with read_committed (option C). Consumer polling is not physically blocked; the consumer simply does not receive data beyond the LSO for uncommitted transactions (option D)."
+    },
+    {
+      "question": "You are designing a real-time payment processing system. The system reads payment events from an input topic and must write both a 'debit event' and a 'credit event' to separate output topics. Having only one of the two writes succeed is completely unacceptable. Additionally, if the application restarts mid-processing, the same payment must not be processed twice. Which Kafka configuration combination is most appropriate?",
+      "options": [
+        "acks=0, retries=0 — prioritize throughput to process payments as fast as possible.",
+        "enable.idempotence=true only — single-partition duplicate prevention is sufficient.",
+        "transactional.id setting + consumer isolation.level=read_committed — processes multiple partition writes and offset commits as an all-or-nothing operation.",
+        "acks=all, retries=MAX_INT — waiting for acknowledgment automatically guarantees exactly-once delivery."
+      ],
+      "answer_index": 2,
+      "explanation": "This scenario requires atomically committing 'writes to multiple output partitions + the input offset commit' as an all-or-nothing operation — a classic exactly-once requirement. The idempotent producer alone (enable.idempotence) only prevents retry duplicates within a single partition; it cannot guarantee atomicity across the debit and credit partitions (option B). Kafka transactions (transactional.id) group multiple partition writes into a single transaction, and read_committed on the consumer side ensures that only committed data is consumed, preventing duplicate processing after a restart. acks=0 is at-most-once and risks losing payment events (option A). acks=all with high retries improves durability but does not prevent duplicates, so it does not guarantee exactly-once (option D)."
+    }
+  ]
+}

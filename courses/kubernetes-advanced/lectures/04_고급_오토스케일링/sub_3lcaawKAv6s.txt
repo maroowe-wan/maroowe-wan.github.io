@@ -1,0 +1,399 @@
+Kind: captions
+Language: en
+the ability to scale applications
+horizontally is one of the most
+important features of kubernetes
+nevertheless horizontal pod auto scaler
+or hpa is very very basic it allows us
+to scale applications based on memory
+and cpu consumption
+but that is not enough
+we need more
+now to be honest hpa can be combined
+with custom metrics api
+which never lived up to the promise we
+need the solution that will allow us to
+scale kubernetes resources based on data
+from almost
+anywhere
+memory and cpu easy metrics from
+probatives why not metrics from any
+other stores like elastic data dog
+yes please please i need that how about
+messages from kafka logs from aws cloud
+watch data from mongodb
+i want it
+all i want to be able to scale my
+applications or other kubernetes
+resources based on whichever data
+i deem is important for scaling it
+should be up to me to decide what the
+source of information is and tell the
+system how to scale and while we're at
+it scaling should not be limited to the
+few commonly used resources like
+deployment and stateful set scaling
+should be available for any kubernetes
+resource built in or provided as a crd
+just as it should be up to me to define
+the source of data used to define when
+something should scale it should be up
+to me to decide
+what
+should be scaled now the question is can
+we have all that can we have horizontal
+scaling without any limits
+kedah might be one of the solutions or
+maybe the solution to all those issues
+and a few others it is a tool that
+allows us to easily scale any kubernetes
+resource and it is short for kubernetes
+event driven auto scaling so let's check
+it out let's see cada in action and see
+whether it can solve our scaling
+problems or needs
+now let me open a silly application
+silly demo application and double check
+first whether it works and there we go
+this is devops token series my silly
+silly website you can see that it runs
+there is nothing special about it and to
+prove that there is nothing special
+about it i'm going to retrieve all the
+pods with cube cattle the namespace is
+production get pots and you can see that
+there is only one pod of that
+application it is not scaling or at
+least it is not visibly scaling and you
+need to trust me there is no horizontal
+pod auto scaler or any other scalar for
+this application it is a single replica
+application for now and we are going to
+change that with kedah but before we do
+let me tell you briefly there is a gist
+with all the commands and the link to
+the gist is in the description so go and
+check it out if you want to reproduce
+what i'm doing so let me output a simple
+definition of a scaled object that's
+what we get with cada so kat keda prom
+dot yaml and we can see a
+straightforward relatively simple
+definition that will help us scale the
+application i just showed and it is
+scaled object that's the kind that's
+what we get when we install canada
+itself and it has a couple of important
+sections in the specification first is
+the scale target reference that's a
+reference the kubernetes resource that
+should be scaled and that can be
+literally any resource actually almost
+any resource it can be any resource that
+is baked into kubernetes or any resource
+that has scale sub-resource defined and
+that should be available in most custom
+resource definitions at least if they
+are done well so theoretically scale
+target reference can be anything
+then we have some housekeeping things
+like pooling interval which in my case
+is set to five seconds by default it's
+30 cooldown period how much time to wait
+before it scales down in my case it's 30
+seconds it could be 300 seconds or
+actually that's the default value what
+is the minimum number of replicas what
+is the maximum number of replicas it can
+scale to zero but don't do that with
+only cada you would need something that
+would cue your requests like k native or
+something like that uh anyways you can
+scale to zero and whether your
+application can handle no replicas
+that's that's a separate question
+separate video and finally we have
+triggers in this case i'm using
+prometheus there can be many many other
+triggers i'm going to show you the list
+later and then in the metadata section
+i'm saying hey the server where you
+should go to fetch metrics is promisive
+server dot monitoring that's the
+namespace this is the name of a metric
+it can be anything you want threshold
+that if it's passed the scaling should
+happen should occur and finally the most
+important part is a query and in this
+case i'm saying hey i want to calculate
+the maximum rate of traffic service
+requests total the total number of
+requests from traffic because i'm using
+traffic today and by the way if you're
+following up you should use traffic as
+well anyways that's all prometheus
+squaring you should know that if you
+don't then there are other videos for
+that anyways this will calculate the
+maximum broker request based on a rate
+for certain metric which is coming from
+traffic and the output is limited to a
+specific service which is my own
+application now the query will differ
+depending on what are you using as a
+source of information
+as i said before this is a promote use
+and if you use something else like
+datadog or whatever else you might be
+using then the query will be obviously
+different it will be whatever the source
+of information accepts as a credit and
+now all that's left is to apply this
+definition with cube cuddle the nasp's
+production i want to apply whatever is
+defined in the file cataprom yaml and
+that's about it a new resource was
+created and now i can relax i can just
+go home or do something else i mean i'm
+already at home i can go and fetch
+coffee for example but that would be
+silly because this application is not
+running in production so it is not
+getting real traffic and that means that
+i need to simulate some traffic so that
+we see scaling in action and for that i
+will use k6 k6 is awesome if you're
+doing performance testing or load
+testing i have a video about that
+somewhere over there go and check it out
+and while doing that while you're
+checking it out i'm going to run a
+certain number of requests in parallel
+for a specific period of time and
+generate like that traffic right so i'm
+doing load testing to generate traffic
+not really to test and it's going right
+it's running and then now actually i can
+go and fetch coffee but before i do that
+let me see whether there is anything
+waiting for me in slack whether there is
+any message over there and look at that
+i got a new message in slack saying the
+deployment called devops toolkit was
+updated the number of replicas changed
+from one to three so i do not really
+need to monitor my cluster to see
+whether scaling really happened or no
+i'm getting notifications on slack and
+i'm getting them through robusta and if
+you don't know what robusta is there's a
+video for that as well check it out and
+i strongly recommend to do that for two
+reasons first because robusta is awesome
+if you need notifications of any kind
+then if you need to troubleshoot stuff
+and so on and so forth anyway i will not
+go into details check it out the link is
+in the description and the second reason
+i'm mentioning robusta is because
+robusta is sponsoring this video so you
+should check them out that way you're
+helping this channel right they sponsor
+they give money for the channel so that
+you don't have to and everybody's happy
+so check them out check out robusta it's
+really awesome solution otherwise i
+would not let them sponsor this channel
+thanks to robusta for sponsoring and now
+let's go back to scaling because we can
+see from this slack message that the
+number of replicas increased to three
+let's see what's going on what happened
+now let's see what's really going on by
+executing cube cattle the name species
+production and i want to retrieve pods
+of my application i want to retrieve all
+horizontal polar auto scalers even
+though i did not define any and i want
+to retrieve all scaled objects that's
+scada that's what i applied a moment ago
+i mean a few minutes ago and we can see
+that indeed there are three pods i mean
+of course there are three pods proposed
+told me about it and there is horizontal
+potato scale this horizontal portal
+scale created by keda by the scaled
+object that i created a few minutes ago
+so scaled object created hpa we then it
+is manipulating hpa it is changing hpa
+and hpa created the pods of my
+application now let's spice it up a bit
+let's create more traffic more traffic
+than before let's uh put the system to
+the test by executing by showing you
+first another k6 manifest and this one
+i'm creating 200 concurrent users over
+30 seconds again check k6 as well uh
+they're not sponsored they should be
+though anyways let's see what will
+happen if i put even more pressure on my
+application so k6 run
+k6-100 js and then it runs for 30
+seconds and while it's running this
+might be a great opportunity for you to
+stop what you're doing i mean continue
+what you're doing continue watching the
+video but subscribe to the channel like
+the video and if you want to sponsor the
+channel yourself as an individual please
+consider joining the channel that helps
+pay the bills so do all the stuff that
+you do on youtube and while i was
+talking about and trying to convince you
+to do the stuff
+k6 finished executing and now i can take
+a look at what's happening and i will
+first go to slug to see whether i got
+the new notification so let's go over
+there and see whether my application
+scaled even more and there we go i got a
+new notification saying hey your
+application now scaled from three
+replicas to six replicas
+you have more traffic than expected so
+application should grow with the traffic
+right and if you list all the pods and
+hpas and scaled objects we can see the
+same story as before
+we have six spots this time horizontal
+powder scale are already configured
+currently with six replicas and scaled
+object that is the one that manages
+controls horizontal auto scaler and now
+i'm going to fast forward a couple of
+minutes i want to see what happens when
+the traffic goes down what happens with
+the application i mean you can probably
+guess so this is me fast forwarding a
+couple of minutes
+there we go and now we can see a new
+slack message saying hey your
+application now scaled from 6 replicas
+to four and i can observe that from the
+terminal as well if i list all the pods
+and hps and scaled objects now we can
+see that there are four pods instead of
+six that were there before so it's
+killed down because there is less
+traffic than there was before and then
+if i fast forward a bit more
+and i go back to my terminal i can see
+that now there is only one replica
+because that's the minimum number of
+replicas there is no traffic going to
+that application anymore so cat event
+back to the minimum number of replicas
+absolutely awesome now you might be
+wondering hey how did i know what to
+define in canada how did i know that i
+can use prometheus as a source of my
+metrics and by the way prometheus is
+boring everybody's using it and you can
+actually scale your application with
+prometheus without kedah but what makes
+kedah amazing is the number of supported
+scalers so i'm going the easy route with
+prometheus but let's take a look at what
+other scalars we can use to fuel
+my applications to fuel our applications
+to scale them and look at that the
+currently available scales for canada
+are active q a couple of them
+cloudwatch
+streams sqs and azure is something
+something there are a couple of other
+supported scalars and cassandra and cpu
+and chrome and then elasticsearch and
+external external push and a couple of
+supporting google and graphics and
+huawei and ibm mmq and influencers being
+going forward load and leak to loose
+topic what is that link to stopping no
+idea and there is memory based scaling
+and matrix api and mobility and manage
+equal and equal and nuts and you really
+can always like metrics and other
+swift postgres sql predictive i can
+write about what is pretty cool i've
+actually checked it out for me too so
+thank you reddish couple of phrases
+actually selenium rescaler and uh solace
+i don't know that one i need to check it
+out as well oh that's quite some list
+and the list is growing we can expect
+even more so you can use
+almost anything
+to fuel scaling you can use almost
+anything to decide what information is
+needed to deduce when an application
+should scale actually not an application
+when something should scale doesn't even
+have to be an application and the reason
+why i'm saying it doesn't have to be
+even an application is because cada
+works with any resource type it can be
+anything in kubernetes including custom
+resources as long as the scale
+sub-resource is defined if you don't
+know what scale is a sub-resource scale
+actually is then tough luck i'm not
+going to explain this here i can make
+another video until then google it scale
+sub-resource and you will find it out
+and cad is becoming huge it's becoming
+adopted by ever-growing projects not
+only on the metrics side but also among
+different projects that are using cada
+to scale themselves azure itself is
+already employing cad in couple of
+situations like azure container apps k
+native is looking into adopting canada
+as well so check it out there is a
+project separate project within canadian
+sandbox about adopting canada and you
+will find quite a few other projects
+that are already using it or are
+planning to use it now let's talk about
+pros and cons of using cada
+now the pros of using canada are
+relatively simple and straightforward to
+explain there are only two of them it
+works with almost any resource type
+anything you have in kubernetes can be
+scaled with cad as long as scale sub
+resource is defined and it should be and
+the second advantage of cad is that it
+works with almost anything as source of
+metrics whatever you have can almost
+anything you have can be used to fuel
+scaling to make decision
+when to scale and how to scale now as
+for cons as for negative sides well
+there isn't any i cannot think of
+anything bad to say about it it's one of
+those things where i could not find
+anything negative at least not when
+compared with alternative solutions all
+in all if you need to scale your
+applications or resources or something
+if you need to scale something based on
+more than memory cpu something more
+elaborated than memory and cpu which by
+the way is almost never enough then
+keda
+might be the solution for you and let me
+know in the comments what are you using
+to scale your applications and the rest
+of kubernetes resources let me know in
+the comments please
+you

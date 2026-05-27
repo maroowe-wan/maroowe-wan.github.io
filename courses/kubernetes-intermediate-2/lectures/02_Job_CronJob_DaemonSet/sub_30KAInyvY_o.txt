@@ -1,0 +1,144 @@
+Kind: captions
+Language: en
+A pod is the smallest unit of computation&nbsp;
+and replication in Kubernetes. If your&nbsp;&nbsp;
+application needs to scale up, you&nbsp;
+simply increase the number of pods.
+Since pods are scaled up and down as a unit,&nbsp;
+all containers in a pod must be scaled together,&nbsp;&nbsp;
+regardless of their individual needs. This can&nbsp;
+lead to wasted resources and a higher cost.
+To avoid this, pods should be kept as small&nbsp;
+as possible, typically containing only a&nbsp;&nbsp;
+main process and its closely associated helper&nbsp;
+containers, which we typically call sidecars.
+Pods are the basic unit of&nbsp;
+computation in Kubernetes,&nbsp;&nbsp;
+but they are not typically created&nbsp;
+directly in the cluster. Instead,&nbsp;&nbsp;
+Kubernetes provides another level of&nbsp;
+abstraction, such as a Deployment.
+The primary purpose of a Deployment&nbsp;
+is to declare how many replicas of&nbsp;&nbsp;
+a pod should be running at any given time.
+When a deployment is added to the cluster, it&nbsp;
+automatically spins up the requested number of&nbsp;&nbsp;
+pods and then monitors them. If a pod fails,&nbsp;
+the deployment will automatically recreate it.
+By using a deployment, you don't have&nbsp;
+to deal with pods manually. You can just&nbsp;&nbsp;
+declare the desired state of the system, and&nbsp;
+it will be managed automatically for you.
+To expose the application to the outside world, we&nbsp;
+use a service object. When a request comes to the&nbsp;&nbsp;
+service, it will be randomly redirected to one&nbsp;
+of the pods managed by the deployment. There is&nbsp;&nbsp;
+no way to individually target any specific&nbsp;
+pod since all of them get unique pod IDs.
+Since pods are ephemeral in nature, when&nbsp;
+a pod gets rescheduled or simply deleted,&nbsp;&nbsp;
+it will lose all the state and&nbsp;
+associated data if it is stored locally.
+There is a way to persist data in a&nbsp;
+Deployment object. You need to create&nbsp;&nbsp;
+a persistent volume claim. By default, most of&nbsp;
+the cloud-managed Kubernetes services would have&nbsp;&nbsp;
+a default storage class that can allocate&nbsp;
+a volume with readWriteOnce access mode.
+This means you can only attach this volume to&nbsp;
+a single pod. If your deployment has more than&nbsp;&nbsp;
+one replica, other pods will fail to mount the&nbsp;
+volume and will be stuck in the creating state.
+I frequently use this with Grafana to persist&nbsp;
+dashboards that I created from the UI. However,&nbsp;&nbsp;
+if you try to update the Grafana&nbsp;
+image, for instance having one replica,&nbsp;&nbsp;
+by default it will create a new pod first&nbsp;
+and then try to mount the existing volume&nbsp;&nbsp;
+to that pod, which will also lead to&nbsp;
+a mounting error and a failed update.
+To fix this issue, just update the deployment&nbsp;
+strategy to recreate. It'll unmount and destroy&nbsp;&nbsp;
+the pod first, and then create a new one&nbsp;
+and attach the existing volume to it.
+There is a workaround to deploy an additional&nbsp;
+driver such as EFS in the AWS cloud, which is a&nbsp;&nbsp;
+type of network storage that allows mounting the&nbsp;
+same volume to multiple pods at the same time.
+In that case, you would use the ReadWriteMany&nbsp;
+mode to allocate the volume. Now you can use&nbsp;&nbsp;
+this claim name and mount this volume&nbsp;
+to all your pods under that replica.
+Now you have the ability to scale your deployment&nbsp;
+with the mounted volume, but you'll still use the&nbsp;&nbsp;
+same volume, which is probably not what&nbsp;
+you want. However, you can probably find&nbsp;&nbsp;
+a way to work with it if your pods use a file&nbsp;
+path based on the pod id or something like that.
+Instead, you would likely want to allocate a&nbsp;
+dedicated volume for each pod. With deployment,&nbsp;&nbsp;
+you would need to create as many&nbsp;
+persistent volumes as the number of&nbsp;&nbsp;
+pods you wish to have. In addition,&nbsp;
+you would need to create deployment&nbsp;&nbsp;
+objects with one replica each. As you can&nbsp;
+see, this solution is difficult to scale.
+To solve this problem, Kubernetes has introduced&nbsp;
+the StatefulSet. It is similar to a deployment,&nbsp;&nbsp;
+but it also offers the option&nbsp;
+to define volumeClaimTemplates,&nbsp;&nbsp;
+which can dynamically create persistent claims&nbsp;
+for each pod that the StatefulSet object creates.
+So, when you create a StatefulSet,&nbsp;&nbsp;
+each pod will be bound to a specific volume.&nbsp;
+If the pod gets rescheduled on another node,&nbsp;&nbsp;
+the same volume will be attached to that pod. In&nbsp;
+this way, you maintain an identity for each pod.
+Another important aspect of the StatefulSet is&nbsp;
+that each pod will get a stable, unique network&nbsp;&nbsp;
+identifier. In simpler terms, each pod will&nbsp;
+have its own stable DNS name. Many stateful&nbsp;&nbsp;
+applications, such as Kafka, not only require&nbsp;
+data persistence between restarts but also&nbsp;&nbsp;
+need to know where the leader of a particular&nbsp;
+partition is located, and provide that DNS name&nbsp;&nbsp;
+of the pod to the client. This way, the client&nbsp;
+can directly connect to the pod using its DNS.
+Speaking about DNS, a StatefulSet also creates and&nbsp;
+maintains not only A records for each pod but also&nbsp;&nbsp;
+SRV records, which some clients can utilize.
+In some use cases, I even prefer to run&nbsp;&nbsp;
+stateless applications using a StatefulSet simply&nbsp;
+because they need to maintain a strong identity.
+Also, by default, when you create a StatefulSet,&nbsp;
+Kubernetes will create pods in sequential order.&nbsp;&nbsp;
+If you have 50 pods and you don't require&nbsp;
+such ordered slow deployment, you can set&nbsp;&nbsp;
+the podManagementPolicy to 'Parallel.' This way,&nbsp;
+StatefulSet pods will be created at the same time.
+Now there is a time when you want to deploy&nbsp;
+a pod on each node such as monitoring or&nbsp;&nbsp;
+logging agents. If you scale up or down your&nbsp;
+Kuberentes cluster, you want to remove and&nbsp;&nbsp;
+add pods as well. DaemonSet can automate this&nbsp;
+process for you. DaemonSet will create as many&nbsp;&nbsp;
+pods as there are nodes in your cluster, so&nbsp;
+you don't need to manage replicas yourself.
+Since we frequently add taints to the node pools&nbsp;
+in Kubernetes to ensure that your pods will be&nbsp;&nbsp;
+deployed on each node, you need to tolerate&nbsp;
+all possible taints on these nodes as well.
+DaemonSet is also commonly used with distributed&nbsp;
+software as a storage solution. For instance,&nbsp;&nbsp;
+if you want to deploy Hadoop, MinIO,&nbsp;
+Rook, or even Local Persistent Volumes,&nbsp;&nbsp;
+you would create Kubernetes nodes with&nbsp;
+attached disks and run a DaemonSet on&nbsp;&nbsp;
+each of them. In this way, by using a&nbsp;
+DaemonSet, you can abstract the local&nbsp;&nbsp;
+distinct disks and provide them as an S3&nbsp;
+or a filesystem for your applications.
+If you want to learn about the differences&nbsp;
+between NodePort, Load Balancer, and Ingress,&nbsp;&nbsp;
+you can watch this video. Thank you for&nbsp;
+watching, and I'll see you in the next video.

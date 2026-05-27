@@ -1,0 +1,290 @@
+Kind: captions
+Language: en
+hi everyone welcome back this is junior
+from confluent in this module i want to
+talk about how compaction works in
+apache cop
+well most people will be maybe mostly
+familiar with time-based retention
+encounter in this case you set up the
+cleaning policy to be
+deletion and then you set an amount of
+time how long you want to keep the data
+in kafka then as those new log segments
+are generated the oldest set of log
+segments will be deleted over time if
+they pass that retention time
+now what's
+compaction
+compaction is a different way of
+retaining data instead of retaining data
+by time it will be retained by key let's
+take a look at this example in this
+example all the records are published
+with keys as you can see some of the
+records some other keys are duplicated
+over time
+so with
+compaction you basically set a cleaning
+policy to be compact and then what's
+gonna happen is over time only the
+records with the latest record will be
+kept
+if you have some older records with the
+same key those will be garbage collected
+over time like those in the pink
+there's a special payload if you if the
+payload is set to now
+that's an indication that you want to
+delete this particular key then at some
+point this is what we call a tombstone
+it will also be cleaned up over time so
+this is actually how how the compaction
+works it's a key base retention what are
+some of the use cases for compaction
+it's actually pretty useful concept it's
+very useful to capture all those event
+changes for something that's updatable
+like in the database table for example
+if you have a profile for the customers
+or you have a catalog for all the
+product descriptions as those customer
+profiles and the product description
+changes you may want to keep getting the
+latest changes of what's happening
+but what compaction gives you is in
+addition to keeping track with latest
+changes it can also bound the total
+amount of space that you need to sort in
+this topic
+because over time
+all the old red cars
+with the same key they can be garbage
+collected
+this is actually pretty useful for
+applications keep up with the
+incremental changes but also
+do some boots trapping occasionally so
+in this case let's say if you have
+applications starting from the very
+beginning you may want to bootstrap the
+state by getting the latest value from
+all the keys particular topic you can do
+this by consuming from the very
+beginning of the offset in a compacted
+topic and once this process is done you
+can continue with newer changes to this
+topic so it's actually a pretty
+convenient way of doing this this kind
+of thing because there's only a single
+kafka topic you need to deal with
+instead of having to have two systems
+when dealing with bootstrap the other
+dealing with incremental consumption now
+let's look at how compaction works in
+kafka
+this is a compactor log
+so over time this compact lock will be
+divided into two parts on the left side
+these are the smaller offsets in the log
+these will be the portion of what we
+call the cleaned log in this case in
+this portion of the log there are no
+duplicate keys all the duplicates have
+been removed
+on the right hand side these over time
+these are accumulated 30 stack segments
+this is the 30 portion of the log in
+those segments the data can have
+duplicates among themselves they can
+also duplicate with some of the cleaned
+records as well
+so the first step during cleaning is we
+have to determine a subset of those 30
+segments to clean the exact number of
+segments that you can choose depends on
+how much memory you have in the broker
+and also how many keys you have in this
+particular topic once we have decided
+the segments to clean what we'll do is
+we'll scan through all the selected
+dirty segments and then build an
+in-memory offset map in this map we'll
+be keeping the key as the key entry for
+the map and
+for each of the key we'll be keeping
+track of the latest offset we have seen
+for this particular key this will be
+used for cleaning subsequently
+after this all the segments have loaded
+and then this offset has been built
+we'll be going through the actual
+cleaning phase
+in this cleaning phase we'll be scanning
+from the very beginning of this log
+including all those clean the portion of
+the log
+and those previously loaded 30 segments
+as we are scanning through each of those
+records will be using the key in the
+record do a lookup
+in this offset map if the key is not
+present in the map we know this record
+is still the latest for this key and
+will be retaining this record
+if this key is present in a map we'll be
+comparing the red cos offset with the
+offset stored associated with the key in
+this offset map
+if the record offset is higher or equal
+we know this record is still the latest
+record for this particular key and it
+will be retaining this record otherwise
+this record will be deleted so once we
+know which records need to be retained
+we'll be copying over those retained
+records into a new set of segments
+when we are copying those them over to
+new segments we'll be preserving the
+exact offsets of those records as they
+are in the old segments
+this means
+between sum up between two consecutive
+records there could be some holes in
+offset
+because some of the records in the
+middle could have been deleted this is
+fine because the consumer application
+knows how to skip those holes in the
+offset gap
+once those new segments have been
+generated
+we will be doing a swap of the old
+segments with the newest one now if you
+have a consumer that try to ask for
+consuming some of the data within this
+offset range if they will be directed to
+the new set of segments and over time
+will be deleting the old segments
+once the cleaning process is done we
+will also save the position which is the
+offset of the last
+30 segments we have loaded into the map
+so that if the broker fails and and
+start over again it will be resuming the
+cleaning from this particular offset
+afterwards for subsequent cleaning
+okay now let's take a look how we can
+clean tombstone this can be a little
+tricky because if we are not very
+careful we can get into a situation
+where
+some of the delete records will never be
+propagated to the application so this
+example shows this so let's say we have
+this record at offset 50 this record is
+subsequently
+deleted because we have a key within our
+payload at offset 57.
+so
+when when we try to clean this segment
+the naive way is
+we can remove both records at 50s and
+record at 57 because the key is
+subsequently deleted
+but
+if we do that it's possible for an
+application who has just finished
+reading
+the record at offset 50 and then took a
+pause and then when it resumed
+consumption it will no longer
+find the record the delete record at
+offset 57
+then in this particular case this means
+this application will never realize that
+particular key has been deleted
+similar issue can happen if we are
+deleting a transactional marker too
+early
+so in this case for example
+we have this record as part of
+transaction which is avoided and if we
+remove this aborted record and a
+transaction a border marker together too
+quickly then we can have the same
+situation where a consumer may have
+written may have read this aborted
+record but without reading the marker so
+it doesn't know this actually is about
+it
+so to solve this issue what we are
+dealing with the tombstone deletion is
+we are clean that in two step arounds in
+the first round of cleaning we will only
+remove the record at 50 but we'll leave
+the tombstone marker at offset 57 as it
+is when we keep it we also set a time
+for when it can be safely deleted and
+that time is set
+from the time when we clean the record
+plus a configured amount of retention
+time so the expectation is an
+application within this amount of time
+is expected to finish consuming all the
+way of this this partitions data all the
+way to the end
+by retaining this data uh for long
+enough now we will give we'll allow the
+applications enough time to finish
+resuming the consumption of this uh
+delete marker and after that we can
+safely delete the tombstone and we can
+do the same thing for the transaction
+marker as well
+now
+when is compaction triggered
+this is controlled with a few of the
+parameters by default we don't want
+the cleaning to happen like too
+frequently because it can be resource
+intensive so instead what we want to do
+is to balance the
+the cleaning with the amount of dirty
+data we have accumulated so we'll be
+measuring how much additional dirty
+portion of the data we have accumulated
+and compare that over the total amount
+of data we have accumulated in this log
+if that exceeded a certain threshold by
+default it's like 50
+then we'll be triggering a cleaning
+some applications may want to defer the
+cleaning a little bit because they may
+want to see every record if possible so
+in this case they can set like a minimum
+number of
+delay for compaction and then the claim
+will happen after that
+some applications they don't want to see
+duplicates too much so they want to be
+able to clean the data as aggressively
+as possible for them they can also set a
+max compaction lag
+in this case we'll be cleaning the data
+if it's older than this amount of time
+to summarize
+compaction is a very effective way of
+retaining the data by keys and it's very
+important for applications that want to
+keep track with updatable
+red course by key the guarantees we have
+when you use compaction is you are
+always guaranteed to see the latest
+record for a particular key but you are
+just not always guaranteed to see every
+update of the of the record for every
+key
+and that's it for this module thanks for
+listening
+you

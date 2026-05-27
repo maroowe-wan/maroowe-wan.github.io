@@ -1,0 +1,744 @@
+Kind: captions
+Language: en
+Hello friends Welcome to our Channel
+knowledge amplifier so in our previous
+video we have already discussed several
+concepts related to Kafka like how to
+install Kafka in our local system what
+is the concept of producers consumers
+topics Brokers etc etc and if you want
+to know those detail explanations you
+can go through the link given in the
+description box
+so today we are back with another very
+important topic in Kafka and that is
+Kafka schema industry okay what is
+schema registry why we need schema
+registry the foundation concept I am
+going to cover in today's session and
+how to integrate schema registry with
+python what are the applications or
+different use cases of schema registry
+that I am going to cover in my upcoming
+okay right so without any further delay
+let us try to understand the concept of
+schema registry
+so if you recall our producer
+architecture
+look like this here we are starting the
+process whenever we are sending the
+message in Kafka as a first step we are
+applying serialization converting the
+data to bytes format okay because the
+data is shared across Network and only
+bytes can travel so here for key as well
+as value we are applying different
+serialization technique right e
+serializer and value serializer is there
+to serialize the data okay and
+eventually after passing via multiple
+blocks we are basically storing that
+serialized data in our leader partition
+within a particular Kafka topic and in
+other replicas also if we enable data
+application for the topic right as
+simple as that so one thing is clear
+Kafka at its own only transfer data in
+bytes format that is in simple words
+Kafka only deal with pipes kafkano only
+one data structure and that is pied
+stator okay there is no data
+verification that's being done at the
+Kafka cluster level okay from producer
+side whatever data we are sharing that
+Kafka is loading and in the consumer
+section whenever we are considering we
+are considering the pipes okay Kafka is
+not doing any data verification or data
+validation whether the bytes are proper
+whether it is that data or not nothing
+it verifies okay in fact Kafka doesn't
+even know what kind of data it is
+sending or receiving whether it is
+string or integer whatever just bytes
+data it's stored and CR right so I hope
+up to this it is very much clear to you
+now the picture of producer cluster and
+consumer in simple words can be shown
+like this way we are having our producer
+we are sending bytes data it is getting
+stored in Kafka cluster Kafka don't know
+what data this is whether it is string
+integer what is the meaning of this data
+and here Kafka throwing and consumer is
+consuming the data from the Kafka
+clustered within a topic within a
+partition might be the data is there
+consumer is considering from that and
+consumer need the actual data not in
+bytes format so what the consumer will
+do the consumer will deserialize the
+data to convert the pipes to actual data
+right so this picture I will take in my
+next slide and continually discussion
+okay so here you can see I have taken
+the same image so due to decoupled
+nature of Kafka producers and consumers
+do not communicate with each other
+directly but rather information transfer
+happens
+which is pretty much clear from this
+diagram producer and consumer no direct
+connection is available via Kafka
+cluster in a decoupled manner the
+communication is happening as simple as
+that but obviously one thing you need to
+keep in mind in this kind of
+architecture that consumer need to know
+the type of data the producer is sending
+in order to deserialize it what is the
+meaning of zero one zero how the
+consumer will deserialize if the
+consumer don't even know how the
+producer published okay so basically
+what I mean to say is in this line that
+for deserialization purpose of the bytes
+consumer need to know what kind of data
+The Producers see at okay and how we
+implemented this in our previous course
+if you recall so here is the producer or
+snippet I have taken from my previous
+video If you see here we are importing
+the basic requirements like time we are
+importing for some sleep interval in
+between successive message publication
+in the Kafka cluster then here we are
+importing dumps from Json if required
+and then here we are importing Kafka
+producer from Kafka python Library okay
+here we are providing the topic name and
+here we have creating the producer using
+Kafka producer if you see here we are
+mentioning the bootstrap server and here
+we are not using any key for
+partitioning purpose so what will happen
+in round robin fashion the data will be
+distributed among different partition if
+the topic has multiple partition okay
+but for Value serialization if you see
+here we have written the code that what
+we are saying here we are saying first
+the data if it is Json or in dictionary
+format first we are using Json dot terms
+to convert the data to string okay then
+we are inputting the string using UDF H
+format okay we are converting two bytes
+and then bytes data we are sending in
+this particular topic using producer dot
+send in a asynchronous manner and then
+we are making a sleep time for 2 second
+and we are publishing another message
+after two seconds like that way we are
+publishing thousand messages that's how
+the producer looks like so here you can
+easily understand from the producer side
+we we are converting the Json data to
+string and then here we are converting
+the string data to bytes okay in the
+consumer side what we are doing here if
+you see just the reverse thing in the
+value D serializer we are first decoding
+the message so in the publisher site or
+producer site first we converted Json to
+string and then string to bytes right
+here what we are doing we are converting
+the bytes to string first using decode
+function and then from that string data
+to get the Json or dictionary we are
+using Json dot loads as simple as that
+right so here you can see how we
+serialize the data in the same reverse
+way we are basically deserializing the
+data in the consumer side so here
+consumer need to know how the producers
+share the data that's what I have
+written using this particular line right
+but the problem in this particular
+coding style is I can publish any data
+of any schema like for example suppose
+the consumer in its processing expecting
+a h key okay so suppose in producer side
+I am publishing each s string although
+it should be actually number data right
+but suppose due to some reason if that
+data is coming where ADC string here
+producer will simply publish and
+consumer will simply consume okay that
+restriction is not there that data
+verification or data validation approach
+is missing in this kind of architecture
+whether schema is coming as expected for
+the messages or whether bad data is
+coming neither in producer site nor in
+consumer side we are checking and that
+is a problem right that's what I have
+written here that is imagine if the
+producer starts sending bad data to
+Kafka or if the data type of of your
+data get changed then what will happen
+then Downstream job might break or start
+throwing error like for example suppose
+our consumer is expecting the Json after
+T serialization like this each one key
+which should be one value type or
+integer type or long type Etc and then
+there is another key name which should
+be string type okay this is what the
+consumer is expecting right and maybe on
+each key it is applying some arithmetic
+operation okay now producer is sending
+some bad data and actually in our
+earlier what we have seen that no data
+verification is happening so suppose by
+mistake producers in this bad data where
+age is hello age is basically it is
+sending a string and name which should
+be string it is sending a number okay
+now the consumer will simply consume so
+now as there is no data verification
+happening the bad data will be directly
+written in Kafka cluster and the
+consumer will consume the data now when
+the consumer will try to basically apply
+arithmetic operation on this Edge key
+which it is expecting to be number but
+now it is string arithmetic operation
+will not happen it will show exception
+and our Downstream job or Downstream
+consumer will start breaking okay so I
+hope you understood the problem in this
+kind of coding where there is no data
+certification
+problem is we are not doing any schema
+level check and as a result our
+Downstream consumer may break so we need
+a solution for this okay we need a way
+to have a common data type that must be
+agreed upon embedded producer and
+consumer if this schema is not matching
+then the producer will not even publish
+that particular message in Kafka cluster
+okay otherwise what will happen
+eventually with time the Kafka cluster
+will be congested with bad data and that
+should not happen right if the data type
+is not matching in the producer itself
+it will be filtered producer will show
+an exception let's see these kind of
+message is not following the proper
+schema as expected I cannot publish that
+in the Kafka cluster okay that kind of
+data verification should happen Okay to
+avoid this kind of problem
+and that's where schema registry comes
+into the picture okay before going to
+the discussion how schema registry
+solves the problem I will show you the
+architecture how the pipeline looks
+without schema registry that is what I
+discussed till now that architecture
+looks like this that is basically here
+we are having our source system which is
+generating the data in real time and our
+producer is consuming the data which is
+not doing any data verification it is
+just simply converting the data to bytes
+that is it is doing serialization and
+after passing by multiple blocks in the
+producer whatever architecture I have
+already shown it is basically publishing
+the data in Kafka cluster okay here in
+person cluster we are having Kafka
+Brokers running okay we are having
+multiple topics within a particular
+topic there can be multiple partitions
+there the messages getting stored and
+consumer is simply consuming the bytes
+it is also not doing any data
+verification then the bytes are getting
+converted to actual data while having
+the serialization and post
+deserialization we can store the data in
+Target system that can be a database or
+elasticsearch cluster Etc okay now let
+me show you this particular scenario so
+to explain this schema registry I am not
+using any other local installation but
+rather I downloaded a particular tool or
+software I can say which is having name
+conductor okay I will basically share
+the installation Link in the description
+box it is very simple you can follow the
+documentation and install it okay so
+here I will open my conductor which is a
+very good tool to explore Kafka if you
+are in learning phase okay it will
+basically provide you an UI and using
+that UI you can do lot of experiment and
+visualize what is happening in the
+package okay now first we will see that
+without schema registry how the message
+is getting published without any data
+level validation or skill matching okay
+so here is our conductor software window
+open and here already I have a cluster I
+will just click on that here you see
+starting zookeeper then here it will
+start the Kafka cluster blockers
+everything for you even it will start
+schema registry for you what is schema
+register I will come to that notice so
+here it is starting Kafka so here you
+can see that our conductor is open if
+you go to overview section here you can
+see our Kafka bootstrap server or broker
+is running at this particular URL and
+our schema registry is running in this
+particular URL currently we are having
+only one blue card we are having three
+topics out of that there are two system
+topics and there is one topic which I
+already created for discussion purpose
+and that is basically Timo schema
+registry okay just a simple topic I have
+created first let me make sure that here
+the topic is empty so I will just make
+the topic empty for this particular
+experiment and now what I will do I will
+start publishing some message in it okay
+so here what I will do I will open
+Notepad
+and suppose the proper data format what
+the producer should publish looks like
+this maybe for example each should be
+one column and that can be suppose 28
+and then comma here name
+name is Run Okay suppose this is a
+proper
+formatted data okay I will copy that so
+here I need to go to producer and then
+here first I need to choose a topic I
+will choose that and then what I will do
+here you can see key and value key is
+optional we're going to put value string
+so here what I will do in value part I
+will paste this particular data okay
+right and then here I will click on
+produce two topic as soon as I am click
+on this particular button here you can
+see that the message is getting
+published here okay in demo schema
+registry offset is 10 because earlier
+also I did some experiment so the
+message is getting published right so
+even I can minimize this particular one
+and then I can start the consumer and
+then here first I can choose the topic
+and then here value format might be I
+can choose string type okay and then
+here starting from the beginning and
+then if I start here you will see it is
+pulling and the message what we
+published we able to consume that okay
+right now what I will do I will publish
+some bad data like it should be integer
+but suppose each I am passing as
+bmhs okay substring and name I am
+passing as shut okay for example and
+then here we are producing to this
+particular topic so here we publish the
+another message and if I just move this
+particular link a little bit right here
+you will see that the message appeared
+here in the consumer because the
+consumer is keep on pulling okay if we
+click on stop then the consumer will
+stop okay so here you can see one thing
+that bad data also getting published
+from producer it is getting stored in
+Kafka cluster and our consumer is
+concerning also each which actually
+should be numbered but although we are
+passing a string the consumer is
+considered that is that movement back
+data and due to the bad data consumption
+as I have already shown you that our
+Downstream consumers might break or
+might start failing right because on
+each key if you are applying some
+arithmetic operation that will show
+exception when pH value will be string
+right so I hope this particular problem
+you understood that what is basically
+happening when we are having
+uh no data verification right in this
+kind of pipeline so we understood the
+problem in pipeline without schema
+registry now what is schema registry and
+how schema registry solves the problem
+of data verification let us try to
+understand okay
+so now let's see pipeline tweaks schema
+registry in case of Pipeline with schema
+registry the lower part looks like this
+here we are having our source system
+which is generating the data in real
+time our producer is consuming here we
+are having our Kafka cluster where Kafka
+broker is there are multiple topics are
+there here we are having our consumers
+and we consumer host consumption of
+messages and post pre-serialization it
+is writing the data in Target after some
+computation okay right but the changes
+here apart from our Kafka cluster there
+is another cluster which is running
+which is called schema registry which is
+centralized storage for all our schema
+or metadata okay this is a separate
+Standalone cluster it is not present
+within our Kafka cluster this particular
+schema registry is running in a separate
+Standalone cluster it is having its own
+jvm Linux etc etc okay and it basically
+used for centralized storage for hours
+different schemas okay now how the
+problem is solved let us try to
+understand step by step okay
+so here in case of Pipeline with schema
+registry we are having a schema 5 where
+we are basically saying that this would
+be the actual schema how the message
+should look like or what the message
+should follow okay now here in producer
+side we are having serializer also there
+are different serializer afro data you
+can use Json data you can use but mostly
+we use approach so I am using afro
+serializer for explanation and as well
+as in my upcoming demo also I will use
+Avro for this kind of schema related
+operations also okay so here we are
+having a afro serializer class what it
+will do whatever data is coming from the
+source system in real time after
+serializer will serialize the data that
+is from data it will convert to pipes
+that is point number one not only that
+it will ensure that the incoming data
+schema is compatible with this schema
+whatever is available in this schema
+okay suppose in this schema file we are
+mentioning the age should be integer and
+the key name should be king type in
+average serializer will not serialize
+any kind of data for which age is coming
+as string okay it will do a
+compatibility check and then it will
+basically convert the data to bytes
+using serialization technique okay and
+the alpha serializer will not stop here
+but it will do further while creating
+the producer we will mention our schema
+registry server name like here you have
+seen in conductor overview here our
+schema registry is running in this
+particular URL right so while creating
+the producer we will mention the URL
+afro serializer will use that particular
+URL and because this schema if we are
+using for the first time average
+serializer will push that particular
+schema in schema registry okay so here
+you can see this particular
+line it is going which is basically
+saying the average serializer will
+register this schema for the very first
+time okay and what will happen from the
+schema registry it will get back a
+schema ID okay basically in schema
+registry there is a mapping maybe for
+schema id1 there is one schema attached
+to it for schema id2 there is another
+schema attached to it like that key
+value pair is there where key is imid
+and value part is basically actual
+schema now whenever serializer will
+register a schema it will create a
+schema ID okay now what the average
+serializer will do is it will happen
+that particular ID in the header with
+our serialized data okay so this becomes
+our one record
+is containing the schema ID and the
+serialize data and that particular whole
+record the producer will send to Kafka
+cluster okay right I hope after this you
+got it now what will happen in consumer
+side the consumer will consume the
+record and when it will consume it will
+get the serialized data and the schema
+ID now the consumer need to do
+deserialization now here in consumer
+side we are basically having afro T
+serializer what it will do
+it will take the ID okay the average
+serializer need to validate whether the
+incoming data is following the copper
+schema structure or not now you don't
+have the schema it has only the schema
+ID right so it will go back to schema
+registry it will see at that particular
+ID and in schema registry I have already
+told you this schema ID versus schema
+this particular key value mapping is
+there from this schema ID it will get
+back the actual schema okay and then the
+average deserializer will deserialize
+the data and then it will do a check
+whether the data is following the schema
+whatever is expected or not if the data
+is not following this schema properly
+there itself it will show an exception
+it will not proceed further okay and if
+the data is following the proper schema
+whatever it got for the particular
+schema ID every serializer will
+basically deserialize the data and then
+the data be used for consumer site
+processing and eventually it can be
+written in Target site okay so I hope
+you can understand here the problem
+which we are facing earlier that is
+resolved okay because here in producer
+side after serializer will not realize
+any kind of data which is not following
+the proper schema structure similarly in
+the consumer side afro deserializer will
+not be serialize any data which is not
+following the schema structure and how
+the schema communication is happening in
+between producer and consumer it is
+basically happening via centralized
+storage which is called schema registry
+where this schema ID and schema mapping
+is there we are not passing the whole
+schema because the payload will be
+higher because schema will be bigger so
+instead of that we are passing a small
+ID value okay and based on ID mapping
+the producer is basically registering
+the schema and here in the consumer side
+the consumer is getting the complete
+schema information from the schema
+registry based on this simple ID value
+so due to application of the schema ID
+the overall payload in Kafka cluster
+also getting reduced okay so that is
+obviously pretty much good and not only
+that airflow compacts our message
+properly is in several compression
+technique that is also one advantage
+which safe Network bandwidth okay so I
+hope you understood that in case of
+Pipeline with schema registry that
+particular problem of data verification
+is resolved now let's see in conductor
+with real-time experiment okay so here
+we have seen our schema registry is
+running in the this particular URL so to
+create a registry here I will go to
+schema registry and then here I can
+click on Create and create a schema
+register here okay but before that how
+this schema should look like like here
+if if I go to this PPT here I am telling
+that I am having a schema file okay and
+if the producer is using that particular
+schema for the first time the average
+serializer is registering that
+particular schema okay now how we will
+get that schema file that can be a
+question for you and that is basically
+very simple if you are using conductor
+tool okay suppose you are expecting that
+your data should follow this kind of
+structure and you want to generate your
+schema for this kind of payload all you
+can do you can copy this particular one
+you can go to conductor and then here
+you will see a flow slash Json tools
+okay here if you see the first option
+create Avro schema from Json okay just
+click on that and here you paste your
+Json payload here it will give you the
+available schema how it should look like
+you no need to think much just consider
+this particular Fields key okay here
+this schema is mentioned this is
+basically a array type inside array
+different key of the Json data is
+present and what should be their data
+type that is also present like first key
+is H so here name the key name is H and
+the type should be integer and the
+second key is basically name okay and
+the type should be straight okay so this
+is what is our schema file look like so
+I will just copy that and I will close
+this one now I can create the particular
+entrance schema registry here as I have
+told you that if we are using a schema
+for the first time in schema registry we
+need to register so that's what we are
+doing next time when I will show you the
+python implementation then you will see
+that automatically it is happening in
+the back end we don't need to do
+anything okay so here first format is
+flow and this strategy is record name
+okay so here I will paste this
+particular one here you can see type is
+record so here whatever schema was
+generated that is for record type so
+that's why I have chosen a record name
+in this strategy part okay and here this
+schema is shared and then here what I
+will do I will basically create this
+particular one and here you can see the
+schema is registered in our schema
+registry if I coincide that here you can
+see what are the fields the fields
+should be H and Len age should be
+integer and name should be 3 okay if you
+click on this here you will get
+different version suppose your schema
+evolves with time okay then you will
+change your schema here and different
+different versions you can see here so
+how this schema evaluation happens that
+I will cover in my upcoming video so now
+in our schema registry schema is
+registered we will see how the bad data
+can be filtered out okay so here here
+what I will do I will open the producer
+and I will just keep this here and here
+I will start my consumer also okay
+parallel
+so here let me keep consumer in the
+right hand side and producer in the left
+hand side okay cool now here what I will
+do I will pick a topic a key no need to
+pass in the value part here we will pass
+average human registry in schema
+registry we basically stored with record
+name and here I will choose the record
+what I created for our schema and then
+here suppose this particular message we
+are publishing age is 2x3 and name is
+ramu after schema registration okay for
+easy understanding purpose and here I
+will put that okay right now here in the
+consumer side here I will choose my
+topic here value format is string only
+start from the beginning I am keeping
+and now what I will do or maybe start
+from now on latest okay and value format
+is string only and now what I will do I
+will start consumption of messages okay
+so here the consumer is calling now what
+I will do I will
+so when you are producing here you see
+the message is coming like this
+but the Age part is getting corrupted
+and that is obvious right because if I
+stop the consumer here in the value
+format we kept string but here we are
+doing F4 serialization while publishing
+the message so we need to configure that
+also so here in the file format instead
+of string we will choose average schema
+ID okay and here this schema ID we need
+to pass if you want to know what is this
+imid for your schema like here I have
+explained you right that whenever we are
+using a new schema it is registered in
+schema resistant one unique schema ID is
+attached to it which the producer used
+to send the data as well as consumer
+basically use that particular schemid to
+get the actual schema for
+deserialization purpose right so that
+schema ID is important and if you go to
+your schema registry here you will see
+the ID number for this case the for this
+schema the ID is 10 so I need to provide
+that so here I will use ID value chain
+and confident encoding is there so I
+will just enable that for the properly
+decoding purpose okay now here the rest
+parties as it is so start from latest
+and then here I will start so it is
+waiting now here we will produce the
+message when we are producing the
+message here you can see now the DC
+realization is happening properly in the
+consumer side and now let's publish some
+bad data Maybe in each part we are
+passing some string data like for
+example lamb okay
+and name I am passing Spring only so
+here when you are producing the message
+here you will see field to convert Json
+to F field H is expected of type integer
+okay so earlier when we send the string
+data in h key then it simply published
+when we have not used email registry but
+because we are using schema register now
+So eventually what is happening that
+here the schema validation is happening
+data verification is happening based on
+the schema whatever we are configuring
+here okay and even in the consumer side
+I have told you right that when a
+producer is sending the data it's in
+this mid along with our data in the
+consumer site when it get indicate the
+ID from ID it get this schema all this
+you can visualize here so here is the
+message if I click on details for our
+consumed messages here you can go to
+Value schema and here you can see that
+consumer received the ID okay that is in
+for our schema and this is basically the
+schema which is available in our schema
+registry consumer took this schema based
+on the ID from schema registry and the
+afro deserializer in policy website
+using that for T serialization purpose
+if the DC realized data is not following
+the schema of this kind of
+architecture then obviously in
+deserialization also it will throw an
+exception okay and that's how our schema
+registry is helping us for data
+verification so I hope you understood
+this and in my upcoming videos I will
+discuss more concepts related to schema
+registry if you find this video helpful
+then please like share and comment
+subscribe our Channel if you haven't
+subscribed till now and don't forget to
+press the Bell icon to get notification
+of all latest videos
+thank you

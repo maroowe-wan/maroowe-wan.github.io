@@ -1,0 +1,219 @@
+Kind: captions
+Language: en
+In today's video, we will provision an EKS cluster and Fargate,
+and then deploy an NGX Docker image on the cluster.
+Also, I'll show how to fix Core DS add-on deployment issue.
+All steps are using the AWS Management Console,
+without installing AWS and Kubernetes control commands on your local box.
+Hello everyone, welcome back to my channel.
+My name is Lian Duan, and I have been a developer for over 20 years,
+specializing in DevOps and cloud security.
+All video-related content and code are in my GitHub repo, the links are below.
+Today's topics are, what is Fargate in EKS?
+What are the benefits of using Fargate with EKS?
+And hands-on demos, create an EKS cluster and Fargate profile via AWS Console.
+Let's start Fargate on EKS concept.
+Amazon EKS, or Electrical Kubernetes Service,
+provides a managed Kubernetes service that simplifies tool deployment,
+management, and scaling of containerized applications using Kubernetes.
+It's called a control plan in AWS EKS architecture.
+EKS has two data plans, an EC2-based data plan and Fargate data plan.
+EKS can use one of them, or use two types of data plan together.
+Check out my video, Create EKS and EC2 with AWS Console.
+It has step-by-step guidelines for building an EC2 data plan.
+Today, we'll focus on the Fargate data plan.
+What is Fargate?
+Fargate is a serverless computing engine for containers.
+If you're interested in Fargate, check out my Fargate video playlist.
+Fargate profile lines bridge for EKS and Fargate.
+The Fargate profile tells EKS which containers should run on Fargate.
+EKS manages Fargate by itself.
+We only have read-only permission for the EKS-managed Fargate on the Fargate console.
+Are there benefits of using Fargate with EKS?
+Easy management.
+Fargate eliminates the need of pervasion and managed service for Kubernetes clusters,
+allowing developers to focus on application development rather than in-structure management.
+No need for servers.
+Fargate provides a serverless experience for running containers
+and enabling great agility in deploying and scaling applications.
+Handle traffic automatically.
+Fargate offers automatic scaling and high availability,
+ensuring that applications can handle varying levels of traffic without manual action,
+so it improves reliability and efficiency.
+After we know the Fargate concept and benefits, move to hands-on demos.
+We will create an EKS cluster and then attach a Fargate profile to the cluster.
+After they're running, a engine is well deployed.
+Before diving into the hands-on demos, ensure you have two IAM roles,
+EKS admin and EKS Fargate.
+EKS admin has Amazon EKS cluster policy and is used by EKS.
+Fargate has Amazon EKS Fargate pod execution role policy.
+The role is by Fargate profile.
+Also, you need a VPC for EKS and Fargate profile.
+This is my demo virtual private cloud on AWS with multiple subnets in different availability zones.
+The demo VPC with specific IP addresses range is 10.0.0.0.16.
+The VPC has two public subnets, public 01 and public 02.
+The EKS uses public subnets and Fargate deploys to the private subnets.
+Based on the AWS document, Fargate cannot be on public subnets with EKS.
+The public subnets use an internet gateway to go to the internet
+and the private subnets NAT gateway for outbound internet traffic.
+If you do not have it yet, you can create the VPC from the console
+or clone my GitLab repository and then go to the code folder,
+run two commands, tireform init and tireform apply to create the VPC.
+To create in progress, we move to hands-on demo detail.
+We'll do below hands-on demos together.
+Create an EKS cluster.
+Create a Fargate profile with two namespaces.
+Deploys NGX pod and fix EKS core DNS pod deployment issue.
+Open the AWS console.
+Log in to the AWS with my root user.
+If you use another AWS account, make sure your account has all the needed permissions.
+Sign in as root user.
+Sign in.
+In the services area, search EKS.
+Select electrical Kubernetes service.
+Select create cluster.
+The cluster name is EKS demo.
+Select previous version 1.28 because in the future video,
+I'll demo how to upgrade Kubernetes version.
+Use EKS admin role.
+The role only has one policy, Amazon EKS cluster policy.
+Cluster access uses default selections.
+Add one tag, demo EKS.
+Go to next page.
+VPC select EKS demo VPC01.
+Subnets selection only keep the public subnets in there.
+Remove private subnets.
+Ignore security groups as now.
+Cluster endpoint access uses public and private.
+Go next.
+Ignore login configure as now.
+Click next.
+Only select three default add-ons.
+The add-on version uses default value.
+Click create button.
+By the clusters list UI.
+Refresh.
+You see the EKS demo cluster is creating now.
+It will take from 10 minutes to 20 minutes.
+You see the support notification.
+Do not worry about it right now.
+I'll show you how to upgrade to the latest version.
+After the cluster is active,
+the next part is create a Fargate profile.
+Click cluster name.
+Go to the computer tab.
+Move a little bit down.
+Add a Fargate profile.
+Name is EKS Fargate demo.
+Execution role select EKS Fargate.
+Subnets use two private subnets.
+Add one tag.
+Demo.
+Value is EKS.
+We'll create two namespaces.
+First namespace is demo namespace.
+Value to deploy our NGX pod.
+Second namespace name is kube-system.
+The namespace values to deploy the core DNS add-on.
+Add a match label for core DNS selection.
+The key is k8s-i.
+Value is kube-dns.
+Reveal all the information.
+Create.
+The profile creating take around 10 minutes.
+Fargate is active right now.
+Let me clear verification.
+EKS use Fargate profile to create a Fargate cluster and manage the Fargate cluster itself.
+We are able to see the Fargate in the Fargate console.
+Let me switch the tab.
+But you cannot do any management on the cluster.
+For example, deploy the new pod from here.
+It's just like view permission for us.
+Back to the EKS console.
+The Fargate is available now.
+While using the AWS Cloud Shell to deploy a NGX Docker image on the cluster.
+Click Cloud Shell.
+Make the shell screen bigger.
+First command.
+Run AWS STS get a seller identity command to check AWS identity.
+We are in the root user right now.
+STS means security token service.
+This command provides information about AWS identity to ensure your current account has the right permissions.
+Next, check the kubectl version.
+Command is kubectl space version space hyphen client.
+If you do not install the kubectl yet.
+Follow the document to install in your Cloud Shell.
+Back to the console.
+Next step.
+Use AWS EKS update kubectl command to update the kubectl file for our demo EKS cluster.
+Clean up the screen.
+The following step.
+Create a namespace and deploy NGX Docker image.
+The command is kubectl apply space hyphen i plus the deploying yaml file location.
+Let me copy the file.
+Open the new tab to quickly go through the deployment file together.
+There are two parts on the file.
+First part.
+Create a demo namespace on the EKS and then deploy NGX Docker image on the namespace.
+Graphic size is three.
+We should see the three paths running for the NGX.
+Back to the Cloud Shell.
+Enter.
+Namespace created successfully.
+Deploy NGX Docker image in progress.
+Deploy completed.
+Back to the UI.
+Go to EKS demo and then go to computer tab.
+Under the resources, we should see the three NGX deployments.
+Check the status.
+It's running.
+Back to the list page.
+How about the core DNS?
+The core DNS is running the scheduling issue.
+The message is no nodes available to the scheduled path.
+We already created the kubectl namespace.
+Why we still face the issue?
+When you go to the internet, search the message.
+You will see we have to run some core DNS patch or remove the annotation on the deployment file.
+Actually, this is not true for the current 1.28 version.
+To fix it, very simple.
+Open the Cloud Shell again.
+Do the cleanup.
+Use the kubectl rollout restart command to redeploy the core DNS.
+Use the kubectl get-out command to check the status.
+No resource found in the default namespace.
+Let me add the namespace parameter.
+Move the space.
+Move the space and run again.
+You see the core DNS pods are running.
+Close the Cloud Shell.
+Go to resources.
+You will see all the file pods are running.
+Go to the computer type.
+You will see five nodes are running.
+Two for core DNS.
+Three for the NGX deployment.
+Based on the NGX deployment,
+You may have a question.
+How to access my NGX pod?
+There is only one way we can do it.
+Use Ingress.
+Please subscribe to my channel.
+I'll show you how to do it in the future.
+That's all for today's video.
+We used AWS EKS console, created EKS cluster, and run the NGX deployment.
+Let's run the NGX deployment.
+We used AWS EKS console, created EKS cluster, and attached Fargate profile on the cluster.
+And then create two namespaces.
+Use the demo namespace.
+Deploy the NGX pod.
+Use the kubectl namespace.
+Deploy the core DNS add-ons.
+And fix the core DNS deployment issue.
+By the way, do not forget to delete all the resources.
+After your exercise is completed.
+To save your money.
+Delete the Fargate profile first.
+When you delete it, delete the EKS cluster.
+Finally, delete the demo VPC.
+Thank you and see you next time.

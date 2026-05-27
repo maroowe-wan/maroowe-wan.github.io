@@ -1,0 +1,513 @@
+Kind: captions
+Language: en
+Let’s say you want to deploy the following&nbsp;
+pod to Kubernetes. You could use kubectl and&nbsp;&nbsp;
+apply the YAML file. Now, when you type&nbsp;
+'kubectl apply', a few things happen.
+First of all, kubectl will read your local&nbsp;
+Kubernetes config. Then it will reach out&nbsp;&nbsp;
+to the Kubernetes API server and discover&nbsp;
+APIs. This simply means it will check the&nbsp;&nbsp;
+available APIs and how they can be used.&nbsp;
+Then kubectl will perform client-side&nbsp;&nbsp;
+validation to check for any obvious errors&nbsp;
+and typos in your YAML file. And finally,&nbsp;&nbsp;
+it will convert your pod to a JSON object and send&nbsp;
+a request with that payload to the kube-apiserver.
+When the kube-apiserver receives a request,&nbsp;&nbsp;
+it does not store it immediately in the&nbsp;
+etcd database. First, it has to verify&nbsp;&nbsp;
+that your request is legitimate. That is to&nbsp;
+say, it has to authenticate your request.
+Once the request is authenticated, it&nbsp;
+needs to check if you have permission&nbsp;&nbsp;
+to create those resources in the request.&nbsp;
+Just because you have access to the cluster,&nbsp;&nbsp;
+it doesn’t mean you can create&nbsp;
+or read all the resources.
+The authorization is usually done&nbsp;
+with Role-Based Access Control (RBAC).&nbsp;
+It allows you to assign granular permissions&nbsp;
+and restrict what a user or an app can do.
+RBAC roles are frequently aligned with&nbsp;
+the physical structure of your teams,&nbsp;&nbsp;
+apps, and departments. You could create roles&nbsp;
+such as Developer, Manager, and maybe Admin.
+Now, in more practical terms, the&nbsp;
+API server follows these steps:&nbsp;
+When it receives the request, it authenticates&nbsp;
+the user. If the validation fails, it will reject&nbsp;&nbsp;
+the request and return a 401 Unauthorized&nbsp;
+error. Otherwise, it moves to the next step.
+When the user is authenticated, it checks if&nbsp;
+they have access to the resource. If they don’t,&nbsp;&nbsp;
+it will reject the request and return&nbsp;
+a 403 Forbidden error. Otherwise,&nbsp;&nbsp;
+it will continue executing the request.
+In this video, we’ll focus&nbsp;
+on the authorization part.
+The RBAC model is designed to grant access&nbsp;
+to resources based on the roles of individual&nbsp;&nbsp;
+users within the organization. To&nbsp;
+better understand how it works,&nbsp;&nbsp;
+let’s take a step back and pretend that you had&nbsp;
+to design an authorization system from scratch.
+So how could you ensure that&nbsp;
+a user has write access to a&nbsp;&nbsp;
+particular resource? One of the simplest&nbsp;
+solutions could be to create a list with&nbsp;&nbsp;
+three columns like this. You could have&nbsp;
+User, Permission, and Resource columns.&nbsp;
+In this example, John has read and write access&nbsp;
+to app1 but has no access to app2. Robert and&nbsp;&nbsp;
+Jennifer have only read access to app2 and&nbsp;
+have no access to app1. This approach works&nbsp;&nbsp;
+fine with a small number of users and&nbsp;
+resources, but can be hard to scale up.
+Let’s say that Robert and Jennifer are in the same&nbsp;
+team and they are granted read access to app1.&nbsp;&nbsp;
+In that case, you would need to add the following&nbsp;
+entries to your table. That’s great, but it’s not&nbsp;&nbsp;
+obvious that Robert and Jennifer have the same&nbsp;
+access because they are part of the same team.
+In a typical authorization system, you have&nbsp;
+users who access resources. One way you can&nbsp;&nbsp;
+assign permissions is directly to a user and&nbsp;
+define what resources they can consume. These&nbsp;&nbsp;
+permissions map directly to the resources. Notice&nbsp;
+how they are user-specific. If you decide to have&nbsp;&nbsp;
+a second user with the same permissions,&nbsp;
+you will have to duplicate the entry.
+Now, to solve the previous problem, you could&nbsp;
+add a 'Team' column to your table, but a better&nbsp;&nbsp;
+way is to break down the relationships.
+First, you could define a generic container&nbsp;&nbsp;
+for permissions: a role. Then, instead of&nbsp;
+assigning permissions directly to users,&nbsp;&nbsp;
+you could assign those permissions to the roles.&nbsp;
+And finally, you could link roles to users.
+Let’s see how this is different. Instead of having&nbsp;
+a single table, now you have two. In the first&nbsp;&nbsp;
+table, permissions are mapped to roles. In the&nbsp;
+second table, roles are linked to identities.&nbsp;
+Let’s say you want Robert to be an admin for&nbsp;
+app1. You can add the role to the user like this.&nbsp;
+At this point, you should understand how&nbsp;
+decoupling users from permissions with roles&nbsp;&nbsp;
+can improve security administration in large&nbsp;
+companies with many users and permissions.
+When using RBAC, you have users, resources,&nbsp;
+and roles. The permissions are not assigned&nbsp;&nbsp;
+directly to a user. Instead, they are included&nbsp;
+in the role. The users are linked to a role&nbsp;&nbsp;
+with a binding. Since roles are generic, when&nbsp;
+a new user needs access to the same resources,&nbsp;&nbsp;
+you can use an existing role&nbsp;
+and link it with a new binding.
+Kubernetes also uses the RBAC model to&nbsp;
+protect resources inside the cluster.&nbsp;&nbsp;
+It utilizes the same three concepts&nbsp;
+explained earlier: identities, roles,&nbsp;&nbsp;
+and bindings, but calls them&nbsp;
+by slightly different names.
+Alright, let's go over an example&nbsp;
+that needs to grant access to pods,&nbsp;&nbsp;
+services, and other resources.&nbsp;
+First, we have a service account,&nbsp;&nbsp;
+which is the identity of who is accessing the&nbsp;
+resource. Next, we have a role that includes&nbsp;&nbsp;
+permissions to access the resources. And finally,&nbsp;
+we have a RoleBinding that links the identity,&nbsp;&nbsp;
+which is a service account, to the&nbsp;
+permissions defined in the Role.
+After you submit these definitions to the&nbsp;
+cluster, the application using that service&nbsp;&nbsp;
+account will be allowed to issue requests to&nbsp;
+the following endpoints. If you have never&nbsp;&nbsp;
+created RBAC objects yourself but only relied&nbsp;
+on the provided roles with the applications,&nbsp;&nbsp;
+it can be a bit confusing. You may be wondering&nbsp;
+what resources exactly you are granting access to,&nbsp;&nbsp;
+what a service account is, and why the&nbsp;
+Role contains a list of Kubernetes objects.
+To better understand how these work, let's&nbsp;
+set aside the Kubernetes RBAC model and try to&nbsp;&nbsp;
+rebuild it from scratch. We will focus on three&nbsp;
+elements: identifying and assigning identities,&nbsp;&nbsp;
+granting permissions, and finally&nbsp;
+linking identities to permissions.
+Let’s say someone on your team wants to log&nbsp;
+in to the Kubernetes dashboard. In this case,&nbsp;&nbsp;
+you should have an entity&nbsp;
+for an “account” of a “user”,&nbsp;&nbsp;
+with each having a unique name&nbsp;
+or ID, such as an email address.
+Now, how should you store the User in the cluster,&nbsp;
+considering Kubernetes does not have objects that&nbsp;&nbsp;
+represent regular user accounts? So, users cannot&nbsp;
+simply be added through an API call. Instead,&nbsp;&nbsp;
+any actor representing a valid certificate&nbsp;
+signed by the cluster’s certificate authority&nbsp;&nbsp;
+is considered authenticated. In this&nbsp;
+case, Kubernetes assigns the username&nbsp;&nbsp;
+from the common name field in the “subject” of the&nbsp;
+certificate like this. And a temporary User object&nbsp;&nbsp;
+is created and passed to the authorization RBAC&nbsp;
+module. This is a code snippet from Kubernetes,&nbsp;&nbsp;
+which is a GoLang struct that maps all of the&nbsp;
+details collected from the Authentication module.
+Just keep in mind that the User is used for humans&nbsp;
+or any external applications to the cluster.
+If you need to create an identity that will be&nbsp;
+used inside Kubernetes, you should use a service&nbsp;&nbsp;
+account. It is very similar to the regular user,&nbsp;
+except that it is managed by Kubernetes itself.
+A service account is usually assigned to&nbsp;
+pods to grant permissions. For example,&nbsp;&nbsp;
+you may have Prometheus deployed inside the&nbsp;
+cluster that needs to discover its targets,&nbsp;&nbsp;
+or perhaps an Nginx ingress controller&nbsp;
+that must have permissions to list all&nbsp;&nbsp;
+the backend endpoints for a service. For&nbsp;
+those apps, you can define a service account.
+Since service accounts are managed within&nbsp;
+the cluster, you can create them as any&nbsp;&nbsp;
+other Kubernetes resource via a YAML file. You can&nbsp;
+also define a group of users or service accounts.&nbsp;&nbsp;
+This is convenient if you want to reference&nbsp;
+all service accounts in a specific namespace.&nbsp;
+At this point, you have a mechanism to identify&nbsp;
+who has access to resources. It could be a&nbsp;&nbsp;
+human, an application, or a group of them. But&nbsp;
+what resources are they accessing in the cluster?
+In Kubernetes, we are interested in controlling&nbsp;
+access to resources such as Pods, Services,&nbsp;&nbsp;
+Endpoints, etc. These resources&nbsp;
+are usually stored in the database&nbsp;&nbsp;
+(etcd) and accessed via built-in APIs like this.
+Now, the best way to limit access&nbsp;
+to these resources is to control&nbsp;&nbsp;
+how those API endpoints are requested. For that,&nbsp;&nbsp;
+you would need two things. First, the API&nbsp;
+endpoint of the resource itself. Then,&nbsp;&nbsp;
+the type of permission granted to access the&nbsp;
+resource, for example, read-only, read-write,&nbsp;&nbsp;
+etc. So, for the permissions, you will use a verb&nbsp;
+such as get, list, create, patch, delete, etc.
+Now let’s say you want to get, list, and watch&nbsp;
+pods, logs, and services in Kubernetes. You&nbsp;&nbsp;
+could combine those resources and&nbsp;
+permissions in a list like this.
+You could simplify the definition and make&nbsp;
+it more concise if you notice a few things.&nbsp;
+First, the base URL /api/v1/namespaces/ is common&nbsp;
+to all. Well, maybe we could drop it. Then,&nbsp;&nbsp;
+you could assume that all resources&nbsp;
+are in the current namespace and drop&nbsp;&nbsp;
+the namespace path as well. This looks&nbsp;
+better. The list is more human-friendly,&nbsp;&nbsp;
+and you can immediately identify what's going on.
+But there's more. Besides APIs&nbsp;
+for built-in objects such as pods,&nbsp;&nbsp;
+endpoints, and services, Kubernetes also&nbsp;
+supports API extensions. For example,&nbsp;&nbsp;
+when we deploy the Prometheus operator&nbsp;
+to our cluster, it also creates custom&nbsp;&nbsp;
+resources. These objects are also stored in the&nbsp;
+cluster, and you can query them using kubectl.
+Additionally, custom resources can be accessed via&nbsp;
+the Kubernetes API. If you want to map those into&nbsp;&nbsp;
+a YAML file, you could write the following&nbsp;
+by dropping the base URL and namespace.
+Well, it’s nice and short, but how does&nbsp;
+Kubernetes know that those resources are&nbsp;&nbsp;
+custom? So, how can it differentiate between&nbsp;
+built-in APIs and custom APIs? Unfortunately,&nbsp;&nbsp;
+dropping the base URL from the API endpoint wasn't&nbsp;
+such a good idea. You could restore it with a&nbsp;&nbsp;
+slight change. You could define it at the top and&nbsp;
+use it later to expand the URL for the resources.
+Now, what about resources such as Pods&nbsp;
+that don't have a namespaced API? For that,&nbsp;&nbsp;
+Kubernetes provides an empty API&nbsp;
+group, which refers to the built-in&nbsp;&nbsp;
+objects. So the previous definition&nbsp;
+should be expanded to the following.
+You have two cases when Kubernetes reads the&nbsp;
+API group from the YAML file. If it’s empty,&nbsp;&nbsp;
+Kubernetes expands it to /api/v1/&nbsp;
+and the resource. Otherwise,&nbsp;&nbsp;
+it uses the following pattern.
+So all your built-in resources&nbsp;&nbsp;
+will be expanded to the following endpoints, and&nbsp;
+custom APIs will use a slightly different pattern.
+Now that you know how to map&nbsp;
+resources and permissions,&nbsp;&nbsp;
+it’s finally time to combine them together&nbsp;
+with multiple resources. In Kubernetes,&nbsp;&nbsp;
+a collection of resources and verbs is called&nbsp;
+a Rule, and you can group rules into a list.
+Each rule contains the “apiGroups,” “resources,”&nbsp;
+and “verbs” that you just learned. A collection&nbsp;&nbsp;
+of rules has a specific name in Kubernetes,&nbsp;
+and it is called a Role. Alright, so far,&nbsp;&nbsp;
+we've modeled Identities with Users,&nbsp;
+Service Accounts, and Groups, as well&nbsp;&nbsp;
+as Permissions to resources with Roles. The&nbsp;
+only missing part is how to link them together.
+Now, to grant permissions defined in&nbsp;
+the Role to a User, Service Account,&nbsp;&nbsp;
+or a Group, we use RoleBinding.&nbsp;
+Let’s have a look at an example.&nbsp;&nbsp;
+This definition has two important fields.&nbsp;
+First is “roleRef” that references the&nbsp;&nbsp;
+“viewer” Role. Next is “subjects”. It&nbsp;
+links to the “myapp” Service Account.
+As soon as you submit this RoleBinding to&nbsp;
+the cluster, the application or user using&nbsp;&nbsp;
+the Service Account will have access&nbsp;
+to the resources listed in the Role.&nbsp;&nbsp;
+But if you remove the binding, the app or&nbsp;
+user will lose access to those resources,&nbsp;&nbsp;
+while the Role itself will stay&nbsp;
+ready to be used by other bindings.
+Take a look at the “subjects” field again.&nbsp;
+It is a list that contains “kind”, “name”,&nbsp;&nbsp;
+and “namespace”. The “kind” property&nbsp;
+is used to differentiate between Users,&nbsp;&nbsp;
+Service Accounts, and Groups.&nbsp;
+But what about the namespace?
+In general, it's often helpful to break the&nbsp;
+Kubernetes cluster up into namespaces and&nbsp;&nbsp;
+limit access to namespaced resources to&nbsp;
+specific accounts. This is helpful when&nbsp;&nbsp;
+you share the same Kubernetes&nbsp;
+cluster between multiple teams.
+In most cases, Roles and RoleBindings are created&nbsp;
+in a specific namespace and grant access only&nbsp;&nbsp;
+within that particular namespace. However,&nbsp;
+there are some edge cases when you can mix&nbsp;&nbsp;
+ClusterRoles with RoleBindings, granting access&nbsp;
+to a different namespace. You’ll see this later.
+Before we move to the next topic, let’s&nbsp;
+have a look at a few examples of how the&nbsp;&nbsp;
+“subjects” field is used. In this case,&nbsp;
+when the namespace field is not specified,&nbsp;&nbsp;
+this targets all service accounts in all&nbsp;
+namespaces. You can also have multiple Groups,&nbsp;&nbsp;
+Users, or Service Accounts as subjects like this.
+Let’s go over a quick exercise. Let’s say you&nbsp;
+have staging and production namespaces in your&nbsp;&nbsp;
+Kubernetes cluster. And you want to grant&nbsp;
+the QA team only read access to the staging&nbsp;&nbsp;
+namespace. For example, they should be allowed&nbsp;
+to get, list pods and services, as well as to&nbsp;&nbsp;
+get logs from those pods. By the way, all the&nbsp;
+source code is available in my GitHub repo.&nbsp;
+Now, because we use Minikube&nbsp;
+to simplify this exercise,&nbsp;&nbsp;
+I’ll create a service account instead of&nbsp;
+a user, but the logic is exactly the same.
+First of all, we need to create a&nbsp;
+service account for the QA team,&nbsp;&nbsp;
+which will be located in the staging namespace.&nbsp;
+Then let’s create a role which would allow QA&nbsp;&nbsp;
+to get pods, services, and retrieve&nbsp;
+logs from those pods. And finally,&nbsp;&nbsp;
+we need to bind the QA service account to the&nbsp;
+QA role. And I also have a couple of pods,&nbsp;&nbsp;
+one located in the staging namespace and&nbsp;
+the other one in the production namespace.
+One way to pretend to be a QA team member&nbsp;
+is to impersonate that service account. So,&nbsp;&nbsp;
+we can use the following command to check if&nbsp;
+QA can get pods in the staging namespace. Yes,&nbsp;&nbsp;
+we can. Now, what about the production namespace?&nbsp;
+Nope, we don’t have permissions to access prod.
+You can also try to get logs from the pod in&nbsp;
+the staging namespace. Yep, we can access it.
+When we discussed resources, you&nbsp;
+learned that endpoints have the&nbsp;&nbsp;
+following structure. But what about&nbsp;
+resources that don't have a namespace,&nbsp;&nbsp;
+such as Persistent Volumes and Nodes? Namespaced&nbsp;
+resources can only be created within a namespace,&nbsp;&nbsp;
+and the name of that namespace is included&nbsp;
+in the HTTP path. If the resource is global,&nbsp;&nbsp;
+like in the case of a Node, the namespace&nbsp;
+name is not present in the HTTP path.
+Now, can you add those to a Role? Well, yes,&nbsp;
+you can. After all, we did not discuss any&nbsp;&nbsp;
+namespace limitation when we were talking about&nbsp;
+Roles and RoleBindings. Here is an example.
+If you try to submit that definition and link it&nbsp;
+to a Service Account, you might realize it doesn't&nbsp;&nbsp;
+actually work. Persistent Volumes and Nodes are&nbsp;
+cluster-scoped resources. However, Roles can only&nbsp;&nbsp;
+grant access to resources scoped to a namespace.&nbsp;
+If you'd like to use a Role that applies to the&nbsp;&nbsp;
+entire cluster, you can use a ClusterRole&nbsp;
+and the corresponding ClusterRoleBinding.
+To make our previous example work, you only need&nbsp;
+to change Role to ClusterRole. Everything else&nbsp;&nbsp;
+stays the same. You can also use ClusterRoles to&nbsp;
+grant permissions to all resources — for example,&nbsp;&nbsp;
+to all Pods in the cluster instead of&nbsp;
+just in one specific namespace such as&nbsp;&nbsp;
+staging. This functionality isn't restricted to&nbsp;
+cluster-scoped resources like persistent volumes.
+Kubernetes actually ships with a few Roles&nbsp;
+and ClusterRoles by default. Let’s take a look&nbsp;&nbsp;
+at them. You can use grep and use 'system'&nbsp;
+as a filter to get roles that are directly&nbsp;&nbsp;
+managed by the control plane. Also, all of the&nbsp;
+default ClusterRoles and ClusterRoleBindings&nbsp;&nbsp;
+are labeled with the following label.&nbsp;
+Let's also list the ClusterRoles. You&nbsp;&nbsp;
+can also inspect the details of each Role&nbsp;
+and ClusterRole with the following command.
+At this point, you know the basic&nbsp;
+building blocks of Kubernetes RBAC:&nbsp;
+How to create identities with&nbsp;
+Users, Service Accounts, and groups.&nbsp;
+How to assign permissions to&nbsp;
+resources in a namespace with a Role.&nbsp;
+How to assign permissions to cluster&nbsp;
+resources with a ClusterRole.&nbsp;
+And how to link Roles and&nbsp;
+ClusterRoles to subjects.&nbsp;
+There's only one missing topic left to&nbsp;
+explore: a few unusual edge cases of RBAC.
+At a high level, Roles and RoleBindings are placed&nbsp;
+inside and grant access to a specific namespace,&nbsp;&nbsp;
+while ClusterRoles and ClusterRoleBindings&nbsp;
+do not belong to a namespace and grant access&nbsp;&nbsp;
+across to the entire cluster. However, it is&nbsp;
+possible to mix these two types of resources.
+For example, what happens when a RoleBinding links&nbsp;
+an account to a ClusterRole? Let's explore this&nbsp;&nbsp;
+next with some hands-on practice. Let's start&nbsp;
+by creating a local cluster with Minikube.
+To start, let’s create four&nbsp;
+namespaces. And finally,&nbsp;&nbsp;
+create a Service Account in the dev&nbsp;
+namespace. You can also submit the&nbsp;&nbsp;
+service account using the apply command. At&nbsp;
+this point, your cluster should look like this.
+Let's start with creating a Role and a RoleBinding&nbsp;&nbsp;
+to grant the Service Account access to&nbsp;
+the dev namespace. We have the role,&nbsp;&nbsp;
+which is placed inside the dev namespace, as&nbsp;
+well as a rolebinding for that service account.
+After you apply these, your cluster should look&nbsp;
+like this: all resources—Service Account, Role,&nbsp;&nbsp;
+and RoleBinding—are in the dev namespace.&nbsp;
+The Role grants access to all resources,&nbsp;&nbsp;
+and the RoleBinding links the&nbsp;
+Service Account and the Role.
+Well, how do you test that the Service&nbsp;
+Account has access to the resources?&nbsp;&nbsp;
+You can combine two features of kubectl.&nbsp;
+You can use user impersonation and verify&nbsp;&nbsp;
+API access with the following commands.
+To issue a request as the myapp Service&nbsp;&nbsp;
+Account and check if you can list Pods in&nbsp;
+the namespace, you can issue the following&nbsp;&nbsp;
+command. Let's break it down.
+“auth can-i” is necessary to&nbsp;&nbsp;
+query the authorization model (RBAC).
+“get pods” is the verb and resource.&nbsp;
+“-n dev” is the namespace where&nbsp;
+you want to issue the command.&nbsp;&nbsp;
+And “--as=system:serviceaccount:dev:myapp”&nbsp;
+is used to impersonate the myapp Service&nbsp;&nbsp;
+Account from the dev namespace.
+Note how the “--as=" flag needs&nbsp;&nbsp;
+some extra hints to identify the Service&nbsp;
+Account. The entire string can be broken&nbsp;&nbsp;
+down to the following pattern. With this&nbsp;
+Role+ServiceAccount+RoleBindings combination,&nbsp;&nbsp;
+you can access all resources in the dev namespace.
+Alright, let's move on to a more complex example.
+Let's create a new Role and RoleBinding in the&nbsp;
+staging namespace. Notice how the RoleBinding&nbsp;&nbsp;
+links the role from the staging namespace and&nbsp;
+the service account from the dev namespace. Ok,&nbsp;&nbsp;
+let's go ahead and apply. At this point,&nbsp;
+your cluster should look like this.
+Now, let's test if the Service Account located&nbsp;
+in the dev namespace has access to the resources&nbsp;&nbsp;
+in the staging namespace. This works. We&nbsp;
+just granted access to resources outside&nbsp;&nbsp;
+the namespace where the service account&nbsp;
+was created. It's worth noting that the&nbsp;&nbsp;
+roleRef property in the RoleBinding&nbsp;
+does not have a namespace field. The&nbsp;&nbsp;
+implication is that a RoleBinding can only&nbsp;
+reference a Role in the same namespace.
+Now let’s take a look at ClusterRoles. As you&nbsp;
+remember, they do not belong to any namespace.&nbsp;&nbsp;
+This means that a ClusterRole does not scope&nbsp;
+permissions to a single namespace. However,&nbsp;&nbsp;
+when a ClusterRole is linked to a&nbsp;
+Service Account via a RoleBinding,&nbsp;&nbsp;
+the ClusterRole permissions only apply to the&nbsp;
+namespace in which the RoleBinding was created.
+Let's look at the following example. Create a&nbsp;
+RoleBinding in the qa namespace and link the&nbsp;&nbsp;
+Service Account to the ClusterRole cluster-admin.&nbsp;
+The cluster-admin is one of those built-in&nbsp;&nbsp;
+ClusterRoles in Kubernetes, created when you&nbsp;
+provision a cluster. Alright, let’s submit this.
+Now your cluster looks like this.&nbsp;
+Let's test if the Service Account&nbsp;&nbsp;
+located in the dev namespace has access to&nbsp;
+the resources in the qa namespace. However,&nbsp;&nbsp;
+it does not have access to other namespaces.
+In this scenario, when you use RoleBindings&nbsp;
+to link a Service Account to a ClusterRole,&nbsp;&nbsp;
+the ClusterRole behaves as if it were&nbsp;
+a regular Role. It grants permissions&nbsp;&nbsp;
+only to the current namespace&nbsp;
+where the RoleBinding is located.
+In this last scenario, we’ll create a&nbsp;
+ClusterRoleBinding to link the ClusterRole&nbsp;&nbsp;
+to the Service Account. Note that we also don’t&nbsp;
+have a “roleRef” field here. This implies that a&nbsp;&nbsp;
+ClusterRoleBinding cannot identify a Role to&nbsp;
+link to because Roles belong in namespaces,&nbsp;&nbsp;
+and ClusterRoleBindings, along with&nbsp;
+the ClusterRoles they reference,&nbsp;&nbsp;
+are not namespaced.
+Let’s apply.
+And now your cluster looks like this.
+Even though neither the ClusterRole nor&nbsp;&nbsp;
+the ClusterRoleBinding defined any namespaces, the&nbsp;
+dev Service Account now has access to everything.
+From these examples, you can observe some&nbsp;
+behaviors and limitations of RBAC resources:&nbsp;
+Roles and RoleBindings must&nbsp;
+exist in the same namespace.&nbsp;
+RoleBindings can exist in separate&nbsp;
+namespaces to Service Accounts.&nbsp;
+RoleBindings can link ClusterRoles, but they only&nbsp;
+grant access to the namespace of the RoleBinding.&nbsp;
+ClusterRoleBindings link accounts to ClusterRoles&nbsp;&nbsp;
+and grant access across all resources.
+ClusterRoleBindings cannot reference Roles.
+Perhaps the most interesting implication&nbsp;
+here is that a ClusterRole can define&nbsp;&nbsp;
+common permissions expressed in a&nbsp;
+single namespace when referenced&nbsp;&nbsp;
+by a RoleBinding. This removes the need to&nbsp;
+have duplicated roles in many namespaces.
+The typical rules section of a Role or&nbsp;
+ClusterRole can look like this. However,&nbsp;&nbsp;
+the above configurations can be rewritten using&nbsp;
+the following format. It significantly reduces&nbsp;&nbsp;
+the number of lines and, in my opinion,&nbsp;
+is much more concise and easier to read.&nbsp;
+I have other tutorials on my channel&nbsp;
+about Kubernetes, Kafka, benchmarks,&nbsp;&nbsp;
+and more. If you're interested, you&nbsp;
+can watch one of those tutorials.

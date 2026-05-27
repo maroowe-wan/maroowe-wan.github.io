@@ -1,0 +1,1049 @@
+Kind: captions
+Language: en
+Hi, I am Varun Jooshi and welcome to day
+38 of our certified Kubernetes
+administrator 2025 course. Today we are
+diving into one of the most powerful
+parts of the Kubernetes API flow that is
+admission controllers. These are
+gatekeepers that validate or even modify
+your requests before they are stored in
+HCD. We will explore both builtin and
+custom admission controllers. Understand
+the difference between mutating and
+validating web hooks. So let's get
+started. What you see on screen is Sema
+sends a command cubectl apply-f
+pod.yamel. This essentially will create
+a pod. Now sema has various
+authentication methods to use and we
+have discussed them in day 37. So if I
+go here, Sema could either be using
+certificates or she could be using
+external identity providers to login
+into the cluster. And it is not just a
+human that will be creating resources.
+Even your CI/CD pipelines will be
+creating resources. In that case, bearer
+tokens will be used for authentication
+process. So once the request is
+authenticated, then we have
+authorization. And we also learned that
+there are various modes of authorization
+that could be used and we also learned
+that arbback is the most famous one and
+it is typically that you would see in
+production environments. Having said
+that, there are also scenarios where you
+will see web hook authorization being
+used and we also discussed that OPA is a
+good example which can be used as a web
+hook authorizer. Once the request is
+authorized, we learned that the request
+is stored. We learned that the object is
+created and whatever is created we know
+is gets stored in HCD data store. But
+this is not the complete picture. There
+is something that sits between
+authorization and CD and that something
+is configured in the API server itself
+like authentication or authorization.
+You configure that in the API server. If
+even if you are outsourcing the
+authorization part to let's say OPA then
+also you are defining that configuration
+in the API server and same for
+authentication even if you are
+outsourcing your authentication to
+external identity providers. It is still
+the API server that authenticates the
+request. The final approval comes from
+the API server. Similarly that something
+that sits in between authorization and
+CD it is the API server where you
+configure that something called
+admission control. Now firstly why do I
+need admission control? While life was
+hunky and dory I used to authenticate.
+Authentication succeeded and then
+authorization played it role and based
+on that the resources were created and
+as long as my request is both
+authenticated and authorized I should be
+good right but no the point is when you
+are dealing with a production grade
+implementation of Kubernetes it's not
+just plain authentication and
+authorization that you need you also
+need something where you can define
+certain policies. For example, what if
+Sema is using a public image and in your
+particular implementation of Kubernetes,
+usage of public images is prohibited.
+How do you achieve that? You have no
+means of achieving that using
+authentication and authorization and
+using private images is one example. But
+what if I want that whenever a pod is
+created, there should be a sidecar
+container automatically injected into
+the pod. What if I wanted certain
+default labels and those labels should
+be available on all pods that are
+running in my environment? I cannot
+force that using authentication and
+authorization. Hence we want something
+that sits in between
+authorization and CD that will ensure
+that the resources that are getting
+created in my cluster first it adheres
+to the policies that I have set for my
+cluster. Second if they are not adhering
+to certain standards that I have set
+that request can be denied. So admission
+control is doing two things. First is if
+the request is not in line with what I
+have specified then admission control
+can modify that request and then forward
+it to CD for storage and it can also
+deny or approve the request based on the
+requests parameters. For example, if a
+request is not specifying certain
+labels, then deny that request.
+Secondly, if the request doesn't have a
+sidecar container, then inject that
+sidecar container. So, hence admission
+control can do both the things. It can
+modify and it can also validate the
+request. And validation involves
+allowing or denying a request. Now let's
+zoom in into admission control. We have
+the same diagram here. What I have done
+is I have expanded the admission control
+part. What we discussed before is
+admission control can both modify and
+validate a request. So now let's see
+what is happening. The first admission
+control is achieved using something
+called admission controllers and
+admission controllers can be mutating or
+they can be validating. What are
+mutating admission controllers? Whenever
+I hear the term mutate, I get back to a
+movie I watched that is X-Men. And in
+that movie, whoever had a modified DNA
+when compared to human beings, they were
+called mutants. And mutants had certain
+special powers. Some won't age, some
+could blow fire from their mouth and so
+on. And hence they were called mutants
+because their DNA was modified. Hence
+they were called mutants. Similarly,
+when I talk about Kubernetes admission
+control, then the mutating admission
+controller is modifying your request.
+Hence, they are called mutating
+admission controllers. And then
+secondly, you have validating admission
+controllers. What they will do is they
+will see the request and based on
+certain parameters or certain policies
+they will either allow the request or
+deny the request. As simple as that. And
+mutating admission controllers are the
+ones that are applied first and then the
+validating admission controllers are
+applied. Any doubts in this? At the very
+last of this lecture, we'll be doing
+admission controller sequence. So that
+the concepts of who is applied first and
+how it is applied, how the logic is
+computated, we'll see all those things
+at the very last of this lecture. Now
+each admission controller be it mutating
+or validating, they have certain
+plugins. So if I talk about these three
+that I have mentioned here, these are
+called mutating admission controller
+plugins. What you see here are called
+validating admission controller plugins.
+These are the actual plugins which are
+doing the leg work for you. Now let's
+discuss few examples of each of them so
+that we know how these function in
+Kubernetes. First is default storage
+class. Now I'll take you back to day 27.
+In day 27, there was a scenario when we
+had multiple storage classes and we had
+a PVC that specified the storage class
+it is supposed to use. In this example,
+persistent volume claim has specified
+that it wants to use GP3 volumes. Hence
+storage class that is associated with
+GP3 is specified here. This part is
+understood. But what if this request did
+not specify any storage class? Then
+there must be some way to choose a
+default storage class. But if you look
+at the example on the left, we have GP3
+and we have IO1. And none of these
+manifests are supplying this
+information. Storage class Kubernetes io
+is default class true. Now let's say in
+our example this was specified in GP3.
+If this was specified in GP3 and if
+there were a request that was omitting
+this field altogether then by default a
+GP3 PV was created. And why was that? It
+was because I have specified that this
+storage class is the default storage
+class. And who is making that happen? If
+your request does not have the storage
+class name that who is the one who is
+adding the default storage class here it
+is the mutating admission controller.
+Hence the first one is default storage
+class. So this plug-in what it will do
+is if you have not specified any storage
+class but you have also defined a
+default storage class then it will
+automatically associate the PVC with the
+default storage class. Then there is
+default toleration seconds. This is
+let's say when you apply a taint that
+has an effect of no execute that implies
+that whatever pods are running on that
+node will automatically be terminated.
+But for applications a abrupt shutdown
+is not recommended. You should allow
+applications enough time to gracefully
+shut down. Hence you have default
+toleration seconds and this timer allows
+I think 5 minutes by default for a pod
+to gracefully terminate. If it doesn't
+terminate even then then only it is
+forcefully terminated from that node.
+And if you want to learn more about
+these things I would recommend you watch
+day 22. In day 22, we discussed pod life
+cycle, pod termination and all these
+things in detail. So now let's go back
+to day 38 again. The third one is
+default ingress class. So we have not
+discussed ingress yet but I want you to
+have a highle understanding. So whenever
+you are implementing let's say a
+kubernetes cluster be on premises or in
+the cloud you have options to have
+multiple ingress controllers. For
+example, if I am on let's say Amazon
+EKS, I could be using haroxy as well. I
+could be using AWS's ALB and I could
+also be using EngineX for example. But
+when I'm creating an ingress object, but
+my ingress object is not specifying the
+load balancer that I would want to use.
+If my request has not specified whether
+I want to use ALB, harroxy or engine X,
+then default ingress class will
+associate my ingress with the default
+ingress controller and that default
+ingress controller I first must be
+specifying like we did for storage
+class. In storage class we said that
+this is the default storage class.
+Similarly, when you have multiple
+ingress controllers, you specify that
+this is the ingress controller that I
+want to be default. And once you do
+that, whenever you are creating any
+ingress resources that are not
+specifying ingress controllers, then the
+default ingress will be associated with
+that ingress. So what we understood from
+this is why are these mutating? These
+are mutating because they are modifying
+the actual request in some way. Hence,
+these are called mutating admission
+controller plugins. Now, let's discuss
+First is node restrictions. So, we know
+that all our nodes are running cublets.
+If I have let's say worker node one, I
+would want the cublet that is associated
+with worker node one shall only be
+performing actions in worker node one
+and the pods that are running in worker
+node one nowhere else. Hence this node
+restriction plug-in ensures that the
+cubelet can only modify the node on
+which it is running and the pods in that
+node. You would be asking but Vun why
+would cubelet in worker node one be
+playing with let's say worker node 2 or
+pods in worker node 2 it is not always
+kubernetes for example let's say if your
+worker node gets hacked then you do not
+want the hacker to have control of the
+cublet and also perform actions in other
+nodes. So hence it is imperative that
+you have things in place you have
+admission control in place which will
+prohibit that behavior. Hence node
+restriction plug-in will prohibit cublet
+from performing any actions in any other
+node but in the node in which it is
+running. Next is resource kota. So what
+happens is when you have let's say a
+production namespace and production
+namespace let's say has been given a
+resource kota that this nameace cannot
+be using more than 50 GB of memory and
+24 vCPUs. If the prod name space is
+already using 50GBs and 24 vCPUs, then
+if there is a new request that wants
+some memory or some vCPU, then that
+request will be denied because the
+resource kota has been exhausted. Third
+one I want to discuss is namespace life
+cycle. So if let's say a namespace does
+not exist and we have seen this before
+when we were creating resources and
+namespace didn't exist we used to
+receive an error that the namespace does
+not exist. Hence it is the namespace
+life cycle plug-in that is working under
+the hood and ensuring users cannot
+create resources in the name spaces that
+do not exist. And second, it also has
+one more important functionality. If a
+namespace is undergoing termination, for
+example, then it will disallow anyone
+from creating resources in the
+terminating namespace. That's pretty
+self-explanatory. Now, these plugins
+that we have just discussed are purely
+mutating that is they are modifying
+something or they are purely validating.
+they are allowing or denying a request
+based on certain parameters. But there
+are also admission controller plugins
+that are both mutating and validating.
+Enlighten me. The first one is limit
+range. So I'll go to my GitHub notes. In
+day 19, we learned about limit range.
+And why were we using limit range? We
+were using limit range to ensure the
+pods that do not specify requests and
+limits. They can have certain defaults
+and you can set this for CPU, memory and
+other resources as well. So here in this
+YAML we have set a default request and
+limit for both CPU and memory. Here are
+our limits and here are our requests. So
+whenever there is a request that does
+not define requests or limits then this
+admission controller plug-in that is
+limit ranger will add those and we have
+seen this behavior in our demo when we
+defined this any request that were not
+specifying requests and limits these
+requests and limits that we have defined
+as defaults were automatically injected.
+We saw that but Wun mutation part is
+fine. I understand that limit range is
+performing that. But what about
+validating? What is it validating? So if
+I go here, we also defined a max and
+minimum. Here we said that if a request
+is specifying more than four vCPUs or
+more than 8 GB bytes of memory then that
+request should not be catered because
+this is the maximum a pod can specify.
+If a pod specifies CPU and memory beyond
+this number then the request is
+rejected. And who is the one that is
+rejecting that request? It is our
+beloved limit range validation
+controller plug-in. Hence, limit ranger
+acts as both mutating and validating
+admission controller plug-in. Then there
+is always pull images. So let's go to
+day 22. So in day 22 we learned about
+image pool policy and we also learned
+that these policies are container level.
+So each container can have its own image
+pool policy. That part is fine but what
+I want you to concentrate on we learned
+certain defaults as well. So for
+example, if you are not specifying any
+tag for your image that implies you are
+using the latest tag, then the image
+pull policy defaults to always. That's
+understood. Second, if you are
+specifying a tag, then the image pull
+policy defaults to if not present. Now
+let's see why understanding this is
+important to understand this concept.
+Always pull images. What this will do is
+if you have set the policy to if not
+present or anything else, it will roll
+it back to always. Hence, no matter if
+the image is cached or not cached, it
+will always pull images. Okay, that is
+the mutating part. Vun, if I have
+specified if not present, it will roll
+it back to always. So, Vun, the first
+part that is mutating that I understand.
+If I have specified if not present, it
+will change it back to always. Or even
+if you if I have specified never, it
+will change it back to always. So what
+is the validation part? It validates
+credentials. Credentials for what? If
+you are pulling images from a private
+registry then all the containers that
+are running should have some sort of
+authentication associated with them so
+that they can pull the images from
+private registries. Now if you do not
+have always as the image pull policy
+then the image will be cached and even
+the containers that do not have access
+to private registries can use that image
+because if the image is locally
+available then the credentials will not
+be used to pull the image from the
+private registry. Hence this plug-in
+helps in two things. First is it ensures
+that image is always pulled. Now always
+pulled as in you could also have a tag
+or you could also have latest but
+whatever you have the image will always
+be pulled from the registry be it
+private or be it public. And the second
+benefit that it gives you is it
+disallows containers who do not have
+access to that private registry or that
+image to use that image. Hence you stop
+malicious behavior of containers where
+they are taking advantage of cached
+images. Third one is service account. So
+what is the mutating part? Mutating part
+is we have created so many containers
+and all the time we have not specified
+any service account that is to be used.
+But as we have understood in our last
+lecture where we discussed service
+accounts that the default service
+account is automatically mounted onto
+our pods and who is doing that this is
+done by the mutating part of the service
+account plug-in. But what is the
+validation part Von? Now let's say if
+you have deleted the default service
+account then that request will error
+out. That implies for your custom
+service accounts as well. If the custom
+account that you have specified does not
+exist then also the request will error
+out. Warun everything is fine until now
+but always pull images. You said that
+whatever I have configured for my
+containers it will change that and it
+will default to always. But in
+production I have never seen this
+behavior. If I write if not present then
+if not present is what is used. Then how
+can you say this? That brings me to a
+very important point and that is this
+one. Some enabled by default. So we have
+talked about many plugins but some of
+them are enabled by default and some of
+them are disabled and out of these all
+of these are enabled by default except
+always pull image. Hence you see that
+behavior if you have supplied if not
+present. If not present is the one which
+is used for pulling your container
+images. But if you want you can enable
+this as well. And how do we enable this?
+We'll see this in the next part.
+Validating admission control can allow
+deny. So mutating admission controllers
+cannot deny anything. They are just
+modifying the requests. The denying and
+allowing capability is only with
+validating admission controllers. Now
+let's move to the next diagram.
+admission controller. So we have good
+understanding of admission controllers.
+We also have understanding about
+mutating and validating admission
+controllers. Now that we have this
+understanding, I want to introduce the
+entire hierarchy and how it works. At
+the very top, we have admission
+controllers and then admission
+controllers can be of two types. First
+is built-in admission controllers. These
+come along with your Kubernetes cluster.
+So when you configure your Kubernetes
+cluster, these are already available at
+your disposal. Then there are custom
+admission controllers. Built-in
+admission controllers can be classified
+into three. Mutating, validating, and
+dual function. We have seen all three.
+Then custom admission controller as the
+name implies are custom. They are not
+inbuilt. They do not come by default
+with your Kubernetes installation. You
+either have an external tool do this for
+you which are often called policy
+engines and you might have heard of
+popular policy engines like OPA combined
+with gatekeeper and Kyberno is also a
+good choice. Then you have organization
+specific. Now let's say whatever
+requirements you have cannot be
+fulfilled by what is readily available
+in the market then you can write your
+own admission controllers. Now let's
+discuss what we have here. All these in
+white, the plugins in white we have
+already discussed. So I will not jump
+onto those. I only want to discuss
+mutating admission web hook and
+validating admission web hook. I want
+you to understand one thing. If you have
+custom admission controllers in your
+cluster, then how do you call those
+custom admission controllers? you need
+some mechanism via which you can call
+those custom admission controllers and
+that is where these come into play. So
+whenever the request warrants something
+to be checked outside something to be
+checked outside of the built-in
+admission controllers then it is the
+mutating admission web hook that calls
+that custom admission controller for
+validation. It is the validating
+admission web hook that calls the custom
+admission controller. So these two
+built-in plugins they are builtin and
+these built-in plugins are used to call
+the custom admission controller plugins.
+They act as a bridge to invoke custom
+admission controllers like OPA, Kyverno,
+Gatekeeper which are implemented as web
+hook servers. Now what is a web hook? In
+very simple terms, web hook is an HTTP
+call back mechanism that allows one
+system to notify or request another
+system in real time when a specific
+event occurs. Warun in English please.
+You have a GitHub repository. Let's say
+you commit something there and as soon
+as you commit something, your Jenkins
+pipeline runs. How is that possible?
+That is possible because of a web hook.
+Whenever you commit, a web hook is
+triggered and that web hook intimates
+Jenkins to run your CI/CD pipeline. So
+this is a web hook. In Kubernetes, web
+hooks enable the API server to invoke
+external services during admission
+requests. And what are those external
+services? Those external services are
+our custom admission controllers. So
+Kubernetes says, "Hey external service,
+before I accept this request, do you
+want to approve, reject or modify this
+request, modify, mutation, allow or deny
+validation?" As simple as that. And if
+you have any confusions about this right
+now, we'll understand this in deeper
+details in our sequencing part. Let's
+move down. What is a web hook? We have
+seen that custom admission controllers
+typically run as deployment. So if you
+are using OPA, gatekeeper, Kyberno, so
+they or even if you have your
+organization specific custom admission
+controller, then they will essentially
+be running as deployments. They run
+inside your cluster but in extremely
+rare scenarios you could also see them
+running outside your cluster. Then how
+do I enable admission controller
+plugins? Enable admission plugins is
+used to enable them. Disable admission
+plugins are used to disable them. Let's
+go to our API server and check what are
+enabled by default and what are disabled
+by default. So let's go to my terminal.
+I will run docker ps because I have a
+kind implementation of kubernetes. I
+will run docker
+exec to have an integrated terminal. And
+the container I want to login is this
+one which is acting as my control plane
+node in Kubernetes. And then I want to
+run again shell which is bash. I'll
+press enter. Oh, I'm not in Kubernetes.
+I should not add double hyphens. I'll
+press enter. And now I am in my cluster
+control plane node. We know that API
+server runs as a static pod in cube ADM
+deployments. If you have any other
+implementation where you are running
+control plane as systemd service then
+you will have to find these options in
+the unit file of your service. So I will
+run let's cd into this cdc kubernetes
+and then manifest. I'll press enter. ls
+here are all my four control plane
+components whose static pod manifest can
+be found here. So I will what I will do
+is I'll vim into cube API server. I see
+enable admission plugins here. But Vun
+when we were discussing here you said
+that all these except always pull images
+are enabled by default. But I only see
+node restriction. Why is that? What
+happens is by default in Kubernetes code
+itself in API servers code itself some
+plugins are enabled by default. So I
+would urge you to check out the
+documentation. The link for the
+documentation can be found in my GitHub
+notes. See that and you will see most of
+the plugins that are enabled by default
+are in the code itself in the API
+servers code itself. So hence you do not
+see them mentioned here. But Vun I if I
+want to disable any of those how do I do
+that? As we saw just now what you can do
+is you can add this disable flag and
+then those plugins can be disabled. And
+I do not want you to believe me blindly.
+So let's do one thing. I will copy this.
+I will add it to my API server. I'll hit
+insert and then I will add this one
+here. And what is that I want to
+disable? I want to disable service
+account. And if I disable this, the
+behavior that I should see is the
+service account that is the default
+service account is not automounted onto
+my containers. So let's first do one
+thing before I apply this change. I'll
+clear my screen in this window. I'll
+zoom in this a little. I will again
+clear my screen. I will run cubectl run
+my pod. And I want to use the engineext
+image for this one. It says the pod is
+created. If I run cubectl describe pods
+and my pod then I will see that there is
+a mount and that mount is for the
+service account and that service account
+is mapped in this location. This part is
+fine and not exactly this location will
+have the service account but this
+location will have the name space token
+and the certificate file. We saw that in
+our previous lecture. So if you have any
+confusions about service accounts do
+watch that. So this mount is happening
+because the service account admission
+controller plug-in is in action which is
+mapping the default service account. And
+if I scroll up a little I should also
+see that the default service account is
+mapped here. Service account is mapped
+and the name of that service account is
+default. Now let's apply this changes
+and as soon as I apply this I just want
+to check the name is it service account
+or service accounts it's just service
+account I'll just save this file and as
+soon as I make modifications in this we
+know that the cube API server is
+restarted so if I run cubectl get pods
+let's run it here as well let's run it
+here itself if I run cubectl get oh I'll
+exit from here and then I will and
+cubectl get pods. The command should
+take some time because the API server is
+restarting right now. Hence, let's allow
+this some time. It is saying busy. So,
+let's me do one thing. I'll add hyphen n
+cube system. Let's again run this
+command. My API server is in pending
+state right now. So, let's add a hyphen
+w. This will watch this and refresh this
+screen every 2 seconds. So now we see
+that the API server is in running state.
+Now let's create another pod. Now I will
+run
+cubectl run my pod 2 and the image I
+want to use is engine x. Now it says my
+pod 2 is created. Now I want to run a
+describe on my pod 2. If I press enter
+you see there are no mounts here. And if
+I scroll up there is no service account
+here. Hence now you know for sure that
+there are certain plugins that are
+enabled by default and you can use that
+disable flag. If you want to disable
+that admission controller plug-in I hope
+you understand this part. Now what I
+want to do is I want to revert it to its
+original state the API server. So I will
+again exec here and then I will vim at C
+kubernetes manifest. I want to modify
+the cube API server. I'll go here and I
+will completely remove this disable
+admission plugins. It is removed. I will
+press escape shift zz to save this. I'll
+exit this. Now the API server would be
+restarting. So let's go back to our
+diagrams. So we have understood how to
+disable or enable these plugins as per
+your requirement and enable plug-in was
+always there. You can add comma and add
+whatever you want to add there. Now
+let's see what we have next. I want to
+cover a certain part that we briefly
+covered in day 35. Day 35 we discussed
+authorization modes and I want to
+correlate that with admission control
+and I want to take an example of OPA
+here. So first let me explain this
+diagram. If you have watched day 35 this
+will make a lot of sense to you and if
+you have not watched it I would request
+you to watch that. So we have Sema here
+and Sema is applying a podium. we have
+the API server which is performing the
+authentication part and since it was an
+authorization lecture we were zooming in
+into the authorization part. So whenever
+we talk about authorization here
+authorization modes are also configured
+in the API server and this is the flag
+and here what we are saying is first is
+node authorizer then go to the web hook
+then go to the arbback and we discussed
+this scenario based on the point that we
+have two requirements. First is
+authorizer will check whether sema has
+permissions to create the pod and
+secondly the policy only if image comes
+from registry.pinkco company.com. So
+only allow Sema to create the pod if the
+image registry from where the image is
+coming is registry.pinkco paying
+company.com and we said that this can be
+achieved using just a web hook or this
+can be achieved with a combination of
+web hook and arbback. So there was an
+oversight from my end in this lecture.
+Achieving this part is not possible by
+just the usage of web hook authorizer.
+we will require admission control here
+and in this particular part I want to
+explain how that works so that all
+doubts are clarified. So let's say Sema
+runs this command cubectl apply
+fpod.yamel API server authenticates then
+for authorization part it checks this
+authorization mode flag and then in this
+sequence the authorization happens.
+First it will come to node. Node each
+authorizer that you specify here can
+either allow the request, deny the
+request or it can say no opinion. Only
+if no opinion is given then only the
+request moves to the next step. If it
+allows or denies then the evaluation
+stops right there. It is not moved to
+the next one. So here node since this is
+used by cublet it says no opinion. then
+the request goes to the OPA web hook
+authorization. So this web hook
+authorizer will say no opinion. Now OPA
+web hook authorization will check
+whether the request meets certain
+parameters or not and those parameters
+we'll see in detail and next it moves to
+arbback. RBback says okay allows this
+request because Sema is allowed to
+create a pod that this part is fine and
+then it moves to admission control and
+we discussed in this lecture that
+admission control sits between
+authorization and HCD. So once it goes
+to OPA admission control, we are using
+OPA gatekeeper as our custom admission
+controller. OPA will check whether the
+request is from registry.pinkco
+company.com and based on that it will
+allow or deny that request. Let's say
+Sema specified registry.pink company.com
+as the place from where the image is
+being fetched. then OPA will also
+approve this request and then the pod
+object will be created. So this is the
+usual flow. But I want to discuss few
+points about OPA when it is used as a
+web hook authorizer. Firstly OPA is open
+policy agent. You can use it in two
+stages of your API flow. You can use it
+as a web hook authorization and we
+learned in day 35 that one of the
+authorization modes is web hook. You can
+use it as web hook. Secondly, you can
+also use as an admission controller. The
+diagram that you see here right now uses
+OPA for both
+authorization and for admission control.
+Now let's see what is happening. OPA as
+web hook authorizer. So these points are
+for this particular part of this diagram
+cannot see the whole request body only
+sees user group service account verb
+resource name space and this is what
+arbback also sees. But Vun, if Arbback
+also sees what OPA as a web hook
+authorizer is seeing, then why would I
+use both web hook and arbback? I can
+just use arbback and get away. But there
+are some unique features that OPA
+provides when it is used as a web hook
+authorizer and those features are
+timebased access. So for example, I will
+only authorize the request after 6:00
+p.m. because I do not want to perform
+any changes during production hours.
+This is just an example. Second is
+network aware checks only these ciders
+when the request is coming from these
+ciders these subnets only then I will
+allow that request. So these features
+are unique to OPA. That's why some
+highly secure
+environments may use OPA as well in the
+authorization part. Now next is why use
+OPA as web hook authorizer or any
+external web hook authorizer in
+production early rejection. So the
+request will not even reach admission
+control and the request will be rejected
+right here. That's one use case. Second
+is centralized access decisions. Now
+imagine if you are dealing with one
+cluster then creating arbback policies
+for one cluster is fine but if you are
+running hundreds of clusters multiple
+clusters then you want to centralize all
+these policies and this
+centralization can be provided by OPA.
+So what you can have is you can create a
+central server which takes care of all
+authorization. Next one is typically
+used in high security environments or
+multicluster deployments like we just
+saw. So I hope this clarifies that the
+requirements were two in day 35. First
+one was to create pods and second one
+was to only allow images from this
+registry. So the first part is
+permissions that can be achieved by
+using arbback or OPA. You could be using
+OPA if you also want these features. And
+there are few more features. You can
+check the GitHub notes or online to see
+what are those features and then you can
+also use arbback. Understand that until
+and unless OPA gives no opinion request
+will not be moved to arbback
+authorization. So what you could see is
+OPA is just checking these two things.
+For example, the request is coming after
+6 p.m. and the request is coming from a
+specific cider which is allowed and then
+arbback could be performing the actual
+role based access control based on these
+parameters. That's one scenario. But now
+what I want to discuss is until and
+unless this gives no opinion it will not
+move to arbback. So if OPA is fine with
+it, let's say if OPA says okay it's time
+based access and it is network aware
+checks all things are fine it is after 6
+p.m. and the cider is also allowed then
+OPA will not give allow it will give no
+opinion only then request will move to
+arbback which will further check whether
+sema is allowed to perform these actions
+or not actions that are defined in the
+verb and the resources that are defined
+in her resource section. Now I want to
+show you what you will see in actual
+production implementations. So here we
+do not have web hook as authorizer. We
+just have the defaults. Here we have
+node and then we have arbback. And in
+the admission control we have OPA and
+gatekeeper. So here is the flow that you
+will see in production. We have already
+discussed these things in detail. what
+is admission control and how it happens.
+But here I wanted to give you some
+example policies that you could be
+using. So only allow images from this
+registries. Containers must not run as
+root. All pods must have team and dev
+labels. Now see so this one will be
+achieved via validation admission
+controller plug-in. Containers must not
+run as root. This again will be covered
+by validating admission controller. This
+all pods must have team and dev label.
+Again validating inject default labels
+if missing. This is mutating admission
+controller. I hope you understand this
+part. Now lastly I want to discuss
+admission controller sequence. This is
+the last part of this lecture and this
+will connect everything together. So
+authentication and authorization. Let's
+say API server is taking care of that.
+Then we have admission control that sits
+between authorization and CD. So first
+Sema hits cube cuddle apply fbot.l API
+server authenticates and authorizes the
+request. It now reaches the mutating
+admission controllers. Understand that
+it is always mutating admission
+controllers that take effect first. So
+once mutating admission controllers have
+modified the request that modified
+object is not yet persisted in HCD those
+changes are still in memory then all the
+validating admission controllers will
+verify that request and if validating
+admission controller denies then the
+request will be denied with an error. If
+validation controller allows then the
+request will be allowed to be stored
+incd. Another important point that I
+should have mentioned initially itself
+admission control only applies to write
+operations. So your create modify patch.
+So when you run these operations only
+then admission control controllers are
+used. And whenever you are thinking of
+admission controllers, think of them
+from HCD's perspective. If a request
+will be writing something to HCD or
+modifying something in HCD or patching
+something in HCD, then that request will
+go through admission control. But if a
+request is just getting the object,
+listing the objects, then that request
+will not go through admission control.
+Hence only requests that are right
+specific that are modifying some data or
+creating new data only those requests
+will go through admission control. Now
+that we understand the sequence let's
+take an example. So let's say you have
+enabled all these and let's see how
+these will work. First is namespace life
+cycle. We know that this is validating
+so this will be skipped. Second is limit
+ranger. We know this is a dual function
+admission controller plug-in. Hence only
+the mutating part will be applied first
+not the validating part. So mutating
+part will say okay uh Sema has not
+specified requests and limits. Let me
+modify her request. Then the request
+will go to service account. Service
+account admission controller plug-in
+again has two functionalities mutating
+and validating. But only the mutating
+part will be applied here because we
+know mutating admission controllers
+apply first then the service account
+will be mapped. Let's say it was the
+default service account. Then we are
+saying mutating admission web hook. Here
+the request will go to our custom
+admission controller. Custom admission
+controller let's say wants to inject a
+sidecar container which is there for
+logging. So it will inject that
+container and that container could also
+be for a service mesh like that is the
+job of mutating admission web hook. This
+is just mutating the request adding new
+container to my request because these
+admission controllers can see the full
+body of the request. Then I have
+validating admission web hook. This will
+also be skipped because this is a
+validating admission controller. Then we
+have resource kota. Resource kota is
+also validating. Hence this will also be
+skipped. So in this entire plugins only
+limit ranger service account and
+mutating admission web hook were applied
+and whatever changes they did whatever
+mutation they performed all of that was
+stored in memory nothing was persisted
+incd now that they have run now comes
+the turn of validating admission
+controller namespace life cycle will say
+okay the namespace exists limit ranger
+it dual function plug-in. So it will say
+oh yeah the maximums for the limit range
+object are adhered by sema. So I am
+fine. Then the request will go to
+service account. Service account will
+say okay the service account she that I
+am about to map exists. So my validation
+is also fine. This will not come into
+picture because this was already
+applied. Then the validation admission
+web hook. This will check whether let's
+say for example the image is from a
+private registry then this will also say
+okay I am also fine then the request
+will go to the request kota request kota
+will say the kota in the name space in
+which sema wants to create a pod is fine
+and her request can be moved ahead and
+at this stage both mutating and
+validating ing plugins are fine with the
+request. So the request is allowed and
+then it gets stored incd. If any of the
+validating admission controller plugins
+would have denied this request, then the
+request would have been denied. I think
+that's all I wanted to cover. That wraps
+up day 38 on admission controllers. Now
+you know how Kubernetes can not only
+authenticate and authorize requests but
+also enforce custom policies before
+anything even touches the cluster. In
+day 39, we will shift gears and look at
+custom resource definitions or CRDs. If
+you have any questions, feel free to ask
+them in the comment section and I will
+reply. If this helped, do consider
+liking, sharing and subscribing. It will
+mean a lot to me.

@@ -1,0 +1,311 @@
+Kind: captions
+Language: en-US
+Hey, everyone today,
+I want to talk to you about a very exciting topic of image caching container,
+image caching to be specific.
+It's exciting. I promise. No.
+But really if you're running any sort of production Kubernetes workloads,
+you want to have control of your image repository.
+That's where you're pulling all your images from
+the registry you have is yours and up time
+is something you need in order to make sure that you can scale your clusters out.
+If you want to move those repositories closer to
+your accounts where you're pulling them from in regions,
+say
+uh that's going to be something that you're gonna have to do.
+And if you're relying on upstream third party repositories and registries,
+you don't control those.
+And in some cases like the
+k8s registry, which is a fantastic service.
+It is a free service that's run by community members and
+there is no S L A for up time on it.
+If it goes down, you can't scale, you can't build images if you're relying on it. So
+I want to talk to you about image cache
+and what we have is called a pull through cash. Uh You can do cashing and
+mirroring in a lot of different ways. E C R just announced a new feature for
+using the upstream Coon
+registry as a pull through cash for E C R. I wanna show you how it works.
+I want to show you how you can use it and a few different ideas on something you
+might be working on just to make sure that
+you can scale your clusters and their performance.
+So I wrote this blog post.
+It has all of the examples that we initially thought that people would like
+to have depending on how you're using your images.
+I'm gonna walk through just a couple of them in
+this video to show you how it can be used.
+And the first thing we need to do is just turn it on.
+So let's look over here in our in my registry.
+You see, I have no repos, no images available right now.
+I'm gonna click on the private registry right here and then pull through cash.
+We have to add a rule for where we're pulling from.
+And so the public registry we're gonna pull from is Kubernetes.
+There's also E C R public in
+those have been there for a little while now and
+we have a default name space here of Kate's.
+I'm gonna go ahead and leave that, but you can change it to whatever you want.
+Once we say that you can see here that what all of
+my images are gonna have this Kates slash upstream image name.
+So I have a registry which is my URL. It's account name
+in my region, all of that stuff. I have
+a Kates
+and then a slash image.
+And let's say I'm pulling the uh auto scale the cluster auto scalar.
+That's gonna be a slash cluster dash, auto scaler colon. And then the tag,
+I'm just gonna pen that to the end of whatever my registry and Kate's name space is.
+So let's show you how we make the first image and pull it from an upstream repository.
+Uh First, we need to log in,
+of course. So we're gonna log into my E C R registry
+and you can see here this is the URL for the registry itself.
+And then we just need to pull an image. Let's say I'm gonna pull the metric server
+and I'm gonna pull the 0.63 version and this is just a standard Docker poll.
+Here is my registry URL. Here's that Kate's name space.
+And then here's the piece that usually would be after registry dot K dot I O
+So I don't have that image existing.
+But when I pull that, I'm gonna tell E C R and say, hey, I need this image.
+It's going to go upstream and fetch that image for me.
+Pull it down to E C R and then serve it back to me.
+And you can see here if I switch back over to
+my registry. I will have a repo now
+that has that metric server available in it.
+And something important to note here, I only pulled the 063 tag.
+So that's only, that's the only tag that's in here.
+It's whatever layers are required for that 063 tag.
+So nothing else gets pulled in with that. I'm not getting the entire
+uh image with all of the tags. I'm just pulling the one that I need.
+I'm mirroring it here or,
+or cashing it here in E C R and now it's available for me to use.
+So let's go ahead and use it. I have a Kubernetes cluster.
+You can see I have nothing installed.
+Let's go ahead and install that metric server using the helm charts.
+So the metric server has a default helm charts.
+And what we need to do is we need to set a variable to say, hey,
+we're gonna use this chart but I want you to
+come from the registry that I'm gonna provide to you
+upgrade
+and here in
+my cache,
+uh we can see here,
+I'm setting this image image dot repository variable
+to the place that I'm storing it now.
+And this is in us West one where I pulled it down from and we will say create name space
+that's gonna go ahead and deploy that helm chart and it,
+it just overwrites that variable at deploy time and says, OK,
+you need the image to come from somewhere else.
+And as we would expect that's gonna pull down and get it from my registry.
+Now,
+let's say I have a different cluster in another region and
+I want this image to be available in that region too.
+And I don't want to pull from, let's say Oregon us West two from us west one.
+The cool thing about having this in E C R is there's a feature for that already.
+So if I look at this private registry,
+I can go to replication.
+Replication has rules that we can add on what we want to replicate. Where
+so I'm in us West one,
+I'm going to say I want cross region replication from this region.
+And so I'm going to replicate to other regions from here.
+So any time I pull an image,
+it'll be pulled down here and then replicated to the other regions,
+I could also go to other accounts,
+but I actually don't need that here because I can set up.
+I am permissions to pull from my centralized accounts in
+those regions once it's available in the region already.
+So all I'm gonna do is do cross
+a cross region replication.
+Click next and I'm gonna replicate this to
+us West two in Oregon, I can click as many of these as I want standard rates,
+apply for storage in those regions and then a
+filter for what is going to be replicated.
+In this case, it's everything in my Kate's name space. So this is a filter for
+anything that gets any repository that gets added in this region under
+that Kate's name space is automatically gonna be replicated somewhere else.
+We can also see here the Jason for how this works.
+If I want to do this through the A W C I or terraform or something,
+it's a prefix match on Kates.
+We submit that rule.
+And the thing to note here is if I go over to the Oregon region,
+go back into E C R
+and we will see that I actually don't have any images there.
+I don't have images because oh actually, I have old images.
+These were from a previous recording of this
+and uh pay no attention to it because this is
+actually the third time I'm recording this for various reasons.
+So let's get rid of all of those. And now we have nothing.
+And so replication only happens when I pull the image.
+And so in order to do that,
+I'm gonna go back into my terminal and let's pull a different
+tag here just to show that we're gonna pull the same tag.
+I'm still in West one. That's where I'm authenticated is to West one
+and this image or this new tag is gonna be pulled through West one.
+It's gonna get the tag and store it in that
+region and then it's going to replicate it to my other
+regions that I defined And so if I just wait
+a second for it to actually do that replication process,
+it's not instant. It does have to send some bits over the wire
+and it's a lot faster than a plane ride though. I'll tell you that much.
+And so here we go, we have the metric server.
+If I click on it here, I will have the, once the tags and everything finishes,
+I will have that 062 image tag here.
+So now I can pull this image in the Oregon region.
+And if I have a cluster there,
+I didn't have to wait for myself to pull it in that region either.
+Now, if I'm replicating this across a lot of different regions,
+one thing that I hate doing is trying to remember what region I'm even deploying to.
+And so in order to
+fix that problem,
+we can actually go into the cluster and set up a policy
+that will rewrite our image destination or pole for us automatically.
+So let's look at
+uh
+Verno which is actually called out in the blog post. I have a whole example for it.
+Shout out to Jimmy on my team for helping me with that policy. Uh That was awesome.
+And so if we install Caver
+in the cluster, which I already have,
+and then here's an example policy that we can look at
+open up this policy.
+And this is gonna show us everything that we're going to look for,
+we're looking for this key here under uh registry
+I
+O
+and we're gonna rewrite that to my registry with
+a slash cases as the name space and everything else is just gonna prepend at the end.
+So everything after
+uh that registry name is going to come here under image container element path
+and also the tag.
+And so we can see here this is for um containers, but I'm also gonna do it for
+further down here and it containers, you could do it for sidecar containers.
+Anything you want to rewrite with that new U R URL,
+you're going to put here in this policy and we're gonna apply that to the cluster.
+I actually already have
+Verno in this cluster. So all I need to do is apply that
+and now that it's applied,
+I can go ahead and pull another image and see how it gets rewritten.
+But in this phase, I actually still need to prepopulate my cache.
+And so let's switch my region back over to Northern California
+and let's pull uh the busy box image.
+I know the case registry has a busy box image at the
+roots and I'm just gonna pull the latest image just so that,
+that gets cashed in my repo
+back in Northern California. Refresh this, I see my busy box image.
+And now let's deploy a pod.
+I have this pod definition here and I'm explicitly leaving
+this as registry Kate dot I O with busy box.
+And so we can see how that gets rewritten when we apply it.
+And then once we describe that pod,
+we can see that we're pulling uh something that's not registry dot K dot I O.
+This is of course our registry Verna went ahead and rewrote
+that image for us and then applied it in this region.
+So each region you have a cluster,
+you can have different policies that automatically do this for you.
+So you can rewrite those image policies for you automatically.
+And the last thing that I really like to do is again,
+I don't like to think about even what images I have cashed or don't have cashed.
+So in this case, I'm going to set up A I M permission to allow my Cooper
+Ty's worker nodes to pull any image from upstream.
+This is gonna work in with I AM permissions that it needs a create repo policy.
+So I currently cannot pull any image I want unless I
+prepopulate it because the nodes when they try to make a pull
+through cache actually need to do an I M create repo policy
+or or call to be able to initially create the repo.
+In this case, you don't really want to do that in production.
+So I'm gonna do this for a test cluster where I typically test out images.
+So anytime I need to update an image tag or pull down new things to try them,
+I'm gonna do that here in my test,
+my test cluster and then that gets replicated across multiple regions.
+And the production accounts don't actually need uh the nodes
+in those production accounts don't need the create rebo policy.
+They're fine with read only.
+And my cluster that I do my testing in a DEV or test
+environment has that access to do this sort of poll and create repos.
+So in order to do that,
+I'm gonna jump over to EC2 and I just need to
+find the I M permissions that my nodes are running with.
+So if I look under instances
+I have a P T C
+uh node here uh for both through cash,
+let's go down and find the I M uh role that it's using
+oops too far
+subnet. I am roll there we go.
+Let's open this up.
+And then in the blog post, I have of course, an example of what you would need.
+Um This is an example. I am for pulling images across multiple accounts,
+but I have here it is
+I am policy right here for uh the ability to
+pull down new images basically through a pull through cache.
+So go here and we're going to add a permission
+and create it in line
+and drop the Jason
+create repo
+great policy.
+And now my nodes have permission to pull new
+images through that cache which create that image.
+So let's go ahead and deploy the node problem detector.
+Uh this is a fun one from upstream. I know those images are stored in the upstream
+uh registry. There's a helm installed somewhere in here that I need to find.
+There we go.
+I just need this.
+And in this case, I'm gonna run this helm install without overriding any of the image
+uh names. Because I have that
+Verno policy that's automatically going to rewrite that registry dot K
+dot I O to my local registry in this region.
+Once that's created,
+it's going to then trigger it in the pull through cache
+and let's just jump real quick back into here. I'll go back to E C R and show you again.
+I don't have this image available in my repos. I just got Busy box and metric server.
+But if we do this helm install, I will get that demon set that goes out
+and now I have oh my busy bo oh It's failing
+because I told it to sleep for a couple of seconds.
+Uh So if I look at this image
+or this pod here,
+you will see that we are assigning it
+and here is our container image.
+Uh And it's, it's present on this machine because I did pull it.
+But if I go back here,
+oh, my image po policy has been set.
+Um Let's delete a note
+that's always the fun part.
+So in this case, uh we can see that I actually didn't trigger
+the Poultry cache
+because
+it says it's already present and I don't have a policy to always pull that image.
+So the only way I can do that is either change the helm chart and say, hey,
+I want you to always pull this image or uh delete a note or, or clear the cache
+on a note so that that image gets removed and that does happen on occasion.
+Uh There's a, a basically a
+that cleans up some of those old images.
+Uh but I didn't wait long enough between recordings to trigger that.
+So let's force it to trigger
+and
+we gotta wait for both my notes to get available.
+I already have the Damon set deployed.
+And so this is just a matter of as soon as the node comes up,
+the Damon set will automatically go to that node
+and that will trigger the pull of that image.
+And it looks like I have a new image. Now it's been available for 17 seconds.
+Let's look for which pod is uh 22 seconds old here.
+And although I don't have my network ready on this note yet,
+you can see that it pulling it, pulled this image finally for us.
+So when I go back into E C R and refresh,
+it was able to automatically create the new image uh cache
+for me.
+So I have permissions now in this node in this cluster to
+create those permissions and pull through any image that I need.
+And again, going back to
+uh if we wanted to look at Oregon,
+that image also gets replicated here because of the rules.
+So even though that node only has you know permissions
+and it's creating a a repository in one region,
+I get that image everywhere based on that poll.
+So my cluster in Oregon can still remain with a read only access to E C R.
+So thanks so much for checking it out.
+I really hope that this feature helps you out with not
+only scaling with uh having better performance from image pulls,
+but also just from availability.
+So if any upstream images are, are being replicated inside A E C R,
+you get a lot more control of that,
+a lot more performance and a lot more just guarantees around
+that up time again because this isn't a community run repot.
+Uh You can get support and,
+and guaranteed S L A s with up time for these images so that you
+can pull them down and scale with them without having to worry about doing manual
+ming and figuring out which images are needed.
+So check out the blog post, really hope you enjoy and see you next time.

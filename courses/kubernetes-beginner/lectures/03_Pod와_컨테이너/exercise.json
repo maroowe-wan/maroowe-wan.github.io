@@ -1,0 +1,63 @@
+{
+  "lecture_no": 3,
+  "mode": "practical",
+  "environment": "minikube 또는 Docker Desktop Kubernetes 기반 로컬 1-노드 클러스터. kubectl 이 클러스터에 연결된 상태에서 시작한다. 각 과제 전후 'kubectl get pods'로 이전 실습의 잔여 Pod가 없는지 확인 후 진행한다.",
+  "tasks": [
+    {
+      "id": "task-1",
+      "level": "워밍업",
+      "title": "nginx Pod 생성 후 상태 확인하기",
+      "prompt": "kubectl run 명령으로 nginx 이미지를 사용하는 Pod를 이름 'my-web'으로 생성하라. 생성 후 다음 세 가지를 확인한다.\n1. Pod 목록에서 READY, STATUS, RESTARTS, AGE 컬럼을 읽는다.\n2. '-o wide' 옵션을 추가해 Pod가 배치된 노드 이름과 IP를 확인한다.\n3. 확인이 끝나면 Pod를 삭제하고, 삭제 후 목록에 남아 있지 않음을 검증한다.",
+      "starter": "# 클러스터 연결 확인\nkubectl cluster-info\n\n# 이후 명령을 직접 채워 실행한다\n# (1) Pod 생성\nkubectl run ___ --image=___\n\n# (2) 목록 확인\nkubectl get pods\n\n# (3) 넓은 출력으로 노드/IP 확인\nkubectl get pods ___\n\n# (4) 삭제\nkubectl delete pod ___\n\n# (5) 삭제 결과 검증\nkubectl get pods",
+      "solution": "# (1) Pod 생성\nkubectl run my-web --image=nginx\n# 출력 예시: pod/my-web created\n\n# (2) 목록 확인\nkubectl get pods\n# 출력 예시:\n# NAME     READY   STATUS    RESTARTS   AGE\n# my-web   1/1     Running   0          8s\n# ※ 처음에 ContainerCreating 또는 Pending으로 보이면 몇 초 대기 후 재실행\n\n# (3) 넓은 출력으로 노드/IP 확인\nkubectl get pods -o wide\n# 출력 예시:\n# NAME     READY   STATUS    RESTARTS   AGE   IP           NODE       NOMINATED NODE   READINESS GATES\n# my-web   1/1     Running   0          30s   10.244.0.4   minikube   <none>           <none>\n\n# (4) 삭제\nkubectl delete pod my-web\n# 출력 예시: pod \"my-web\" deleted\n\n# (5) 삭제 결과 검증\nkubectl get pods\n# 출력 예시: No resources found in default namespace.",
+      "explanation": "'kubectl run <이름> --image=<이미지>'는 YAML을 쓰지 않고 Pod를 빠르게 만드는 명령형 방식이다. '-o wide'는 기본 컬럼에 노드 이름과 Pod IP를 추가해 배치 위치를 즉시 파악할 수 있게 한다. 직접 run으로 만든 Pod는 컨트롤러 없이 단독으로 존재하므로, delete 하면 그대로 사라지고 재생성되지 않는다. 이것이 다음 강의의 Deployment와의 핵심 차이다.",
+      "hints": [
+        "READY 컬럼의 '1/1'은 '전체 컨테이너 수 / 준비된 컨테이너 수'를 뜻한다. 멀티 컨테이너 Pod라면 '2/2'처럼 표시된다.",
+        "STATUS가 'ContainerCreating'으로 멈춰 있다면 이미지 pull이 진행 중인 것이다. 'kubectl describe pod my-web'의 Events 섹션을 보면 Pulling → Pulled → Started 순서로 진행 상황을 확인할 수 있다.",
+        "'-o wide' 대신 '-o yaml'을 쓰면 Pod의 전체 명세를 YAML로 볼 수 있다. 다음 과제 전에 한 번 실행해 spec.containers 구조를 눈에 익혀두면 좋다."
+      ]
+    },
+    {
+      "id": "task-2",
+      "level": "핵심 실습",
+      "title": "YAML 파일로 Pod 정의·생성·삭제하기",
+      "prompt": "아래 starter YAML 파일을 'simple-pod.yaml'로 저장한 뒤, kubectl apply -f 명령으로 Pod를 생성하라. 생성 후 다음 순서로 수행한다.\n1. 'kubectl describe pod simple-pod'를 실행해 IP, 배치 노드, Events 섹션을 확인한다.\n2. 'kubectl logs simple-pod'로 nginx 초기 로그를 출력한다.\n3. 'kubectl exec -it simple-pod -- /bin/bash'로 컨테이너 내부에 접속해 'ls /usr/share/nginx/html' 명령을 실행한 뒤 exit로 빠져나온다.\n4. YAML 파일로 Pod를 삭제한다('kubectl delete -f simple-pod.yaml').",
+      "starter": "# simple-pod.yaml 파일 내용\napiVersion: v1\nkind: Pod\nmetadata:\n  name: simple-pod\n  labels:\n    app: web\nspec:\n  containers:\n    - name: web-container\n      image: nginx\n      ports:\n        - containerPort: 80",
+      "solution": "# 1. YAML 파일 저장 후 적용\nkubectl apply -f simple-pod.yaml\n# 출력 예시: pod/simple-pod created\n\n# 2. describe로 상세 정보 확인\nkubectl describe pod simple-pod\n# 주목할 항목:\n#   IP: 10.244.0.x (클러스터마다 다름)\n#   Node: minikube\n#   Events 맨 아래 3줄:\n#     Normal  Scheduled  ...  Successfully assigned default/simple-pod to minikube\n#     Normal  Pulled     ...  Container image \"nginx\" already present on machine\n#     Normal  Started    ...  Started container web-container\n\n# 3. 로그 확인\nkubectl logs simple-pod\n# 아직 HTTP 요청이 없으면 nginx 시작 메시지만 출력될 수 있다\n\n# 4. 컨테이너 내부 접속\nkubectl exec -it simple-pod -- /bin/bash\n# 프롬프트가 바뀌면 내부 명령 실행\nls /usr/share/nginx/html\n# 출력 예시: 50x.html  index.html\nexit\n\n# 5. YAML 파일로 삭제\nkubectl delete -f simple-pod.yaml\n# 출력 예시: pod \"simple-pod\" deleted",
+      "explanation": "YAML 방식은 'kubectl run'과 달리 모든 설정을 파일로 관리할 수 있어 버전 관리(git)에 적합하고 실무 표준이다. 'kubectl apply -f'는 파일을 선언적으로 적용하며, 같은 파일로 수정 적용도 가능하다. 'describe'의 Events 섹션은 Scheduled → Pulled → Started 순서로 기록되며 문제 진단 시 가장 먼저 확인하는 부분이다. 'exec -it'는 실행 중인 컨테이너 안에서 인터랙티브 셸을 여는 명령으로, 파일 구조 확인·환경 변수 점검 등 디버깅에 유용하다. 'delete -f'는 apply와 쌍을 이뤄 같은 파일로 자원을 제거하므로 이름을 따로 기억할 필요가 없다.",
+      "hints": [
+        "YAML의 들여쓰기는 반드시 스페이스(공백 문자)로 해야 한다. 탭 문자를 쓰면 'error: yaml: line N: found character that cannot start any token' 오류가 난다.",
+        "'kubectl exec -it simple-pod -- /bin/bash'에서 '--'는 kubectl 옵션과 컨테이너에 전달할 명령을 구분하는 구분자다. /bin/bash가 없는 경량 이미지(busybox 등)라면 '/bin/sh'를 대신 사용한다.",
+        "로그가 비어 있다면 'kubectl exec'로 내부에서 'curl localhost'를 실행해 HTTP 요청을 보낸 뒤 'kubectl logs simple-pod'를 다시 실행하면 access log가 찍힌다."
+      ]
+    },
+    {
+      "id": "task-3",
+      "level": "핵심 실습",
+      "title": "잘못된 이미지로 오류 Pod 만들고 describe로 원인 진단하기",
+      "prompt": "의도적으로 존재하지 않는 이미지 'nginx:doesnotexist999'를 사용하는 Pod를 이름 'broken-pod'로 생성하라. 생성 직후 'kubectl get pods'를 반복 실행해 STATUS 변화를 관찰한다. STATUS가 'ErrImagePull' 또는 'ImagePullBackOff'로 바뀌면 'kubectl describe pod broken-pod'의 Events 섹션에서 실패 이유를 찾아 기록한다. 진단이 끝나면 Pod를 삭제하고, 올바른 이미지('nginx:stable')로 새 Pod 'fixed-pod'를 만들어 Running 상태가 되는지 확인한다.",
+      "starter": "# 오류 Pod 생성\nkubectl run broken-pod --image=nginx:doesnotexist999\n\n# 상태 반복 확인 (몇 초 간격으로 2~3회 실행)\nkubectl get pods\n\n# 상태가 ErrImagePull 또는 ImagePullBackOff가 되면 상세 확인\nkubectl describe pod broken-pod\n# Events 섹션에서 'Failed to pull image' 메시지를 찾는다\n\n# 진단 후 삭제\nkubectl delete pod broken-pod\n\n# 올바른 이미지로 수정 후 재생성\nkubectl run fixed-pod --image=___\nkubectl get pods",
+      "solution": "# 1. 오류 Pod 생성\nkubectl run broken-pod --image=nginx:doesnotexist999\n# 출력: pod/broken-pod created (생성 요청 자체는 성공)\n\n# 2. 상태 확인 (20~30초 경과 후)\nkubectl get pods\n# 출력 예시:\n# NAME         READY   STATUS             RESTARTS   AGE\n# broken-pod   0/1     ImagePullBackOff   0          35s\n# ※ 처음에는 ErrImagePull로 나왔다가 재시도 간격이 늘어나며 ImagePullBackOff로 바뀐다\n\n# 3. describe로 원인 진단\nkubectl describe pod broken-pod\n# Events 섹션 핵심 내용 예시:\n#   Warning  Failed  ...  Failed to pull image \"nginx:doesnotexist999\":\n#            rpc error: code = NotFound desc = failed to pull and unpack image\n#            ...: not found\n#   Warning  Failed  ...  Error: ErrImagePull\n#   Normal   BackOff ...  Back-off pulling image \"nginx:doesnotexist999\"\n\n# 4. 오류 Pod 삭제\nkubectl delete pod broken-pod\n\n# 5. 올바른 이미지로 재생성\nkubectl run fixed-pod --image=nginx:stable\n# 출력: pod/fixed-pod created\n\n# 6. Running 상태 확인\nkubectl get pods\n# 출력 예시:\n# NAME        READY   STATUS    RESTARTS   AGE\n# fixed-pod   1/1     Running   0          12s\n\n# 7. 정리\nkubectl delete pod fixed-pod",
+      "explanation": "Pod 생성 요청은 성공(pod created)해도 실제 컨테이너 실행은 kubelet이 이미지를 pull할 때 비로소 결정된다. 존재하지 않는 이미지 태그는 레지스트리에서 404를 반환하고 kubelet이 이를 'ErrImagePull'로 기록한다. 쿠버네티스는 pull 실패 시 지수 백오프(exponential backoff) 방식으로 재시도 간격을 늘리며, 이 상태가 'ImagePullBackOff'다. describe의 Events 섹션에는 'Failed to pull image'와 함께 오류 원인이 명시되므로, 운영 중 Pod가 0/1로 멈춰 있을 때 가장 먼저 실행해야 하는 진단 명령이다. 이미지 이름 오타, private registry 인증 실패, 존재하지 않는 태그가 현업에서 가장 흔한 원인이다.",
+      "hints": [
+        "STATUS가 바뀌지 않고 Pending에 오래 머무른다면 이미지 pull이 아니라 노드 자원 부족일 수 있다. 그 경우에도 describe Events에서 'Insufficient cpu/memory' 메시지로 구분된다.",
+        "ErrImagePull과 ImagePullBackOff는 같은 문제의 두 단계다. ErrImagePull은 첫 실패 직후이고, ImagePullBackOff는 쿠버네티스가 재시도를 늦추는 대기 상태다. 둘 다 이미지 문제라고 봐도 무방하다.",
+        "nginx 공식 이미지의 유효한 태그 목록은 Docker Hub(hub.docker.com/_/nginx/tags)에서 확인할 수 있다. 'latest', 'stable', 'alpine'이 가장 많이 쓰인다."
+      ]
+    },
+    {
+      "id": "task-4",
+      "level": "응용",
+      "title": "멀티 컨테이너(사이드카) Pod YAML 작성 및 컨테이너별 로그 확인",
+      "prompt": "하나의 Pod 안에 두 컨테이너를 함께 구성하는 YAML 파일을 직접 작성하라.\n- 메인 컨테이너: 이름 'web', 이미지 'nginx', 포트 80\n- 사이드카 컨테이너: 이름 'log-watcher', 이미지 'busybox', args로 '/bin/sh -c while true; do echo sidecar-running; sleep 5; done' 을 무한 루프로 실행\n\n파일명은 'sidecar-pod.yaml', Pod 이름은 'sidecar-demo'로 한다. 생성 후 다음을 수행한다.\n1. 'kubectl get pods'에서 READY 컬럼이 '2/2'임을 확인한다.\n2. '-c web' 옵션으로 web 컨테이너의 로그를, '-c log-watcher'로 사이드카 컨테이너의 로그를 각각 출력한다.\n3. 두 컨테이너가 동일한 Pod IP를 공유하는지 'kubectl describe pod sidecar-demo'의 IP 필드와 'kubectl exec -it sidecar-demo -c web -- printenv HOSTNAME'으로 검증한다.\n4. 실습 후 Pod를 삭제한다.",
+      "starter": "# sidecar-pod.yaml 파일 작성 (빈칸을 채운다)\napiVersion: v1\nkind: Pod\nmetadata:\n  name: sidecar-demo\nspec:\n  containers:\n    - name: web\n      image: nginx\n      ports:\n        - containerPort: 80\n    - name: log-watcher\n      image: busybox\n      args:\n        - /bin/sh\n        - -c\n        - ___  # 5초마다 'sidecar-running'을 출력하는 무한 루프",
+      "solution": "# sidecar-pod.yaml 완성본\napiVersion: v1\nkind: Pod\nmetadata:\n  name: sidecar-demo\nspec:\n  containers:\n    - name: web\n      image: nginx\n      ports:\n        - containerPort: 80\n    - name: log-watcher\n      image: busybox\n      args:\n        - /bin/sh\n        - -c\n        - while true; do echo sidecar-running; sleep 5; done\n\n# 1. 생성\nkubectl apply -f sidecar-pod.yaml\n# 출력: pod/sidecar-demo created\n\n# 2. READY 2/2 확인\nkubectl get pods\n# 출력 예시:\n# NAME           READY   STATUS    RESTARTS   AGE\n# sidecar-demo   2/2     Running   0          20s\n\n# 3. web 컨테이너 로그 (nginx 시작 메시지)\nkubectl logs sidecar-demo -c web\n# 출력 예시: nginx 초기화 로그\n\n# 4. log-watcher 컨테이너 로그\nkubectl logs sidecar-demo -c log-watcher\n# 출력 예시:\n# sidecar-running\n# sidecar-running\n# (5초 간격)\n\n# 5. describe로 Pod IP 확인\nkubectl describe pod sidecar-demo | grep -E '^IP:'\n# 출력 예시: IP:   10.244.0.5\n# → 두 컨테이너가 같은 IP를 공유한다\n\n# 6. web 컨테이너의 HOSTNAME 환경 변수 확인 (Pod 이름과 동일)\nkubectl exec -it sidecar-demo -c web -- printenv HOSTNAME\n# 출력 예시: sidecar-demo\n\n# 7. 정리\nkubectl delete -f sidecar-pod.yaml\n# 또는: kubectl delete pod sidecar-demo",
+      "explanation": "멀티 컨테이너 Pod는 spec.containers 배열에 여러 항목을 나열해 정의한다. 두 컨테이너는 동일한 Pod IP를 공유하므로 describe의 IP 필드가 하나뿐이고, 서로 localhost로 통신할 수 있다. 'kubectl logs'에 '-c <컨테이너명>'을 붙이지 않으면 'Error: a container name must be specified for pod sidecar-demo, because it has multiple containers' 오류가 나므로 반드시 컨테이너를 지정해야 한다. READY 컬럼의 '2/2'는 Pod 안의 컨테이너 두 개 모두 준비됐다는 뜻이며, 한 컨테이너라도 Crash 등으로 불량이면 '1/2'처럼 줄어든다. busybox의 무한 루프는 사이드카가 메인 앱의 생명주기와 함께 종료되어야 한다는 패턴을 단순하게 재현한 것이다.",
+      "hints": [
+        "YAML args 배열에서 while 루프 명령 전체를 하나의 문자열 원소로 적어야 한다. '-c' 뒤에 오는 원소가 하나의 문자열이어야 /bin/sh가 그것을 스크립트로 실행한다.",
+        "컨테이너가 CrashLoopBackOff 상태가 되면 명령이 즉시 종료됐다는 뜻이다. busybox 이미지에서 while 루프 없이 단순히 'echo hello'만 넣으면 컨테이너가 종료되어 쿠버네티스가 재시작을 반복한다. 반드시 무한 루프로 작성해야 한다.",
+        "두 컨테이너가 localhost 통신을 실제로 확인하고 싶다면, 'kubectl exec -it sidecar-demo -c log-watcher -- wget -qO- localhost:80'을 실행해 보라. log-watcher에서 web(nginx)의 응답을 받을 수 있다."
+      ]
+    }
+  ]
+}

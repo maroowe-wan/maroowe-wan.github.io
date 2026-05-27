@@ -1,0 +1,484 @@
+Kind: captions
+Language: en
+hello and welcome to this lecture my
+name is moonshot muhammad and we are
+going through the kubernetes
+certification course and in this lecture
+we will discuss about ingress in
+kubernetes before we proceed please
+remember to subscribe to our channel so
+that you know when our new videos come
+out we will start with a simple scenario
+you are deploying an application on
+kubernetes for a company that has an
+online store selling products your
+application would be available at say my
+- online - store comm you build the
+application into a docker image and
+deployed on the kubernetes cluster as a
+pod in a deployment your application
+needs a database so you deploy a MySQL
+database as a pod and create a service
+of type cluster IP called MySQL service
+to make it accessible to our application
+your application is now working to make
+the application accessible to the
+outside world you create another service
+this time of type node port and make
+your application available on a high
+port on the nodes in the cluster in this
+example a port 3 8080
+is allocated for the service the users
+can now access your application using
+the URL HTTP colon slash slash IP of any
+of your nodes followed by port 3 8080
+that setup works and users are able to
+access the application whenever traffic
+increases we increase the number of
+replicas of the pod to handle the
+additional traffic and the service takes
+care of splitting traffic between the
+pods however if you have deployed a
+production grade application before you
+know that there are many more things
+involved in addition to simply splitting
+the traffic between the pods for example
+we do not want the users to have to type
+in the IP address every time so you
+configure your DNS server to point to
+the IP of the nodes your users can now
+access your application using the URL my
+online store comm and port 3 8080
+now you don't want your users to have to
+remember port number either
+however service note ports can only
+allocate high numbered ports which are
+greater than 30,000 so you then bring in
+an additional layer between the DNS
+server and your cluster like a proxy
+server that proxies requests on port 80
+to port 3 8080 on your notes you then
+point your dns to this server and users
+can now access your application by
+simply visiting my online store come now
+this is if your application is hosted on
+Prem in your data center let's take a
+step back and see what you could do if
+you were on a public cloud environment
+like Google cloud platform in that case
+instead of creating a service of type
+node port for your where application you
+could set it to type load balancer when
+you do that kubernetes would still do
+everything that it has to do for an old
+port which is to provision a high port
+for the service but in addition to that
+kubernetes also sends a request to
+Google cloud platform to provision a
+network load balancer for this service
+on receiving the request GCP would then
+automatically deploy a load balancer
+configured to route traffic to the
+service ports on all nodes and return
+its information to kubernetes the load
+balancer has an external IP that can be
+provided to users to access the
+application in this case we set the dns
+to point to this IP and users access the
+application using the URL my online
+store comm perfect your company
+business grows and you now have new
+services for your customers for example
+a video streaming service now you want
+your users to be able to access your new
+video streaming service by going to my
+online store comm /watch you'd like to
+make your old application accessible at
+my online store comm slash where your
+developers develop the new video
+streaming application as a completely
+different application as it has nothing
+to do with the existing one however to
+share the cluster's resources you deploy
+the new application as a separate
+deployment within the same cluster you
+create a service called video service of
+type load balancer kubernetes provisions
+for three 8282
+for this service and also provisions in
+network load balancer on the cloud the
+new load balancer has a new IP remember
+you must pay for each of these load
+balancers and having many such load
+balancers can inversely affect your
+cloud bill so how do you direct traffic
+between each of these load balancers
+based on the URL that the user types in
+you need yet another proxy or load
+balancer that can redirect traffic based
+on URLs to the different services every
+time you introduce a new service you
+have to reconfigure the load balancer
+and finally you also need to enable SSL
+for your applications so your users can
+access your application using HTTP word
+he configure that it can be done at
+different levels either at the
+application level itself or at the load
+balancer level or at the proxy server
+level but which one you don't want your
+developers to implement it in their
+applications as they would do it in
+different ways and it's an additional
+burden for them to develop additional
+code to handle that you want it to be
+configured in one place with minimal
+maintenance now that's a lot of
+different configuration and all of these
+becomes difficult to manage in your
+application scales
+it requires involving different
+in different teams you need to configure
+your firewall rules for each new service
+and it's expensive as well as for each
+service in new cloud native load
+balancer needs to be provisioned
+wouldn't it be nice if you could manage
+all of that within the kubernetes
+cluster and have all that configuration
+as just another kubernetes to finish in
+file that lives along with the rest of
+your application deployment files
+that's where ingress comes in ingress
+helps your users access your application
+using a single externally accessible URL
+that you can configure to route traffic
+to different services within your
+cluster based on the URL path at the
+same time implement SSL security as well
+think of ingress as a layer 7 load
+balancer built into the kubernetes
+cluster it can be configured using
+native kubernetes primitives just like
+any other object that we've been working
+with in kubernetes now remember even
+with ingress you still need to expose it
+to make it accessible outside the
+cluster so you still have to either
+publish it as a nude port or with a
+cloud native load balancer but that is
+just a one-time configuration going
+forward you're going to perform all your
+load balancing of SSL and URL based
+routing configurations on the ingress
+controller so how does it work
+what is it where is it how can you see
+it and how can you configure it and how
+does it load balance how does it
+implement SSL without ingress how would
+you do all of these well I will use a
+reverse proxy or a load balancing
+solution like nginx or H a proxy or
+traffic I would deploy them on my
+kubernetes cluster and configure them to
+route traffic to other services the
+configuration involves defining URL
+routes configuring SSL certificates etc
+ingress is implemented by kubernetes in
+kind of the same way
+first deploy a supported solution which
+happens to be any of these listed here
+and then specify a set of rules to
+configure ingress the solution you
+deploy is called as an ingress
+controller and the set of rules you
+configure are called as ingress
+resources ingress resources are created
+using definition files like the ones we
+have been using to create pods
+deployments and services earlier in this
+course now remember a kubernetes cluster
+does not come with an ingress controller
+by default if you set up a cluster
+following the demos in this course you
+won't have an ingress controller built
+into it so if you simply create ingress
+resources and expect them to work they
+won't let's look at each of these in a
+bit more detail as I mentioned you do
+not have an ingress controller and
+kubernetes by default so you must deploy
+one
+what do you deploy there are a number of
+solutions available for ingress a few of
+them being GCE which is Google's layer 7
+HTTP load balancer nginx contour H a
+proxy traffic and Sto out of these GCE
+and nginx are currently being supported
+and maintained by the kubernetes project
+and in this lecture we will use nginx as
+an example these ingress controllers are
+not just another load balancer or nginx
+server the load balancer components are
+just a part of it ingress controllers
+have additional intelligence built into
+them to monitor the kubernetes cluster
+for new definitions or inverse resources
+and configure the nginx server
+accordingly an engine X controller is
+deployed as just another deployment in
+kubernetes so we start with a deployment
+definition file named engine X inverse
+controller with 1 replicas and a simple
+pod definition template we will label it
+nginx ingress and the image used is
+nginx ingress controller with the right
+version
+this is a special build of nginx built
+specifically to be used as an ingress
+controller in kubernetes so it has its
+own set of requirements within the image
+the nginx program is stored at location
+slash nginx ingress controller so you
+must pass that as the command to start
+the nginx controller service if you have
+worked with nginx before you know that
+it has a set of configuration options
+such as the path to store the logs the
+keepalive threshold ssl settings session
+timeout etc in order to decouple these
+configuration data from the nginx
+controller image you must create a
+config map object and pass that in now
+remember the config map object need not
+have any entries at this point a blank
+object will do but creating one makes it
+easy for you to modify a configuration
+setting in the future you will just have
+to add it into this config map and not
+have to worry about modifying the nginx
+configuration files you must also pass
+in to environment variables that carry
+the pods name and namespace it is
+deployed to the nginx service requires
+these to read the configuration data
+from within the pod and finally specify
+the ports used by the ingress controller
+which happens to be 80 and 443 we then
+need a service to expose the ingress
+controller to the external world so we
+create a service of type node port with
+the nginx ingress label selector to link
+the service to the deployment as
+mentioned before the ingress controllers
+for ingress resources and configure the
+underlying nginx server when something
+has changed but for the ingress
+controller to do this it requires a
+service account with the right set of
+permissions for that we create a service
+account with the correct roles and role
+bindings so to summarize with a
+deployment of the nginx ingress image a
+service to expose it a config map to
+feed nginx can
+data and a service account with the
+right permissions to access all of these
+objects we should be ready with an
+ingress controller in its simplest form
+now on to the next part of creating
+ingress resources an ingress resource is
+a set of rules and configurations
+applied on the ingress controller you
+can configure rules to say simply
+forward all incoming traffic to a single
+application or route traffic to
+different applications based on the URL
+so if the user goes to my online store
+dog calm slash where then route to one
+app or if the user visits the watch URL
+then route the user to the video app or
+you could route user based on the domain
+name itself for example if the user
+visits where dot my online store come
+then route the user to the where app or
+else route the user to the video app let
+us look at how to configure these in a
+bit more detail the ingress resource is
+created with a kubernetes definition
+file in this case ingress where demo as
+with any other object we have API
+version kind metadata and spec the API
+version is extensions /v 1 beta 1 kind
+is ingress and we will name it ingress
+where and under spec we have back-end
+now remember that the API version for
+ingress is extension slash we want beta
+1 as of this recording but this is
+expected to change with newer releases
+of kubernetes so when you are deploying
+ingress always remember to refer to the
+kubernetes documentation to know exactly
+the right API version for that release
+of kubernetes so the traffic is of
+course routed to the application
+services and not pods directly the
+backend section defines where the
+traffic will be routed to so if it's a
+single back-end then you don't really
+have any rules you can simply specify
+the service name and port of the backend
+where service
+create the ingress resource by running
+the cube cut' it'll create command view
+the created ingress by running the cube
+cuddle get ingress command the new
+ingress is now created and routes all
+incoming traffic directly to the where
+service you use rules when you want to
+route traffic based on different
+conditions for example you create one
+rule for traffic originating from each
+domain or hostname that means when users
+reach your cluster using the domain name
+my online store comm you can handle that
+traffic using rule one when users reach
+your cluster using domain name where dot
+traffic using a separate rule rule to
+use a rule 3 to handle traffic from
+watch dot my online store come and say
+use the fourth rule to handle everything
+else and just in case you didn't know
+you could get different domain names to
+reach your cluster by adding multiple
+DNS entries all pointing to the same
+ingress controller service on your
+kubernetes cluster now within each rule
+you can handle different paths for
+example within rule 1 you can handle the
+where path to route that traffic to the
+clothes application and a watch path to
+route traffic to the video streaming
+application and a third path that routes
+anything other than the first two to err
+404 not found page similarly the second
+rule handles all traffic from where my
+online store com you can have path
+definition within this rule to route
+traffic based on different paths for
+example say you have different
+applications and services within the
+apparel section for shopping or returns
+or support when a user goes to where dot
+my online store come by default they
+reach the shopping page but if they go
+to exchange or support URL to reach a
+different back-end service the same goes
+for rule 3 where you route traffic to
+watch dot my online store comm - the
+video streaming application but you can
+have additional pads in it such as
+movies or TV and finally anything other
+than the ones listed here will go to the
+for true that would simply show a 404
+not found error page so remember we have
+rules at the top for each host or domain
+name and within each rule you have
+different paths to route traffic based
+on the URL now let's look at how we
+configure ingress resources in
+kubernetes we will start where we left
+off we start with a similar definition
+file this time under spec we start with
+a set of rules
+now our requirement here is to handle
+all traffic coming in to my online store
+comm and route them based on the URL
+path so we just need a single URL for
+this since we are only handling traffic
+to a single domain name which is my
+online store comm in this case under
+rules we have one item which is an HTTP
+rule in which we specify different paths
+so paths is an array of multiple items
+one path for each URL then we move the
+back-end we used in the first example
+under the first path the backend
+specification remains the same it has a
+service name and service port
+similarly we create a similar back-end
+entry to the second URL path for the wot
+service to route all traffic coming in
+through the watch URL to the wot service
+create the ingress resource using the
+cube cuddle create command once created
+view additional details about the
+interest resource by running the cube
+cuddle describe ingress command you now
+see to back in URLs under the rules and
+the backend service they are pointing to
+just as we created it now if you look
+closely in the output of this command
+you see that there is something about a
+default back-end hmm what might that be
+if a user tries to access a URL that
+does not match any of these rules then
+the user is directed to the service
+specified as the default back-end in
+this case it happens to be a service
+named default HTTP back-end so you must
+remember to
+deployer is such a service back in your
+application say a user visits the URL my
+online store comm slash listen or eat
+and you don't have an audio streaming or
+a food delivery service you might want
+to show them a nice message you can do
+this by configuring a default back in
+service
+to display this 404 not found error page
+the third type of configuration is using
+domain names or host names we start by
+creating a similar definition file for
+ingress now that we have two domain
+names we create two rules one for each
+domain to split traffic by domain name
+we use the host field the host field in
+each rule matches the specified value
+with the domain name used in the request
+URL and routes traffic to the
+appropriate back-end in this case note
+that we only have a single back-end path
+for each rule which is fine all traffic
+from these domain names will be routed
+to the appropriate back-end irrespective
+of the URL path used you can still have
+multiple path specifications in each of
+these to handle different URL paths now
+let's compare the two splitting traffic
+by URL had just one rule and we split
+the traffic with two paths to split
+traffic by hostname we used two rules
+and one path specification in each rule
+well that's it for this lecture let us
+now head over to the practice tests
+section and practice working on ingress
+now there are two types of labs in this
+section the first one is where an
+ingress controller resources and
+applications are already deployed and
+you basically view and walkthrough the
+environment the first one is where an
+you basically view and walk through the
+environment gather data and answer
+questions towards the end you would
+create or modify ingress resources based
+on the needs
+in the second practice test you will be
+deploying an ingress controller and
+resources from scratch well good luck
+and hope you enjoy the labs I will see
+you in the next lecture well thanks a
+lot for watching please remember to
+subscribe to our channel so that you
+know when our new videos come out

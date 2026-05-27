@@ -1,0 +1,440 @@
+Kind: captions
+Language: en
+in the previous video we explored
+progressive delivery rolling updates
+blue green canary
+what it's good for what it's not good
+for and so on and so
+forth the reason why i'm saying that
+it's twofold first if you haven't seen
+that video
+follow the link it's up there somewhere
+i think
+uh and watch it because it provides the
+base for what we are going to do today
+and what we are going to do to get that
+today is explore
+practical implementation of progressive
+delivery
+to be more precise we are going to see
+how to do canary deployments
+and the reason why we are doing all that
+is because we are going to explore
+argo rollouts argo rollouts is one of
+the few solutions today
+to use to actually implement progressive
+the alternative would be flagger but
+anyways we are going to see
+how we can use argo rollouts to do
+all that to do country deployments and
+the reason why we are doing all that
+first of all because progressive
+delivery is cool you should use it
+second because argo rollouts is great
+and third because i am working on a next
+section of the devops catalog
+which will go through all this in more
+depth so if you like this video
+and you would like to go into more depth
+of this subject please consider taking
+this course or a video
+you will find the link to the course or
+the book
+whichever format you prefer in the
+comment section
+and now let's get going and see argo
+rollouts
+hands-on practice what's or not
+in 20 minutes or less
+let's deploy the first release but
+before we do that
+i'm going to i will use helm to deploy
+the release the first and the second and
+the third and all of them
+but it might be too complicated to show
+you what's going on by
+going through helm templates and cam
+values what's or not
+so instead i'm going to convert the helm
+definitions that i will use to help
+template which will output
+typical kubernetes yaml that might be
+easier to show you what's going on
+i will not explain everything i have
+here but two critical
+uh components let's say and the first
+one
+actually the second the first one let's
+go to the analysis first
+is analysis template and that is the
+template
+that defines uh what are the metrics
+that should be
+used to decide whether canary deployment
+should continue progressing
+or it should roll back to the previous
+release
+and here i have two one it's called
+success rate
+by the way this is using prometeuse it
+could be using something
+else so one is success rate
+that says hey a success condition is if
+80 or more of the requests are
+successful
+and failure is if it's the opposite if
+it's less than 80
+successful this is the address of my
+primitive server
+taylor limit set to 3 meaning that if
+canary process fails to
+retrieve satisfying result from from it
+used three times
+it will it will roll back and then we
+have query
+uh this is not a video about remedius i
+will not explain it in detail except
+that
+to say that it measures the success rate
+of my requests
+of request to my application and the
+second one
+that measures the duration of the
+request
+responses actually so two metrics two
+queries
+that will be used to evaluate uh canary
+deployments and decide what to do next
+and then we go to the main guy which is
+rollout
+this is argo rollout and the definition
+is
+almost exactly the same as the
+deployment so everything you do with
+deployments you can do with argo
+with few differences three differences
+actually first of all api version
+and kind are different it's not
+deployment it is rollout and api version
+is not v1
+it is argo project io v1 alpha 1
+for now and the second important
+difference
+everything is the same is in the
+strategy
+now kubernetes deployment strategy can
+be rolling updates or
+recreate and with argo rollouts we can
+have
+canary and blue green as well probably
+more by the time you're watching this
+and in it we are saying since this is
+going to be canary
+hey there there are two services the
+stable service is where all the requests
+should go
+this is that's the service that will
+serve requests to the
+main release let's say or the current
+and country service that will be used
+for
+serving requests going to a percentage
+of
+a new release traffic routing exist you
+it could be
+benzene extinguishers or linker d quite
+a few others
+and then we have the main main part
+which is steps
+and in this case step says set
+the weight to 10 meaning them start
+sending
+10 percent of the requests to the new
+release and then
+pause for two minutes and
+let me stop there actually why do we
+want to pause for two minutes
+uh in this case two minutes sounds like
+like a reasonable
+period of time for prometheus to collect
+sufficient amount of metrics
+and then we have set weight to 30
+meaning increase the reach of the new
+release to 30 percent
+pause again for 30 seconds and at this
+time we should probably
+start evaluating the new release
+and if you remember the analysis
+actually
+not if you remember the analysis if you
+see here
+here in analysis starting step two
+meaning that
+hey when you reach this part when you
+increase the reach of the new release to
+start analyzing it and decide what to do
+next
+and then we're after 30 seconds we are
+changing the weight to 50 and pausing
+for another 30 seconds and after that it
+should roll out the new release
+fully the analysis section is using the
+this is the same template that we saw
+earlier that's the one that
+defines queries for the success rate
+and average request duration and passing
+a few
+arguments to that analysis okay
+that should be pretty straightforward so
+i'm going to deploy the first release
+and since the command is pretty large
+i'm going to copy and paste it
+here we go deploying the first release
+so let's see what's going on we are
+going to execute
+cube cattle argo uh i installed cube
+cattle argus
+argo rollouts plugin rollouts
+and the namespace is devops toolkit
+and we want to get a rollout
+called devops toolkit devops
+toolkit and i want to watch
+the progress
+and we can see that it is progressing
+still
+actually it's already finished it's
+progressing because uh
+and that in that moment uh horizontal
+powder scale did not finish now it's
+fully rolled out
+we can see that six out of six steps
+were executed
+and the weight is set to 100 meaning
+all the requests are going to this
+release this was very fast
+because argo rollout skipped doing
+calorie deployments
+because it is pointless you don't do
+canaris on the first release you do it
+in all other releases but not of the
+first release because
+there is no previous release um to use
+to measure things and roll back and
+what's or not
+okay so first release is uneventful
+things are going to start
+looking much more interesting in the
+second so let me start sending some
+requests to my application
+and you're seeing 404 not found
+in a loop i'm doing that intentionally
+because i want to see
+what happens if there is something wrong
+with the application i'm simulating as
+if the new release will be
+incorrect let's say
+so uh upgrading to the new release helm
+upgrade devops toolkit
+helm and then the namespace
+is devops toolkit i want to reuse
+values and i'm going to set
+image tag to new release which is 2.9.9
+and let's watch what's going on cube
+cattle argo
+rollouts namespace devops
+toolkit and we want to get
+rollout devops toolkit
+devops toolkit
+and i want to watch the progress
+so we can see that it paused right now
+here
+it paused because the first step if you
+remember
+in the steps is to set the weight
+to 10 it did that
+and to pause for two minutes
+that was specified in the steps
+now let me i will fast forward to the
+end of those
+first three minutes because after that
+the action will start so first three
+minutes think of it as
+heating up preparing for the battle
+we're almost there we're almost at 120
+seconds or two minutes it will take a
+few seconds
+more and that soon argue rollouts
+will increase the weight to 30 meaning
+it will start sending thirty percent
+of the requests to the new release and
+here we go thirty percent
+and then it immediately immediately
+started analyzing
+the new release the reason why it's
+doing that because we told it i told it
+to
+that's the analysis template that was
+used
+we can see that two are successful and
+two failed
+uh the average request duration seems to
+be okay
+but the error rate is
+higher than expected and now it's three
+failures
+and we said that if it reaches three it
+should roll back so let's see whether
+that will happen
+uh right now the weight is set to 50
+percent
+and it is still failing and we have we
+degraded the new release was
+unsuccessful and it automatically
+degraded it
+what that means really is that it shut
+down
+the pods of the new release it scaled it
+it changed the weight the point
+to go back to 100 being on the old
+so it's as if it never happened
+it failed the tests it failed the
+analysis
+and right now uh that's what we have
+we have a failed release detected by
+country deployments
+now let me stop this loop and start
+good requests now we see that the
+responses are 200
+and now i'm simulating how would country
+deployments look like
+if they're if everything works as
+expected
+so i'm going to deploy a new release now
+the one that is supposed to be good uh
+by doing the same thing as before
+except that i will use new image stock
+2.9.17
+previous was 2.9.9 and let's see
+whether all that works remember now
+we're simulating what happens
+if uh the release is okay so let me
+watch the progress by executing
+uh cube cattle argo rollouts
+in the namespace devops toolkit
+and i want to get rollout
+there was toolkit and i want to watch
+let's see what's going on we can see
+that right now
+it is on the first step it set the
+weight to 10
+just as before and it is waiting for two
+minutes until it progresses to the
+next step which is to increase the reach
+uh to 30 percent and to start
+uh performing the analysis
+this time it should work correctly
+hopefully let's see
+i will fast forward to the end of those
+two minutes just for you not to
+watch me watch the screen we are almost
+at
+seconds it should now move increase the
+weight to 30 percent and start
+another round of analysis let's go
+come on here we go and we can see that
+this time
+two only two analysis were executed and
+they're successful
+and now it decreased to four remember we
+are running two analysis in parallel
+and it's all still successful and then
+let's say 10 second six successful
+at one moment it should increase the
+actual weight to 50
+because everything is going great
+everything is perfect
+so far fifty percent it increased was
+fifty percent
+it continues analyzing all the time
+analyzing analyzing analyzing data
+double checking everything looks okay
+this is like a soccer match
+uh it's going great it's going great 10
+executed they were all successful 50
+uh of the requests are going to the new
+it still looks brilliant it still looks
+great our team is winning
+let's go let's go and uh
+here we go and now it is rolling out
+hundred percent
+here we go 100 actual weight is going to
+renew release canary deployments were
+the first the second release were
+unsuccessful it failed the test it
+failed the analysis the second one the
+third one
+was successful and argo rollouts rolled
+out
+100 of the requests to the new release
+it is healthy as you can see here at the
+top
+um and we are successful
+that's it that's all it takes to
+apply country deployments or even blue
+green deployments even though i haven't
+didn't didn't show you how to do it but
+it's more or less the same
+all we have to do is do the same things
+that we would normally do if you have
+uh kubernetes services and ingress and
+relistio
+or this or that everything stays the
+same except
+that you modify your kubernetes
+deployment jumbo file and change
+deployment to rollout and
+change the strategy to canary or blue
+green you need to define the steps
+hey do this and then do that almost like
+if it's a pipeline
+uh the target rollout will use to
+evaluate whether to move forward or move
+back
+you can help yourself additionally by
+defining
+analysis template that will help
+roll out uh find out where is the
+information it should use how it should
+better the metrics how it should create
+the metrics and what are the formulas it
+should use
+to do your job uh and by your job i mean
+decide whether to roll forward
+or roll back completely that's all there
+thank you for watching if you if you
+like this video click the like button it
+helps a lot click it right now
+and please subscribe to the channel if
+you would like to support this channel
+um to buy me pizza or
+bread bowl or coffee or something like
+that so that i can work on more videos
+like this
+uh please consider purchasing
+one of the books or the courses
+that's how this channel is financed and
+finally
+the last one the newest course has many
+many cool things
+but the one that is really matters for
+this in the concept of
+calorie deployments and algorithms is
+that in the latest section the one that
+will be released
+maybe a week from now or something like
+that you will find
+uh argo rollouts among many others in
+much more detail
+much deeper exploration of the subject
+thank you so much for watching see you
+next time cheers

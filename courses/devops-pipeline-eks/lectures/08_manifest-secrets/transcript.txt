@@ -1,0 +1,1146 @@
+## Video 1: Kubernetes Kustomize Tutorial: 4 Examples (ConfigMapGenerator, Secrets, Overlays, Build, Helm) (https://www.youtube.com/watch?v=LWbbL3jZcgo)
+
+Kind: captions
+Language: en
+Unless you use Kubernetes for your personal
+projects or some kind of POC, you need to
+be able to customize Kubernetes configuration
+files such deployments, services, ingresses,
+etc., to a specific environment.
+For example, if you expose an application
+to the internet using ingress, you definitely
+need to update DNS for different environments.
+Due to the fact that there are so many projects
+out there, and some of them are widely used,
+such as Helm, the problem is still considered
+to be not completely solved.
+One approach to configuration reuse is simply
+copy-paste.
+However, as with code, it makes it harder
+to benefit from ongoing improvements to the
+source.
+Another approach to reuse is to express the
+source material as a parameterized template.
+Then a tool is processing the template executing
+any embedded scripting, and replacing parameters
+with desired values to generate the configuration.
+The challenge here is that the templates and
+value files are not specification of Kubernetes
+API resources.
+They are a necessary new thing, a new language
+that wraps the Kubernetes API.
+The problem here with Helm is that different
+teams want different changes.
+So almost every specification that you include
+in the YAML file becomes a parameter that
+needs a value.
+And finally, a template-free approach.
+Since the Kubernetes configuration is expressed
+as JSON or YAML, it's relatively easy to target
+individual keys and merge them with environment-specific
+values.
+That's where kustomize comes into play.
+It's native to Kubernetes, a template-free
+way to customize Kubernetes objects.
+Kustomize has the concept of bases and overlays.
+A base is a directory with a kustomization.yaml
+file, which contains a set of Kubernetes resources
+such as deployments, configMaps, services,
+etc., and associated customization.
+Overlays directories contain environment-specific
+changes.
+It may be a name prefix, replica count, a
+new image tag, or other changes.
+Kustomize uses an industry-standard declarative
+approach that can be described in YAML and
+stored in git.
+Since it's template free, it expresses the
+full power of Kubernetes API, with no need
+to parameterize every single line compared
+to Helm.
+It can be used for both bespoke (build in-house
+apps) and off-the-shelf applications such
+as Redis, Kafka, Postgres, and other open-source
+projects.
+Kustomize supports bulk management operations:
+creation, deletion, and updates.
+It is built into kubectl, so you can create
+and update resources using kubectl apply -k
+command and similar command to delete.
+Since Kustomize is provided as a standalone
+golang package and cli tool as well as it
+is built into kubectl, it's easy to integrate
+with user's tools and workflows.
+In this video, we will go over 4 examples.
+In this first one, I'll show you how to convert
+a typical Kubernetes deployment object to
+a customizable base and overlay.
+In the second example, we will use configMapGenerator
+to create config maps specific to particular
+environments.
+You are probably aware if you simply update
+configmap with new data, it will not trigger
+a rolling deployment update.
+The recommended approach without kustomize
+is to create a new config map with a new name
+and replace it in deployment.
+Kustomize automates this process.
+Every time you modify the data, kustomize
+generates a new configmap object and appends
+a hash, which triggers a rolling update.
+The third example will focus on secrets and
+how to generate them from multiple sources,
+such as environment variables.
+And the final example demonstrates how to
+update an image name or a tag based on the
+specific environment.
+The common workflow is to set up continuous
+deployment to the development or staging environment
+and when it's properly tested, upgrade the
+production.
+You can find the code and commands that I
+run in the video in a blog post.
+The link will be in the description.
+Alright, let's start.
+I'm going to follow the same naming convention.
+Create a base directory.
+This folder will be used in other environments
+to customize our deployment.
+As I mentioned before, the goal of the first
+example is to show you how to convert a simple
+deployment to a kustomize base and overlays.
+It will be a Kubernetes deployment based on
+an open-source nginx image.
+I specified a namespace as a default, but
+you can easily override it in each environment.
+The important part is that it's a native Kubernetes
+specification.
+It's not a template that needs to be customized.
+We will share this deployment and make some
+environment-specific changes by either merging
+with the original or completely replacing
+it.
+Next, you need to create a kustomization.yaml
+file in the same base directory.
+Optionally you can specify the kind to be
+Kustomization, but it's not necessary if you
+use kustomization.yaml file name.
+In the following examples, we will omit this
+part.
+Then you need to specify what files will be
+used as a base (in other words, shared between
+environments) in this kustomization directory.
+Since we have a single deployment file, let's
+put it there.
+I would say that's the bare minimum that you
+need to get started.
+Now let's create the environments folder.
+The first environment will be staging.
+To modify our nginx deployment to be specific
+to this environment, we need kustomization.yaml
+file again.
+Here, for example, I want to replace the default
+namespace on the original deployment with
+a staging namespace.
+Then same, here, we need to point this kustomization
+to the base directory.
+The base name is an arbitrary name, and you
+can use anything you want; just update the
+path.
+For this example, let's create staging namespace
+manually using the kubectl client.
+Kustomize is built into kubectl, and you can
+apply it by providing the -k flag.
+You can also use a standalone binary if you
+want to build and preview the changes.
+As you can see, we have a single pod running
+in the staging namespace.
+We modified a single deployment attribute,
+namespace.
+Now let's create another production environment.
+In this folder, we can create another deployment
+object; the key is to have the same deployment
+name as the original.
+And we can choose to override any part of
+the deployment; for example, for production,
+we need 20 replicas.
+As you can imagine, with Helm, you need to
+go over the whole Deployment specification
+and parameterize every single attribute if
+you want to be as flexible as kustomize.
+This deployment doesn't have to be a complete
+object if we're going to merge it together
+with the original.
+Also, we need kustomization.yaml file.
+Update the namespace to be production.
+You can open this link to find all possible
+parameters that you can override in the kustomization
+file.
+This list is additional customization that
+you can add to simply modifying the source
+object.
+If you use the same namespace to deploy services,
+you may choose to prepend a prefix to the
+name.
+Then the same path to the base directory.
+In this example, I want kustomize to create
+a production namespace instead so that I will
+specify additional namespace resource here.
+Then we have two options either merge two
+deployments together or choose to replace
+You can do it not only with deployments but
+with all other Kubernetes objects, such as
+roles, stateful sets, configmaps, etc.
+The last item here is a production namespace.
+That will be applied along with deployment.
+To apply, use the same command; just specify
+the path to the production environment.
+Now we have 20 nginx pods in the production
+Also, we have a production prefix at the front
+of the pod and deployment.
+To delete, you can use a similar command;
+just don't forget to use the -k flag.
+In the second example, I'll show you how to
+use config map generators.
+When you change any data, it will trigger
+a rolling update.
+We're going to use the same folder structure.
+Example 2 and a base directory.
+This deployment will use an environment variable
+that we will retrieve from configmap.
+The same very simple kustomization file with
+a single resource.
+We don't need to define configmap in the base
+directory.
+Now under the staging folder, we will create
+kustomization and generate configmap.
+Point to the base directory.
+Then the configMapGenerator.
+There are multiple ways to generate it.
+In this example, we use literals, env equal
+to staging.
+That's it; let's go ahead and apply the folder.
+The pod is already running.
+If you take a look at the configmap, you can
+notice the hash appended to the name.
+Let's print it out.
+Under the data section, you have env equal
+Now there is another way to generate a configmap
+from the file.
+Instead of environment variables, we will
+get the data from configmap and mount it to
+the file.
+Another change we need to make is to add a
+second generator.
+In this case, we will use a file.
+We also need to create a creds.txt file in
+the same directory.
+We have a username and a password here.
+Let's reapply it.
+We have generated two configmaps.
+Let's verify if we can access the credentials
+from the pod.
+We can cat the file from the pod.
+Alright, it's the same username and password.
+The third example will be similar, but instead
+of configmaps, we will generate secrets.
+Under the environments section, we use secret
+instead of configmap.
+The same concept, when the content of the
+secret changes, it generates a new secret
+with a hash which triggers a rolling update.
+To check environment variables in the pod,
+you can run the env command.
+And we have our username admin environment
+variable.
+The second environment variable region will
+be generated from the file.
+Add another generator to kustomize.
+Be careful when generating anything from the
+file, especially environment variables.
+If you add a new line to the file, it will
+be appended to the environment variable as
+well.
+That's the region, us-west-2.
+Finally, let's use the environment variable
+to populate environment variable in the pod.
+Create a .env file and define variables, for
+example, password 123.
+When you apply the configuration, kustomize
+will source it and parse environment variables
+We have all three environment variables here.
+The final example demonstrates how to update
+the image tag or name based on the environment.
+This deployment is without any changes.
+You can include the images section and rewrite
+the name and a tag.
+Kustomize will search for any image in the
+base directory with the name nginx.
+I don't want to update the image name; just
+upgrade the version.
+You can see that we have a new image, version
+1.21.6.
+In my opinion, this is the best tool right
+now to customize configuration files based
+on the environment.
+I want to remind you if you use Helm, to achieve
+the same flexibility, you need to parameterize
+every single attribute.
+Also, it's easier to integrate kustomize to
+existing tools and workflows, such as continuous
+deployment.
+Let me know in the comments if I was able
+to convince you to try kustomize.
+
+
+## Video 2: What is configMap in Kubernetes? Part 6 (https://www.youtube.com/watch?v=O6Uhe9bItkI)
+
+Kind: captions
+Language: en-IN
+Today our topic is configMap.
+Agenda of this video are, what is configMap?
+How to create configMap from yaml file? and
+the second one is from command line?
+Then we will try to learn how to insert the
+variable into container.
+Again, we can insert the variable from environment
+variables and volume.
+Inside this environment variable, we can divide
+it into three parts, from the file or directory.
+2nd is from yaml file, and inside this, we
+have three types, env, envFrom and from command
+line.
+So, both are the syntax here, env and envFrom.
+And we will try to discuss what are the difference
+between env and envFrom.
+ENV Stand for Environment variable.
+And inside this volume, we will create through
+yaml file.
+So, let's explore the first topic.
+That is, what is configMap?
+A ConfigMap is an API object used to store
+non-confidential data in key-value pairs.
+We have already covered what is key-value
+pairs in the Yaml file topic.
+It means that, ConfigMap does not provide
+secrecy or encryption.
+If you want to store data confidential then
+use a Secret rather than a ConfigMap or use
+additional (third party) tools to keep your
+data private.
+Kubernetes provides these values to your containers.
+Pods can consume ConfigMaps as environment
+variables, command-line arguments, or as configuration
+files in a volume.
+It means that we can insert the extra parameters
+from three ways, and we will cover in the
+lab.
+A ConfigMap allows you to decouple environment-specific
+configuration from your container images,
+so that your applications are easily portable.
+In short, we can say that use a ConfigMap
+to keep your container’s application code,
+separate from your configuration.
+A ConfigMap is not designed to hold large
+chunks of data.
+The data stored in a ConfigMap cannot exceed
+1 MiB.
+If you need to store settings that are larger
+than this limit, you may want to consider
+mounting a volume or use a separate database
+or file service.
+Just for your information, the configMap is
+stores in the ETCD database.
+In short, we can say that, if we need to add
+environment variables like hostname or some
+other variables, we can use ConfigMap.
+How to create configMap.
+There are two ways to create configMap.
+The first one is through yaml file, and the
+second one is from command line.
+Let's explore the first one.
+That is create a configMap through yaml file.
+In the configMap, kind equal to configMap
+here, C and M are capital words, API version
+is v1.
+Under the metadata section, we have defined
+name of this configMap, so that we can identify
+it.
+After that, after that we have added "namespace
+= core", it means that this configMap will
+be created inside the core namespace, and
+please bear in mind that configMap is a namespace
+object.
+Further, you will notice the data section,
+however for other objects, we have always
+spec section.
+Inside this data section, we have added 3
+variables.
+Remember the key-value pair.
+NGINX_PORT is key and 8080 is the value.
+Same as it is language is key and the value
+of this key is English.
+In the last variable, we have defined more
+than one values separated by comma.
+Now, let's explore the second one that is
+create a configMap from command line.
+In order to create the configMap from command
+line, I just take a reference from previous
+yaml file, so that we can understand it better.
+First, we need to use kubectl create sub-command
+&amp; then object type is configMap after that
+we mention the configMap name, that is, “command-configmap”.
+Next, we use –-from-literal option to specify
+the key-value pair.
+If we have multiple key value pairs, then
+we can use multiple time this option like
+this and like this.
+If I describe this configMap, I will observe
+same output if we create a configMap from
+From here we have data.
+Inside this data we have key, and this key
+has the value of 8080.
+Then again, we have key and the value is this.
+Again, we have key, and the value is English.
+Inside this binary data, we have not mentioned
+anything, so it means that in the configMap
+we can insert the value inside this data or
+binary data.
+Now, we will talk about how to insert the
+As I said previously, there are two ways environment
+variables are from volume.
+From the environment variable, we have two
+options from files or directory from yaml
+file env, and envFrom and from Command line.
+So, let's explore the first one that is from
+file or directory.
+If you use directly file or directly with
+the command option for now, just remember
+that while using file in the environment variable,
+the file name will be the key and the content
+of this file will be the value.
+So here the file name is NGINX_PORT.
+So, this is my key, and 8080 is my value.
+Don't worry, we have a dedicated lab for this
+topic.
+So, we will cover in the lab objection, how
+we can create this thing.
+So, for now, let's move forward.
+From the command line we have env syntax,
+so let's explore this one.
+This is our simple deployment yaml file.
+Or you can see that manifest file.
+One can notice the kind equal to deployment.
+In this spec section, we have some information
+about the container.
+If we want to insert the variable by using
+env syntax, we have to adhere the parameters.
+Let me zoom this section
+Here, the first section is env.
+Under this, we have defined the name of key
+that we want to insert it.
+Then we have value from.
+Beneath this we use configMap, reference syntax,
+and the name of our configMap is this.
+Please bear in mind that the same name we
+have mentioned in the configMap yaml file,
+in the last, we have defined the key name
+that is NGINX_PORT.
+Must be same in the configMap yaml file.
+Again, we are going to insert second variable
+and the name of this key variable is Web-App-Lang.
+We can use any name, no limitation.
+In this example we are using the same configMap
+is the reason we are using this configMap
+name.
+Please note that we can use other configMap
+too.
+There is no limitation to use only one configMap.
+From this configMap, we want to insert second
+key, i.e., language.
+In the container, we will observe these two
+variables’ names i.e., NGINX_PORT and Web-App-Lang.
+Please note that we can use "env" option to
+hardcode our key values.
+In this example, we are not calling our configMap,
+but we hardcoded our key1 and key2 variables.
+So, key1 is this and the value of this key
+is value1, just for the information.
+This is the extra information apart from the
+configMap topic.
+So, let's move to our second syntax.
+That is envFrom.
+Again, this is our simple deployment YAML
+file, and this is our spec section.
+Inside this, we have added envFrom section.
+Stands for environment variable.
+Beneath this, we have a configMap key reference
+(configMapRef), and here we must define the
+name of our configMap that we created earlier.
+Here, name is same.
+That is “example-configmap”.
+If we add entries like this, we will observe
+the content of this configMap in the container
+environment variables.
+In this case, we will observe three environment
+In last, we can say that if we want to consume
+all the content of configMap, then we can
+use "envFrom" syntax.
+That is this one.
+And if we want to insert some key, then we
+can use "env" syntax.
+So now I hope you understand the difference
+between env and envFrom option.
+So, let's move our third option that is from
+command line.
+Now this is our pod.
+Why we are using pod because we are going
+to use command option.
+It means that this pod will complete the job
+and stop, that's it.
+I will talk about job in some other topic.
+However, today we are just focusing on command
+option, while using configMap.
+In this spec section, we are using "env" option.
+Please note that.
+These two variables names, which we used earlier.
+Inside the command option, here in the command,
+we are just print the variable names.
+We are not using key name, that is language.
+That is our second variable.
+So what we have defined the name of this key
+we just printed here.
+And when we print this variable, we will observe
+the value of this key.
+Therefore, we can say that in the pod’s
+configuration file, we define one variable
+name, and that variable name is pointing out
+to one key, and that key has the value inside
+this configMap.
+I execute this command "kubectl create -f
+Newpod.yaml".
+So, in this yaml file, we have the content
+of pod yaml file that I described in the previous
+slide.
+If I execute this command "kubectl get pod",
+I will see this status is completed.
+And if I use "kubectl logs configmap-example-pod",
+this is the name of my pod, I will observe
+“8080” and “English”.
+Let me show you the command that I used here
+is echo “NGINX_PORT” and “Web-APP-LANG”,
+the value of NGINX_PORT is
+“8080” and Web-App-Lang is “English”.
+Now let's move to our second topic.
+That is volume.
+How to insert it, right?
+So let, and we have only one option inside
+this volume that is file.
+Mounting a configMap as a data volume.
+In this case, we are using configMap as a
+file in the pod's container.
+For this under spec section, we need to add
+a volume section.
+And also extend the container section and
+add the volumeMounts name Should be same.
+We had already discussed in the volume videos.
+Inside the volume section, we need to add
+configMap parameter and add the configMap
+name, same as we define any configMap file.
+Once we create the deployment, we will observe
+3 files.
+Inside the "/etc/config" directory in the
+container, both yaml files are now in front
+of you so, that you can visualize it and notice
+that I have defined configMap name on both
+deployment manifest files.
+We have to make a link in the yaml file, deployment
+yaml file so that we can instruct Kubernetes
+object to fetch the content from the configMap.
+And the last topic is immutable configMap.
+So, what is this?
+If we add the immutable equal true, it means
+that once we created a configMap with this
+option, we cannot upgrade the configMap in
+future.
+If we want to modify this configMap, then
+we have to delete the existing one and then
+create a new one with modified data.
+If you want to add this option, please wisely
+add this option and you are making sure that
+we are not going to update this configMap
+in future.
+Now, let's move to “configMap lab + exam
+preparation”.
+As my best knowledge configMap question will
+become under CKAD, not in CKA.
+configMap directory is already created on
+my Github page, so inside this "14 volume"
+directory, going inside this configMap.
+And we have 4 labs available.
+First, I'm going to click command line.
+It's very short one.
+We have already covered all the parts.
+So how we can create the configMap from Command
+Line.
+So here we are using "kubectl create configMap",
+and the name of this configMap is Command,
+configMap from "--from-literal" NGINX_PORT
+Equal to 8080.
+So, let me go here.
+Copy,
+there is no file inside this directory.
+From the output, we can observe that this
+configMap is created.
+As you can see here, that command configMap
+is created.
+Describe from this describe sub command the
+name of this conflict file is Command, configMap,
+and it is created inside the namespace default.
+We have not set any label and notations, and
+we have data.
+And here we have binary data.
+So we have set variables inside this data.
+So, NGINX_PORT, the value is this.
+So, this is my key and this is my value.
+This is my key, and this is my value.
+Key value pairs.
+Here, let me clear this screen.
+After successfully completed the configMap,
+now we need to create the deployment.
+In this deployment I'm using envFrom, and
+after that configMap reference, and this is
+my configMap name, so come command-configMap.
+This name is same here.
+So let me copy this yaml file and paste it
+over here.
+Let me clear the window.
+This is my yaml file.
+Now, I need to create the deployment on the
+above yaml file.
+So, I'm just using this command.
+From the output, it is clear that my deployment
+is created successfully.
+Check the deployment.
+I can also check the deployment here by executing
+the command "kubectl get deployment", one
+of my pods is running successfully.
+As of now, my 1 pod is running, so, let me
+check this pod.
+Pods grep this one and running and "awk ''{print
+$1}'" . So now it'll print only one name.
+And let's suppose if we have multiple pods
+are running, we can use here "head -n 1".
+So, now it'll always showing me only one pod
+that is running.
+What I can do here, kubectl exec -it, and
+then dollar sign ($), and then bracket close
+{}.
+Inside this bracket, I'm going to use this
+command.
+Here and then env, it'll print env.
+From the output, we can confirm these 3 variables
+are correctly inserted inside my container.
+This is what I did here in order to clear
+the lab.
+First, I need to delete this deployment, and
+then, I need to delete this deployment, and
+after that, delete this configMap and also
+delete this yaml file.
+So let me copy all these three commands and
+clear the window, insert all these things.
+"ls -ltr", everything is removed here.
+We have completed the first lab from the command
+How to create the configMap from command line.
+This is the lab we have completed.
+Now, we need to perform the second lab.
+For this, I need to click on "02 Env variable.md",
+How to insert the configMap as an environment
+variable?
+This is my configMap file.
+Here we have defined 3 variables.
+NGINX_PORT 8080, language= English, environment=
+"production, deployment, and test".
+After that, we have a deployment.
+Here we are using envFrom, same as it is we
+did for the previous lab.
+Let me copy this and then, "ls" I need to
+paste over here and then perform "ls".
+Our file is created, create the object from
+yaml file, so I'm just using "kubectl apply
+command".
+Once it's done from the output, we get to
+know that our configMap, the name of this
+configMap is "example-configmap" is created
+and deployment.
+The name of the deployment is "env-deploy"
+is also created successfully.
+So, we can describe this configMap
+from the output.
+We get to know that inside this data we have
+key and the value is this.
+This is my key NGINX_PORT and value is 8080.
+So, this is key-pair.
+Explore the configMap through get command.
+We can also explore, let me clear the screen.
+Here it is showing inside this data we have
+three keys,
+Login into 1 pod and check the environment
+The last time I have already shown you what
+is this, so, I'm just copy this command here.
+And check the env inside 1 pod.
+Here we can see that our 3 variables key and
+the values attached in the container.
+clear the lab.
+So, I'm just going to delete configMap, yaml
+file and deployment.
+It'll be deleted and then remove this file.
+Fair enough.
+Let me execute "ls -ltr".
+Now, the file is deleted and there is no configMap
+should be here.
+configMap, this is the default one.
+If I go back and now, click on configMap from
+file.
+In the theory part, we have already covered,
+so here I'm just going to create one single
+file and NGINX_PORT, and the name of the file
+would be the key.
+And inside this file would be our variable
+/value.
+You can say that.
+Let me paste over here.
+After that, we are going to create a configMap
+in "env-file".
+This is the name of my configMap and from
+file option.
+This time we are using here, and we are saying
+NGINX_PORT.
+This is my key, created deployment.
+And here again, we are using envFrom.
+The third lab is also from envFrom Environment
+Variable.
+After creating the yaml file, we need to create
+the objects, so for that reason, "kubectl
+apply -f env-file-deploy.yaml".
+Now, our deployment is created, and it'll
+create some pods.
+Let me check if my pods are running.
+Yeah, some pods are running.
+Here, I can use this command.
+Now, I can see here that NGINX_PORT is showing
+8080.
+This is the variable that we have attached.
+So, now we are going to delete all the stuff.
+Clear the lab, everything is removed.
+Let me go with "ls -ltr".
+Nothing is here.
+That's great.
+Now, the last one is configMap from volume.
+In order to proceed this lab for configMap
+from volume, first I need to create a namespace
+core, because here we are going to create
+the configMap inside 1 core map, core namespace,
+and inserting 3 variables.
+In the deployment, again, we are using the
+same namespace and inside this volume section,
+we are using ConfigMap sub command syntax.
+And the name of this configMap is "example-configmap1".
+And the same name we are using here, "example-configmap1".
+So, let me copy, before executing this command,
+let me create 1 namespace
+and paste over here.
+After that, create the object from the yaml
+So, it'll going to create 1 configMap and
+1 deployment for us.
+From the command output, we get to know that
+it is successfully executed.
+After that, explore the configMap through
+describe sub-command.
+We will see the same 3 environment variables
+that we are going to attach here, key value
+pairs, and this time we are using "-n core"
+namespace.
+So, here we will observe inside this data-
+we have 3 keys.
+Now verify our pod is created or not.
+I have to use core namespace.
+So all are created, all five pods are created
+here.
+If I execute this command, I will see the
+ENV environment variable.
+It'll print out, but this time it'll not showing
+me anything here.
+Why?
+Because this time we are inserted the key
+values as a file here.
+You will observe these 3 files under the directory,
+"/etc/config", I'm just going to check if
+this is the case or not, why it is inside
+this "/etc/config" directory?
+Here, we have mentioned inside this container's
+configuration mountpath is "/etc/config".
+Let me paste this command here.
+And now I can see here that 3 files are there.
+We can also open this file by using the CAT
+So let me copy this command and paste it over
+Language is English here, so this is the way
+we can insert the configMap inside our container.
+So, I hope this is clear for you.
+Let me clear the lab.
+"kubectl delete namespace core".
+Question: You are tasked to create a configMap
+and consume the configMap in a pod using the
+volume mount, please complete the following
+question.
+Create a configMap named another config.
+The name of the configMap is another config
+containing the key value pair, and the key
+is key 3 and the value is 2.
+Start the pod name.
+And the name of the pod should be “nginx-configmap”
+containing a single container using the "nginx"
+image and mount the key you just created into
+the pod under the directory "/some/path/".
+So, we can create the configMap with the help
+of command line "--from-literal" key value
+pair.
+So, if I copy here, and paste it over here.
+My configMap is created.
+I can check this configMap "kubectl get configMap
+another-config".
+1 key is here.
+After that, I need to create a pod.
+Here in the exams, you can open a terminal/
+browser and write it here, "Kubernetes.io"
+website and click on documentation and type
+here, configMap.
+Just click on the first one.
+And if you scroll down, you will observe this
+pod and if you scroll down more.
+Yeah, this, copy this yaml file, create 1
+file here "config.yaml", any file name, you
+can write it here.
+Press I for insert, shift + Insert now as
+per the question.
+What we need to do here, the name of the pod
+is nginix and in the Exams you need to use
+shortcut control shift + C and paste it over
+here,
+right?
+And after that, what it says that using nginx
+image.
+Here, it is using "redis", so I'm just modify
+it here and "/some/path/" directory.
+mounted in "/some/path/".
+So, I'm just going to remove this one and
+"readOnly" is true, if you want, you can delete
+And the name of our configMap is another-config.
+Just copy this one
+and paste it over here.
+Apply this one "kubectl apply -f configmap.yaml".
+We added as a volume.
+So it should be visual inside the "/some/path/"
+So let me go here.
+"kubectl get pods".
+Yes.
+My pod is running.
+Let me go inside this pod here "kubectl"
+If I open this file, I can see this "value2".
+I can do like this here.
+So now it is showing I neatly "value2" and
+the same thing I have done for you.
+So let me exit from here and then copy to
+clear the lab plus question.
+Over here, everything is deleted.
+I should not see anything here.
+Yes, so this is the configmap.yaml.
+I also need to delete here that I created
+manually.
+So, I believe that this type of question can
+be asked in the question, especially in CKAD
+exam.
+This is very simple.
+After completing the 4 labs, this question
+is very simple.
+It's a cup of tea for me now.
+if you like this video, please like, share,
+and subscribe to my channel so that you will
+get free contents in future and thank you.
+
+
+## Video 3: Kubernetes Secrets Deep Dive: Production-Grade Security (https://www.youtube.com/watch?v=X-pjSFVKnlY)
+
+Kind: captions
+Language: en
+Hello everyone, welcome back to the channel.&nbsp;
+I am Nikhil Kumar. In our last video,&nbsp;&nbsp;
+we talked about config maps in Kubernetes and how&nbsp;
+it store and inject non-sensitive configuration&nbsp;&nbsp;
+into your applications. But what about passwords,&nbsp;
+token or API keys, you definitely don't want them&nbsp;&nbsp;
+sitting inside the plain configmaps. That's where&nbsp;
+Kubernetes secrets comes in. And in this video,&nbsp;&nbsp;
+I will show you practically how to create and&nbsp;
+use secrets the right way. And if you have been&nbsp;&nbsp;
+following my Kubernetes series, this videos built&nbsp;
+directly on the top of config maps only. So if you&nbsp;&nbsp;
+missed that one, check that out after this. Today&nbsp;
+is all about secret, how they differ from config&nbsp;&nbsp;
+maps, how to create them, and most importantly,&nbsp;
+how to use them in pod safely. First, let's&nbsp;&nbsp;
+start with basic. Config maps are for general&nbsp;
+configurations, things like environment variables&nbsp;&nbsp;
+or app arguments. Secrets are for sensitive data&nbsp;
+things like passwords, certificates or API tokens.&nbsp;&nbsp;
+Now one important point, secrets in Kubernetes are&nbsp;
+Base64 encoded and it's not fully encrypted unless&nbsp;&nbsp;
+you enable encryption at rest. So it's more secure&nbsp;
+than configmaps, but you should still treat them&nbsp;&nbsp;
+carefully. Let's understand the difference between&nbsp;
+the configmaps and the secrets. Configmaps are for&nbsp;&nbsp;
+the general configuration things like environment&nbsp;
+variable, application arguments and the public&nbsp;&nbsp;
+configuration files. On the other hand, secrets&nbsp;
+are sensitive data which requires protection that&nbsp;&nbsp;
+is your passwords, tokens, TLS certificates or the&nbsp;
+database credentials. Now we have understood what&nbsp;&nbsp;
+is secrets and what is the difference between&nbsp;
+config map and the secrets. Now let's jump onto&nbsp;&nbsp;
+the demo where we are going to create a secret&nbsp;
+using the CLI command and then we are going to use&nbsp;&nbsp;
+the same in the pod manifest files. So this is our&nbsp;
+Kubernetes cluster. So let's create a secret. I&nbsp;&nbsp;
+will start with a simple example which is storing&nbsp;
+a database password and the username. For that I'm&nbsp;&nbsp;
+going to use a CLI command that is a cubectl&nbsp;
+command. For that we can use kubectl create&nbsp;&nbsp;
+secret and generic and the secret name which is&nbsp;
+db-secret and similar to the configmap here also&nbsp;&nbsp;
+I'm going to use a from literal and I'm passing&nbsp;
+the key value pair here where the key is username&nbsp;&nbsp;
+and value is admin. name. Similar to the username,&nbsp;
+I'm going to pass the password. For that as well,&nbsp;&nbsp;
+I'm going to use a from hyphen literal equal&nbsp;
+to password equal toSecret123. Now the secret&nbsp;&nbsp;
+got created. If we use the command kubectl get&nbsp;
+secret, we can see our secret got created and&nbsp;&nbsp;
+this particular secret is having two keys that is&nbsp;
+username and password. Now if we describe it. So&nbsp;&nbsp;
+for that you can use kubectl describe secret and&nbsp;
+the secret name. As you can see we only see the&nbsp;&nbsp;
+information about the keys but it's not showing&nbsp;
+any actual values of those keys, and they are&nbsp;&nbsp;
+basically for encoded. And if you want to see the&nbsp;
+YAML file for this, we can use a command kubectl&nbsp;&nbsp;
+get secret and the secret name with -o yaml o&nbsp;
+this shows the actual secret in the ML format&nbsp;&nbsp;
+in this and notice the value in this particular&nbsp;
+data section. The values are B ase4 encoded and&nbsp;&nbsp;
+if you want to decode them, you can use the echo&nbsp;
+command with the Base64. So for that what I can&nbsp;&nbsp;
+do I can run echo and the value and pipe symbol&nbsp;
+with the base64 and use hyphen --decode. Here we&nbsp;&nbsp;
+can see the password which we have passed via the&nbsp;
+cli command that is Secret123. Similar to this if&nbsp;&nbsp;
+I run the same command with the different value&nbsp;
+for the username and at last we have a equal to&nbsp;&nbsp;
+we can see the admin is the username which is&nbsp;
+the exact the same thing which we have passed&nbsp;&nbsp;
+via CLI so Kubernetes doesn't store secret as a&nbsp;
+plain text by default it just encodes them but&nbsp;&nbsp;
+here secret alone don't do much you need to inject&nbsp;
+them into your application. Just like config maps,&nbsp;&nbsp;
+you can use them as an environment variable or&nbsp;
+mount them as a files. So let's create one pod&nbsp;&nbsp;
+manifest file where we are going to inject the&nbsp;
+secret. So I have already created a manifest&nbsp;&nbsp;
+file here. So the file name is secret pod.yaml If&nbsp;
+you see this is the pod manifest file till here&nbsp;&nbsp;
+is just a normal or simple manifest file which we&nbsp;
+used to create in our previous video. And if you&nbsp;&nbsp;
+remember in my commands and environment variables,&nbsp;
+I use the environment keyword over there as well.&nbsp;&nbsp;
+This particular pod will run the nginx application&nbsp;
+inside the container and you will be having a&nbsp;&nbsp;
+environment variable that is a DB user and the&nbsp;
+DB pass. And so how we are passing the secret&nbsp;&nbsp;
+in this. So let's try to understand here. So here&nbsp;
+we can see env that is enviornment variable. We&nbsp;&nbsp;
+are so we are injecting the environment variables&nbsp;
+here and here if you see value from and the secret&nbsp;&nbsp;
+key reference which is a db-secret it fetch the&nbsp;
+values from our DB secret which we have created.&nbsp;&nbsp;
+So basically we are creating an environment&nbsp;
+variable that is a DB user which fetching the&nbsp;&nbsp;
+username from the secret. So we are fetching&nbsp;
+up the value from secret key reference and we&nbsp;&nbsp;
+are giving the name that is a DB - secret that&nbsp;
+is a secret name and the key of that particular&nbsp;&nbsp;
+secret that is username. Similar to this we have&nbsp;
+a password stored into the secret. So for that we&nbsp;&nbsp;
+have a different block for the different password&nbsp;
+variable for that we are specifying the name that&nbsp;&nbsp;
+is a DB_PASS and here also we are specifying&nbsp;
+the value from secret key reference and the&nbsp;&nbsp;
+secret name and the key name. This is just like a&nbsp;
+setting environment variable only this time they&nbsp;&nbsp;
+are coming directly from the secret. Let's try to&nbsp;
+create this pod kubectl create -f secret pod.yaml&nbsp;&nbsp;
+and pod got created. If we see kubectl get pod the&nbsp;
+pod is getting created and it's running now and&nbsp;&nbsp;
+if we describe this describe pod secret-demo it's&nbsp;
+demo so these are the information for the events.&nbsp;&nbsp;
+And if we scroll a little bit up, we can see these&nbsp;
+are the environment variable which is being passed&nbsp;&nbsp;
+by the secret that is db-secret. We won't be&nbsp;
+able to see the information here because we are&nbsp;&nbsp;
+getting those information from the db-secret. So&nbsp;
+just now we have created a pod manifest file and&nbsp;&nbsp;
+passing the environment variable via the secret.&nbsp;
+But environment variables aren't always the best&nbsp;&nbsp;
+option, especially if your app expects credentials&nbsp;
+as file or if you want to avoid them showing up in&nbsp;&nbsp;
+process list. In that case, you can mount secrets&nbsp;
+directly as files inside your container. The&nbsp;&nbsp;
+similar thing we have did with the config map. We&nbsp;
+have mounted the configmap as a volume mount point&nbsp;&nbsp;
+in the pod. So we are going to do the same with&nbsp;
+the secret. So for that we have a manifest file&nbsp;&nbsp;
+that is secret-vol-pod.yaml so this is the same&nbsp;
+structure of the pod manifest file which we used&nbsp;&nbsp;
+for the configmap. Instead of the configmap here&nbsp;
+we are going to use a secret. So if you see till&nbsp;&nbsp;
+here it's the similar thing which we which we used&nbsp;
+to create a pod with a single container. So below&nbsp;&nbsp;
+that we have a volume mount. It attached storage&nbsp;
+to the container and below that we can see the&nbsp;&nbsp;
+mount path. It is a location inside the container&nbsp;
+where secret will be mounted. And here you can&nbsp;&nbsp;
+see it's a read only true that means secrets are&nbsp;
+mounted as a read only for the safety purpose.&nbsp;&nbsp;
+Below that we have a volume section and inside&nbsp;
+that we are specifying the secret information.&nbsp;&nbsp;
+And here we are specifying the secret and the&nbsp;
+secret name that is DB - secret and it mount&nbsp;&nbsp;
+data from the db-secret to this particular mount&nbsp;
+path. So with this particular setup, Kubernetes&nbsp;&nbsp;
+will mount each key of the secret as a file inside&nbsp;
+the /etc/secret-data. So you will see two files&nbsp;&nbsp;
+username and the password with their content as&nbsp;
+a value. So let's create this particular pod.&nbsp;&nbsp;
+So ckubectl create - f secret-vol-pod.yaml The&nbsp;
+pod got created. Let's see this the pod is in&nbsp;&nbsp;
+the running state. Now if you want to see the&nbsp;
+information in that particular mount point we&nbsp;&nbsp;
+can get into the container. For that we can use&nbsp;
+kubectl exec -it and the pod name that is secret&nbsp;&nbsp;
+volume demo and hyphen and the command here I'm&nbsp;
+giving the /bin/bash so it will open a shell for&nbsp;&nbsp;
+us. So inside that I can run ls -l and the mount&nbsp;
+point that is /etc/secret-data. So as you can&nbsp;&nbsp;
+see we have a two files that is password and the&nbsp;
+username and if we are going to like cat that cat&nbsp;&nbsp;
+/etc/secret-data/password. So this is the same&nbsp;
+password which we have stored in the secret. so&nbsp;&nbsp;
+this is the actual value we stored earlier in our&nbsp;
+secret. This proves that Kubernetes automatically&nbsp;&nbsp;
+mount each secret key as a separate file inside&nbsp;
+the container. This approach is super handy for&nbsp;&nbsp;
+apps that read credentials from the file instead&nbsp;
+of environment variables. It also keeps things&nbsp;&nbsp;
+more secure and isolated. So whether you inject&nbsp;
+secrets as environment variables or mount them as&nbsp;&nbsp;
+a files, Kubernetes gives you flexible and secure&nbsp;
+ways to get sensitive data into your container.&nbsp;&nbsp;
+Now let's understand with the help of visual&nbsp;
+diagram. So here's a quick visual representation&nbsp;&nbsp;
+of how this works behind the scene. So we start&nbsp;
+with a Kubernetes secret called db-secret which&nbsp;&nbsp;
+stores the username and the password just like&nbsp;
+we did with the cli command that is kubectl&nbsp;&nbsp;
+create secret. Then in the pod specification we&nbsp;
+define a volume of type secret that refers to&nbsp;&nbsp;
+that particular secret and that particular&nbsp;
+volume called secret hyphen volume is then&nbsp;&nbsp;
+mounted into the container as a file system and&nbsp;
+at the runtime Kubernetes automatically creates&nbsp;&nbsp;
+a files under the /etc/secret data mountpoint&nbsp;
+which we have specified in the manifest file and&nbsp;&nbsp;
+one file is being created for each key in the&nbsp;
+secret. So just now we saw we have a two keys&nbsp;&nbsp;
+that is username and the password. Similarly, two&nbsp;
+files has been created into the container mount&nbsp;&nbsp;
+point and finally container reads those files for&nbsp;
+example /etc/secret-data/username and the password&nbsp;&nbsp;
+to get the credentials of the database. So far we&nbsp;
+have seen how to use secrets directly inside pods&nbsp;&nbsp;
+either as environment variables or mounted&nbsp;
+as a file. But in the real world workloads,&nbsp;&nbsp;
+you won't be running standalone pods manually.&nbsp;
+Instead, you will be likely use deployments which&nbsp;&nbsp;
+manages your pod automatically, handle scaling&nbsp;
+and ensure self-healing. So let's see how we&nbsp;&nbsp;
+can inject a secret inside a deployment manifest&nbsp;
+file. So let's jump back to our console. So here&nbsp;&nbsp;
+I already created a file for the deployment. So if&nbsp;
+you remember my deployment video, this spec looks&nbsp;&nbsp;
+familiar till here. The only difference here is&nbsp;
+instead of each variable separately we are using&nbsp;&nbsp;
+the environment from getting a environment from&nbsp;
+the secret and here we are referencing to the&nbsp;&nbsp;
+secret that is db-secret and it's going to load&nbsp;
+the whole secret at once. So let's apply this&nbsp;&nbsp;
+and see how Kubernetes passes the secret to the&nbsp;
+pod inside the deployment. So let me apply this&nbsp;&nbsp;
+kubectl apply -f secret deploy.yaml the deployment&nbsp;
+got created. Cubectl deploy. The deployment is&nbsp;&nbsp;
+running with two replicas. So kubectl get pod&nbsp;
+and we can see two pods are running. Now let's&nbsp;&nbsp;
+check the environment variables inside the pod. So&nbsp;
+for that we can run a command inside a container.&nbsp;&nbsp;
+So let me clear out the screen. First, capture&nbsp;
+the name of the pod kubectl get pod and then run&nbsp;&nbsp;
+the command inside the container. So for that we&nbsp;
+can run the kubectl exec command. So kubectl exec&nbsp;&nbsp;
+-it and the pod name and we are going to run the&nbsp;
+command that is env and grep for username and the&nbsp;&nbsp;
+password with -E that is username and password.&nbsp;
+Oh, it's a typo over there. And we can see the&nbsp;&nbsp;
+information that is password and the username&nbsp;
+which is being captured by the deployment using&nbsp;&nbsp;
+the secret which we just created just now so this&nbsp;
+makes managing secret at scale much easier because&nbsp;&nbsp;
+your deployment handle multiple pods automatically&nbsp;
+and all of them get the same environment variables&nbsp;&nbsp;
+from the secret. So if I'm going to run&nbsp;
+the same command with a different pod.&nbsp;
+so let me remove this. So just now I use the&nbsp;
+L7 RH. I'm going to use another one. If I&nbsp;&nbsp;
+hit the enter, so I'm going to get the same thing&nbsp;
+because deployment is managing these things at the&nbsp;&nbsp;
+backend. Now that you know how to use secrets with&nbsp;
+pod and deployments both, let's quickly look at&nbsp;&nbsp;
+some best practices because using secrets securely&nbsp;
+is just as important as using them correctly. So&nbsp;&nbsp;
+never commit secret YAML files with real password&nbsp;
+or tokens in git. Always use placeholder or sealed&nbsp;&nbsp;
+secrets instead. Enable Kubernetes encryption&nbsp;
+at rest. So even if someone get access to etcd,&nbsp;&nbsp;
+they can't read your secrets in the plain text.&nbsp;
+For production workloads, offload sensitive&nbsp;&nbsp;
+data to external secret managers like HashiCorp&nbsp;
+Vault, AWS Secret Manager or an external secrets&nbsp;&nbsp;
+operator. And finally, rotate secrets regularly.&nbsp;
+Don't hardcode and forget credentials age quickly&nbsp;&nbsp;
+and rotation keep your system safer. So that's&nbsp;
+how Kubernetes secrets work. Think of them as the&nbsp;&nbsp;
+secure sibling of configmaps. Together, configmaps&nbsp;
+and secrets give you a flexible and secure way&nbsp;&nbsp;
+to manage configuration in your cluster. And&nbsp;
+if you haven't watched my config map videos,&nbsp;&nbsp;
+go check it out now. And if you found this video&nbsp;
+helpful, hit like, share it with your friends,&nbsp;&nbsp;
+and subscribe for more content like this. Thanks&nbsp;
+for watching. I will see you in the next one.
+

@@ -1,0 +1,1090 @@
+## 영상 1: Kubernetes Autoscaling: HPA vs. VPA vs. Keda vs. CA vs. Karpenter vs. Fargate (https://www.youtube.com/watch?v=hsJ2qtwoWZw)
+
+Kubernetes was created to run applications&nbsp;
+at scale. So, in this video, let's talk&nbsp;&nbsp;
+about autoscaling. Now, there are many different&nbsp;
+controllers, some of them built-in and some that&nbsp;&nbsp;
+you need to additionally install in your cluster.&nbsp;
+For example, your online store may get a lot of&nbsp;&nbsp;
+traffic during the day and almost no one using&nbsp;
+it at night. So, in order to save on compute,&nbsp;&nbsp;
+you can either manually adjust or have some&nbsp;
+kind of cron job to scale up your application&nbsp;&nbsp;
+during the peak hours and scale down at night to&nbsp;
+avoid wasting resources. It’s much easier to do&nbsp;&nbsp;
+if you have stateless applications than scaling&nbsp;
+up and down some kind of distributed databases.&nbsp;&nbsp;
+Another example would be a big data ELT pipeline&nbsp;
+where you periodically, let's say every hour,&nbsp;&nbsp;
+run a batch job that takes maybe 10 minutes. And,&nbsp;
+you don’t want to pay for the remaining 50 minutes&nbsp;&nbsp;
+of compute when you're not running anything.&nbsp;
+For example, to scale up your application to&nbsp;&nbsp;
+handle more traffic, you increase the number of&nbsp;
+pods. Now, those pods run on Kubernetes nodes.&nbsp;&nbsp;
+A node can be a VM or a server in a data center.&nbsp;
+If you don’t have enough nodes in your Kubernetes&nbsp;&nbsp;
+cluster, you need to scale the cluster itself&nbsp;
+as well. So, in this video, we’ll talk about&nbsp;&nbsp;
+how to autoscale pods on one hand and Kubernetes&nbsp;
+nodes on another. The most common approach that&nbsp;&nbsp;
+comes to mind when you need to autoscale your&nbsp;
+application to handle an increasing load is to&nbsp;&nbsp;
+use the HorizontalPodAutoscaler based on CPU or&nbsp;
+memory. It automatically updates the replica count&nbsp;&nbsp;
+on your deployment or statefulset object.
+The HorizontalPodAutoscaler is implemented&nbsp;&nbsp;
+as a Kubernetes API resource and as a controller.&nbsp;
+The controller runs within the Kubernetes control&nbsp;&nbsp;
+plane, so there's no need to install anything&nbsp;
+extra in this case. It periodically adjusts the&nbsp;&nbsp;
+desired scale of its target, such as a Deployment&nbsp;
+object, based on metrics like CPU, memory,&nbsp;&nbsp;
+or custom metrics, which we will discuss later.&nbsp;
+Now, the controller ships with Kubernetes, but&nbsp;&nbsp;
+you still need to provide metrics for it to work.&nbsp;
+Again, the most common approach would be to deploy&nbsp;&nbsp;
+the metrics server in your cluster. Some managed&nbsp;
+Kubernetes services, such as GKE, come with a&nbsp;&nbsp;
+metrics server by default, while for others, such&nbsp;
+as EKS, you need to install it as additional step.&nbsp;&nbsp;
+To follow along, you can use Minikube, and you can&nbsp;
+find the source code in my GitHub repository. The&nbsp;&nbsp;
+easiest way to verify that the metrics server is&nbsp;
+deployed is to run kubectl top pods. If you get&nbsp;&nbsp;
+the error 'Metrics API not available', you will&nbsp;
+need to install it, and I’ll show you how. You&nbsp;&nbsp;
+can use the Helm CLI to deploy it manually, or&nbsp;
+my preferred approach would be to use Terraform&nbsp;&nbsp;
+with the Helm provider. Now, when you deploy the&nbsp;
+metrics server in your cluster, it will scrape the&nbsp;&nbsp;
+kubelet of each node and provide those aggregated&nbsp;
+metrics to other components in your Kubernetes&nbsp;&nbsp;
+cluster via the metrics API. To verify, you can&nbsp;
+use the kubectl top pods command to get the usage.&nbsp;&nbsp;
+Another way is to run kube proxy, and then in&nbsp;
+your browser, go to apis/metrics/namespaces to&nbsp;&nbsp;
+get the usage. And, you can also obtain the same&nbsp;
+metrics using the kubectl get --raw command. Now,&nbsp;&nbsp;
+you can start using the Horizontal Pod Autoscaler&nbsp;
+resource. Let's say we want to target this&nbsp;&nbsp;
+deployment object with 'myapp'. Keep in mind&nbsp;
+that for the autoscaler to work, you must provide&nbsp;&nbsp;
+resource requests. Limits are optional but highly&nbsp;
+recommended. The HPA uses requests, not limits,&nbsp;&nbsp;
+to calculate usage in percentage. For example,&nbsp;
+in this case, we want to automatically scale pods&nbsp;&nbsp;
+if the average CPU utilization across all pods&nbsp;
+exceeds 80 percent. You can also include memory&nbsp;&nbsp;
+usage. Here, we want to scale if the average&nbsp;
+exceeds 70%. Let me quickly run the demo with&nbsp;&nbsp;
+all these objects deployed. When you apply, it may&nbsp;
+take a few seconds for the HPA to show the current&nbsp;&nbsp;
+usage. If it takes longer, you can describe&nbsp;
+the HPA object to find any errors. Most likely,&nbsp;&nbsp;
+this happens when you forget to define requests&nbsp;
+for your pods. If we simulate high CPU usage,&nbsp;&nbsp;
+it will spin up enough pods to reduce the&nbsp;
+average CPU usage below 80 percent. Now,&nbsp;&nbsp;
+when the load decreases, it may take a minute or&nbsp;
+so for the HPA to scale down the pods. The last&nbsp;&nbsp;
+thing I want to mention is that you should not set&nbsp;
+the replica count on the deployment or statefulset&nbsp;&nbsp;
+object if you use a GitOps approach. In that case,&nbsp;
+the HPA and your tool, such as ArgoCD or FluxCD,&nbsp;&nbsp;
+will constantly fight to set the desired&nbsp;
+replica count based on their spec. Now,&nbsp;&nbsp;
+autoscaling based on CPU or memory is not very&nbsp;
+accurate because different applications may have&nbsp;&nbsp;
+different requirements. One application may be&nbsp;
+fine running at 90% CPU usage, while another may&nbsp;&nbsp;
+only handle 40% CPU usage. The best way to scale&nbsp;
+your app is to use more meaningful metrics from&nbsp;&nbsp;
+the client's perspective. A good starting point&nbsp;
+is the four golden signals: latency, traffic,&nbsp;&nbsp;
+errors, and saturation. For example, if you ran&nbsp;
+some tests and determined that a single instance&nbsp;&nbsp;
+of your application can only handle 100 requests&nbsp;
+per second, unfortunately, we can’t use a metrics&nbsp;&nbsp;
+server for that. We need something more powerful,&nbsp;
+such as Prometheus. In order to use custom metrics&nbsp;&nbsp;
+for the horizontal pod autoscaler, we need to&nbsp;
+deploy a few things in our cluster. First of all,&nbsp;&nbsp;
+we need a Prometheus operator that will manage&nbsp;
+the lifecycle of our Prometheus instances as well&nbsp;&nbsp;
+as convert service and pod monitors into the&nbsp;
+native Prometheus configuration. Then, we’ll&nbsp;&nbsp;
+deploy the Prometheus instance itself using the&nbsp;
+custom resource provided by the operator. Let’s&nbsp;&nbsp;
+say we also have the app running in Kubernetes&nbsp;
+that we want to monitor; we’ll create a service or&nbsp;&nbsp;
+pod monitor to scrape that app and store metrics&nbsp;
+in Prometheus itself. The next step is to provide&nbsp;&nbsp;
+those metrics to the horizontal pod autoscaler.&nbsp;
+For that, we need to deploy a Prometheus adapter&nbsp;&nbsp;
+that will convert Prometheus metrics and register&nbsp;
+them at the custom.metrics API. From that point,&nbsp;&nbsp;
+we can use custom Prometheus metrics exposed by&nbsp;
+our application in the autoscaling policy like&nbsp;&nbsp;
+this. Now, in the previous part, we discussed&nbsp;
+that to autoscale based on CPU and memory,&nbsp;&nbsp;
+we need to deploy a metrics server. Since&nbsp;
+we already have Prometheus, we can get rid&nbsp;&nbsp;
+of the metrics server altogether and use cAdvisor&nbsp;
+to get CPU and memory usage from the pods,&nbsp;&nbsp;
+and register a Prometheus adapter with a metrics&nbsp;
+API. If you want to fully replace the metrics&nbsp;&nbsp;
+server, you would also want to deploy a node&nbsp;
+exporter on each node to get node metrics.So,&nbsp;&nbsp;
+if you configured everything correctly, you should&nbsp;
+be able to scale your application based on custom&nbsp;&nbsp;
+metrics, such as the number of requests per&nbsp;
+second or any other metrics. Now, sometimes you&nbsp;&nbsp;
+have stateful applications that are very difficult&nbsp;
+or impossible to scale horizontally. For example,&nbsp;&nbsp;
+a standalone database such as Postgres or MySQL.&nbsp;
+The only option you have to handle more load is&nbsp;&nbsp;
+to scale those applications vertically. This&nbsp;
+simply means adding more CPU or memory to the&nbsp;&nbsp;
+existing pods. Kubernetes has a tool called&nbsp;
+Vertical Pod Autoscaler that can help you with&nbsp;&nbsp;
+that. It has a few modes. There is a 'Recreate'&nbsp;
+mode, which should be used rarely because VPA&nbsp;&nbsp;
+will try to evict and create a new pod with&nbsp;
+new recommended resources, which can be very&nbsp;&nbsp;
+dangerous for standalone databases. Another&nbsp;
+mode is 'Initial', which only sets requests&nbsp;&nbsp;
+and limits when you deploy the application. And&nbsp;
+finally, which I use most often, is to simply&nbsp;&nbsp;
+get recommendations and not take any actions.&nbsp;
+The Vertical Pod Autoscaler also consists of a&nbsp;&nbsp;
+custom resource and a controller, but it does not&nbsp;
+ship with Kubernetes, and you need to install it&nbsp;&nbsp;
+additionally in your cluster. Using this mode, you&nbsp;
+can describe or get the VPA in your cluster, see&nbsp;&nbsp;
+recommendations, and perhaps apply those requests&nbsp;
+and limits during the next maintenance window.&nbsp;&nbsp;
+Keep in mind that you should never use HPA and&nbsp;
+VPA simultaneously targeting the same deployment&nbsp;&nbsp;
+or stateful set. They will conflict with each&nbsp;
+other and may disrupt your workloads. Also,&nbsp;&nbsp;
+I don’t see a point in getting recommendations&nbsp;
+from the VPA for stateless applications that can&nbsp;&nbsp;
+be scaled horizontally. For example, if you run 5&nbsp;
+web servers, you get recommendations specific to&nbsp;&nbsp;
+the current load that 5 servers can handle. If you&nbsp;
+run 20 of the same web servers and try to get VPA&nbsp;&nbsp;
+recommendations, they will be very different.&nbsp;
+So, don’t use VPA for stateless applications,&nbsp;&nbsp;
+even in recommendation mode, and only use it for&nbsp;
+stateful apps that cannot be scaled horizontally.
+There are a lot of companies nowadays using&nbsp;
+event sourcing. Some companies completely&nbsp;&nbsp;
+rely on some sort of messaging&nbsp;
+system to communicate between&nbsp;&nbsp;
+different microservices. It can be Apache&nbsp;
+Kafka, RabbitMQ, NATS, and many others.
+On one side, you have a bunch of producers&nbsp;
+that write to the messaging system,&nbsp;&nbsp;
+and on the other, you have consumers.&nbsp;
+This pattern allows you to decouple&nbsp;&nbsp;
+your services and simplifies&nbsp;
+the development of new features.
+There is a KEDA project that can help you to&nbsp;
+autoscale based on the number of messages in the&nbsp;&nbsp;
+queue or a topic. For example, KEDA can monitor&nbsp;
+a RabbitMQ queue and scale your application if&nbsp;&nbsp;
+the queue keeps getting more messages and your&nbsp;
+service is not able to handle the current load.
+One advantage of this approach is&nbsp;
+that it can scale your application&nbsp;&nbsp;
+to 0 if there are no messages in the queue.
+There are many different scalers&nbsp;
+supported, and you can find them&nbsp;&nbsp;
+on the official website. It includes&nbsp;
+cloud services such as DynamoDB as well&nbsp;&nbsp;
+as open-source projects such as Apache&nbsp;
+Kafka, etcd, MySQL, and many others.
+To start using KEDA, you need&nbsp;
+to deploy the controller using a&nbsp;&nbsp;
+single Helm chart. It does not&nbsp;
+have any other dependencies.
+After that, you can configure a custom&nbsp;
+resource to automatically scale your&nbsp;&nbsp;
+application. In this case, we will assign&nbsp;
+5 messages from the queue for each replica.
+Now, if you deploy it, you can apply the&nbsp;
+Kubernetes job to start publishing messages to the&nbsp;&nbsp;
+queue, and in a few seconds, KEDA will scale up&nbsp;
+your application from 0 to the maximum you defined&nbsp;&nbsp;
+in the custom resource. After your application&nbsp;
+processes all the messages, KEDA will scale your&nbsp;&nbsp;
+application down to 0. It’s optional, but you&nbsp;
+can keep a few instances running if you want.
+So far, we’ve talked about how to&nbsp;
+autoscale applications or pods running&nbsp;&nbsp;
+in your Kubernetes cluster. The next major&nbsp;
+topic is how to scale the Kubernetes nodes.&nbsp;
+Let’s start with a cluster&nbsp;
+autoscaler. It was one of the&nbsp;&nbsp;
+first projects that automated&nbsp;
+Kubernetes node autoscaling.
+In some clouds, such as AWS, you need&nbsp;
+to explicitly configure permissions&nbsp;&nbsp;
+and deploy your own cluster autoscaler&nbsp;
+controller. Others, such as Azure and GCP,&nbsp;&nbsp;
+allow you to simply check a box, and the&nbsp;
+cloud will deploy and manage it for you.
+In most clouds, Kubernetes node groups&nbsp;
+are created as autoscaling groups.&nbsp;&nbsp;
+Some allow you to specify multiple&nbsp;
+instance types within a single group,&nbsp;&nbsp;
+while others only permit the&nbsp;
+use of a single instance type.
+After you deploy the autoscaler, it will watch&nbsp;
+for pending pods in your cluster. If it detects&nbsp;&nbsp;
+a pending pod that cannot fit onto the existing&nbsp;
+nodes, the autoscaler will increase the desired&nbsp;&nbsp;
+size of your autoscaling group, and the cloud&nbsp;
+will spin up additional nodes for your cluster.
+The problem with that approach is if you&nbsp;
+use large instance types and a single tiny&nbsp;&nbsp;
+pod does not fit onto the existing&nbsp;
+nodes, the cluster autoscaler will&nbsp;&nbsp;
+create another node with the same CPU and&nbsp;
+memory as all other nodes. In many cases,&nbsp;&nbsp;
+this can lead to wasted resources, and&nbsp;
+you would pay more than you actually use.
+To fix this issue, AWS developed another&nbsp;
+tool called Karpenter. It works with other&nbsp;&nbsp;
+clouds as well, not only AWS. Instead&nbsp;
+of simply scaling up your node group&nbsp;&nbsp;
+with the same instance types, Karpenter&nbsp;
+will analyze the pending pods and create&nbsp;&nbsp;
+EC2 instances directly with enough CPU&nbsp;
+and memory to fit the pending workloads.
+In general, this approach is more efficient than&nbsp;
+scaling up node groups. However, there are some&nbsp;&nbsp;
+edge cases when you run logging, monitoring,&nbsp;
+and other agents as daemonsets and generally&nbsp;&nbsp;
+want to use large instance types to minimize the&nbsp;
+number of agents you have to run on each node.
+And finally, you can use serverless Kubernetes&nbsp;
+clusters provided by AWS, such as Fargate,&nbsp;&nbsp;
+and by GCP, which they call Autopilot. When you&nbsp;
+create a pod, Kubernetes will spin up a dedicated&nbsp;&nbsp;
+node for it. In this case, you don’t have to&nbsp;
+manage your nodes yourself and worry about&nbsp;&nbsp;
+wasted resources. However, these serverless&nbsp;
+clusters are much more expensive in terms of&nbsp;&nbsp;
+how much you pay for CPU and memory compared to&nbsp;
+EC2. So, you might want to test it first before&nbsp;&nbsp;
+committing to the serverless approach, but it does&nbsp;
+reduce the maintenance of your infrastructure.&nbsp;
+That’s all for this video. Thank you for&nbsp;
+watching, and I’ll see you in the next one.
+
+## 영상 2: KEDA: Kubernetes Event-Driven Autoscaling (https://www.youtube.com/watch?v=3lcaawKAv6s)
+
+the ability to scale applications
+horizontally is one of the most
+important features of kubernetes
+nevertheless horizontal pod auto scaler
+or hpa is very very basic it allows us
+to scale applications based on memory
+and cpu consumption
+but that is not enough
+we need more
+now to be honest hpa can be combined
+with custom metrics api
+which never lived up to the promise we
+need the solution that will allow us to
+scale kubernetes resources based on data
+from almost
+anywhere
+memory and cpu easy metrics from
+probatives why not metrics from any
+other stores like elastic data dog
+yes please please i need that how about
+messages from kafka logs from aws cloud
+watch data from mongodb
+i want it
+all i want to be able to scale my
+applications or other kubernetes
+resources based on whichever data
+i deem is important for scaling it
+should be up to me to decide what the
+source of information is and tell the
+system how to scale and while we're at
+it scaling should not be limited to the
+few commonly used resources like
+deployment and stateful set scaling
+should be available for any kubernetes
+resource built in or provided as a crd
+just as it should be up to me to define
+the source of data used to define when
+something should scale it should be up
+to me to decide
+what
+should be scaled now the question is can
+we have all that can we have horizontal
+scaling without any limits
+kedah might be one of the solutions or
+maybe the solution to all those issues
+and a few others it is a tool that
+allows us to easily scale any kubernetes
+resource and it is short for kubernetes
+event driven auto scaling so let's check
+it out let's see cada in action and see
+whether it can solve our scaling
+problems or needs
+now let me open a silly application
+silly demo application and double check
+first whether it works and there we go
+this is devops token series my silly
+silly website you can see that it runs
+there is nothing special about it and to
+prove that there is nothing special
+about it i'm going to retrieve all the
+pods with cube cattle the namespace is
+production get pots and you can see that
+there is only one pod of that
+application it is not scaling or at
+least it is not visibly scaling and you
+need to trust me there is no horizontal
+pod auto scaler or any other scalar for
+this application it is a single replica
+application for now and we are going to
+change that with kedah but before we do
+let me tell you briefly there is a gist
+with all the commands and the link to
+the gist is in the description so go and
+check it out if you want to reproduce
+what i'm doing so let me output a simple
+definition of a scaled object that's
+what we get with cada so kat keda prom
+dot yaml and we can see a
+straightforward relatively simple
+definition that will help us scale the
+application i just showed and it is
+scaled object that's the kind that's
+what we get when we install canada
+itself and it has a couple of important
+sections in the specification first is
+the scale target reference that's a
+reference the kubernetes resource that
+should be scaled and that can be
+literally any resource actually almost
+any resource it can be any resource that
+is baked into kubernetes or any resource
+that has scale sub-resource defined and
+that should be available in most custom
+resource definitions at least if they
+are done well so theoretically scale
+target reference can be anything
+then we have some housekeeping things
+like pooling interval which in my case
+is set to five seconds by default it's
+30 cooldown period how much time to wait
+before it scales down in my case it's 30
+seconds it could be 300 seconds or
+actually that's the default value what
+is the minimum number of replicas what
+is the maximum number of replicas it can
+scale to zero but don't do that with
+only cada you would need something that
+would cue your requests like k native or
+something like that uh anyways you can
+scale to zero and whether your
+application can handle no replicas
+that's that's a separate question
+separate video and finally we have
+triggers in this case i'm using
+prometheus there can be many many other
+triggers i'm going to show you the list
+later and then in the metadata section
+i'm saying hey the server where you
+should go to fetch metrics is promisive
+server dot monitoring that's the
+namespace this is the name of a metric
+it can be anything you want threshold
+that if it's passed the scaling should
+happen should occur and finally the most
+important part is a query and in this
+case i'm saying hey i want to calculate
+the maximum rate of traffic service
+requests total the total number of
+requests from traffic because i'm using
+traffic today and by the way if you're
+following up you should use traffic as
+well anyways that's all prometheus
+squaring you should know that if you
+don't then there are other videos for
+that anyways this will calculate the
+maximum broker request based on a rate
+for certain metric which is coming from
+traffic and the output is limited to a
+specific service which is my own
+application now the query will differ
+depending on what are you using as a
+source of information
+as i said before this is a promote use
+and if you use something else like
+datadog or whatever else you might be
+using then the query will be obviously
+different it will be whatever the source
+of information accepts as a credit and
+now all that's left is to apply this
+definition with cube cuddle the nasp's
+production i want to apply whatever is
+defined in the file cataprom yaml and
+that's about it a new resource was
+created and now i can relax i can just
+go home or do something else i mean i'm
+already at home i can go and fetch
+coffee for example but that would be
+silly because this application is not
+running in production so it is not
+getting real traffic and that means that
+i need to simulate some traffic so that
+we see scaling in action and for that i
+will use k6 k6 is awesome if you're
+doing performance testing or load
+testing i have a video about that
+somewhere over there go and check it out
+and while doing that while you're
+checking it out i'm going to run a
+certain number of requests in parallel
+for a specific period of time and
+generate like that traffic right so i'm
+doing load testing to generate traffic
+not really to test and it's going right
+it's running and then now actually i can
+go and fetch coffee but before i do that
+let me see whether there is anything
+waiting for me in slack whether there is
+any message over there and look at that
+i got a new message in slack saying the
+deployment called devops toolkit was
+updated the number of replicas changed
+from one to three so i do not really
+need to monitor my cluster to see
+whether scaling really happened or no
+i'm getting notifications on slack and
+i'm getting them through robusta and if
+you don't know what robusta is there's a
+video for that as well check it out and
+i strongly recommend to do that for two
+reasons first because robusta is awesome
+if you need notifications of any kind
+then if you need to troubleshoot stuff
+and so on and so forth anyway i will not
+go into details check it out the link is
+in the description and the second reason
+i'm mentioning robusta is because
+robusta is sponsoring this video so you
+should check them out that way you're
+helping this channel right they sponsor
+they give money for the channel so that
+you don't have to and everybody's happy
+so check them out check out robusta it's
+really awesome solution otherwise i
+would not let them sponsor this channel
+thanks to robusta for sponsoring and now
+let's go back to scaling because we can
+see from this slack message that the
+number of replicas increased to three
+let's see what's going on what happened
+now let's see what's really going on by
+executing cube cattle the name species
+production and i want to retrieve pods
+of my application i want to retrieve all
+horizontal polar auto scalers even
+though i did not define any and i want
+to retrieve all scaled objects that's
+scada that's what i applied a moment ago
+i mean a few minutes ago and we can see
+that indeed there are three pods i mean
+of course there are three pods proposed
+told me about it and there is horizontal
+potato scale this horizontal portal
+scale created by keda by the scaled
+object that i created a few minutes ago
+so scaled object created hpa we then it
+is manipulating hpa it is changing hpa
+and hpa created the pods of my
+application now let's spice it up a bit
+let's create more traffic more traffic
+than before let's uh put the system to
+the test by executing by showing you
+first another k6 manifest and this one
+i'm creating 200 concurrent users over
+30 seconds again check k6 as well uh
+they're not sponsored they should be
+though anyways let's see what will
+happen if i put even more pressure on my
+application so k6 run
+k6-100 js and then it runs for 30
+seconds and while it's running this
+might be a great opportunity for you to
+stop what you're doing i mean continue
+what you're doing continue watching the
+video but subscribe to the channel like
+the video and if you want to sponsor the
+channel yourself as an individual please
+consider joining the channel that helps
+pay the bills so do all the stuff that
+you do on youtube and while i was
+talking about and trying to convince you
+to do the stuff
+k6 finished executing and now i can take
+a look at what's happening and i will
+first go to slug to see whether i got
+the new notification so let's go over
+there and see whether my application
+scaled even more and there we go i got a
+new notification saying hey your
+application now scaled from three
+replicas to six replicas
+you have more traffic than expected so
+application should grow with the traffic
+right and if you list all the pods and
+hpas and scaled objects we can see the
+same story as before
+we have six spots this time horizontal
+powder scale are already configured
+currently with six replicas and scaled
+object that is the one that manages
+controls horizontal auto scaler and now
+i'm going to fast forward a couple of
+minutes i want to see what happens when
+the traffic goes down what happens with
+the application i mean you can probably
+guess so this is me fast forwarding a
+couple of minutes
+there we go and now we can see a new
+slack message saying hey your
+application now scaled from 6 replicas
+to four and i can observe that from the
+terminal as well if i list all the pods
+and hps and scaled objects now we can
+see that there are four pods instead of
+six that were there before so it's
+killed down because there is less
+traffic than there was before and then
+if i fast forward a bit more
+and i go back to my terminal i can see
+that now there is only one replica
+because that's the minimum number of
+replicas there is no traffic going to
+that application anymore so cat event
+back to the minimum number of replicas
+absolutely awesome now you might be
+wondering hey how did i know what to
+define in canada how did i know that i
+can use prometheus as a source of my
+metrics and by the way prometheus is
+boring everybody's using it and you can
+actually scale your application with
+prometheus without kedah but what makes
+kedah amazing is the number of supported
+scalers so i'm going the easy route with
+prometheus but let's take a look at what
+other scalars we can use to fuel
+my applications to fuel our applications
+to scale them and look at that the
+currently available scales for canada
+are active q a couple of them
+cloudwatch
+streams sqs and azure is something
+something there are a couple of other
+supported scalars and cassandra and cpu
+and chrome and then elasticsearch and
+external external push and a couple of
+supporting google and graphics and
+huawei and ibm mmq and influencers being
+going forward load and leak to loose
+topic what is that link to stopping no
+idea and there is memory based scaling
+and matrix api and mobility and manage
+equal and equal and nuts and you really
+can always like metrics and other
+swift postgres sql predictive i can
+write about what is pretty cool i've
+actually checked it out for me too so
+thank you reddish couple of phrases
+actually selenium rescaler and uh solace
+i don't know that one i need to check it
+out as well oh that's quite some list
+and the list is growing we can expect
+even more so you can use
+almost anything
+to fuel scaling you can use almost
+anything to decide what information is
+needed to deduce when an application
+should scale actually not an application
+when something should scale doesn't even
+have to be an application and the reason
+why i'm saying it doesn't have to be
+even an application is because cada
+works with any resource type it can be
+anything in kubernetes including custom
+resources as long as the scale
+sub-resource is defined if you don't
+know what scale is a sub-resource scale
+actually is then tough luck i'm not
+going to explain this here i can make
+another video until then google it scale
+sub-resource and you will find it out
+and cad is becoming huge it's becoming
+adopted by ever-growing projects not
+only on the metrics side but also among
+different projects that are using cada
+to scale themselves azure itself is
+already employing cad in couple of
+situations like azure container apps k
+native is looking into adopting canada
+as well so check it out there is a
+project separate project within canadian
+sandbox about adopting canada and you
+will find quite a few other projects
+that are already using it or are
+planning to use it now let's talk about
+pros and cons of using cada
+now the pros of using canada are
+relatively simple and straightforward to
+explain there are only two of them it
+works with almost any resource type
+anything you have in kubernetes can be
+scaled with cad as long as scale sub
+resource is defined and it should be and
+the second advantage of cad is that it
+works with almost anything as source of
+metrics whatever you have can almost
+anything you have can be used to fuel
+scaling to make decision
+when to scale and how to scale now as
+for cons as for negative sides well
+there isn't any i cannot think of
+anything bad to say about it it's one of
+those things where i could not find
+anything negative at least not when
+compared with alternative solutions all
+in all if you need to scale your
+applications or resources or something
+if you need to scale something based on
+more than memory cpu something more
+elaborated than memory and cpu which by
+the way is almost never enough then
+keda
+might be the solution for you and let me
+know in the comments what are you using
+to scale your applications and the rest
+of kubernetes resources let me know in
+the comments please
+you
+
+## 영상 3: Kubernetes cluster autoscaling for beginners (https://www.youtube.com/watch?v=jM36M39MA3I)
+
+so you've deployed your first kubernetes
+cluster you've created a bunch of
+container images you've learned how to
+write yaml
+and you've started deployments you're
+mastering cube ctl
+you have three kubernetes nodes you
+start deploying pods
+one by one developers productivity goes
+up you add load balancers
+ingresses life is good until
+we run out of space
+so the whole point of the cloud and
+kubernetes is to have the ability to
+scale
+we want to be able to add new nodes as
+our existing ones become
+full and as the demands drop we want to
+be able to delete those nodes
+and scale them down but it's not always
+as simple as that
+kubernetes has a scheduler the
+scheduler's job is to schedule pods onto
+nodes
+let's say we have one machine four cores
+of cpu we start deploying pods now by
+default kubernetes uses best effort
+quality of service to schedule pods
+meaning that pods will be treated with
+lowest priority they can use
+all of the cpu and all of the memory but
+will be killed if the system runs out of
+memory and will take low priority when
+scheduling onto nodes
+on the surface this might seem okay when
+starting out but as the box gets full
+things get messy that's why it's
+important to add cpu and memory request
+and limits when you do this kubernetes
+will give you guaranteed quality
+of service high priority when you tell
+kubernetes that your service needs for
+example
+500 millicourse of cpu it'll make better
+informed scheduling decisions when
+placing your pod onto nodes kind of like
+tetris
+so if you're new to this channel
+everything i do is on github if you
+check out the source code i have a
+kubernetes folder and in the kubernetes
+folder i have an auto scaling folder and
+everything we're going to be doing in
+this video is in the readme file so as
+part of the series we're going to be
+taking a look at kubernetes auto scaling
+we're going to take a look at cluster
+auto scaling as well as horizontal pod
+auto scaling so remember to check out
+the link down below to the source code
+so you can follow along
+now as an engineer we like to deploy
+stuff to kubernetes so i have this
+example application that we're going to
+be deploying this is a small application
+written in golang that every time it
+receives a request it generates some cpu
+load so you can see i have a kubernetes
+cluster
+with one node and if we take a look at
+the source code i have a kubernetes auto
+scaling folder and inside that i have a
+components folder with an example
+application
+in here i have app.go with a docker file
+and a deployment file so to build this
+application i'm going to change
+directory to that applications folder
+and i'm gonna say docker build dot minus
+t and i'm gonna tag this as an
+cpu version one so that's gonna go ahead
+and build up a docker container with our
+example app that we're gonna deploy to
+kubernetes
+now to push it up to a registry i can
+run docker push
+and push the application to docker hub
+now if we take a look at our deployment
+yaml file it's a very simple
+file that describes a deployment to
+kubernetes so in here we just name it
+application.cpu we're
+going to be deploying one replica and
+here is the container spec we call it
+application cpu
+and we pass in our image and we also
+expose port 80. and the interesting part
+here is that we're going to be putting
+some resource requirements for our
+application so we're going to tell
+kubernetes that we request 50 megs
+of memory and 500 milli cores of cpu
+remember that one core of cpu equals a
+thousand milli cores so we should be
+able to deploy
+two of these instances per cpu core of
+our kubernetes node so to deploy that
+i'm going to say cube ct i'll apply
+minus
+f and i'm going to deploy that yaml file
+that's going to create our deployment
+and it's also going to create a service
+that will expose our application so we
+can access it in the browser
+so if we run cubectl getpodso wide we
+can see we have one pod
+up and running on our node now the
+interesting part is when we say cube ctl
+top pods we can see that our application
+is currently using
+zero milli cores and seven megabytes of
+memory if we say cube ctl top
+nodes we can see that our kubernetes
+node is using
+117 milli cores of cpu which is three
+percent and uses
+866 megabytes of memory that's 16
+of the total of memory available on the
+box so how does cube ctl know the
+metrics of our pods and also know the
+metrics of our node
+well this is where metric server comes
+in metric server is a component that
+runs in the kubernetes control plane
+that provides crucial metrics like cpu
+and memory
+back to the kubernetes api server
+kubernetes can then use this for
+built-in
+auto scaling pipelines like cluster auto
+scalers horizontal
+and vertical pod auto scalers so metric
+server is available on github and it's
+maintained by the community if you have
+a kubernetes cluster you can say cube
+ctl
+get pods in the cube system namespace
+and this will show you the metric server
+running in the cube system namespace if
+you have it installed already you can
+check out the documentation it's very
+straightforward to deploy
+you simply pick the release you want and
+and download the yaml file so as part of
+this demo i went over to the releases
+page
+and i've taken the 0.3.7 and i
+downloaded this components.yaml file
+under the kubernetes auto scanning
+components file i've created a metrics
+server folder and i've added the
+metrixserver.yaml in here so even though
+i already have it installed i'm going to
+install it anyway to show you the
+process but i just say cubectl apply and
+i apply that metricserver yaml file
+that'll go ahead and update the metric
+server running in our cluster once you
+have metric server deployed it may take
+a couple of minutes for pod metrics and
+node metrics to come available now
+there's two very important points when
+it comes to auto scaling
+the first one is to make sure you
+understand cpu and memory usage of your
+pods running in your cluster use your
+monitoring to get this information and
+number two it's important to set
+resource requests and limits on your
+pods and deployments this will help
+kubernetes make smart decisions that
+we're going to be looking at now in
+terms of auto scaling
+so if we take a look at our
+deployment.yaml we can see i've set
+resource requests and limits the request
+values is what's important to allow
+kubernetes to make those smart
+scheduling decisions so i've indicated
+here that i need 50 megabytes of memory
+and then i need
+500 milli cores of cpu so given i have a
+four
+core machine in my cluster one core
+equates to roughly 1024 milli cores
+i'm going to multiply this by four and
+this is the total number of milli cores
+that i should have
+in my cluster and if i divide this by
+500 we can see i can
+deploy roughly eight pods to a machine
+before that box will become full
+this means that the scheduler can make
+more informed decisions about where to
+place
+our pods if we have more than one node
+running in the cluster
+now to simulate us deploying
+applications to our node what i'm going
+to do is i'm going to scale up this
+deployment to two replicas now when i do
+this we can see that we're adding
+more pods to the same node when we say
+cube ctl
+top nodes we can see that the
+utilization on the node is still the
+same but when i say cube ctl describe
+node there's a little section that's
+very important which is about
+allocated resources we can see that we
+have requested 43 percent
+of the cpu on this box already and let's
+see what happens when i scale up to
+three pods if i do cube ctl describe
+node now
+and i take a look at the allocated
+resources we can see we're now using 56
+of cpu so as we scale up our pods given
+we have request values on cpu we're
+allocating more cpu
+to our pods so kubernetes is able to
+tell us exactly how much cpu it's using
+and how much it has left
+now what happens when our developer
+teams start deploying more and more
+applications to simulate that
+let's scale up to 12 and let's say cube
+ctrl get pods
+and we can see that all of these pods
+are now in pending state so this means
+we've run out of space
+on our node and if i say cube ctl
+describe pod and i describe one of these
+pods we can see
+zero out of one nodes are available in
+if sufficient cpu
+and if we say describe node we can also
+see that we're at capacity now given
+this has happened to our cluster
+this could have caused an outage also
+usually this is the time when everyone
+comes together
+and starts to make a decision on whether
+or not we should be adding the nodes to
+our cluster
+and then manually going and adding those
+machines and scaling up
+but not today
+now if we take a closer look at the cube
+ctl describe
+pod command on one of the pods that
+we're in a pending status
+and we scroll down to the events we can
+see that we have an event called
+triggered scale up
+by the cluster auto scanner and it says
+pod triggered scaling up from one to two
+maximum five nodes this is because we
+have the kubernetes cluster autoscaler
+deployed in our cluster so the scheduler
+has now triggered the cluster auto
+scaler since it requires more space in
+the cluster and just a few moments later
+if i go cube ct i'll get nodes we can
+see that a second
+node has been added to the cluster
+automatically and if i do cube ctl get
+pods we can now see that all the pods
+have been
+successfully scheduled across these two
+nodes so this means that no one had to
+get up at night to scale up our cluster
+we also did not have to
+have any form of human interaction to
+make that decision and manually scale
+that cluster up it's very important that
+we put resource requests and limits on
+our deployments so that the scheduler
+can make smart decisions when scheduling
+and also understand
+when it runs out of capacity and it's
+able to trigger the cluster auto scaler
+the cluster autoscaler is also part of
+the kubernetes community
+and it's also on github under the
+kubernetes auto scaler guitar brepo they
+have full documentation about the
+cluster auto scaler and what cloud
+providers are supported now it's also
+important to remember
+that there is logic in the cluster
+autoscaler that serves
+each different cloud provider so it's
+very important to deploy the right
+cluster autoscaler
+for your cloud provider so if we take a
+look at this they have an aws one so aws
+has a cluster auto scaler which you can
+deploy following the aws
+instructions here now the cluster
+autoscaler for amazon relies on the auto
+scaling groups for ec2 instances so
+basically the cluster autoscaler will
+talk to amazon
+auto scaling groups and trigger a scale
+up of the ec2
+instances whenever your cluster needs to
+scale up for microsoft azure it's pretty
+similar so there's multiple deployment
+manifests available for azure
+such as virtual machine scale sets
+standard virtual machines as well as aks
+so in my example here i've used a simple
+aks cluster i said a z aks create and i
+created a cluster and enabled the auto
+scaler with this flag so i just say
+enable cluster autoscaler set the
+minimum and maximum
+number of nodes so it's also very
+important to know that every cluster
+autoscaler has
+lower and upper bounds of how high it's
+allowed to scale
+now let's say demand has dropped and we
+scale that cluster back down to
+four now we can see that if i say cube
+ct i'll get pods
+the pods are terminating and we should
+be left with four pods the cluster auto
+scaler should follow suit
+and start scaling down the cluster nodes
+now this does take a while depending on
+the cloud provider you're using
+as well as depending on the settings you
+use for that cluster auto scaler the
+auto scanner will not aggressively scale
+down because there can be other
+parts running on that node that might be
+critical so it'll take anywhere between
+5 and 10 minutes for this node to scale
+down
+so if i say cube ctrl get pods we can
+see we now only have
+four pods and if we say cube ctrl get
+nodes we still have two nodes and if i
+describe that second node
+and we take a look at the pods running
+we can see that we only have the q
+proxy pod running on this node so given
+the demand has dropped the cluster
+autoscaler will take some time and then
+trigger to scale this node down
+and after about 10 minutes we can see if
+i run cube ctrl get nodes we now only
+have one node so the cluster autoscaler
+has removed
+the node we no longer need now the
+cluster autoscaler works really well
+with the pod autoscaler also known as
+the horizontal part autoscaler or hpa
+now usually folks will start adding pods
+to their cluster without
+auto scaling so the cluster auto scaler
+is a great place to start
+because a lot of folks don't always
+understand exactly how much cpu and
+memory the
+microservices and pods will need so
+number one always to keep an eye on your
+metrics like your prometheus monitoring
+to make sure you start understanding
+resource
+requirements for your pods number two is
+to start adding resource limits and
+request values to your deployments so i
+hope this video helps you with
+auto scaling your cluster nodes so in
+the next video we're going to be taking
+a look at the horizontal pod autoscaler
+that will allow you to scale
+pods automatically so remember to like
+and subscribe and hit the bell
+notification so you get notified when i
+upload
+also be sure to check out the community
+page in the link down below
+and if you want to support the channel
+even further you can hit the join button
+and become a member so as always thanks
+for watching and until next time
+peace
+you

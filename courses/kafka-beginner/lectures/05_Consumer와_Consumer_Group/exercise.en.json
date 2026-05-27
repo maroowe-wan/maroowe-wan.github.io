@@ -1,0 +1,39 @@
+{
+  "lecture_no": 5,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "Run a consumer with the --from-beginning option to read all messages in the 'orders' topic from the start. After reviewing the messages, exit with Ctrl+C, then run the same command without --from-beginning and leave the consumer waiting for new messages.",
+      "starter": "# Step 1: Read all messages from the beginning\nkafka-console-consumer.sh \\\n  --topic ______ \\\n  --bootstrap-server ______ \\\n  ______\n\n# After Ctrl+C\n\n# Step 2: Wait for new messages only (without --from-beginning)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092",
+      "solution": "# Step 1: Read all messages from the beginning\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning\n\n# After Ctrl+C\n\n# Step 2: Wait for new messages only (without --from-beginning)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092",
+      "explanation": "Adding --from-beginning starts reading from the earliest offset — that is, the oldest message stored in the topic. Omitting this option uses the latest offset, meaning only messages that arrive after the command runs are received. Because Kafka does not delete messages after they are read, --from-beginning can be used at any time to re-read everything from the start.",
+      "hints": [
+        "Adding --from-beginning starts reading from the oldest offset.",
+        "The messages published in Lecture 4 are still stored in the topic, so all of them will be printed.",
+        "Running without --from-beginning leaves the cursor waiting silently for new messages. Send a new message with the producer and it will appear immediately."
+      ]
+    },
+    {
+      "prompt": "Run a consumer with group.id set to 'order-processors'. After consuming messages once, exit with Ctrl+C, then run the same group again to confirm that already-read messages are not printed again. Also use the kafka-consumer-groups.sh command to inspect the group's committed offset state.",
+      "starter": "# Step 1: Run consumer with group specified\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group ______ \\\n  --from-beginning\n\n# After Ctrl+C, run the same command again\n# (--from-beginning only takes effect when the group has no committed offset)\n\n# Step 2: Check group offset state\nkafka-consumer-groups.sh \\\n  --bootstrap-server localhost:9092 \\\n  --group ______ \\\n  --describe",
+      "solution": "# Step 1: Run consumer with group specified\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors \\\n  --from-beginning\n\n# After Ctrl+C, run the same command again → already-read messages are not printed\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors\n\n# Step 2: Check group offset state\nkafka-consumer-groups.sh \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors \\\n  --describe",
+      "explanation": "Specifying --group commits consumed offsets to Kafka's internal topic (__consumer_offsets) under that group name. Running the same group again starts reading from the position after the last committed offset, so already-processed messages are not printed again. The --describe output shows CURRENT-OFFSET (the current read position), LOG-END-OFFSET (the offset at the end of the partition), and LAG (number of messages remaining to be consumed).",
+      "hints": [
+        "Adding --group order-processors commits offsets under that group name.",
+        "After the first run exits with Ctrl+C, running the same command again will not print the already-committed messages.",
+        "In the kafka-consumer-groups.sh --describe output, a LAG of 0 means the group has consumed all messages."
+      ]
+    },
+    {
+      "prompt": "Open two terminals side by side and run two consumers in the same group (order-processors). From a third terminal, use the producer to quickly publish 6 messages to the orders topic (which has 3 partitions). Verify that messages arrive split between the two consumers, and confirm that the total across both consumers adds up to 6.",
+      "starter": "# Terminal 1: Consumer A (group order-processors)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group ______\n\n# Terminal 2: Consumer B (same group)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group ______\n\n# Terminal 3: Publish 6 messages with the producer\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092\n# Enter at the prompt:\n# msg-1, msg-2, msg-3, msg-4, msg-5, msg-6 (one per Enter)",
+      "solution": "# Terminal 1: Consumer A\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors\n\n# Terminal 2: Consumer B (same group)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors\n\n# Terminal 3: Publish 6 messages with the producer\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092\n> msg-1\n> msg-2\n> msg-3\n> msg-4\n> msg-5\n> msg-6\n# Exit with Ctrl+C\n\n# Result: 6 messages arrive split between the two consumers (e.g., A gets 2-3, B gets 3-4)\n# The combined output across both terminals should total 6",
+      "explanation": "Consumers sharing the same group.id automatically divide up the partitions. Since the orders topic has 3 partitions, 2 consumers split them (e.g., A takes partitions 0 and 1, B takes partition 2). Messages arrive split between the two consumers, but the group as a whole consumes all 6. This is Consumer Group parallel consumption. Note that messages in the same partition are assigned to only one consumer, so the same message never appears in both terminals.",
+      "hints": [
+        "Both terminals must specify --group order-processors identically. The same group.id puts them in the same group.",
+        "With 3 partitions and 2 consumers, each consumer takes a different partition. The producer distributes messages across partitions, and each consumer only receives its own partition's messages.",
+        "The total message count across both consumers should match the 6 messages published. If the same message appears in both terminals, the group.id values are different."
+      ]
+    }
+  ]
+}

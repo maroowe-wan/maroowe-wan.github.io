@@ -1,0 +1,50 @@
+{
+  "lecture_no": 2,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "워밍업: Node.js 웹 애플리케이션용 Dockerfile을 작성하되, 레이어 캐싱 순서가 올바르게 되도록 한다. 앱은 포트 3000에서 수신하고 'node server.js'로 시작한다. 베이스 이미지는 'node:18-alpine'을 사용하라. 'package*.json'을 나머지 소스보다 먼저 복사하는 이유를 주석으로 설명하라.",
+      "starter": "# 프로젝트 루트에 Dockerfile을 생성한다.\n# 프로젝트 디렉터리에는 server.js  package.json  package-lock.json 파일이 있다.\n\n# 여기에 Dockerfile 내용을 작성하라:\n",
+      "solution": "FROM node:18-alpine\nWORKDIR /app\n# 의존성 매니페스트를 먼저 복사해서 Docker가 설치 레이어를 캐시하도록 한다.\n# server.js만 변경된 경우 이 레이어는 재사용되어 npm install을 건너뛴다.\nCOPY package*.json ./\nRUN npm install\nCOPY . .\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]",
+      "explanation": "Docker는 이미지를 레이어 단위로 빌드하고 각 레이어를 캐시한다. 재빌드 시 입력이 변경되지 않은 레이어는 캐시에서 제공한다. 'package*.json'을 복사하고 'npm install'을 실행한 뒤에 애플리케이션 소스를 복사하면, 비용이 큰 설치 단계는 의존성 목록이 바뀔 때만 재실행된다. 'server.js'만 변경된 경우 마지막 'COPY . .' 레이어와 그 이후만 무효화되므로 빌드가 훨씬 빨라진다. 반대로 'COPY . .'를 먼저 하면 소스 변경이 있을 때마다(의존성 변경이 없어도) 설치 캐시가 무효화된다.",
+      "hints": [
+        "핵심은 순서다. Docker는 처음으로 변경된 레이어 이후를 모두 무효화한다. 가장 자주 변경되는 파일(소스코드)과 가장 드물게 변경되는 파일(package.json)을 구분해 생각하라.",
+        "EXPOSE는 실제로 포트를 공개하지 않는다. 의도를 문서화하는 역할이다. 실제 포트 매핑은 'docker run -p'에서 이루어진다.",
+        "CMD는 JSON 배열 형태(exec form)를 사용해 셸 처리를 피한다. CMD [\"node\", \"server.js\"] 형태를 CMD node server.js보다 권장한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습 A — ECR 리포지토리를 생성하고 Docker를 인증한다. AWS CLI를 사용해: (1) 'us-east-1' 리전에 'my-app'이라는 이름의 프라이빗 ECR 리포지토리를 생성하고, (2) 로컬 Docker 데몬을 해당 레지스트리에 인증하라. '<account-id>' 자리에는 실제 12자리 AWS 계정 ID를 입력한다.",
+      "starter": "# 1단계: ECR 리포지토리 생성\naws ecr create-repository \\\n  --repository-name ________ \\\n  --region ________\n\n# 2단계: Docker 인증\naws ecr get-login-password --region ________ \\\n  | docker login --username AWS --password-stdin \\\n    ________.dkr.ecr.________.amazonaws.com",
+      "solution": "# 1단계: ECR 리포지토리 생성\naws ecr create-repository \\\n  --repository-name my-app \\\n  --region us-east-1\n\n# 2단계: Docker 인증\naws ecr get-login-password --region us-east-1 \\\n  | docker login --username AWS --password-stdin \\\n    <account-id>.dkr.ecr.us-east-1.amazonaws.com",
+      "explanation": "'aws ecr get-login-password'는 AWS에 단기 인증 토큰을 요청해 stdout에 출력한다. 파이프를 통해 '--password-stdin'으로 'docker login'에 직접 전달하므로 시크릿이 셸 히스토리에 남지 않는다. 레지스트리 URL 형태는 항상 '<account-id>.dkr.ecr.<region>.amazonaws.com'이며, 해당 리전의 계정 ECR 엔드포인트를 식별한다. 로그인 토큰은 12시간 후 만료되므로 프로덕션 파이프라인은 빌드 시작 시마다 재인증한다.",
+      "hints": [
+        "'UnauthorizedException'이 발생하면 AWS CLI에 'ecr:GetAuthorizationToken'과 'ecr:CreateRepository' 권한이 있는 자격증명이 설정되어 있는지 확인하라.",
+        "12자리 계정 ID는 AWS 콘솔 우측 상단에서 확인하거나, 다음 명령으로 확인할 수 있다: aws sts get-caller-identity --query Account --output text",
+        "리포지토리가 생성됐는지 확인하려면: aws ecr describe-repositories --region us-east-1"
+      ]
+    },
+    {
+      "prompt": "핵심 실습 B — 현재 Git 커밋 SHA로 태그를 붙여 이미지를 빌드하고 ECR에 푸시한다. ECR 리포지토리 URL이 '<account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app'이라고 가정하고, 빌드 → 커밋 SHA 태깅 → 푸시 → ECR에서 태그 확인, 이 네 단계 명령을 작성하라.",
+      "starter": "# 빌드\ndocker build -t my-app .\n\n# 짧은 커밋 SHA로 태깅 (git 명령을 채우라)\ndocker tag my-app:latest \\\n  <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:________\n\n# 푸시\ndocker push \\\n  ________\n\n# ECR에서 이미지 태그가 존재하는지 확인\naws ecr describe-images \\\n  --repository-name my-app \\\n  --region us-east-1",
+      "solution": "# 빌드\ndocker build -t my-app .\n\n# 짧은 커밋 SHA로 태깅\ndocker tag my-app:latest \\\n  <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)\n\n# 푸시\ndocker push \\\n  <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)\n\n# ECR에서 이미지 태그가 존재하는지 확인\naws ecr describe-images \\\n  --repository-name my-app \\\n  --region us-east-1",
+      "explanation": "'git rev-parse --short HEAD'는 현재 커밋의 짧은(7자) SHA를 출력한다. 예: 'a1b9f3c'. 이것을 이미지 태그로 사용하면 불변의 추적 가능한 아티팩트가 만들어진다. 이 태그는 어떤 커밋이 이 이미지를 만들었는지 정확히 알려준다. 'docker tag' 명령은 별칭을 만들 뿐이다. 이미지를 복사하지 않고 동일한 레이어를 가리키는 다른 이름을 추가한다. 'docker push'는 해당 레지스트리/리포지토리:태그 주소로 레이어를 ECR에 업로드한다. 'describe-images' 호출은 태그가 ECR에 나타나고 쿠버네티스 Deployment 매니페스트에서 참조할 준비가 됐음을 확인한다.",
+      "hints": [
+        "가독성을 위해 SHA를 변수에 담을 수 있다: IMAGE_TAG=$(git rev-parse --short HEAD), 그런 다음 tag와 push 명령에서 $IMAGE_TAG를 사용한다.",
+        "'docker push'가 'no basic auth credentials'를 반환하면, 12시간짜리 토큰이 만료됐을 수 있다. 이전 단계의 'aws ecr get-login-password' 파이프를 다시 실행하라.",
+        "전체 ECR 이미지 이름 형식: <account-id>.dkr.ecr.<region>.amazonaws.com/<repo-name>:<tag> — 모든 부분이 필요하다."
+      ]
+    },
+    {
+      "prompt": "응용 도전 — 워밍업의 단일 스테이지 Dockerfile을 더 작은 최종 이미지를 만드는 멀티 스테이지 빌드로 변환하라. 스테이지 1('builder'로 명명)에서는 devDependencies를 포함한 모든 의존성을 설치한다. 스테이지 2(최종 이미지)는 'node:18-alpine'에서 시작하며, 스테이지 1에서 프로덕션 node_modules와 애플리케이션 소스만 복사하고 동일한 CMD를 설정한다. 최종 이미지가 왜 더 작은지 설명하라.",
+      "starter": "# 멀티 스테이지 Dockerfile\n# 스테이지 1: 빌드 스테이지\nFROM node:18-alpine AS builder\nWORKDIR /app\n# ... devDependencies를 포함한 모든 의존성 설치\n\n# 스테이지 2: 프로덕션 이미지\nFROM ________\nWORKDIR /app\n# 빌더 스테이지에서 실행 앱에 필요한 것만 복사\n# COPY --from=builder ...\n\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]",
+      "solution": "# 스테이지 1: 모든 의존성 설치 (dev 포함)\nFROM node:18-alpine AS builder\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install\nCOPY . .\n\n# 스테이지 2: 프로덕션 이미지 — 런타임 아티팩트만\nFROM node:18-alpine\nWORKDIR /app\n# 빌더에서 프로덕션 node_modules와 애플리케이션 코드만 복사\nCOPY --from=builder /app/node_modules ./node_modules\nCOPY --from=builder /app/server.js ./server.js\n# 추가 소스 파일/디렉터리가 있으면 함께 복사한다:\n# COPY --from=builder /app/src ./src\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]",
+      "explanation": "단일 스테이지 빌드에서는 빌드 과정에서 사용된 모든 도구(컴파일러, 테스트 러너, devDependencies)가 최종 이미지에 포함된다. 멀티 스테이지 빌드는 이를 해결한다. 마지막 스테이지에는 'COPY --from='으로 명시적으로 옮긴 아티팩트만 포함된다. 최종 이미지에는 빌드 툴체인도, devDependencies도, 중간 빌드 파일도 없다 — 최소한의 런타임만 남는다. 실제로 이미지 크기가 30~70% 줄어들어 풀 시간이 단축되고 공격 표면도 줄어든다(패키지가 적을수록 잠재적 취약점도 적다). '--from=builder' 문법은 어느 스테이지에서 복사할지 지정한다.",
+      "hints": [
+        "플래그 없이 실행하는 npm install은 'dependencies'와 'devDependencies'를 모두 설치한다. 스테이지 2에서 node_modules를 복사하는 대신 'npm install --omit=dev'를 실행하는 방법도 있다.",
+        "전체 디렉터리를 복사할 수 있다: COPY --from=builder /app/dist ./dist — TypeScript나 React 빌드 결과물에 유용하다.",
+        "빌드 후 이미지 크기를 비교해 보라: docker images my-app — 멀티 스테이지 결과와 기존 단일 스테이지 이미지의 크기를 비교한다."
+      ]
+    }
+  ]
+}

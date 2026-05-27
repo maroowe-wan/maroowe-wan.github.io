@@ -1,0 +1,1290 @@
+## 영상 1: Argo Rollouts Demo (https://www.youtube.com/watch?v=hIL0E2gLkf8)
+
+in this video we will go through a quick
+overview and demo of argo rollouts argo
+rollouts
+is a progressive delivery controller
+which provides additional
+update strategies such as blue green and
+canary to kubernetes
+and it does this by integrating with
+various service meshes and
+ingress controllers for the purposes of
+shaping
+and safely shifting traffic to versions
+of the application
+during an update argo rollouts will
+query metric providers
+and perform analysis on the update and
+based on these metrics
+is able to either automatically promote
+the rollout to the new version
+or roll back to the previous stable
+version
+so first off let's explain what exactly
+is progressive delivery
+progressive delivery is the practice of
+gradually rolling out an
+update to a progressively larger and
+larger subset
+of users and by doing this you are able
+to limit the potential negative
+impact of the update in the event that
+something goes wrong
+let's see how this can be applied in
+practice using argo rollouts
+let's say we want to deploy version 2 of
+our application
+after updating our spec rollouts can
+expose a small percentage of traffic to
+that new version
+let's say five percent the controller
+then waits while metrics are collected
+on the application behavior after the
+update
+next those metrics will be analyzed to
+determine whether or not the change is
+causing any problems
+if it's going smoothly the update
+continues and the weight
+is increased again and the process
+repeats
+otherwise if the analysis fails
+inaugural rollouts will abort the update
+and automatically roll back to the
+previous stable version
+our goal rollouts introduces some new
+custom resources to your cluster
+the rollout custom resource is intended
+to be a drop-in
+replacement for a deployment it has an
+identical spec
+but with added blue-green and canary
+strategies
+the rollout manages your networking and
+service mesh related resources
+in order to shape the traffic according
+to your rollout steps
+it then automates the promotion of your
+rollout based on analysis
+analysis is a custom resource which lets
+you describe how to perform analysis
+it lets you define what metrics to
+measure and when
+and how to interpret those measurements
+as
+an update is happening analysis
+continuously queries metric providers
+to measure the success of an update
+so now we'll go through a quick demo of
+argo rollouts in action
+at the top left is the cubesat argo
+rollouts plugin
+showing a visual representation of
+varela
+this rollout is using the canary
+strategy with the istio traffic routing
+integration
+it's running with a single replica and
+it's currently running revision 1 of our
+application
+at the top right we have our demo
+and every bubble that you see folding by
+is a request
+which our browser is making to the
+backend
+the backend responds with a color which
+indicates which version
+of the app it is there's a bar chart at
+the bottom
+which represents the percentage of
+requests that were handled by
+the different versions of the backend
+and right now
+since we are only running a single
+version it's showing
+it as 100 of the blue
+at the bottom right of the screen is
+kiali which is a
+management console for the istio service
+mesh
+currently it's showing us that we have
+traffic coming from the
+istio gateway which is being split
+between
+two services istio rollout stable
+and istio rollout canary and 100
+of that traffic is being directed to the
+stable version
+and currently both of the surfaces are
+reaching the same
+set of pods finally at the bottom left
+is the rollout
+specification and as you can see the
+rollout
+looks nearly identical to the deployment
+resource
+but it does have a new section
+which contains the canary update
+strategy
+the strategy describes the steps that
+the rollout will take during an update
+and for now you should understand that
+the rollout will initially direct
+10 of the traffic to the canary and then
+pause
+indefinitely so let's go ahead and
+perform an
+update i am going to change the
+image from the blue to the yellow image
+so what you see happening is that the
+controller has started spinning up the
+new version of the application
+which you can see by the revision 2
+replica set and once the new version is
+running
+if you can recall from our steps the
+rollout will send 10
+of the traffic to the canary and then
+pause indefinitely
+in our demo application you can now see
+the yellow version that the back end is
+servicing
+some of our requests and from the bar
+chart
+roughly 10 of the requests are being
+handled by the yellow version
+the rollout controller also kicked off
+analysis run and that's going to take
+some time to
+gather some measurements so while we're
+waiting let's go ahead and look at the
+analysis spec
+so this is the analysis template that
+our rollout is using
+this analysis is using the prometheus
+metric provider
+and performing queries at 20 second
+intervals
+the query that is performing is taking
+the total number of
+non 500 requests and dividing it by
+total request which is
+effectively our success rate that result
+is then
+evaluated by the success condition
+which if it ever drops below 90
+the analysis will fail and we will
+automatically
+roll back in the plug-in
+each of these green ticks represents a
+measurement which was taken
+and it as successful
+and in kyali we can now see that roughly
+10 of the traffic is reaching our canary
+service
+which is then being directed to the
+canary
+pods
+so now let's introduce some errors in
+and see how the rollout behaves so our
+demo app allows me to adjust
+the error rate using this slider
+and i will do that for the
+yellow yellow surface
+okay so i basically injected errors for
+our yellow backend
+and what should now happen is that the
+next measurement that the controller
+takes
+should evaluate to a success rate
+below 90 which will then abort the
+and looking at kyoli we if you look at
+the traffic pack
+we can confirm that this success rate
+has
+dropped and and now
+and sure enough on the plug-in
+we see that it took a failed measurement
+indicated by this red x and the analysis
+run
+has been marked failed
+and the replica set has then been scaled
+down
+and the rollout is now degraded
+and from our demo app we can see that
+our back-end is no longer servicing any
+uh requests
+by our yellow version
+so that's a quick demo of vargo rollouts
+argument rollouts integrates with many
+common service meshes and ingers
+controllers
+including the ones listed here one thing
+to note is that the use of a service
+measure english controller is optional
+since it is possible to achieve canary
+and blue-green updates without the use
+of a traffic provider
+in addition rollouts also integrates
+with common metric providers
+you can also perform queries against
+your own custom metric provider
+or even run kubernetes jobs to determine
+the
+success of analysis using your own
+container and scripts
+to learn more about rollouts please
+visit our github page
+read our blog or join our slack
+
+## 영상 2: Argo Rollouts - Canary Deployments Made Easy In Kubernetes (https://www.youtube.com/watch?v=84Ky0aPbHvY)
+
+in the previous video we explored
+progressive delivery rolling updates
+blue green canary
+what it's good for what it's not good
+for and so on and so
+forth the reason why i'm saying that
+it's twofold first if you haven't seen
+that video
+follow the link it's up there somewhere
+i think
+uh and watch it because it provides the
+base for what we are going to do today
+and what we are going to do to get that
+today is explore
+practical implementation of progressive
+delivery
+to be more precise we are going to see
+how to do canary deployments
+and the reason why we are doing all that
+is because we are going to explore
+argo rollouts argo rollouts is one of
+the few solutions today
+to use to actually implement progressive
+the alternative would be flagger but
+anyways we are going to see
+how we can use argo rollouts to do
+all that to do country deployments and
+the reason why we are doing all that
+first of all because progressive
+delivery is cool you should use it
+second because argo rollouts is great
+and third because i am working on a next
+section of the devops catalog
+which will go through all this in more
+depth so if you like this video
+and you would like to go into more depth
+of this subject please consider taking
+this course or a video
+you will find the link to the course or
+the book
+whichever format you prefer in the
+comment section
+and now let's get going and see argo
+rollouts
+hands-on practice what's or not
+in 20 minutes or less
+let's deploy the first release but
+before we do that
+i'm going to i will use helm to deploy
+the release the first and the second and
+the third and all of them
+but it might be too complicated to show
+you what's going on by
+going through helm templates and cam
+values what's or not
+so instead i'm going to convert the helm
+definitions that i will use to help
+template which will output
+typical kubernetes yaml that might be
+easier to show you what's going on
+i will not explain everything i have
+here but two critical
+uh components let's say and the first
+one
+actually the second the first one let's
+go to the analysis first
+is analysis template and that is the
+template
+that defines uh what are the metrics
+that should be
+used to decide whether canary deployment
+should continue progressing
+or it should roll back to the previous
+release
+and here i have two one it's called
+success rate
+by the way this is using prometeuse it
+could be using something
+else so one is success rate
+that says hey a success condition is if
+80 or more of the requests are
+successful
+and failure is if it's the opposite if
+it's less than 80
+successful this is the address of my
+primitive server
+taylor limit set to 3 meaning that if
+canary process fails to
+retrieve satisfying result from from it
+used three times
+it will it will roll back and then we
+have query
+uh this is not a video about remedius i
+will not explain it in detail except
+that
+to say that it measures the success rate
+of my requests
+of request to my application and the
+second one
+that measures the duration of the
+request
+responses actually so two metrics two
+queries
+that will be used to evaluate uh canary
+deployments and decide what to do next
+and then we go to the main guy which is
+rollout
+this is argo rollout and the definition
+is
+almost exactly the same as the
+deployment so everything you do with
+deployments you can do with argo
+with few differences three differences
+actually first of all api version
+and kind are different it's not
+deployment it is rollout and api version
+is not v1
+it is argo project io v1 alpha 1
+for now and the second important
+difference
+everything is the same is in the
+strategy
+now kubernetes deployment strategy can
+be rolling updates or
+recreate and with argo rollouts we can
+have
+canary and blue green as well probably
+more by the time you're watching this
+and in it we are saying since this is
+going to be canary
+hey there there are two services the
+stable service is where all the requests
+should go
+this is that's the service that will
+serve requests to the
+main release let's say or the current
+and country service that will be used
+for
+serving requests going to a percentage
+of
+a new release traffic routing exist you
+it could be
+benzene extinguishers or linker d quite
+a few others
+and then we have the main main part
+which is steps
+and in this case step says set
+the weight to 10 meaning them start
+sending
+10 percent of the requests to the new
+release and then
+pause for two minutes and
+let me stop there actually why do we
+want to pause for two minutes
+uh in this case two minutes sounds like
+like a reasonable
+period of time for prometheus to collect
+sufficient amount of metrics
+and then we have set weight to 30
+meaning increase the reach of the new
+release to 30 percent
+pause again for 30 seconds and at this
+time we should probably
+start evaluating the new release
+and if you remember the analysis
+actually
+not if you remember the analysis if you
+see here
+here in analysis starting step two
+meaning that
+hey when you reach this part when you
+increase the reach of the new release to
+start analyzing it and decide what to do
+next
+and then we're after 30 seconds we are
+changing the weight to 50 and pausing
+for another 30 seconds and after that it
+should roll out the new release
+fully the analysis section is using the
+this is the same template that we saw
+earlier that's the one that
+defines queries for the success rate
+and average request duration and passing
+a few
+arguments to that analysis okay
+that should be pretty straightforward so
+i'm going to deploy the first release
+and since the command is pretty large
+i'm going to copy and paste it
+here we go deploying the first release
+so let's see what's going on we are
+going to execute
+cube cattle argo uh i installed cube
+cattle argus
+argo rollouts plugin rollouts
+and the namespace is devops toolkit
+and we want to get a rollout
+called devops toolkit devops
+toolkit and i want to watch
+the progress
+and we can see that it is progressing
+still
+actually it's already finished it's
+progressing because uh
+and that in that moment uh horizontal
+powder scale did not finish now it's
+fully rolled out
+we can see that six out of six steps
+were executed
+and the weight is set to 100 meaning
+all the requests are going to this
+release this was very fast
+because argo rollout skipped doing
+calorie deployments
+because it is pointless you don't do
+canaris on the first release you do it
+in all other releases but not of the
+first release because
+there is no previous release um to use
+to measure things and roll back and
+what's or not
+okay so first release is uneventful
+things are going to start
+looking much more interesting in the
+second so let me start sending some
+requests to my application
+and you're seeing 404 not found
+in a loop i'm doing that intentionally
+because i want to see
+what happens if there is something wrong
+with the application i'm simulating as
+if the new release will be
+incorrect let's say
+so uh upgrading to the new release helm
+upgrade devops toolkit
+helm and then the namespace
+is devops toolkit i want to reuse
+values and i'm going to set
+image tag to new release which is 2.9.9
+and let's watch what's going on cube
+cattle argo
+rollouts namespace devops
+toolkit and we want to get
+rollout devops toolkit
+devops toolkit
+and i want to watch the progress
+so we can see that it paused right now
+here
+it paused because the first step if you
+remember
+in the steps is to set the weight
+to 10 it did that
+and to pause for two minutes
+that was specified in the steps
+now let me i will fast forward to the
+end of those
+first three minutes because after that
+the action will start so first three
+minutes think of it as
+heating up preparing for the battle
+we're almost there we're almost at 120
+seconds or two minutes it will take a
+few seconds
+more and that soon argue rollouts
+will increase the weight to 30 meaning
+it will start sending thirty percent
+of the requests to the new release and
+here we go thirty percent
+and then it immediately immediately
+started analyzing
+the new release the reason why it's
+doing that because we told it i told it
+to
+that's the analysis template that was
+used
+we can see that two are successful and
+two failed
+uh the average request duration seems to
+be okay
+but the error rate is
+higher than expected and now it's three
+failures
+and we said that if it reaches three it
+should roll back so let's see whether
+that will happen
+uh right now the weight is set to 50
+percent
+and it is still failing and we have we
+degraded the new release was
+unsuccessful and it automatically
+degraded it
+what that means really is that it shut
+down
+the pods of the new release it scaled it
+it changed the weight the point
+to go back to 100 being on the old
+so it's as if it never happened
+it failed the tests it failed the
+analysis
+and right now uh that's what we have
+we have a failed release detected by
+country deployments
+now let me stop this loop and start
+good requests now we see that the
+responses are 200
+and now i'm simulating how would country
+deployments look like
+if they're if everything works as
+expected
+so i'm going to deploy a new release now
+the one that is supposed to be good uh
+by doing the same thing as before
+except that i will use new image stock
+2.9.17
+previous was 2.9.9 and let's see
+whether all that works remember now
+we're simulating what happens
+if uh the release is okay so let me
+watch the progress by executing
+uh cube cattle argo rollouts
+in the namespace devops toolkit
+and i want to get rollout
+there was toolkit and i want to watch
+let's see what's going on we can see
+that right now
+it is on the first step it set the
+weight to 10
+just as before and it is waiting for two
+minutes until it progresses to the
+next step which is to increase the reach
+uh to 30 percent and to start
+uh performing the analysis
+this time it should work correctly
+hopefully let's see
+i will fast forward to the end of those
+two minutes just for you not to
+watch me watch the screen we are almost
+at
+seconds it should now move increase the
+weight to 30 percent and start
+another round of analysis let's go
+come on here we go and we can see that
+this time
+two only two analysis were executed and
+they're successful
+and now it decreased to four remember we
+are running two analysis in parallel
+and it's all still successful and then
+let's say 10 second six successful
+at one moment it should increase the
+actual weight to 50
+because everything is going great
+everything is perfect
+so far fifty percent it increased was
+fifty percent
+it continues analyzing all the time
+analyzing analyzing analyzing data
+double checking everything looks okay
+this is like a soccer match
+uh it's going great it's going great 10
+executed they were all successful 50
+uh of the requests are going to the new
+it still looks brilliant it still looks
+great our team is winning
+let's go let's go and uh
+here we go and now it is rolling out
+hundred percent
+here we go 100 actual weight is going to
+renew release canary deployments were
+the first the second release were
+unsuccessful it failed the test it
+failed the analysis the second one the
+third one
+was successful and argo rollouts rolled
+out
+100 of the requests to the new release
+it is healthy as you can see here at the
+top
+um and we are successful
+that's it that's all it takes to
+apply country deployments or even blue
+green deployments even though i haven't
+didn't didn't show you how to do it but
+it's more or less the same
+all we have to do is do the same things
+that we would normally do if you have
+uh kubernetes services and ingress and
+relistio
+or this or that everything stays the
+same except
+that you modify your kubernetes
+deployment jumbo file and change
+deployment to rollout and
+change the strategy to canary or blue
+green you need to define the steps
+hey do this and then do that almost like
+if it's a pipeline
+uh the target rollout will use to
+evaluate whether to move forward or move
+back
+you can help yourself additionally by
+defining
+analysis template that will help
+roll out uh find out where is the
+information it should use how it should
+better the metrics how it should create
+the metrics and what are the formulas it
+should use
+to do your job uh and by your job i mean
+decide whether to roll forward
+or roll back completely that's all there
+thank you for watching if you if you
+like this video click the like button it
+helps a lot click it right now
+and please subscribe to the channel if
+you would like to support this channel
+um to buy me pizza or
+bread bowl or coffee or something like
+that so that i can work on more videos
+like this
+uh please consider purchasing
+one of the books or the courses
+that's how this channel is financed and
+finally
+the last one the newest course has many
+many cool things
+but the one that is really matters for
+this in the concept of
+calorie deployments and algorithms is
+that in the latest section the one that
+will be released
+maybe a week from now or something like
+that you will find
+uh argo rollouts among many others in
+much more detail
+much deeper exploration of the subject
+thank you so much for watching see you
+next time cheers
+
+## 영상 3: Kubernetes Deployment strategies | Canary Deployment | Argo rollout (https://www.youtube.com/watch?v=6zWfVqkKuyI)
+
+okay because now we saw
+that
+blue green is not always suitable
+now when to use cannery now before that
+if you understand the word canary it
+will be easy for you to know
+so
+in the olden days when they were
+kind of digging mines so i hope everyone
+understand what is the mind right a coal
+mine or a gold mine or a diamond mine
+okay now it goes very deep into the
+earth or into a location where
+you won't even have oxygen
+but
+not just oxygen there will be lot of
+other
+gases which is not
+consumable by a human being right toxic
+ones which we don't know especially like
+if you dig at some place there might be
+some toxic gases
+now what will happen
+when the technology was not so great
+and it's not easy for us to know what is
+happening so now when people go inside
+and when they are they're stuck hovers
+together and if they inhale then it's
+going to be harmful right that's when
+they started using a bird called a
+scannery bird
+so it was just like an indication where
+that bird was very sensitive or the
+birds are very sensitive so if there is
+any kind of such toxic gases it
+indicatedly affects that
+canary bird with that anyone can know
+saying that hey there is something
+harmful so we have to carry
+masks or those kind of things
+okay so the purpose of canary is
+it lets you know that there is something
+wrong so that instead of sending
+all the people inside and get affected
+maybe one or two people with cannery can
+go find out and everything is good then
+you send all the remaining people okay
+so that's the same concept in deployment
+so now what happens
+if your application has certain amount
+of replicas
+if you talk about blue green method
+problem is you're switching the entire
+traffic
+okay once again i'm not worried about
+how the containers are created but
+if your application
+doesn't want
+to switch all the traffic to the new
+version of the application
+whereas you want to give it only to a
+subset of users or
+you want only a percentage of the
+traffic coming from the users
+go to the
+new version of your application
+so this way
+if there is a problem
+only a limited amount of users will be
+affected not everyone okay so such a way
+is what we call it as canary so canary
+means
+a fixed set of users
+or a subset so don't do the deployment
+for everyone like in the blue green
+whoever is accessing the actual service
+everyone will get the deployment right
+which is whether blue or green whatever
+that you have done whereas in this
+method
+we are not
+going to switch it to every customer we
+can decide only a particular customer
+or a subset of users are going to
+receive and this will help us to do some
+testing and also understand how the
+application is behaving and only then if
+it is working i can keep increasing the
+traffic so for example let's say
+i have some replicas let's say i have
+four replicas
+now i don't want to change everything
+and then test so i want to first release
+only 25 of the traffic
+then
+we will see how it is working
+then we will release 50 of the traffic
+and then we will see how the new version
+of the application is working then 75
+and then i will change to 100 which is
+what we call it as progressive
+okay
+now this is where
+in canary when you are deploying that is
+replacing your old version with new
+version you take a percentage and based
+on that you kind of send the traffic
+but once again
+the difference here is
+along with your existing replicas your
+new replicas will also be running which
+now in a canary deployment so let's
+understand
+i have three replicas
+now i decide 30 percent so what is 30 of
+3 probably one replica so now
+i have one old build now i want to
+replace it with new build at a time i
+will not replace with three replicas so
+first
+what is the percentage 30 so 30 means
+one part so first i will create one new
+pod
+with the
+new
+image or the new build but understand
+the traffic will be flowing for all of
+them now this is where once this new is
+successfully up you will replace
+one of the old one because all together
+you want only three replicas but in this
+what happens
+you can now see you are still having
+three replicas but
+too old and one new replica so this is
+how in my case 30 of the traffic is sent
+to
+new and remaining is sent to hold so
+that way
+if there is a problem it is easy for me
+to immediately roll back in the very
+beginning not at the end
+okay so like this you have to fix the
+strategy and keep deploying suppose if i
+fix it as 30 then
+first 30 percent is one pod okay now if
+i'm saying okay release the next 30
+percent so what is the next 30
+another part so now
+i have to replace one old pod with one
+new pot in which method it will release
+that is rolling update okay so one new
+will come and old will go so that's
+where your canary also works on top of
+rolling update so rolling update is how
+do you create but
+here
+the blue green in canary method you are
+controlling how the traffic should be
+sent to your application that is what we
+call it as actual deployment so once
+again now if you see while 60 of the
+load is going to the new version of your
+application still thirty percent goes to
+the old one
+and then
+finally you replace it hundred percent
+okay so this is how
+in canary
+you
+deploy in subset
+okay so you don't replace everything
+and at the same time when a customer is
+accessing your application they will be
+accessing the old version plus
+new versions
+okay both are going to happen
+getting the difference so again just to
+show you the diagram
+so you're going to replace one by one
+and the traffic will be sent
+okay so this is how any time when you're
+replacing your old build with new build
+in a canary method you will fix a
+percentage and then for that you will be
+changing it
+now comes the question on when to use
+and not to use
+so the advantage of canary is
+you can release your version only to a
+particular
+users where you can give a percentage
+and based on that you can deploy not
+every customer will be impacted
+and
+it's more convenient if you want to
+control the error rate and also to have
+a control on the performance because i
+have modified something
+for my new release but i don't know how
+the performance is actually there in the
+production so i cannot
+change everything with the new one and
+then wait for the performance instead
+slowly i will give few subset percentage
+and then we will see how it is behaving
+so that way instead of changing hundred
+percent we can change in certain
+percentage see the performance and then
+take the decision whether to move
+further or not just like a cannery board
+it also helps you to do fast roll back
+right because if there is a problem in
+the performance of the application which
+i find in the first thirty percent it's
+only the thirty percent get impacted not
+my whole business so i can easily roll
+back
+now
+what's the disadvantage
+it's actually slow
+right so this is where if you are
+expecting zero downtime this is not
+going to happen
+because you are slowly changing with the
+percentage so that is where if your
+application requires a zero downtime
+then you cannot directly use canary then
+you just have to do some mix and match
+of few things
+the other big problem is
+how do you control the traffic
+because
+as i said
+i want only a particular user to access
+the new replicas now how do you control
+the traffic
+now this is where you have to start
+creating
+more services
+am i audible to everyone
+yes adam
+yes okay that's yours yes
+yes you're audible so
+the problem is if you want to control
+saying okay only a particular user
+should access the new replica then how
+will you send the traffic because if you
+have a common service like blue green as
+i showed you you will also hit
+old version you will also hit the new
+version so that's where
+it's not like you cannot do
+if you try to manage in all these things
+in cloud then it is going to be more
+expensive for you
+so ideally this is also another method
+of deployment
+for production but again it depends on
+the nature of your business where if you
+do not want to release everything at one
+shot
+then go with canary simple in production
+you're gonna talk only about two types
+blue green or
+canary blue green is when you want
+stateless and zero downtime and if you
+want
+a percentage of traffic to be released
+based on a user for performance or
+for agility then you're going to think
+of using canary
+in blue green disadvantages more
+resources is needed whereas in canary
+disadvantages
+traffic is going to be
+difficult to manage and
+it's going to be slow
+fine
+so with this let's try to pick up
+another
+demo
+but again this time i'll take
+my first build as blue second builders
+retso
+from the existing blue
+how will you do a canary deployment and
+switch the traffic completely to red
+okay and
+watch the applications once again
+okay so there's nothing running now
+for this example
+so i have canary blue and canary red so
+what we will do
+is
+i'll take the canary blue
+all right now what we will do let's put
+it as
+four replicas now it's the same
+deployment object i have taken
+with four replicas now i haven't
+mentioned any strategy so what is the
+method it will use
+rolling up but for me it's not about
+creating the pod it's completely about
+allowing the access okay and related to
+that if you come down okay you can see
+i'm using the blue image
+watch this
+there is a service where i am just using
+a label called
+canary
+okay and this is the same label i've
+also used for my pot
+so whenever we access the new service
+right now it is going to allow only blue
+so let's watch this
+cube curtail
+apply hyphen f
+canary blue
+so we have three one six one three
+okay so this is your first build which
+is currently running with how many
+replicas
+four so now in canary you need to now
+fix a percentage okay so for convenience
+let's take
+again
+what we are going to do now is the
+manual way
+so let's understand how to do that and
+that's where
+tomorrow
+we will see how the same process should
+be automated because i cannot sit and do
+all those things manually right because
+you can see how much of time it is
+taking
+but anyway try to understand the logic
+there are four replicas and i'm choosing
+25 percent so at any time
+one replica should be replaced so
+what is my new
+deployment object so let's say
+red okay
+along with your
+old
+blue i want to deploy red and this is
+where 25 so
+i have to create a new red
+based
+container and replace any one of them so
+this is going to be a complete manual
+work okay so watch this so first what we
+will do
+i have
+one more
+deployment object which is called as red
+and i have given this as one to start
+with
+and it is based on red and you see there
+is no
+service for that
+why because i want the same service
+wherein
+25 traffic should go to this so that's
+where the label again you can see is
+canary so the service will now take
+the blue replicas plus
+this
+and this is where first
+let's go ahead and
+cube cuddle
+apply
+red
+you should see
+now you have
+4 plus 1 5
+okay but
+in the rolling update strategy what is
+that we have to do once the new one
+comes i should delete the old one okay
+so now once the new one has come now i
+am not doing any testing but this is
+what you have to actually do so let's
+quickly go to canary
+blue
+and i have to replace this with
+four with three
+okay and then
+so what happened now if you see this two
+old blue and sorry three old blue and
+one red we're in 25 of the traffic
+right
+and now come to this application and
+refresh
+it's 25
+okay if you actually see
+the api is receiving
+one part of red and three parts of blue
+okay and that's what is the traffic 25
+now once everything is fine this is
+where the canary method says okay you do
+progressively okay
+okay i tested everything and i feel it's
+fine now i can decide what should be the
+next step now it's not mandatory every
+time you should do 25 25 now i i feel
+okay let's put 50 now so then what is 50
+2 replicas so that means totally
+three replicas in red
+one replica in
+blue now in this first i should update
+the
+red only when the red replicas are up i
+should replace it with
+blue right so
+let's go to canary
+and this is where your manifest files
+will be easy to use so i can just change
+three
+and let's apply
+now once they are successfully up
+so let's go ahead and edit
+the blue
+and here i'll change this to one
+okay and now let's apply this
+okay and once
+everything comes up you can see the old
+one terminating so all together
+you should have
+four replicas it's the same traffic what
+i wanted
+okay so you can see three red on one
+blue and now come back here
+the traffic is now flowing
+reverse 75 percent to red 25 percent to
+okay so that's where as a customer
+you won't see any difference
+however you are controlling the
+deployment strategy and now when i feel
+everything is okay after my verification
+or my performance check
+then i can go ahead and change it to 100
+so what is 100
+typically i have to first
+increase the red to full
+once this is up
+so you have all the four red
+and then you're going to remove this now
+simply what i'll do
+delete okay
+now this is where i
+want to delete the service because that
+file has both the things right
+so this is where what i'll do we'll just
+delete only the object
+so cube cuddle now again you have to
+automate but i'm just trying to show you
+everything manually
+so deploy
+and this deployment
+so now
+you have only four so now all the
+hundred percent traffic you can see it
+switched to
+red and there is no blue so that's where
+customers are now going to access
+everything from
+your new version
+so let me just show you another example
+this is where i said
+which color you want
+you have green and you have orange
+all right green
+let's take orange so what i'll do
+i'll
+okay i think we already had orange here
+okay so now here in this what do i have
+so the same
+where i'm referring to a new deployment
+object with orange based image tag and
+it's still referring to the same label
+and now we have one
+so this time here what should we do
+cube cuttle apply hyphen f canary
+orange
+now this is
+up so now i should go to
+the red one and reduce one again
+considering 25
+what is 25
+25 is one
+oh sorry
+you have three reds and one orange
+go back and
+yeah
+you're not
+gonna see huge difference but yes
+25 percent traffic
+written group and then now if i keep the
+same 25 percent then
+what should i do
+so once again canary orange
+i should change here
+to if i'm still saying 25 so right now
+it is 50
+cube curl apply
+so now you should see
+two orange and then i should go ahead
+reduce this to
+two
+and this way you have 50 50 percent
+so you should see two orange
+and so notice this and this two red
+and now if you refresh
+traffic is 50 50 percentage
+okay and slowly now you decide how you
+want suppose if i want i can do the same
+thing for another 25 or
+i don't want to take time so let me say
+you have to replace this with
+or
+so now you're going to have all the 100
+traffic here
+but still we have
+one pod which is still there for red but
+yeah once it is up
+you need to change
+the red one here
+in fact
+i can change this to
+zero but i can't make it zero and
+this is where
+i'll change this to one
+let's just say cube cuddle delete
+all right so
+all you should have is your 100
+orange so the traffic
+is completely to this
+okay so this is also called as
+progressive
+deployment because you are doing
+percentage by percentage
+got it
+so this is how
+now if you are moving ahead you need to
+what is the type of application that you
+are using
+okay and for that what kind of strategy
+and what is the advantage and
+disadvantage so there is no hard coded
+rule saying
+everyone should use blue green or
+everyone should use cannery but
+especially when you're attending
+interviews try to answer depending on an
+application so it comes depending on the
+need
+and next as i was telling
+what we have seen is only the manual way
+right now let's say one of the most
+preferable
+deployment as of now in the market is
+now if i give you 25 replicas and if i'm
+asking you to do are you going to sit
+and do this kind of deployment and the
+same way
+we didn't create a second service but
+how is that i can have a control and
+access only the old replicas and view
+replicas so which is again going to be a
+problem
+all right and that's when
+the next step of whatever we have
+learned today is more about automating
+this which is what again we call it as
+rollout so how are you going to
+automatically roll out your deployments
+using whatever the strategy that you're
+applying wherein with minimal effort you
+should be able to do and if possible
+this is what you're going to attach it
+to your ci cd because after your build
+is created in a cd you're not just going
+to take your manifest file
+and do a cue cut will apply in a machine
+right because that is just for recreate
+and rolling update but for blue green
+canary there is some
+management that we have to do on top of
+it for which
+you need
+a automation in place so remember in
+production it's not just gonna be like
+one kubernetes cluster and your jenkins
+will go and deploy and that's where i
+said earlier
+ketops is essential but
+for gitops once again
+you need to also have one more
+deployment which is where we'll talk
+about a new tool called
+argo rollouts okay anyway i'm gonna talk
+about this in the next session so let me
+stop it for now
+thank you

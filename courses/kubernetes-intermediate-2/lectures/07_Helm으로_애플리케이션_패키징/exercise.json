@@ -1,0 +1,62 @@
+{
+  "lecture_no": 7,
+  "mode": "practical",
+  "tasks": [
+    {
+      "step": 1,
+      "title": "워밍업: helm create로 Chart 뼈대 생성하고 구조 파악하기",
+      "goal": "helm create 명령으로 빈 Chart를 만들고, Chart.yaml·values.yaml·templates/ 의 역할을 직접 눈으로 확인한다.",
+      "prompt": "1. helm create myapp 으로 Chart 뼈대를 생성한다.\n2. 생성된 디렉터리에서 다음 파일을 순서대로 열어 내용을 확인한다.\n   - myapp/Chart.yaml — name, version, appVersion 필드를 찾는다.\n   - myapp/values.yaml — replicaCount, image.repository, image.tag, service.type, service.port 필드를 찾는다.\n   - myapp/templates/deployment.yaml — {{ .Values.replicaCount }} 처럼 .Values 를 참조하는 자리를 3곳 이상 찾는다.\n3. helm template myapp ./myapp 명령으로 템플릿 치환 결과(완성된 매니페스트)를 출력하고, deployment 의 replicas 값이 values.yaml 의 replicaCount 와 일치하는지 확인한다.",
+      "starter": "# 1. Chart 생성\nhelm create myapp\n\n# 2. 구조 확인 (트리 형태로 보기)\nfind myapp -type f | sort\n\n# 3. 파일 내용 확인\ncat myapp/Chart.yaml\ncat myapp/values.yaml\ncat myapp/templates/deployment.yaml\n\n# 4. 템플릿 치환 결과 미리 보기 (빈칸을 채워라)\nhelm template __릴리스이름__ __차트경로__",
+      "solution": "# 1. Chart 생성\nhelm create myapp\n\n# 2. 구조 확인\nfind myapp -type f | sort\n# 주요 출력:\n# myapp/Chart.yaml\n# myapp/values.yaml\n# myapp/templates/_helpers.tpl\n# myapp/templates/deployment.yaml\n# myapp/templates/service.yaml\n# myapp/templates/hpa.yaml\n# myapp/templates/serviceaccount.yaml\n\n# 3. 메타데이터 확인\ncat myapp/Chart.yaml\n# name: myapp\n# version: 0.1.0\n# appVersion: \"1.16.0\"\n\n# 기본 설정값 확인\ncat myapp/values.yaml\n# replicaCount: 1\n# image:\n#   repository: nginx\n#   tag: \"\"\n# service:\n#   type: ClusterIP\n#   port: 80\n\n# 4. 템플릿 치환 결과 미리 보기\nhelm template myapp ./myapp\n# 출력된 deployment YAML 에서 replicas: 1 을 확인\n# (values.yaml 의 replicaCount: 1 과 일치)",
+      "explanation": "helm create 는 실제 배포에 바로 쓸 수 있는 Deployment·Service·HPA·ServiceAccount 템플릿이 포함된 뼈대를 한 번에 만들어 준다. Chart.yaml 은 패키지의 '신분증'으로 차트 이름·버전을 담고, values.yaml 은 모든 설정의 기본값이다. templates/ 안의 파일들은 {{ .Values.경로 }} 자리가 비어 있어, helm install 또는 helm template 시점에 values 값으로 채워진 완전한 쿠버네티스 매니페스트로 변환된다. helm template 은 클러스터에 실제로 배포하지 않고 치환 결과만 미리 확인하는 안전한 디버그 도구다.",
+      "hints": [
+        "find 대신 tree myapp 명령도 사용할 수 있다. tree 가 없다면 ls -R myapp 으로 대체한다.",
+        "helm template 의 첫 번째 인수는 릴리스 이름(임의의 문자열), 두 번째 인수는 차트 경로다. 예: helm template myapp ./myapp",
+        "출력된 매니페스트에서 replicas: 를 grep 으로 찾으면 빠르다: helm template myapp ./myapp | grep replicas"
+      ]
+    },
+    {
+      "step": 2,
+      "title": "핵심 실습 1: values.yaml 수정 후 helm install로 릴리스 배포하기",
+      "goal": "values.yaml 을 직접 편집해 replicaCount·service.type 을 바꾸고, helm install 로 클러스터에 배포한 뒤 실제로 적용됐는지 kubectl 로 확인한다.",
+      "prompt": "1. myapp/values.yaml 을 편집해 다음 값을 변경한다.\n   - replicaCount: 1 → 2\n   - service.type: ClusterIP → NodePort\n2. helm install myshop ./myapp 으로 릴리스를 배포한다.\n3. 아래 명령으로 배포 결과를 확인한다.\n   - helm list — 릴리스 이름·차트·리비전·상태를 확인한다.\n   - kubectl get pods — Pod 2개가 Running 상태인지 확인한다.\n   - kubectl get service — service 타입이 NodePort 인지 확인한다.\n4. helm install myshop ./myapp 을 한 번 더 실행하면 어떤 오류가 발생하는지 확인하고 이유를 설명한다.",
+      "starter": "# 1. values.yaml 편집 (vi, nano, 또는 선호하는 에디터 사용)\nvi myapp/values.yaml\n# replicaCount 를 2 로, service.type 을 NodePort 로 변경 후 저장\n\n# 2. 릴리스 배포 (빈칸을 채워라)\nhelm __명령__ __릴리스이름__ __차트경로__\n\n# 3. 배포 결과 확인\nhelm list\nkubectl get pods\nkubectl get service\n\n# 4. 동일 이름으로 재설치 시도\nhelm install myshop ./myapp",
+      "solution": "# 1. values.yaml 수정 내용 (변경된 부분만)\n# replicaCount: 2\n# service:\n#   type: NodePort\n#   port: 80\n\n# 직접 편집하는 대신 sed 로 치환하는 방법:\nsed -i 's/replicaCount: 1/replicaCount: 2/' myapp/values.yaml\nsed -i 's/type: ClusterIP/type: NodePort/' myapp/values.yaml\n\n# 변경 확인\ngrep -E 'replicaCount|type' myapp/values.yaml\n# replicaCount: 2\n# type: NodePort\n\n# 2. 릴리스 배포\nhelm install myshop ./myapp\n# 출력 예:\n# NAME: myshop\n# LAST DEPLOYED: ...\n# NAMESPACE: default\n# STATUS: deployed\n# REVISION: 1\n\n# 3. 배포 결과 확인\nhelm list\n# NAME     NAMESPACE  REVISION  STATUS    CHART       APP VERSION\n# myshop   default    1         deployed  myapp-0.1.0  1.16.0\n\nkubectl get pods\n# NAME                             READY   STATUS    RESTARTS\n# myshop-myapp-xxxxxxxxx-aaaaa     1/1     Running   0\n# myshop-myapp-xxxxxxxxx-bbbbb     1/1     Running   0\n\nkubectl get service\n# NAME           TYPE       CLUSTER-IP    EXTERNAL-IP  PORT(S)\n# myshop-myapp   NodePort   10.96.x.x     <none>       80:3xxxx/TCP\n\n# 4. 동일 이름으로 재설치 시도 → 오류 발생\nhelm install myshop ./myapp\n# Error: INSTALLATION FAILED: cannot re-use a name that is still in use\n# 이유: 같은 네임스페이스에 'myshop' 릴리스가 이미 존재하기 때문.\n# 이미 존재하면 install 대신 upgrade 를 사용해야 한다.",
+      "explanation": "values.yaml 을 수정하면 templates/ 의 모든 {{ .Values.경로 }} 치환 결과가 바뀐다. replicaCount: 2 로 설정하면 Deployment 의 spec.replicas 가 2가 되어 Pod 2개가 생성되고, service.type: NodePort 는 Service 오브젝트의 type 필드에 반영된다. helm install 은 릴리스 이름이 이미 사용 중이면 오류를 내며 중단한다. 이때 upgrade 로 업데이트하거나, uninstall 후 재설치해야 한다. 자동화 스크립트에서 install 과 upgrade 를 구분하지 않으려면 helm upgrade --install 관용구를 쓴다.",
+      "hints": [
+        "values.yaml 을 직접 편집할 때 YAML 들여쓰기(스페이스 2칸)를 유지해야 한다. 탭 문자를 쓰면 파싱 오류가 발생한다.",
+        "helm install 후 Pod 가 ContainerCreating 상태면 잠시 기다린다. kubectl get pods -w 로 실시간 상태 변화를 관찰할 수 있다.",
+        "kubectl get service 에서 TYPE 컬럼이 NodePort 가 아닌 ClusterIP 로 나온다면 values.yaml 수정이 저장됐는지 cat myapp/values.yaml | grep type 으로 재확인한다."
+      ]
+    },
+    {
+      "step": 3,
+      "title": "핵심 실습 2: helm upgrade --set으로 설정 변경 + helm history로 이력 확인하기",
+      "goal": "helm upgrade --set 으로 replicaCount 를 변경하고, helm history 로 리비전 이력을 확인한다. 업그레이드 전후 Pod 수 변화를 kubectl 로 직접 관찰한다.",
+      "prompt": "1. helm upgrade --set 으로 myshop 릴리스의 replicaCount 를 1로 줄인다.\n2. kubectl get pods 로 Pod 가 1개로 줄어드는 것을 확인한다.\n3. helm history myshop 으로 리비전 이력을 확인하고 리비전 1과 2의 차이를 설명한다.\n4. 이번에는 --set 을 사용해 replicaCount 를 3으로 올리는 업그레이드를 한 번 더 수행한다.\n5. helm history myshop 을 다시 실행해 리비전 3이 추가된 것을 확인한다.",
+      "starter": "# 1. replicaCount 를 1로 줄이는 업그레이드 (빈칸을 채워라)\nhelm upgrade myshop ./myapp --set ____=____\n\n# 2. Pod 수 변화 확인\nkubectl get pods\n\n# 3. 릴리스 이력 확인\nhelm history ____\n\n# 4. replicaCount 를 3으로 올리는 업그레이드\nhelm upgrade myshop ./myapp __플래그__\n\n# 5. 이력 재확인\nhelm history myshop",
+      "solution": "# 1. replicaCount 를 1로 줄이는 업그레이드\nhelm upgrade myshop ./myapp --set replicaCount=1\n# 출력 예:\n# Release \"myshop\" has been upgraded. Happy Helming!\n# REVISION: 2\n\n# 2. Pod 수 변화 확인\nkubectl get pods\n# NAME                             READY   STATUS    RESTARTS\n# myshop-myapp-xxxxxxxxx-aaaaa     1/1     Running   0\n# (Pod 1개만 남아 있음)\n\n# 3. 릴리스 이력 확인\nhelm history myshop\n# REVISION  UPDATED       STATUS      CHART         APP VERSION  DESCRIPTION\n# 1         ...           superseded  myapp-0.1.0   1.16.0       Install complete\n# 2         ...           deployed    myapp-0.1.0   1.16.0       Upgrade complete\n# 리비전 1: 최초 install (replicaCount=2, service.type=NodePort)\n# 리비전 2: upgrade (replicaCount=1 로 변경됨)\n\n# 4. replicaCount 를 3으로 올리는 업그레이드\nhelm upgrade myshop ./myapp --set replicaCount=3\n# REVISION: 3\n\n# 5. 이력 재확인\nhelm history myshop\n# REVISION  UPDATED       STATUS      CHART         APP VERSION  DESCRIPTION\n# 1         ...           superseded  myapp-0.1.0   1.16.0       Install complete\n# 2         ...           superseded  myapp-0.1.0   1.16.0       Upgrade complete\n# 3         ...           deployed    myapp-0.1.0   1.16.0       Upgrade complete\n\nkubectl get pods\n# Pod 3개가 Running 상태임을 확인",
+      "explanation": "helm upgrade --set KEY=VALUE 는 명령줄에서 values.yaml 의 특정 키만 덮어쓰는 가장 빠른 방법이다. 값 하나를 바꿀 때 파일을 수정할 필요 없이 인라인으로 지정할 수 있어 CI/CD 파이프라인에서 자주 쓰인다. 업그레이드할 때마다 리비전 번호가 1씩 증가하고, 이전 리비전은 superseded 상태로 이력에 남는다. helm history 의 이 이력이 롤백의 근거다. --set 으로 덮어쓰지 않은 값은 이전 upgrade 시점의 values 를 유지하지 않고 차트의 values.yaml 기본값으로 돌아가므로, 여러 값을 함께 관리할 때는 -f values-override.yaml 방식이 더 안전하다.",
+      "hints": [
+        "--set 의 KEY 는 values.yaml 의 계층 구조를 점(.)으로 구분한다. 예: image.tag=1.2.0, service.port=8080",
+        "helm history 에서 STATUS 가 deployed 인 리비전이 현재 활성 리비전이고, superseded 는 이전 리비전이다.",
+        "Pod 수 변화가 즉시 보이지 않으면 kubectl get pods -w 로 실시간 추적하거나 몇 초 후 다시 실행한다. Deployment 의 롤링 업데이트 전략에 따라 Pod 가 순차적으로 교체된다."
+      ]
+    },
+    {
+      "step": 4,
+      "title": "응용: helm rollback으로 특정 리비전 복구 후 helm uninstall까지 전체 생애주기 체험하기",
+      "goal": "잘못된 설정으로 업그레이드한 뒤 helm rollback 으로 정상 리비전으로 복구하는 전체 흐름을 체험하고, 마지막으로 helm uninstall 로 릴리스를 정리한다.",
+      "prompt": "1. '잘못된 업그레이드'를 시뮬레이션한다. helm upgrade --set replicaCount=10 --set image.tag=broken-9.9.9 으로 myshop 을 업그레이드한다.\n   - kubectl get pods 로 Pending 또는 ImagePullBackOff Pod 가 생겼는지 확인한다. (실제 클러스터에서 존재하지 않는 이미지 태그라면 ImagePullBackOff 가 발생한다.)\n2. helm history myshop 으로 현재 이력을 확인하고 '정상이었던 마지막 리비전 번호'를 찾는다.\n3. helm rollback myshop <리비전 번호> 로 직전 정상 리비전으로 복구한다.\n4. kubectl get pods 로 Pod 가 다시 정상화되었는지 확인하고, helm history myshop 에서 rollback 도 새 리비전으로 기록됨을 확인한다.\n5. helm uninstall myshop 으로 릴리스를 삭제하고, kubectl get pods 와 kubectl get service 로 오브젝트가 모두 제거됐는지 확인한다.",
+      "starter": "# 1. 잘못된 설정으로 업그레이드 (빈칸을 채워라)\nhelm upgrade myshop ./myapp \\\n  --set replicaCount=____ \\\n  --set image.tag=____\n\n# Pod 상태 확인\nkubectl get pods\n\n# 2. 이력 확인 — 정상 리비전 번호를 찾아라\nhelm history ____\n\n# 3. 롤백 (빈칸을 채워라)\nhelm rollback __릴리스이름__ __리비전번호__\n\n# 4. 롤백 후 확인\nkubectl get pods\nhelm history myshop\n\n# 5. 릴리스 삭제\nhelm __삭제명령__ myshop\nkubectl get pods\nkubectl get service",
+      "solution": "# 1. 잘못된 설정으로 업그레이드\nhelm upgrade myshop ./myapp \\\n  --set replicaCount=10 \\\n  --set image.tag=broken-9.9.9\n# REVISION: 4\n\n# Pod 상태 확인 (존재하지 않는 이미지 → ImagePullBackOff 또는 ErrImagePull)\nkubectl get pods\n# NAME                             READY   STATUS             RESTARTS\n# myshop-myapp-xxxxxxxxx-ccccc     0/1     ImagePullBackOff   0\n# myshop-myapp-xxxxxxxxx-ddddd     0/1     ImagePullBackOff   0\n# ... (10개 시도, 대부분 ImagePullBackOff)\n\n# 2. 이력 확인 — 정상 리비전 찾기\nhelm history myshop\n# REVISION  UPDATED  STATUS      CHART         APP VERSION  DESCRIPTION\n# 1         ...      superseded  myapp-0.1.0   1.16.0       Install complete\n# 2         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete\n# 3         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete\n# 4         ...      deployed    myapp-0.1.0   1.16.0       Upgrade complete\n# → 리비전 3 이 마지막 정상 리비전 (replicaCount=3, 기본 이미지 태그)\n\n# 3. 리비전 3으로 롤백\nhelm rollback myshop 3\n# Rollback was a success! Happy Helming!\n\n# 4. 롤백 후 확인\nkubectl get pods\n# NAME                             READY   STATUS    RESTARTS\n# myshop-myapp-xxxxxxxxx-aaaaa     1/1     Running   0\n# myshop-myapp-xxxxxxxxx-bbbbb     1/1     Running   0\n# myshop-myapp-xxxxxxxxx-eeeee     1/1     Running   0\n# (replicaCount=3 으로 복구, nginx 기본 이미지로 돌아와 Running 상태)\n\nhelm history myshop\n# REVISION  UPDATED  STATUS      CHART         APP VERSION  DESCRIPTION\n# 1         ...      superseded  myapp-0.1.0   1.16.0       Install complete\n# 2         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete\n# 3         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete\n# 4         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete\n# 5         ...      deployed    myapp-0.1.0   1.16.0       Rollback to 3\n# (롤백 자체도 리비전 5로 기록됨)\n\n# 5. 릴리스 삭제\nhelm uninstall myshop\n# release \"myshop\" uninstalled\n\nkubectl get pods\n# No resources found in default namespace.\n\nkubectl get service\n# NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE\n# kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP   ...\n# (myshop 관련 Service 가 모두 제거됨)",
+      "explanation": "이번 실습은 Helm 릴리스의 전체 생애주기(install → upgrade → 장애 발생 → rollback → uninstall)를 한 번에 체험하는 것이 목적이다. helm rollback 의 핵심은 Helm 이 모든 리비전의 상태를 네임스페이스 Secret 에 보관하고 있어, 어떤 리비전의 매니페스트로든 한 줄 명령으로 클러스터를 복원할 수 있다는 점이다. 롤백 또한 새 리비전(5번)으로 기록되므로 '언제 롤백했는지'도 이력으로 남는다. helm uninstall 은 해당 릴리스가 생성한 Deployment·Service·ServiceAccount 등 모든 쿠버네티스 오브젝트를 일괄 삭제한다. 기본적으로 이력 Secret 도 함께 삭제되며, 이력을 남기고 싶다면 --keep-history 플래그를 사용한다.",
+      "hints": [
+        "image.tag=broken-9.9.9 는 실제로 존재하지 않는 태그다. 클러스터에 따라 즉시 ImagePullBackOff 가 나타나지 않을 수 있으니, kubectl get pods 를 몇 초 간격으로 반복하거나 -w 옵션을 사용한다.",
+        "helm rollback 의 두 번째 인수에는 helm history 로 확인한 정상 리비전 번호를 그대로 입력한다. 리비전 번호는 상황에 따라 다를 수 있으므로 반드시 history 를 먼저 확인한다.",
+        "helm uninstall 후에도 kubectl get pods 에 Terminating 상태의 Pod 가 잠시 남을 수 있다. 완전히 사라지기까지 수 초에서 수십 초가 걸리는 것은 정상이다."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,682 @@
+## 영상 1: Apache Kafka Consumers and Consumer Group Protocol
+https://www.youtube.com/watch?v=ovdSOIXSyzI
+
+Kind: captions
+Language: en
+welcome back everyone junior from kang
+here in this module we're going to talk
+about how consumer group works in kafka
+in kafka we separated the way how we
+store the data from the processing of
+that and then the processing is
+typically done in the consumer
+applications and consumer group is a
+great way of scaling out those consumer
+instances
+once you define a consumer group the
+load of the data you are subscribing to
+can be divided evenly among those
+consumers and then they can be
+processing those
+records and events in parallel
+the unit of distributing a load is
+partitioned so for given partition here
+you are subscribing to we are only going
+to give that to one of the instances of
+the consumer in this consumer group
+defining consumer group is pretty simple
+you just need to define a consumer group
+and then you make subscription to the
+set of topics that you want to consume
+once you started the consumer group the
+load will be evenly divided among those
+instances of the members in the group
+and then if there's a new member joins
+or the existing vendor leaves the load
+can be rebalanced among the remaining
+members
+the workforce behind consumer group is a
+concept called group coordinator
+group coordinator is responsible for for
+coordinate the communication among all
+the members in the consumer group and is
+also responsible coordinating assignment
+of the workload to those members
+in a typical cafe cluster there will be
+multiple of those group coordinators
+and this allows the load from different
+consumer group to be evenly distributed
+among those different coordinators now
+let's look at how a consumer group is
+started so in this case we have a
+consumer group let's say we have two
+members in this consumer group and they
+are starting at the same time in
+parallel
+the first thing each of this consumer
+instance needs to do is to identify the
+group coordinator for this group so on
+the broker side
+we use an internal topic called consumer
+offset to store all the metadata about
+this particular group and then it
+typically has multiple partitions and
+then the group coordinator for this
+consumer group is determined
+by the leader of the partition this
+consumer group will be hashed into
+later on you will see this concept or
+internal topic will be used multiple
+times to manage various other things
+so once the
+broker identified the group coordinator
+for this consumer group it will send its
+endpoint including the host and port
+back in the response
+the next thing what the
+consumer instance will need to do is to
+send a join group request to this root
+coordinator in the join group request it
+will include the subscription it has
+one of the tricky things we have to deal
+with is we want the assignment of the
+load to those consumer members to be
+pluggable to be determined by the
+consumer instances in separate broker
+because we want to provide more
+flexibility to the application
+because of that the group coordinator
+actually doesn't know how to assign the
+load so instead what it does is to pick
+one of the group members
+typically the first member will join the
+group as the group leader and it will
+let the group leader to make the
+decision of assigned work among those
+members so we'll do is it will include
+all the member information including
+member ids and the subscription back to
+this group coordinator for the rest of
+the non-group leader consumer instances
+it will just send its member id
+once the group leader has received the
+complete member list and a subscription
+it will use its plugable assigner to
+assign the topic partitions among those
+member instances
+and then we will be sending the response
+in the results in a separate request
+called sync group request to the group
+coordinator
+every other member will also be sending
+a similar request including its member
+id
+and the group coordinator will take the
+data it received from the group leader
+and then send the assignment for each of
+the members back to each of the consumer
+now let's look at some of the assignment
+strategies
+one of the assembly strategy is called a
+range partition in this case what is
+work is it will
+distribute a partition at each
+individual topic level so we'll look at
+the first topic and divide up its
+partitions amount of consumer members
+and we'll go through the next topic and
+then do the same thing
+as you can see in this case
+both partition zero but the partition
+zero from both topic will be assigned to
+consumer one and similarly partition one
+from both topic will be assigned to
+consumer two but the rest of the
+consumers will be added because there's
+no work for them
+now for the range partition there's a
+particular important use case for that
+it's pretty important for doing
+co-locating collocated joins for example
+you may have these topics with shared
+keys
+so all the records with the same key
+will be assigned to the same partition
+by having the same partition assigned to
+the consumer they can easily do the
+joining across these two topics locally
+another commonly used partition
+assignment strategy is called round
+robin in this case um we just tear down
+the topic boundary we'll just line up
+all the target partitions no matter
+which
+topic they're coming from and then we'll
+just assign them uniformly across those
+consumer instances the benefit of this
+is this actually allows more degree of
+parallelism because all the partitions
+across all the topics can be used but
+you just don't get a co-location
+another variant of round robin is called
+sticky partitioner so this improves the
+roundabout a little bit by trying to do
+a best effort of sticking to the
+previous assignment during the next
+reassignment so try to reduce this
+number of partitions that need to be
+moved around across those consumer
+in kafka we also provide a way for the
+consumer to keep track of where they
+have consumed
+in kafka keeping track of consumer is
+very easy because for given partition is
+always given to a single consumer and
+all the records within a partition are
+always given to the consumer in offset
+order
+so the consumer really needs to track
+the last offset it has consumed for each
+of the
+partitions in order to keep track the
+position the consumer can issue a commit
+offset request to the group coordinator
+the coordinator will then persist that
+information in the underlying internal
+topic
+if the consumer group instance is
+restarted the first thing it can do is
+to call make a request to the
+coordinator to retrieve its last
+committed offset and once it has the
+offset and it can resume the consumption
+from that particular offset
+if this consumer instance is started for
+the very first time and there's no saved
+position for this consumer group then
+you can either
+start consuming from the very beginning
+of this topic partition or the very
+latest the group coordinator of course
+can fail
+but because the internal offset commit
+topic is replicated the group
+if it fails can easily fail over as a
+new leader for this internal topic
+partition so we can handle failure in a
+pretty resilient way as well
+sometimes
+a rebalance will be needed among the
+consumer
+instances within the same group this can
+happen because one of instance fails the
+heartbeat with the crude group
+coordinator which indicates this
+consumer instance has failed
+or a new consumer instance has joined a
+group or maybe a new partition has been
+added to the subscribe topic
+and if you are using wildcard
+subscription
+some of the new topic being created
+could match the subscription that you
+are making so all those can trigger a
+rebalance so that the consumers can be
+rebalanced
+now let's look at the rebalance process
+once the group coordinator noticed that
+rebalance is needed the first thing it
+will do is to send a response piggyback
+on the heartbeat to indicate to each of
+the consumer instances that a rebalance
+is needed once the consumer received
+this rebalance notification it will go
+through a rebalance process some people
+may be familiar this stop award
+rebalance person this is actually issue
+we used to have and i will explain what
+some of the issues are in our old
+rebalance protocol and what are some of
+the improvements we have made since
+let's say in this example
+initially you have only two consumers
+and a new consumer which is consumer
+three joins which triggers a rebalance
+among all the
+three consumers
+so the first thing the existing two
+consumers have to do
+is to revoke the assigned partitions
+they have
+and sometimes the consumers they may
+have maintained some internal states
+for each of the assigned partitions
+in that case it will also clear up the
+state associated with those assigned
+partitions
+then all those consumer instances will
+go through the process of sending the
+join request and then sync request to
+the group coordinator in the end the new
+partition assignment will be received by
+each of the consumer instances then the
+consumer instance if they have the state
+will need to rebuild the state
+corresponding to those newly assigned
+now what are some issues with this whole
+process
+well there are a couple of issues
+the first issue is the need to rebuild
+some of the states as i mentioned i
+think in the earlier
+slide that during rebalance the consumer
+instance first revoke partitions and
+then clear out the state and only to
+rebuild some of those when the new
+partitions are signed and in this case
+you can see
+partition
+zero and partition one they actually are
+assigned back to the same consumer
+instance so rebuilding their state is
+actually wasteful sometimes you know if
+you have a large state this can take
+some time so this is the first problem
+of unnecessary rebuilding some of the
+state for the consumer applications the
+second issue is what we call the post
+processing as you can see
+since the each of the consumers revoke
+those partitions immediately the
+processing of all the records for all
+the partitions have stopped and it only
+resumes until the new partitions have
+been assigned which can take a little
+time
+at least in this particular case you can
+see the pausing for all the processing
+records in partition 0 and partition one
+are necessary
+because they are actually assigned back
+to the same consumer instance in theory
+you know they could have just continued
+processing during this rebalance process
+now let's look at some of the
+improvements we have made to address
+these two issues the first thing is we
+are used we are using the improved
+version of this sticky partition
+designer to address the first issue
+where the states need to be rebuild
+unnecessarily so the improvement is in
+this case during the rebalance initially
+we won't be cleaning out the state
+during the beginning of rebalance
+instead we try to rebuild state only
+when
+the new partitioning assignment has been
+reached
+so in this case since partition 0 and
+partition 1 assign back to the same
+instance they actually don't need to
+have their state reviewed because we
+know that they are the same as the
+previous assignment
+another improvement we made is through
+what we call cooperative sticky
+partition assigner this is used to solve
+the second issue which is the solved
+processing issue so what this will do is
+at the beginning of the rebalance each
+of the consumers will not immediately
+revoke the previously assigned partition
+instead they will just include those
+previously assigned partition as part of
+join group to the coordinator
+during the rebalance the group leader
+will try to only send back the revoked
+partition for each of the consumer
+instances in this case
+only partition two will be revoked from
+a consumer one and for partition zero
+and partition one's data they can
+continue to be processed by consumer one
+and consumer two because they're never
+remote so the processing for those
+records don't stop at this point
+and in the second round of rebalance
+what we'll do is the group coordinator
+will now
+having given a chance for the consumer
+instance to revoke some of the unneeded
+partitions it will then assign the
+remote partition back to the new
+instance in this case it will reassign
+the previous revoked partition two to
+the new consumer as you can see in the
+whole process
+the processing for partition zero and
+partition one never stopped is actually
+a big improvement from the previous case
+the last thing we can consider to
+improve this is to avoid rebalance
+completely because in some of the common
+cases the reason we need to rebalance is
+a consumer instance is restarted because
+it may be able to restart the consumer
+instance for upgrading for picking up
+some new configuration in this case you
+know the consumer instance will come
+back pretty quickly so you can actually
+choose not to move the partitions around
+in this phase and then just wait for
+this new consumer to come back
+to achieve this what we are introducing
+is a new
+capability called
+static group membership in this model
+you will be assigning a static member id
+for each of the consumer instances in
+the group
+then the unassigned will be the group
+leader will be deterministically
+assigned the partitions
+to the same
+consumer instance with the same group
+member id
+and in this case if you stop the
+consumer and then restart it
+when you stop the consumer
+the consumer instance won't be sending
+the leave group the request to the group
+coordinator so there's no con rebalance
+that's triggered instead
+the group coordinator just waits for
+this consumer instance to come back as
+long as you can come back
+before this session timeout then if the
+group coordinator just thinks this
+consumer insurance net has never gone
+away and will give back the same
+partition assignment to this consumer
+instance this actually is much more
+convenient because the consumer never
+need to
+participate in the rebalance and then do
+things like rebuilding state
+yeah so that's the end of this module
+thanks for listening
+you
+
+
+## 영상 2: Kafka Consumer and Consumer Groups Explained
+https://www.youtube.com/watch?v=lAdG16KaHLs
+
+Kind: captions
+Language: en
+all right so now that we've seen the
+concept of producers we need to see the
+concept of consumers and then we'll have
+an entire nend to and flow so consumers
+they read data from a topic as you can
+expect they only have to specify the
+topic name they want to read from and
+one broker to connect to and like for
+similar for producers basically ccas
+knows that once you connect to one
+broker you connected the entire
+cluster data is read from each
+partitions from the topic okay but again
+capf is really smart you don't have to
+worry about it you just say I want to
+connect from to this topic and that's it
+you'll read from it so this what it
+looks like in a graph we have two
+partitions one consumer and the consumer
+reads the data in order for each of
+these partitions it's really important
+to understand that the consumer will
+consume the data in parallel for
+partition zero and one but within each
+partition for example for partition zero
+the consumer will see message zero then
+it will see message one then two then
+three and so on so messages are read in
+order within a partition but they're
+read in parallel across partitions you
+really need to understand this
+concept now consumers they're organized
+into consumer groups and the reason for
+this is that to enhance
+parallelism each consumer within a group
+they will read from one or many part or
+more part partitions but they're all
+exclusive to each other and we'll see
+what that means in the
+diagram the result is that you cannot
+have more consumers than partitions
+otherwise some will just do nothing so
+let's take an example right here we have
+topic one and it has three
+partitions now we take a consumer group
+with two consumers and these two
+consumers they have to decide which
+partition to read from and remember they
+cannot read from the same partitions so
+here's an example consumer one will read
+from partition zero and partition one
+and consumer two will read from
+partition two and that works really
+well if we take an example with a
+consumer group with three consumers it
+looks like this each consumer reads from
+Mar partition as you can see with the
+arrows finally if we take a consumer
+group composed of only one consumer well
+that one consumer will read from all the
+partitions so that's what it looks like
+here in yellow
+so really remember that graph it's
+really
+important uh that you see that consumers
+they share partitions basically and have
+a very good look at the orange one if we
+add a fourth consumer it won't be able
+to read anything because partitions
+already assigned to
+Consumers okay so now you may ask me how
+do consumers know where to read from I
+mean and that's a really good question
+and the answer is is consumer
+offsets so remember the offsets it's 0 1
+2 3 up to 11 and whatever it's
+increasing for each partition well kfka
+store the offset at which a consumer
+group will have been reading that's
+really important so that offset storage
+is actually stored in a CAF topic named
+consumer
+offsets and basically when a consumer
+has been reading some data and processed
+it it will be committing offsets so
+let's look at what it looks like in the
+diagram and basically if your consumer
+process dies you'll be able to read back
+from the offset that was
+committed so here we have our topic and
+as you can see the offsets are well
+above 4,000 so a lot of data has been
+written and here's my consumer and the
+consumer after reading some data in the
+topic it will just commit the offset and
+that offset right here the vertical
+orange bar it's exactly
+where the the consumer has been reading
+until so kfin knows that this consumer
+which is part of the consumer group
+remember this consumer will have red up
+to
+4262 now the consumer knows that it
+should be reading from
+onwards the idea is that if that
+consumer goes away for five minutes and
+it dies and then he comes back up CFA
+will be able to tell the consumer hey
+here's where you left it off which is
+allows you to just keep on processing
+your data which is awesome it's a really
+really important concept so make sure
+you remember this make sure you really
+have that diagram in your head around
+how consumer groups we read from the
+same topic and how consumers get
+partitions assigned to them because
+that's how you optimize the performance
+of your CFA consumers so thanks for
+watching and next we'll see about
+zookeeper
+
+
+## 영상 3: What is a Kafka Consumer and How does it work?
+https://www.youtube.com/watch?v=XgmJWoXQVvY
+
+Kind: captions
+Language: en
+hi I'm Dan Weston from confluent in this
+video we'll take a look at the kfka
+consumer and the things you should keep
+in mind as you build your kfka cluster
+there are three main pieces to a Kafka
+based architecture the producer or where
+our messages come from the Kafka cluster
+itself and the consumers to understand
+consumers it's helpful to follow the
+message path as it moves through your
+Kafka cluster messages can be any event
+a sale was made on your website a
+temperature sensor recorded the current
+temperature or an order was shipped each
+of these messages contains five core
+elements and one that's optional the key
+the value the timestamp of when the
+message was created the current message
+offset the partition that the message
+comes from and the optional headers if
+message order is important for your
+application you'll want to provide the
+key this ensures that messages are sent
+to the same partition and kept in the
+order that they were received the key is
+also used to serialize the message
+before being sent to kfka and
+deserialized in the
+consumer consumers subscribe to your
+topics and pull for messages one of the
+things that sets Kafka apart from other
+messaging systems is that once a message
+has been consumed it is not deleted
+instead each message stays around until
+the retention period is met this is one
+of the main reasons why Kafka scales so
+easily you can have any number of
+consumers connecting to each topic one
+of consumer's most important and often
+misunderstood ass aspects is
+understanding offsets an offset is a
+unique identifier of a message in a
+partition it's an increasing number
+that's assigned to each message when it
+is stored consumers can save which
+messages have been processed in a
+special Kafka topic that allows them to
+pick up where they left off in case
+something goes wrong this operation is
+called committing offsets by default the
+Kafka Java consumer does this
+automatically for you and offers at
+least once toiv delivery if you aren't
+going to be using the Java consumer
+you'll want to check out the default
+behavior of your selected language for
+an example of hownet implements consumer
+offset be sure to check out our course
+Apache kofka foret
+developers each consumer is part of a
+consumer group each group can be as
+small as one consumer or as large as the
+number of partitions in your kofka topic
+each consumer in a group adds
+paralyzation for that task splitting the
+messages among the consumers for example
+let's say you have a topic that has a
+th000 messages arriving per second if
+your consumer can only process 500
+messages per second you would never
+catch up and you'd eventually fall
+significantly behind however if you
+added another consumer to that group
+you'd be able to handle all 1,000
+messages per
+second kofka automatically assigns
+consumers to partitions within a
+consumer group so if you had one
+partition you'd be able to have one
+consumer if you had three partition
+partitions you'd be able to have three
+consumers for instances where you have
+less than the maximum number of
+consumers kofka will assign consumers
+equally so if you had five partitions
+and only four consumers each partition
+would be assigned to a consumer with one
+consumer being assigned to two
+partitions this is the same thing that
+happens when you have a consumer that
+fails or is added a rebalancing takes
+place and assigns partitions to
+Consumers if you need additional
+consumers in a group you will also need
+to add more partitions to your topic it
+is also common to have a consumer act as
+a producer in this scenario you would
+have the application consume the
+messages perform any analysis
+aggregation or other transformation and
+then send it back to the separate Kafka
+topic now that we have a better picture
+of how our consumer Works let's take a
+look at a simplified consumer
+configuration this is a sample
+configuration taken directly from
+consent Cloud first we provide the
+properties like the bootstrap server and
+any certificates or API keys to connect
+to our Kafka cluster next we provide the
+group ID for our
+consumers third we set the offset
+Behavior this property can contain three
+options earliest latest or none if you
+care about all of the messages in a
+topic you should select earliest if you
+only want to see the messages from when
+your consumer connects onward select
+latest none will throw an except if
+there is no offset for the consumer
+group this property only applies the
+first time a consumer connects to a
+topic after that when a consumer
+reconnects it will pick up consuming
+from the last offset we then call kofka
+consumer and provide the following
+information the topic we're connecting
+to how often you want to pull the kofka
+cluster to check for new messages and
+then we print the key and value of our
+message that's the basic of kofka
+consumers let us know in the comments
+below if you have any questions or
+content you'd like to see us cover and
+be sure to like And subscribe to be
+notified as we publish additional videos
+until next time have fun streaming
+

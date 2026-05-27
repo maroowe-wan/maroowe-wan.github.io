@@ -1,0 +1,155 @@
+## 영상 1: Kubernetes Deployment vs. StatefulSet vs. DaemonSet (https://www.youtube.com/watch?v=30KAInyvY_o)
+
+A pod is the smallest unit of computation and replication in Kubernetes. If your application needs to scale up, you simply increase the number of pods. Since pods are scaled up and down as a unit, all containers in a pod must be scaled together, regardless of their individual needs. This can lead to wasted resources and a higher cost.
+
+To avoid this, pods should be kept as small as possible, typically containing only a main process and its closely associated helper containers, which we typically call sidecars.
+
+Pods are the basic unit of computation in Kubernetes, but they are not typically created directly in the cluster. Instead, Kubernetes provides another level of abstraction, such as a Deployment.
+
+The primary purpose of a Deployment is to declare how many replicas of a pod should be running at any given time. When a deployment is added to the cluster, it automatically spins up the requested number of pods and then monitors them. If a pod fails, the deployment will automatically recreate it.
+
+By using a deployment, you don't have to deal with pods manually. You can just declare the desired state of the system, and it will be managed automatically for you.
+
+To expose the application to the outside world, we use a service object. When a request comes to the service, it will be randomly redirected to one of the pods managed by the deployment. There is no way to individually target any specific pod since all of them get unique pod IDs.
+
+Since pods are ephemeral in nature, when a pod gets rescheduled or simply deleted, it will lose all the state and associated data if it is stored locally.
+
+There is a way to persist data in a Deployment object. You need to create a persistent volume claim. By default, most of the cloud-managed Kubernetes services would have a default storage class that can allocate a volume with readWriteOnce access mode.
+
+This means you can only attach this volume to a single pod. If your deployment has more than one replica, other pods will fail to mount the volume and will be stuck in the creating state.
+
+I frequently use this with Grafana to persist dashboards that I created from the UI. However, if you try to update the Grafana image, for instance having one replica, by default it will create a new pod first and then try to mount the existing volume to that pod, which will also lead to a mounting error and a failed update.
+
+To fix this issue, just update the deployment strategy to recreate. It'll unmount and destroy the pod first, and then create a new one and attach the existing volume to it.
+
+There is a workaround to deploy an additional driver such as EFS in the AWS cloud, which is a type of network storage that allows mounting the same volume to multiple pods at the same time. In that case, you would use the ReadWriteMany mode to allocate the volume. Now you can use this claim name and mount this volume to all your pods under that replica.
+
+Now you have the ability to scale your deployment with the mounted volume, but you'll still use the same volume, which is probably not what you want. However, you can probably find a way to work with it if your pods use a file path based on the pod id or something like that.
+
+Instead, you would likely want to allocate a dedicated volume for each pod. With deployment, you would need to create as many persistent volumes as the number of pods you wish to have. In addition, you would need to create deployment objects with one replica each. As you can see, this solution is difficult to scale.
+
+To solve this problem, Kubernetes has introduced the StatefulSet. It is similar to a deployment, but it also offers the option to define volumeClaimTemplates, which can dynamically create persistent claims for each pod that the StatefulSet object creates.
+
+So, when you create a StatefulSet, each pod will be bound to a specific volume. If the pod gets rescheduled on another node, the same volume will be attached to that pod. In this way, you maintain an identity for each pod.
+
+Another important aspect of the StatefulSet is that each pod will get a stable, unique network identifier. In simpler terms, each pod will have its own stable DNS name. Many stateful applications, such as Kafka, not only require data persistence between restarts but also need to know where the leader of a particular partition is located, and provide that DNS name of the pod to the client. This way, the client can directly connect to the pod using its DNS.
+
+Speaking about DNS, a StatefulSet also creates and maintains not only A records for each pod but also SRV records, which some clients can utilize.
+
+In some use cases, I even prefer to run stateless applications using a StatefulSet simply because they need to maintain a strong identity.
+
+Also, by default, when you create a StatefulSet, Kubernetes will create pods in sequential order. If you have 50 pods and you don't require such ordered slow deployment, you can set the podManagementPolicy to 'Parallel.' This way, StatefulSet pods will be created at the same time.
+
+Now there is a time when you want to deploy a pod on each node such as monitoring or logging agents. If you scale up or down your Kubernetes cluster, you want to remove and add pods as well. DaemonSet can automate this process for you. DaemonSet will create as many pods as there are nodes in your cluster, so you don't need to manage replicas yourself.
+
+Since we frequently add taints to the node pools in Kubernetes to ensure that your pods will be deployed on each node, you need to tolerate all possible taints on these nodes as well.
+
+DaemonSet is also commonly used with distributed software as a storage solution. For instance, if you want to deploy Hadoop, MinIO, Rook, or even Local Persistent Volumes, you would create Kubernetes nodes with attached disks and run a DaemonSet on each of them. In this way, by using a DaemonSet, you can abstract the local distinct disks and provide them as an S3 or a filesystem for your applications.
+
+If you want to learn about the differences between NodePort, Load Balancer, and Ingress, you can watch this video. Thank you for watching, and I'll see you in the next video.
+
+
+## 영상 2: Deploy a production Database in Kubernetes (https://www.youtube.com/watch?v=UDXnyh0vtXw)
+
+Hey guys, in this video I'm going to show you how to deploy a production grade database cluster in Kubernetes. I'm going to be using MySQL but the concepts you learn here can be used to deploy any other database.
+
+If you're new to this channel, please hit the Subscribe button. I release new DevOps and reliability videos every week and your support would be extremely helpful. Now let's get started.
+
+This is the architecture of the MySQL cluster we'll deploy. The writer node handles all the writes. All data gets replicated to three other readers. All read requests are sent to these readers. This way we're able to scale for both writes and reads.
+
+Here's the main tutorial from Kubernetes documentation that I'm going to be following. The link for this tutorial is in the description below. I've also included links to all relevant Kubernetes concepts and my GitHub repository that contains the code used here.
+
+These are few basic Kubernetes concepts I'm assuming you already know. It is also a plus if you have some familiarity with MySQL but this is not mandatory.
+
+Now let's learn a few advanced Kubernetes concepts that will help us achieve our database setup.
+
+A persistent volume is a piece of storage in the cluster. A pod can use it to persist data even when you restart or delete the pod. The PV doesn't get deleted because it has an independent lifecycle, so it is the ideal place for you to store data that you don't want to lose.
+
+A PV abstracts away the underlying storage mechanism from the user. An administrator could be using anything like a network file system, Ceph, AWS EBS or even local hard disk underneath.
+
+When an administrator manually provisions a PV for you to use it's called static provisioning. Dynamic provisioning is when Kubernetes creates a PV on demand.
+
+A persistent volume claim is a request for storage by a user. When you create a pod it consumes some node resources like CPU. Similarly, when you create a PVC it consumes a persistent volume. PVC is where you specify things like the disk size that you need, access mode like read-only or read-write, etc. Your claim might end up getting bound to a PV that was statically provisioned or dynamically, whatever satisfies the criteria specified.
+
+A stateful set is for stateful applications what a deployment is for normal stateless applications. It too manages pods based on a container specification. So when you want to use storage volumes in your pod, you deploy it using stateful set. It ensures that pods are always mapped to the same persistent volume they were originally given.
+
+Every Kubernetes service performs load balancing of requests. If I perform a DNS lookup, the service returns its cluster IP so my request gets forwarded to one of the pods. This is great for the usual stateless services but it's not desirable in our case because what if a write request ends up going to a reader or vice versa. This means I directly want the IP of the writer pod. So how do we achieve this? We use the concept of headless service.
+
+When you declare a service to be headless, performing a DNS lookup doesn't return the cluster IP. Instead it returns IPs of all the pods behind it. The service creates DNS entries for each pod. We use this method to specifically reach the writer pod for all our writes. We can declare a service headless by simply setting cluster IP to none in the definition.
+
+Let's have a look at the setup now. For this video I'm running Minikube on a Linux virtual machine. I gave it 8GB of memory and 50 GB of disk space. My cluster has one control plane and two worker nodes, all simulated inside the VM. Of course in a production setup you'd have a real Kubernetes cluster with multiple servers and better configurations.
+
+I've enabled dynamic provisioning of persistent volumes so when I run the database pods, my cluster automatically gives them new storage. I'm using local disk for these storage volumes. I've included the link on how to do this in the description but your configurations and drivers might be different from mine.
+
+Here are the configurations I'm going to apply for the MySQL cluster. The code is slightly modified from the tutorial and also available in my GitHub repository.
+
+The config map YAML lets us control configurations for the MySQL writer and readers. For example, we want the readers to reject any writes that don't come via writer replication log. We configure in the stateful set whether a pod is a writer or a reader and based on that the pod picks up the right configuration from here.
+
+Up next we declare two services. The first is a headless MySQL service so we can access the writer endpoint. The second is a normal service that load balances our read requests amongst all MySQL pods.
+
+Finally, here's the stateful set that launches the pods. A stateful set controller creates its pods one at a time in order of the pod index. It also gives them stable DNS names like MySQL-0, MySQL-1, and so on.
+
+The init MySQL container creates custom configuration for each MySQL pod. It generates a unique server ID based on pod index. If the index is zero, it applies the writer configuration, else it simply applies the reader configuration.
+
+When the service brings up a new pod, the clone MySQL container copies data from an already existing pod into it so it doesn't have to replicate from scratch. This cloning is skipped if we're bringing up a writer pod.
+
+We define the MySQL container and specify things like config paths, resources to allocate, health checks, etc. Xtrabackup is a sidecar container that starts the replication in all readers. At the bottom is our configuration for persistent volume claim. This tells Kubernetes to give a 5GB storage volume that satisfies all the criteria here to all our pods.
+
+The MySQL cluster is now running. MySQL-0 is the writer. The rest are readers.
+
+Each pod received a 5GB storage volume. Let's now send some traffic to our database. First, I'm going to send a query to the writer. I'm running a temporary MySQL client that sends a query to create a database and table and insert a row.
+
+Now let's run a read query to get our row back. This time we send our request to the reader pool and the service forwards it to one of the replicas.
+
+Perfect. We were able to fetch the data. Currently we have two readers. Let's add more replicas to scale out our read traffic.
+
+After a while, two new pods have been spun up. Stateful set also recreates a pod that crashes or gets deleted. It ensures that the new pod is linked to the same persistent volume claim that was given to the original one.
+
+I have five pods with me. So how about I delete one. As you can see a replacement was spun up so we have resilience built into our application. Perfect.
+
+That's all folks. These are the basics of how you can deploy databases to Kubernetes in production. Depending on your specific use case there can be a lot more configurations involved. So make sure you know beforehand what you're signing up for.
+
+If you found this video insightful please like and share and if you want to stay on top of the world of DevOps and SRE, hit the Subscribe button. Cheers.
+
+
+## 영상 3: What are stateful workloads? (https://www.youtube.com/watch?v=yROFvZiV5cU)
+
+Kubernetes allows you to focus on the applications that matter to you by abstracting away clusters of underlying infrastructure. But when an application is stateful, meaning it needs to persist data in some form, it can be essential to have greater control over that underlying infrastructure.
+
+Today we're going to explore tools for running stateful workloads in GKE.
+
+First, let's explore what a stateful workload is in the context of Kubernetes. To put it simply, a stateful workload is typically one that stores some form of data that needs to persist. Meanwhile, a stateless one does not necessarily store data and often could be disrupted for a short time without major consequence.
+
+From its beginnings, Kubernetes has been well suited to managing stateless workloads. When a workload does not need to maintain state, it can generally be disrupted and spun back up with minimal interruption to the service. Kubernetes is very good at auto healing these types of use cases.
+
+Generally, when running stateless workloads, we don't get too attached to any specific instance of the workload or of the hardware. If and when a workload fails, Kubernetes will automatically replace it with a new one.
+
+In the case of stateful workloads, the workload will have constant data persistent needs of some sort. The workload may have significant dependencies on underlying hardware as it writes data to disk. These rights may be long-lived, meaning that the workload cannot simply be disrupted and spun back up. Any disruption must be handled gracefully to avoid any potential for data loss.
+
+As a managed Kubernetes service, GKE provides the normal open source tools for managing stateful workloads such as persistent volumes and persistent volume claims, pod disruption budgets or PDBs, and node affinity for ensuring stateful workloads have access to the hardware they need.
+
+However, there are also a number of considerations beyond the cluster itself where GKE can provide additional help. For example, cluster backup services, built-in observability features to ensure safe upgrades, and the infrastructure options to make sure your stateful workloads have the hardware they need.
+
+Let's explore some of these useful tools and features. Backups are a key consideration for stateful workloads. Anywhere, the backup for GKE service ensures you can backup your Kubernetes workloads safely. It provides the ability to backup not only the persistent volumes containing the data for your apps running in Kubernetes but also the configuration of the GKE cluster itself.
+
+Another important functionality in GKE is upgrades. GKE has a few upgrade tools that can help you run stateful workloads with minimal disruption across upgrades.
+
+The first I'll talk about here is release channels. The rapid, regular, and stable channels provide a regular cadence at varying frequencies to ensure your clusters are getting updated to maintain supportability with the pace of the Kubernetes project.
+
+It can be challenging to both keep up with supported versions and at the same time ensure minimal disruption from version changes for your workloads. Release channels and GKE's related release management tooling helps you maintain both uptime and supportability.
+
+One important way GKE ensures you can safely keep your clusters on supported updated GKE versions is with deprecation insights and recommendations. When GKE detects that a cluster is using a Kubernetes feature or API that is deprecated and will be removed in an upcoming minor version, it pauses any auto upgrades to that upcoming minor version and provides recommendations to help you assess and mitigate potential issues.
+
+A common approach to ensure a smooth transition during an upgrade is to use a blue-green strategy. GKE offers native blue-green node pool upgrade functionality.
+
+A blue-green node pool upgrade will spin up a full set of new nodes so you can test workloads on the new version before completing a node pool upgrade.
+
+Using a blue-green strategy for upgrades can be particularly helpful in stateful use cases where continuity and stability are especially important. Be sure to check out our video on GKE node pool upgrades to learn more about the strategies and tools to help you upgrade your clusters safely.
+
+When it comes to making sure your Kubernetes workloads have the storage they need, GKE has a number of options to fulfill a variety of needs. For NFS, Cloud Filestore can provide persistent storage for multiple readers and writers. GKE also provides options for configuring persistent disks for your cluster with flexible sizes. For those workloads that need high performance at very low latency, you can configure locally attached SSDs for the workloads in your GKE clusters.
+
+From backups to upgrades to configuring storage to suit your needs, GKE provides an ecosystem of solutions to support the challenges of running stateful workloads in Kubernetes.
+
+In this video, you learned about what stateful means for workloads running in Kubernetes and about the ecosystem of tools, features, and services GKE provides to help you run your stateful workloads safely.
+
+With the concepts discussed in this video, we're confident you'll be on your way to building a GKE cluster that suits your needs. You can get started with GKE by visiting the Google Cloud console and checking out the links below. Stay tuned for our next videos where we dive deeper into GKE topics.

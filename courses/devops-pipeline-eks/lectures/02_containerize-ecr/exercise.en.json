@@ -1,0 +1,50 @@
+{
+  "lecture_no": 2,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "Warm-up: Write a Dockerfile for a minimal Node.js web application that demonstrates correct layer caching order. The app listens on port 3000 and starts with 'node server.js'. Use the 'node:18-alpine' base image. Explain in a comment why you copy 'package*.json' before copying the rest of the source.",
+      "starter": "# Create a file named Dockerfile in your project root.\n# The project directory contains: server.js  package.json  package-lock.json\n\n# Your Dockerfile here:\n",
+      "solution": "FROM node:18-alpine\nWORKDIR /app\n# Copy dependency manifests first so Docker can cache the install layer.\n# If only server.js changes, this layer is reused and npm install is skipped.\nCOPY package*.json ./\nRUN npm install\nCOPY . .\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]",
+      "explanation": "Docker builds images layer by layer and caches each layer. When you re-build, layers whose inputs have not changed are served from cache. By copying 'package*.json' and running 'npm install' before copying the application source, the expensive install step is only re-executed when the dependency list changes. A change to 'server.js' alone only invalidates the final 'COPY . .' layer and beyond, so builds are much faster. Reversing the order — 'COPY . .' first — would invalidate the install cache on every source change, even when no dependency changed.",
+      "hints": [
+        "The key is order: Docker invalidates all layers after the first changed layer. Think about which files change most often (source code) vs. least often (package.json).",
+        "EXPOSE does not actually publish the port; it documents intent. The real port mapping happens at 'docker run -p'.",
+        "CMD uses JSON array form (exec form) to avoid shell processing: CMD [\"node\", \"server.js\"] rather than CMD node server.js."
+      ]
+    },
+    {
+      "prompt": "Core practice A — Create an ECR repository and authenticate Docker to it. Using the AWS CLI: (1) create a private ECR repository named 'my-app' in the 'us-east-1' region, (2) authenticate your local Docker daemon to that registry. Replace '<account-id>' with your actual 12-digit AWS account ID throughout.",
+      "starter": "# Step 1: create the ECR repository\naws ecr create-repository \\\n  --repository-name ________ \\\n  --region ________\n\n# Step 2: authenticate Docker\naws ecr get-login-password --region ________ \\\n  | docker login --username AWS --password-stdin \\\n    ________.dkr.ecr.________.amazonaws.com",
+      "solution": "# Step 1: create the ECR repository\naws ecr create-repository \\\n  --repository-name my-app \\\n  --region us-east-1\n\n# Step 2: authenticate Docker\naws ecr get-login-password --region us-east-1 \\\n  | docker login --username AWS --password-stdin \\\n    <account-id>.dkr.ecr.us-east-1.amazonaws.com",
+      "explanation": "'aws ecr get-login-password' requests a short-lived authorization token from AWS and writes it to stdout. The pipe passes it directly to 'docker login' using '--password-stdin', so the secret never appears in your shell history. The registry URL format is always '<account-id>.dkr.ecr.<region>.amazonaws.com' — this identifies your account's ECR endpoint in that region. The login token expires after 12 hours, so production pipelines re-authenticate at the start of each build.",
+      "hints": [
+        "If you get an 'UnauthorizedException', check that your AWS CLI is configured with credentials that have 'ecr:GetAuthorizationToken' and 'ecr:CreateRepository' permissions.",
+        "The 12-digit account ID is visible in the top-right corner of the AWS Console, or via: aws sts get-caller-identity --query Account --output text",
+        "You can verify the repository was created with: aws ecr describe-repositories --region us-east-1"
+      ]
+    },
+    {
+      "prompt": "Core practice B — Build, tag with the current Git commit SHA, and push the image to ECR. Assume your ECR repository URL is '<account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app'. Write the four commands for: build → tag with commit SHA → push → verify the tag exists in ECR.",
+      "starter": "# Build\ndocker build -t my-app .\n\n# Tag with the short commit SHA (fill in the git command)\ndocker tag my-app:latest \\\n  <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:________\n\n# Push\ndocker push \\\n  ________\n\n# Verify the image tag exists in ECR\naws ecr describe-images \\\n  --repository-name my-app \\\n  --region us-east-1",
+      "solution": "# Build\ndocker build -t my-app .\n\n# Tag with the short commit SHA\ndocker tag my-app:latest \\\n  <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)\n\n# Push\ndocker push \\\n  <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)\n\n# Verify the image tag exists in ECR\naws ecr describe-images \\\n  --repository-name my-app \\\n  --region us-east-1",
+      "explanation": "'git rev-parse --short HEAD' outputs the short (7-character) SHA of the current commit, e.g. 'a1b9f3c'. Using this as the image tag creates an immutable, traceable artifact: the tag tells you exactly which commit produced this image. The 'docker tag' command creates an alias — it does not copy the image; it simply adds another name pointing to the same layers. 'docker push' then uploads the layers to ECR under that full registry/repository:tag address. The 'describe-images' call confirms the tag appears in ECR and is ready to be referenced in a Kubernetes Deployment manifest.",
+      "hints": [
+        "You can also capture the SHA in a variable for readability: IMAGE_TAG=$(git rev-parse --short HEAD) then use $IMAGE_TAG in the tag and push commands.",
+        "If 'docker push' returns 'no basic auth credentials', you need to re-run the 'aws ecr get-login-password' pipe from the previous task — the 12-hour token may have expired.",
+        "The full ECR image name format is: <account-id>.dkr.ecr.<region>.amazonaws.com/<repo-name>:<tag> — every part is required."
+      ]
+    },
+    {
+      "prompt": "Applied challenge — Convert the single-stage Dockerfile from the warm-up into a multi-stage build that produces a smaller final image. Stage 1 (named 'builder') installs all dependencies including devDependencies. Stage 2 (final image) starts from 'node:18-alpine', copies only the production node_modules and the application source from stage 1, and sets the same CMD. Explain why the final image is smaller.",
+      "starter": "# Multi-stage Dockerfile\n# Stage 1: build stage\nFROM node:18-alpine AS builder\nWORKDIR /app\n# ... install all deps including devDependencies\n\n# Stage 2: production image\nFROM ________\nWORKDIR /app\n# Copy only what the running app needs from the builder stage\n# COPY --from=builder ...\n\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]",
+      "solution": "# Stage 1: install all dependencies (including dev)\nFROM node:18-alpine AS builder\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install\nCOPY . .\n\n# Stage 2: production image — only runtime artifacts\nFROM node:18-alpine\nWORKDIR /app\n# Copy only production node_modules and application code from builder\nCOPY --from=builder /app/node_modules ./node_modules\nCOPY --from=builder /app/server.js ./server.js\n# If you have additional source files/directories, copy them too:\n# COPY --from=builder /app/src ./src\nEXPOSE 3000\nCMD [\"node\", \"server.js\"]",
+      "explanation": "In a single-stage build, every tool used during the build (compilers, test runners, devDependencies) ends up baked into the final image. Multi-stage builds fix this: only the artifacts that are explicitly COPY --from= transferred into the final stage are included. The final image contains no build toolchain, no devDependencies, and no intermediate build files — just the minimal runtime. In practice this typically cuts image size by 30–70%, reducing both pull time and the attack surface (fewer packages = fewer potential vulnerabilities). The '--from=builder' syntax names which stage to copy from.",
+      "hints": [
+        "npm install with no flags installs both 'dependencies' and 'devDependencies'. To install only production deps in stage 2 you could alternatively run 'npm install --omit=dev' in the second stage instead of copying node_modules.",
+        "You can copy entire directories: COPY --from=builder /app/dist ./dist — useful for compiled TypeScript or React builds.",
+        "After building, compare image sizes: docker images my-app — compare the multi-stage result to the size of the original single-stage image."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,516 @@
+Kind: captions
+Language: en
+Hello and welcome back to my channel. My
+name is Piyush. This is day 52 in CK2025
+series and in this video we'll be
+looking into storage class and dynamic
+volume provisioning using storage
+classes. So this video will be all about
+understanding it, how
+dynamic provisioning works, what is
+storage class, why do we use it,
+and all the nitty-gritty around it. Plus
+we'll be doing the demo in a GKE
+cluster, Google Kubernetes Engine
+cluster, because the dynamic
+provisioning needs a storage solution or
+a cloud provider that supports a storage
+solution. So that's why we'll be using
+GKE, but feel free to use AKS, EKS, or
+if you have a storage solution such as
+NFS,
+Portworx, VMware storage, anything
+anything that you like like. But I'm
+just telling you what I'm using in this
+demo.
+Um so let me just share my screen and
+first we'll go through the concept in
+detail like what exactly it is because
+before getting into the demo, we need to
+understand a bit about it.
+Okay.
+I might have explained this a bit in
+one of the previous videos in the
+storage section where we discussed about
+persistent volume, persistent volume
+claims and so on, but I'm just going to
+um
+maybe the demo was missing in that. So
+I'm just going to explain it once again.
+So storage class defines how a storage
+is provisioned in Kubernetes, right? So
+when you create a storage, it has to be
+either statically provisioned or dynamic
+provisioning. So what exactly is a
+static provisioning? So for example,
+your storage admin uh that person
+creates a persistent volume
+and as a user, as a application
+developer, Kubernetes administrator,
+operator, DevOps engineer, like you can
+name any persona who's a user of the
+application, that person can create a
+persistent volume claim,
+and then the persistent volume claim
+will be bound to the persistent volume
+and then later it can be utilized in the
+pod or your workload, right? So that's
+the static provisioning in which
+you as a storage admin are
+pre-provisioning your persistent volume.
+Okay, so you are creating a persistent
+volume
+and a PVC which is a persistent volume
+claim can request a slice from that
+persistent volume, okay? So that's the
+static provisioning model.
+Now,
+we have dynamic provisioning as well in
+which we don't have to create the
+persistent volume. You create the
+persistent volume claim, give the
+storage class reference in the
+persistent volume claim, and then once
+the user requests a persistent volume
+claim,
+a PV will be created and it will be
+bounded to the PVC, okay?
+Um there are several use cases of why we
+use it
+because let's say the storage
+the storage requirement differs from
+workload to workload, right? Some some
+workload require, let's say
+a high performance persistent disk. Some
+some
+workload required an HSD for the cost
+effective method. Some storage required
+a balanced persistent disk and so on,
+right? So we can create storage classes
+of all those persistent disks so that we
+don't have to pre-provision the
+persistent volumes and it will help us
+save a lot of cost and it will help us
+dynamically provision the volume when
+needed and the volume will be deleted
+when it's not required, okay?
+So that's the main difference between
+static and dynamic volume provisioning.
+Now it has different components,
+the storage class. So it defines what
+what type of storage will be
+provisioned, right? Whether it is an
+NFS, SSD, HSD,
+HDD and so many more.
+And how to create it? So there is a
+section in the storage class, it's
+called provisioner and provisioner
+defines how do we create the storage.
+Okay?
+And then it has several configuration
+parameter which is based on the
+performance, durability, stability and
+which defines all those things and it
+defines like
+how much of the how much cost effective
+or costly the solution is, okay?
+Now, how it works? So this is the
+storage class, okay? Storage class has
+as I've told you, it has provisioner
+which defines how the storage will be
+provisioned. For example, whether it is
+AWS EBS, Azure files, GCP persistent
+disk, NFS, Portworx or any other.
+So that's is that is defined in the
+provisioner.
+And then these are the volume plugins,
+okay? Plugins as in it attaches the
+Kubernetes cluster to that respective
+cloud provider. For example, GCP, AWS or
+Azure
+and so on, right? So these are the
+volume plugins that is attached to the
+Kubernetes cluster and it maps your
+Kubernetes cluster with the cloud
+provider so that the storage can be
+provisioned over there.
+Okay? So that's provisioner, okay?
+And then we have parameters, like the
+configuration parameters. We'll look at
+that once we do the demo. Then it has
+the reclaim policy, like what happens to
+the storage when the underlying
+persistent volume will be deleted, okay?
+Or when the underlying persistent volume
+claim will be deleted, what happens to
+the persistent volume? So that's
+part of reclaim policy. It could be
+deleted, it could be retained, recycle.
+Recycle has been I believe it has been
+deprecated, but
+now it is retained or deleted.
+Okay, and then it has several other
+options.
+Now, the way it works is you create a
+storage class
+and when user creates a persistent
+volume claim using the storage class, it
+creates a persistent volume and then the
+persistent volume will be bounded to the
+persistent volume claim over here,
+Now, let's look at the
+example and let's look at the overall
+high level diagram of dynamic volume
+provisioning and static volume
+provisioning.
+So what happens in a static volume
+provisioning? Give me a second, I might
+have
+Okay, so how static provisioning works?
+This is something that we have discussed
+on a high level earlier. Let's have a
+look at that with the help of an
+example.
+So uh you create a persistent volume,
+okay? Like as a storage admin you create
+a persistent volume with 80 GI of
+uh
+storage and the mode is read write once,
+okay? So that's the mode. Mode is also
+part of storage
+like your storage class as well as
+persistent volume.
+And then your developer, when developer
+wants to create an application, it
+creates a pod or a workload.
+Then that person also create a
+let's say 10 GI and
+the same mode as your PV is created,
+read write once.
+Okay? So this
+the storage, it should be less than or
+equal to what is available, okay? That's
+one thing. Other is the mode should be
+same. So read write once, read write
+once. Once these things or these
+condition are matched, only then the PV
+will be bounded to the PVC.
+Okay? And this 10 GB, so we are
+requesting a slice from that persistent
+volume. So we have 80 GB of storage, out
+of that 10 GB we are taking and
+allocating it to the workload. So that's
+static provisioning.
+Okay? Now, what
+Okay, now there is dynamic provisioning
+as well in which
+there is a developer who requests the
+persistent volume claim over here, okay?
+Let's say 70 GI and this time the mode
+is RWX, read write many.
+Now, the persistent volume that we have
+over here, it has a different mode,
+okay? And we don't have this particular
+PV already present. We don't have
+anything that has 70 GI of storage and
+RWX as the
+mode.
+Storage mode, right? We don't have
+anything available. So this
+we cannot bound this, right? It does not
+satisfy the requirement.
+Even though the storage is similar, 70
+GB, but the mode is different. So we
+cannot use this one like. So what
+Kubernetes will do, based on the storage
+class that we have added in this PVC, it
+will create a new
+persistent volume with the same mode as
+this one,
+okay? And it will bound it to that.
+And this will happen with the help of
+storage class and this process is called
+dynamic volume provisioning, okay? So
+this was static provisioning, this is
+dynamic volume provisioning. Over here
+we are creating the PV in advance
+and a persistent volume claim will be
+attached to that PV, but over here we
+are not creating the PV in advance or
+even the one that we had does not
+satisfy our requirement. That's why it
+will dynamically create a PV and bound
+that PV to the persistent volume claim.
+Okay? So we will be doing a demo and in
+that demo we'll be creating
+two storage class, one for high
+performance and one that is cost
+effective. We'll be using the
+provisioner GC persistent disk. And the
+type of this will be PD SSD, the type of
+the other one will be PD standard so
+that separate
+persistent volumes can be used.
+And this has a specific use case for
+high performance computing and this is
+just for the dev test workload, okay? So
+let me share my
+screen and uh here it is. So, I have a
+GKE cluster created.
+Now, I'm going to log in to the cluster.
+So, there are multiple ways. I have
+created multiple videos around GKE, so
+you can walk through that.
+Or
+or you can just simply follow what I'm
+doing right now, okay? So, I'm just
+going to run that in the Cloud Shell,
+and it will help me log in to the
+cluster.
+Let's do that. And while it's doing, let
+me pause the recording. It might take a
+couple of minutes.
+Okay, I have logged in to the cluster.
+Now, what you can do is let me just
+change the prompt. It's too huge.
+All right.
+Okay. Now, let's try to check the
+default
+uh storage classes that are available,
+okay? So, cube CTL get storage class or
+SC.
+Okay, so we have three storage classes,
+as you can see. Uh first is premium RWO,
+that's the name. Second is standard.
+Third one is standard RWO. These are the
+provisioners. Provisioners
+uh GCE PD and PDCS as storage uh GKE. I
+hope so. They all are provisioner for uh
+GKE persistent disk or GKE.
+And it has different volume uh it has
+different
+uh what do you call
+volume binding mode, wait for first
+consumer or immediate. Right? So, wait
+for consumer means it will be bounded to
+the
+um the persistent volume, and persistent
+volume claim will be bounded once the
+pod that is requesting that storage is
+up and healthy. Okay, and immediate
+means the pod doesn't have to be there.
+Even if there is a PVC, PV will be
+bounded to that, okay?
+Now, um there is this default So, uh
+in front of the name, if it's written as
+default, that means that is the default
+storage class. So, when you create a PVC
+without mentioning the storage class, it
+will by default be created as standard
+RWO.
+Okay. So, now let's see if we can
+describe this. So, cube CTL describe
+storage class, name of the storage
+class.
+Okay. So, what does it say?
+Um the provisioner is this,
+and parameter is this. Parameter has a
+type PD-balanced. That means by default,
+PD persistent disk balance will be
+created. Okay, and there are some other
+options
+like mount mount option, reclaim policy
+is is default class is yes. That means
+that is the default storage class.
+Okay. You can also update the default
+storage class to something else. I'll
+show you how you can do that. Okay, so
+first let's let's begin with our demo.
+So, first I'm going to create two
+storage classes. One is for, let's say,
+high performance.
+So, I'm just going to paste the content.
+It's a kind is storage class.
+Okay, and it's um provisioned is GCE
+persistent disk.
+It will use PD-SSD. These are the zones
+that will it will be using, and
+replication type is regional.
+Um there are other details, okay? So,
+I'm just going to save this, and cube
+CTL
+apply {hyphen} f hp.
+Okay, it says created. So, cube CTL get
+storage class.
+Uh here is our storage class, which says
+the name high performance, okay? Now,
+let me try to create another one for our
+development workflow, okay? So, vi
+dev.yaml.
+Oops.
+vi dev.yaml
+Okay, it has a different type. It uses
+PD-standard. The other one was using uh
+was using balanced persistent disk, plus
+it was a regional persistent disk. So,
+now we are only creating a zonal
+persistent disk in one zone,
+because that is a cost-effective uh
+method that we are using, right?
+Cube CTL apply {hyphen} f dev.yaml.
+Okay. So, cost-effective high
+performance, both are
+uh storage classes have been created.
+Now, let's um
+Now, let's change the default storage
+class with what it has to something
+else.
+So, I'm going to run cube CTL patch
+command, and I'm going to make the
+cost-effective one as the default
+Okay. So, cube CTL patch storage class,
+name of the storage class, and this is
+the parameter. So, we are changing in
+the annotation, we are changing storage
+class is true.
+Okay, now it's been patched. And if I do
+get storage class, now we can see
+cost-effective is the default storage
+Now, let's try to create a persistent
+volume claim, and let's try to see how
+does it work, okay?
+So, pvc1.yaml.
+So, it's a persistent volume claim um
+and access mode is read write once,
+which which is matching with the storage
+class. Storage class name is high
+performance, and we are requesting 50 Gi
+of storage.
+So, cube CTL apply {hyphen} f pvc1.yaml.
+Okay, cube CTL get PVC.
+Okay, it says pending.
+And if we do get PV, uh it has not been
+created yet.
+So, let's wait.
+It should dynamically provision the
+Um let's wait.
+Let's check if uh everything is good. Uh
+let's check if it is matching with the
+cube CTL. Let's see.
+Get storage class.
+So, we have created the one for
+production, and it says name is high
+performance.
+Uses uh
+Get PV again. Nothing is there. Get PVC.
+Um
+storage class is high performance.
+And let's check this one more time.
+pvc1.yaml.
+Access mode is read write one. Um
+storage is 50, and
+Storage class name is good as well.
+Okay, let's try to create another one as
+well, and let's see after this.
+So, I'm going to create one for
+uh the development environment as well.
+So, pvc2.yaml.
+And over here, I have not specified the
+storage class name, so that it should
+use the default one.
+So, cube CTL apply {hyphen} f pvc2
+pvc2.yaml.
+Cube CTL get PVC.
+Okay, they both are pending.
+And we don't Okay. So, now dev storage
+is bounded, as you can see over here.
+Something wrong with the other one. I'll
+check that later on, but let's see the
+dev one.
+Cube CTL get PV. So, it created a
+persistent volume, okay?
+Uh with the storage class as
+cost-effective, because cost-effective
+is now the default storage class once we
+patched it.
+Okay, and cube CTL get PVC.
+Uh let's see why this is pending, okay?
+So, I'm going to describe it. Cube CTL
+describe
+PVC.
+Okay, it says waiting for the first
+consumer to be created before binding.
+Okay, and because this is a first
+consumer one, right? And the one that
+we've created earlier, get PVC.
+Let's see. This one, if I describe this
+one,
+cube CTL
+describe PVC
+dev app storage.
+It says waiting for the volume to be
+created. That's okay.
+And succeeded, and its volume mode is,
+let's see.
+I'm going to compare the uh
+storage class YAMLs for both. So, cat
+hp, which is high performance, over
+here.
+volume binding mode is wait for first
+consumer.
+And if I do dev one,
+volume binding mode is immediate. That
+is why it did not provision it. It was
+waiting for the pod to be provisioned
+first.
+So, let's change the one uh let's change
+the HP one.
+And let's change the volume binding mode
+to immediate, or you can create a pod
+and consume the volume. That's one and
+the same thing.
+Okay, and now let's apply the changes.
+Is invalid. Oh.
+Okay, field is immutable. It cannot be
+changed, so I have to delete it and then
+apply it again. Okay.
+Delete and then apply it again.
+Okay, if I do kubectl get PV.
+Okay, still not created. Let's wait for
+it.
+Still pending.
+kubectl Oh, it did not created It did
+not deleted the PVC actually. So, let's
+delete the PVC first.
+kubectl delete PVC.
+Okay, and we add PVC one.
+Over here, everything is good. Let's try
+to provision this again. kubectl apply
+hyphen f PVC one.
+Okay, kubectl get PVC.
+Still pending. Now, it's bound.
+Okay, says it's bound. And if I do
+kubectl get PV.
+So, you will see it is It has created
+another storage as well over here. So,
+we have two storage because I have
+created it twice.
+Um, I have not deleted the other one,
+and the reason over here is retained.
+That means when I deleted the earlier
+one, it was already bounded.
+And it retained it. Okay, and now when I
+created the PVC again, it created a new
+PV.
+So, that's what I wanted you to see. So,
+we have covered both the scenarios. We
+have covered all from the exam
+perspective as well, and all the
+fundamentals of PV, PVC, storage class.
+So, yeah, that's it for this video. I'm
+going to just clean up my cluster now.
+Make sure you delete the cluster once
+you are done, otherwise it will cost you
+a lot of money. So, thank you so much. I
+will see you soon with the next one, and
+you have a good day. Happy learning.

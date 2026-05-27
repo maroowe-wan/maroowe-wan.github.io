@@ -1,0 +1,175 @@
+## 영상 1: Kubernetes Deployment vs. StatefulSet vs. DaemonSet (https://www.youtube.com/watch?v=30KAInyvY_o)
+
+A pod is the smallest unit of computation and replication in Kubernetes. If your application needs to scale up, you simply increase the number of pods.
+
+Since pods are scaled up and down as a unit, all containers in a pod must be scaled together, regardless of their individual needs. This can lead to wasted resources and a higher cost.
+
+To avoid this, pods should be kept as small as possible, typically containing only a main process and its closely associated helper containers, which we typically call sidecars.
+
+Pods are the basic unit of computation in Kubernetes, but they are not typically created directly in the cluster. Instead, Kubernetes provides another level of abstraction, such as a Deployment.
+
+The primary purpose of a Deployment is to declare how many replicas of a pod should be running at any given time.
+
+When a deployment is added to the cluster, it automatically spins up the requested number of pods and then monitors them. If a pod fails, the deployment will automatically recreate it.
+
+By using a deployment, you don't have to deal with pods manually. You can just declare the desired state of the system, and it will be managed automatically for you.
+
+To expose the application to the outside world, we use a service object. When a request comes to the service, it will be randomly redirected to one of the pods managed by the deployment. There is no way to individually target any specific pod since all of them get unique pod IDs.
+
+Since pods are ephemeral in nature, when a pod gets rescheduled or simply deleted, it will lose all the state and associated data if it is stored locally.
+
+There is a way to persist data in a Deployment object. You need to create a persistent volume claim. By default, most of the cloud-managed Kubernetes services would have a default storage class that can allocate a volume with readWriteOnce access mode.
+
+This means you can only attach this volume to a single pod. If your deployment has more than one replica, other pods will fail to mount the volume and will be stuck in the creating state.
+
+I frequently use this with Grafana to persist dashboards that I created from the UI. However, if you try to update the Grafana image, for instance having one replica, by default it will create a new pod first and then try to mount the existing volume to that pod, which will also lead to a mounting error and a failed update.
+
+To fix this issue, just update the deployment strategy to recreate. It'll unmount and destroy the pod first, and then create a new one and attach the existing volume to it.
+
+There is a workaround to deploy an additional driver such as EFS in the AWS cloud, which is a type of network storage that allows mounting the same volume to multiple pods at the same time.
+
+In that case, you would use the ReadWriteMany mode to allocate the volume. Now you can use this claim name and mount this volume to all your pods under that replica.
+
+Now you have the ability to scale your deployment with the mounted volume, but you'll still use the same volume, which is probably not what you want. However, you can probably find a way to work with it if your pods use a file path based on the pod id or something like that.
+
+Instead, you would likely want to allocate a dedicated volume for each pod. With deployment, you would need to create as many persistent volumes as the number of pods you wish to have. In addition, you would need to create deployment objects with one replica each. As you can see, this solution is difficult to scale.
+
+To solve this problem, Kubernetes has introduced the StatefulSet. It is similar to a deployment, but it also offers the option to define volumeClaimTemplates, which can dynamically create persistent claims for each pod that the StatefulSet object creates.
+
+So, when you create a StatefulSet, each pod will be bound to a specific volume. If the pod gets rescheduled on another node, the same volume will be attached to that pod. In this way, you maintain an identity for each pod.
+
+Another important aspect of the StatefulSet is that each pod will get a stable, unique network identifier. In simpler terms, each pod will have its own stable DNS name. Many stateful applications, such as Kafka, not only require data persistence between restarts but also need to know where the leader of a particular partition is located, and provide that DNS name of the pod to the client. This way, the client can directly connect to the pod using its DNS.
+
+Speaking about DNS, a StatefulSet also creates and maintains not only A records for each pod but also SRV records, which some clients can utilize.
+
+In some use cases, I even prefer to run stateless applications using a StatefulSet simply because they need to maintain a strong identity.
+
+Also, by default, when you create a StatefulSet, Kubernetes will create pods in sequential order. If you have 50 pods and you don't require such ordered slow deployment, you can set the podManagementPolicy to 'Parallel.' This way, StatefulSet pods will be created at the same time.
+
+Now there is a time when you want to deploy a pod on each node such as monitoring or logging agents. If you scale up or down your Kubernetes cluster, you want to remove and add pods as well. DaemonSet can automate this process for you. DaemonSet will create as many pods as there are nodes in your cluster, so you don't need to manage replicas yourself.
+
+Since we frequently add taints to the node pools in Kubernetes to ensure that your pods will be deployed on each node, you need to tolerate all possible taints on these nodes as well.
+
+DaemonSet is also commonly used with distributed software as a storage solution. For instance, if you want to deploy Hadoop, MinIO, Rook, or even Local Persistent Volumes, you would create Kubernetes nodes with attached disks and run a DaemonSet on each of them. In this way, by using a DaemonSet, you can abstract the local distinct disks and provide them as an S3 or a filesystem for your applications.
+
+If you want to learn about the differences between NodePort, Load Balancer, and Ingress, you can watch this video. Thank you for watching, and I'll see you in the next video.
+
+## 영상 2: Kubernetes CronJobs in 8 Minutes! Schedule and Automate Like a Pro (https://www.youtube.com/watch?v=KwyrHDEJ8LM)
+
+Repetitive manual tasks in your Kubernetes cluster like database backups log rotations or batch processing can be automated and put in a schedule. Kubernetes cron jobs are the answer. To learn about Kubernetes cron jobs, we're gonna learn about Kubernetes jobs first.
+
+Stop if you don't know what jobs are. You won't understand how cron jobs work. So make sure that you stick around.
+
+Jobs are Kubernetes resources that make any number of pods, making sure that each pod is given a task and that it completes that task successfully.
+
+So unlike pods that are created by deployments, these pods don't stick around once they're done. They're gone.
+
+Here's what an overly simple job manifest would look like. Under our spec, we have a section called template, which we are templatizing are the pods that this job is going to create.
+
+So the second spec you're seeing there is just the same as what you would see inside of a pod manifest.
+
+One thing that's different is that we are including a restart policy, which isn't always included in pod manifests. A restart policy of never means that when that container is finished, it doesn't restart, because again, job pods are one and done.
+
+We're using a busybox image in our container because busybox can execute bash commands and we're just echoing hello from kubernetes. Let's pretend that's an actually useful task that needs to be executed.
+
+By default, that would be one pod that gets created that would complete that one time. But we can also add more to this with parallelism and completions.
+
+So what do these mean? Well, completions is how many times does that job need to be completed? How many times do I need to have hello from kubernetes printed here? We've got three, so that should happen three times.
+
+Parallelism means many hands make light work. How many pods are we willing to create and run concurrently to make sure that that gets completed three times total?
+
+So what does it take to convert a job to a cron job? Well, before and after, under the spec for the cron job section, there are two fields: the job template, which is where everything that we set in our job example earlier can be set inside of that section.
+
+Because all the cron job is is just a resource that makes jobs.
+
+There's also this section here called schedule. If you're not familiar with how cron expressions work, then here's one of my favorite websites, crontab.guru, which shows you how with these five digits, you can represent how often you would like something to occur.
+
+Whether it is per minute with the first value, whether it is at a specific hour of the day like 12 o'clock noon, a specific day of the month, so the first of the month, a specific month out of the year, so let's say March 3rd, or maybe you would like to say I would like this to happen every Friday at noon in perpetuity.
+
+And getting back to our manifest here, if I ungroup job template, you can see it's exactly the same spec as before, including completions, parallelism, and the section that describes the pods being made by the job.
+
+Now let's deploy a cron job inside of a real Kubernetes cluster. And right away, you can see that the cron job got created and that it's got a schedule of making jobs every minute.
+
+What we should see is that down at the bottom of my screen, we'll see that output change when one of those jobs gets created.
+
+Now remember we had set that we should have a parallelism and completion for our job. We said we wanted this done three times and that we were willing to let up to two pods run in parallel.
+
+Did you see how two pods showed up there, ran, completed, then a third pod showed up, ran, completed? That's parallelism and completions at work.
+
+And after about another minute, we should see another job show up, which will bring up a whole other set of pods, and this is what we can expect to continue running in perpetuity until this cron job is stopped.
+
+So we let that run and as you can see, another job has been created and another three sets of pods have completed as well.
+
+You can stop cron jobs by deleting them. But if you just want to pause them because you don't want them to go away, there's a couple of different ways you could do this.
+
+You could edit the manifest and under spec, you could change the value of suspend to true. Or you can do what I'm doing here, which is use a kubectl patch, and what this is going to do is that it's going to set that value of suspend from false to true.
+
+And as a result, we should not see any more jobs get created until we undo that change.
+
+Now when you delete objects that create objects in Kubernetes, that can have a cascading effect. For instance, if you delete a deployment, that deployment is going to delete all the replica sets and the pods that deployment made.
+
+But when we delete a cron job, watch what happens. It cleans up after itself. It deletes all those jobs. It deletes all those pods, which means that it also deletes all of the logs that may have been associated with them.
+
+Now if you wanted to keep those logs, you would need some sort of third-party logging tool in order to make that happen. And that could be the content of a different video.
+
+Now let's take a look at something just a little bit more advanced. You need to know that by default, Kubernetes will let multiple jobs created by the same cron job run in parallel.
+
+So if this cron job is making jobs every minute, but that job is creating commands that definitely take more than one minute to run, then you could have a problem if those are tasks that cannot be run concurrently.
+
+So the line I've added right here, which its default setting is allow, which is what it'll be if you don't set this as anything at all, is that if multiple jobs want to be created, then that's allowed.
+
+However, you can also set it up so that it forbids. If a job is still running, then the next one just straight up won't be created. Or you can set it to replace, which is kill the old job because we need to replace it with the new one.
+
+All right, so we cover it a lot today. But if you're just getting started with Kubernetes or if you plan on taking one of the Kubernetes certification exams, you're going to need to practice this stuff.
+
+Got other topics you want us to talk about? Let us know down inside of the comments and don't forget to like and subscribe. See you next time.
+
+## 영상 3: Kubernetes jobs for batch workload (https://www.youtube.com/watch?v=4yu2o3bpRHk)
+
+Hello and welcome to building a batch platform on Kubernetes. My name is Mofize. I'm a developer advocate at Google focusing on Kubernetes, and my name is Ali, and I'm a solutions architect at Google. I partner with Mofize on high-performance computing and AI infrastructure.
+
+In the last video, we saw a traditional architecture of an HPC platform built on Kubernetes. In this video, we're going to look at the fundamental block in Kubernetes that allows us to run batch workload on it, and that fundamental block is the job API.
+
+A job creates one or more pods, which are basically one or more containers, and will continue to retry execution of those pods until a specified number of them successfully terminate.
+
+So let's go ahead and look at an example of a simple job. You'll notice that we're inside our Cloud shell, and we're defining the YAML template for this one simple job. You'll notice that the API version is batch version one. The kind of this entity is a job. Metadata contains simple identifiers like name or a namespace where this job can exist.
+
+And then inside the spec template spec, you can define your containers that run as a part of this job. Since we don't define any counts, it's assumed that this is going to be a one pod job in which it's going to run the Perl 5.340 image with the command shown in line number 11.
+
+You'll notice that line 12 also talks about the fact that this job must never be restarted. So let's go ahead and apply this manifest. We're going to say kubectl apply -f simple_job.yaml. As we can see, the job has been created. So let's go ahead and check the status of this job. We'll notice that there is one job that is still running at this time, and here we can see the pods that contribute themselves to this.
+
+Now that we know the name of our pod, let's take a look at the logs from it. As you can see, this is pi to the 2,000th decimal place. And if we take a look at the jobs, you'll notice that this job is now complete.
+
+The example we just looked at is an example of a nonparallel job where we only started one pod and the job was considered complete when that job was completed. If the job somehow failed, Kubernetes will try to restart the job unless we set restart policy to never, in this case, which we did.
+
+In many cases, we actually want to run the job multiple times to complete a larger task. In those cases, you want to set completions to greater than zero. Let's quickly take a look at example here. We have a job that is very similar to the job that we just looked at. The only difference being on line six, completions is set to four.
+
+Let's apply this job with kubectl apply -f completions_job.yaml. We will see a job completions was created. If we do kubectl get pods, we'll see I have one of these jobs running. If I check again, we should see the one has completed and the second one is running because our job has a completions number set to four. We'll have to run four pods to complete this job.
+
+Because the value of parallelism is not set, our job can only execute one pod at a time. In the end, we should see all four of our pods has completed, and by looking at their timestamp, we can tell they run one after another. You can also see kubectl get jobs that our job has a completion of four out of four.
+
+So now that we've seen how a job with completion works, let's take a look at a job where we can define the number of parallel pods that get processed at the same time. You'll notice that in line number seven, we define parallelism as two, and the rest of the YAML remains the same as example before with a completion set to four.
+
+So let's go ahead and say kubectl apply this manifest to run this job. Taking a look at the pods, you'll notice that two are running at the same time. You'll notice the two of them are now completed and the other two have started just now. As you can see, all four of those workers have been completed, processing two in parallel at the same time.
+
+In batch processing, often we have workloads that needs to communicate with each other to coordinate a certain task. For those kind of workloads, we can take advantage of indexed completion mode, in which each of the pod in the job will start with a static index that we can refer to to communicate and identify the specific pod.
+
+We can set spec completions and parallelism to a specific number and exact number, and have a service for interpod network communication. Let's look at an example. Here we have a service definition of a headless service, where cluster IP is set to none. This is an intra-cluster service where we do not need a cluster IP for the service because we're only using this to get a domain name for our pods to communicate with each other.
+
+In our job definition, we have kind job, name index_job. In our spec, we set completions and parallelism to the same value of three and completion mode to index. In an index job, each of the pod within the job gets a static index starting from zero up to n minus one. In this case, our indexes will be zero, one, and two because we have three copies of this pod.
+
+In our template, we set a subdomain of headless service, the name of our service. We set restart policy to never, and in our container, we run a bash script that for each of those pod tries to ping the other pods within the same job. When all of those succeeds, we consider this job done and the job successful.
+
+This is a simplified version of jobs where pods need to communicate with each other to complete a job, for example, like MPI jobs. Let's apply this job with kubectl apply -f index_job.yaml. We'll see that headless service and index jobs was created. With kubectl get pods, we'll see three of our pod actually started and completed almost immediately.
+
+We could take a look at the log of this pod by running kubectl logs. We'll see that our pod managed to ping itself and two of the other pods that's running. We could check that for some of the other pods as well. We'll see the same log because each of them are trying to ping each other, including themselves.
+
+To recap: In Kubernetes, jobs are the fundamental building block of running batch workload. The most basic configuration, the job only consists of about 10 lines of YAML where we define our job name and the container that should execute for the job to complete.
+
+We then look at a very similar job where we define completions, for example, a workload that might require multiple workers to complete their work for the job to be considered successful.
+
+If we want to take advantage of using our resources to do the job quicker, we can set parallelism to a number higher than one to speed up our job execution time by running multiple copies of the pod to complete the job quicker.
+
+In the last example, we saw an index job paired with a headless cluster IP service. This service is local to the cluster and provides a domain name for the workers that will participate in this indexed job. Each worker pod will have an index associated with this job as a part of their hostname, and this is useful for those workers to be able to reliably find each other and communicate with each other as a part of this job's workflow.
+
+In this video, we saw several different ways of configuring jobs as batch workloads on Kubernetes.

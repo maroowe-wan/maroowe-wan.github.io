@@ -1,0 +1,1045 @@
+## 영상 1: 12분 안에 알아야 할 모든 것 - Pod Requests and Limits (https://www.youtube.com/watch?v=lKH1K5R3kqg)
+
+running on kubernetes without being
+aware of what pods request and limits
+are is like spending money without being
+aware of your budget
+Engineers often don't know what requests
+and limits are how to control them how
+to use them and what happens when
+something goes wrong so they find
+themselves spending a lot of money on
+cloud resources or the application
+getting killed by kubernetes
+this is why I've created this video to
+make sure that each one of you knows
+what requests and limits are how to
+control them and what happened when
+something goes wrong
+there are two resources which every
+application in the world needs in order
+to run
+CPU and memory
+the application is actually worthless
+without those
+when our application runs on kubernetes
+it runs within a pod
+and the Pod run on a node
+the pod on our application consumes the
+memory and the CPU of the node run-on it
+means that all the Pod within the same
+node actually sharing the same CPU and
+memory
+why do you should care about this kind
+of things the power the resources the
+node the memory it's very confusing all
+this stuff
+so
+for your application to run well it's
+need basically two things
+first of all you want to make sure that
+your application have enough resources
+in order to run
+you want to reserve maybe some of the
+resources because if your application
+needs one CPU and half gigabyte of
+memory you need to make sure that it
+each node is going to be scheduled on
+got enough resources for it to run it's
+like the minimum requirement when we buy
+a new game or we run new software we
+want to make sure we have the minimum
+requirement in order to run
+the second thing
+is about the limit and how much
+resources we can consume at maximum we
+don't want our application to go crazy
+and consume all the CPU and all the
+memory within the node it run on why
+first of all it means the application do
+not operate well and second of all it
+means that we may impact other
+applications within this node
+so we want to have a maximum requirement
+for application that if you need to go
+through we need to make sure that we
+kill it and we signal to the developer
+or for yourself that this application
+consumed too much memory consume too
+much CPU
+from the application perspective the
+minimum and maximum requirements are
+enough to run
+but when we take it to a wide scope why
+should we plan the resources so first of
+all we want to make sure that we know
+how much we are going to pay
+we pay for the cloud provider for a CPU
+memory machines
+we need to understand that we do not
+consume a lot of CPU memory because then
+our application will be not cost
+effective and we want to make sure that
+we keep the price as low as we can in
+order for application and business to
+run
+is about Noisy Neighbor and availability
+of our application
+we want to make sure that if one service
+go crazy and consume a lot of memory and
+CPU it will not impact the other
+application running within the cluster
+so we actually contain the risk of
+having one application go crazy and
+disrupt other
+board or application within the cluster
+we call it the Noisy Neighbor now let's
+move on to what our request and limit
+for each container within our pod we can
+configure
+two things the request
+how much resources do we want kubernetes
+to find and Reserve within the node this
+Pawn is going to run on
+and we can limit the resources
+and make sure kubernetes is going to
+impact the application when it's going
+to consume more resources than we
+defined the maximum requirement for this
+application
+I want to talk a little bit about the
+configuration in the units so where we
+do configure request and limits in each
+container we got the resources section
+and there we can Define requested limits
+and for each one we can Define the
+memory and CPU required
+and what are the units involved in this
+configuration some memory the unit will
+be bytes it means megabyte gigabyte
+maybe byte or any other byte version
+for the CPU it will be how many cores of
+CPU
+our application needs it can be even a
+fraction of it like elf core or one
+quarter of a core it depends on how much
+we need how the CPUs break down
+basically the operating system is
+slicing time frame like seconds and for
+each time frame it's sharing the CPU
+between all the containers need that
+when do kubernetes takes the request
+configuration into consideration
+it happens during the scheduling process
+when a new pod is created and kubernetes
+looking for a new node for it to run
+then kubernetes will check the request
+we requested for resources and take a
+look on all of the nodes within the
+cluster and find the right run for it so
+let's say for example that we got one
+pod and with one container and we
+requested 800 megabyte of memory
+now kubernetes is looking for all of the
+nodes and find the right one for it to
+if there is no one available
+then the Pod will be pending for
+scheduling or will fail scheduling
+depends on the time frame
+in general what happens when a pod is
+pending we are waiting for the cluster
+scaler to spawn up a new node and then
+our plot will be run on it
+when do limits takes into consideration
+anytime our product running kubernetes
+monitors the usage of memory and CPU and
+see if none of them actually is the
+threshold
+so basically it uses the operating
+system in order to do two things in
+areas where memory and CPU are a little
+bit diverse
+if we reach the maximum amount of memory
+that we Define on limit kubernetes is
+going to kill the container with out of
+memory killed signal
+on CPU it's a little bit different in
+CPU if our container reached the limits
+of CPU kubernetes will give this
+container less CPU Cycles than before it
+limits the CPU Cycles but it would not
+kill the Pod it means that our pod will
+be slowed down a little bit
+this is why it's so hard to catch
+we just see that something really slowed
+down with our pods and we don't know why
+and this is why the difference is so
+confusing so always remember memory out
+of memory killed CPU slow down
+when you set the limits and requests to
+the same amount it means that you
+reserve all the resources that you need
+probably you are going to spend
+resources because you are not going to
+use the eye Mount all the time
+so the diff will be a resources that are
+reserved for your containers application
+but no one use those so it's a waste of
+resources
+on the other side when we Define the
+request a little bit lower than the
+limits it means there is a diff where
+everyone can use it so we can dance more
+containers and pods to the same amount
+of nodes which is great because we can
+save some money and save some resources
+on the other side it means that if
+something happens and all the
+application all the containers need the
+max
+obviously there are not enough resources
+and all of them will be slowed down or
+some of them will be killed so there is
+a risk involved in here and you need to
+consider how much risk do you want to
+take in place
+I would recommend to start from
+something and then watch the metrics you
+can see the metrics and Prometheus
+grafana data log New Relic even with
+Cube metric State and watch them over
+time and understand what is the values
+that should be set for you and then
+Define the request and limit based on
+that
+there is one more thing very interesting
+about requests and limits it's not only
+Define our application requesting limits
+it also defined our importance of the
+application for kubernetes then
+kubernetes knows
+how critical this application for us
+why is that important because in a
+certain State when for example there is
+no enough memory on a node
+then kubernetes needs to decide which
+application must be killed
+so for example if you have a pressure on
+on the Node there is not enough memory
+so kubernetes will pick the lowest
+priority application and it's going to
+basically kill it
+how is that happening how we Define the
+quality of service so when we Define the
+request to be equal to the limits it
+means that this application needs to be
+reserved all the resources from from the
+time start this is called guaranteed
+quality of service because we guarantee
+the resources all along the way
+a little bit lower we got burstable
+quality of service when we defined the
+limits to be a little bit higher than
+the request
+it means that for burstable amount of
+time our application going to consume
+more than the request but lower than the
+limits
+and the last quality of service is best
+effort if we do not Define anything this
+is the lowest priority of our
+application to be in so anytime you
+start to run a pod check the quality of
+service make sure it match your business
+needs and what you expect to happen when
+something goes under pressure
+there is a movement within the
+kubernetes community that claims that
+CPU limits should not be set
+why is that because when you set a CPU
+limit your application is going to be
+slowed down when it reached the limits
+and obviously if there is CPU available
+you wanted to use it
+the other thing is that CPU is a
+resource which is not always on shortage
+usually in most of the cluster memory is
+the resource on shorter but the other
+side of that is the quality of service
+and the resource consumption that can be
+involved within that obviously when one
+of the containers go crazy and consume
+all the CPU in the node it will impact
+all the application in the cluster and
+that can be a big problem
+and the second thing is the quality of
+service going to be impacted if you do
+not set the limit because if you want to
+be guaranteed to be run you will be at
+least going into burstable or even
+better which you don't know my
+recommendation is
+to set limits but to be very careful
+about those
+now you are experts in pod requesting
+limits what you should do next is go to
+your service
+see if you got request and limits if not
+add those if you don't know what to add
+go to the metrics dashboard find the
+right things or the right values that
+you have in place what you consume and
+then out those make sure that you never
+run your service without request and
+limits in place
+the next thing that you should do is
+click on the like button or the
+Subscribe button
+thank you very much
+
+============================================================
+
+## 영상 2: K8S HPA 강의 제대로 듣고 있었습니까? 정신 차리십시오 | Kubernetes Autoscaling with HPA (https://www.youtube.com/watch?v=V-Ib-DdconY)
+
+오토스케일링 쿠버네티스에서 어떻게 되는 거냐
+핵심만 보겠습니다
+다 볼 수는 없으니까
+이게 핵심인데요
+HorizontalPodAutoscaler 라는 설정을 할 수 있어요
+너무 기니까 HPA라고 부르는데
+설정을 하면 저희가 원하는 서비스 카트라든지
+API 아니면 구글 페이스북
+이러한 서비스 들의 사용량에 따라서
+자연스럽게 팟이 증가했다가 줄어들었다
+스케일 아웃 인 이렇게 될 수 있도록
+쿠버네티스 컨트롤러가 해주는 거고
+알맞은 값으로 세팅해놓고 그냥 가만히 있으면 돼요
+minReplicas 라고 하는게 최소 팟의 숫자
+맥스가 최대 숫자
+밑에 있는 메트릭스라고 있죠
+팟마다 사용하는 CPU 값과 메모리 값을 모니터링 해서
+쿠버네티스가 80 이상이 안되도록
+최대한 노력을 하겠다라는 의미이고
+이런 식으로 설정이 되어있었어요
+이미 라마단 전에 돼 있었는데
+이렇게 스케일링 돼 있었지만 잘 안됐다
+그래서 HPA에 대해서 다시 한번 살펴보자
+엄청 간단하게 생겼어요
+오토 스케일러가 아까 그 컨피규레이션 알고 있으니까
+어떤 지표 어떤 메트릭을 보고서 스케일링을 할지 알고 있죠
+조금 더 고급 버전을 보면
+조금 복잡해 보일 수도 있어도
+가장 핵심은 결국 컨트롤 플레인에서
+쿠버네티스서버가 알아서 오토스케일링 해준다
+근데 인터벌 이 있다는 게 가장 중요하고
+오토 스케일러 싱크 인터벌이 있기 때문에
+이게 기본 십오 초고 메트릭을 모으는 시간이 또 있어요
+에버리지를 보는데 그게 삼십초고
+최대로 보면은 인터벌이 사십오 초까지도 걸릴 수가 있어요
+메트릭이 실제로 쳤어도
+실시간으로 치자마자 내가 아는 게 아니라
+수집해서 알려주는 데까지
+삼십에서 사십오 초 걸릴 수 있다
+그러면 이걸 줄이면 되는 거 아니냐
+일 초로 줄이면 안 돼
+인터벌은 설정으로 줄일 수 있거든요
+API Server 쪽에 부하가 엄청 가겠죠
+트레이드 오프가 발생을 하는데
+권장사항은 줄이지 않고 그냥 잘 하는 게 권장사항이고
+1초로 줄인다고 해도
+영초가 될 수는 없기 때문에
+결국 그 간격은 생길 수밖에 없거든요
+메트릭 서버에 어그리게이션 타임과 싱크 인터벌을 유지하면서
+할 수 있는 방법이 없을까 를 찾아봐야 됩니다
+아까도 잠깐 그림으로 봤지만
+실제로 HPA가 오토스케일링을 하는데
+계산식이 있을 거 아니에요
+팟이 한 개인데 두 개로 늘려야 된다면
+어떻게 계산을 하냐
+계산식이 있어요
+의외로 단순합니다
+디자이어드 팟 레플리카는
+현재 레플리카 수 곱하기
+커런트 메트릭 나누기 디자이어드 메트릭 밸류이건데
+위에 같이 보면은 좀 어려워 보이고
+밑에 제가 예제로 써놨거든요
+지금 팟이 한 개 있어요
+팟들의 전체 사용량이 이백 사십 프로인 거예요
+근데 내가 원하는 타깃 밸류는 백프로야
+그러면 이런 식으로 계산이 돼요
+1 곱하기 240 프로 나누기 100 프로
+그럼 이점사니까 세일을 해요
+어 계산이 틀렸다
+왜 아무도 안 알려주지
+실링 하면 저렇게 되는 줄 알았다고요?
+왜 피피티에 오류가 있는데
+아무도 안 알려 주죠?
+3 이 됩니다
+공식은 맞습니다 공식 맞는데
+실링 한 값이 안 맞아요
+잘 듣고 있나 확인했는데
+아무도 안 보고 있었던 거 아닌가요 지금
+정신을 차리십시오
+절레절레
+그림으로 또 가져와 봤어요
+데이터 독에서도 이런 그림을 많이 보는데
+메모리도 그렇고 CPU도 그렇고
+지속적으로 증가하다가
+오픈 오더 끝나고 나면 이제 감소를 하죠 자연스럽게
+이 그림보다는 급격하게 감소를 하죠
+절벽처럼
+만약에 이렇게 증가를 한다 라고 하면
+이 스케일링이 일어나는 시간이 맨 밑에 도 있지만
+조금 시간이 걸려요 스케일링 타임이
+우리는 타깃을 팔십 프로로 잡으면
+팔십 프로일때 바로 일어나길 원하지만
+실제로 팔십오 프로 정도에서 일어나더라
+물론 이것보다 실제 로드 기울기가 더 급하면
+80 프로 일 때 이벤트를 감지했어도
+구십 프로나 백 프로가 돼 있을 수도 있죠
+실제 스케일링이 돼버리면
+약간 주파수같지 않나요 파동 우리 파동배울 때 물리시간
+그런 것과 비슷한데
+천둥치는 거랑 비슷하죠
+번개가 먼저 치고 소리가 나중에 들리는 것처럼
+빛을 봤어도 막 스케일링을 하려고 했는데
+이미 소리가 뒤늦게 오는 이런 느낌입니다
+그래서 어떻게 해야 되냐고 하면
+타깃 유틸라이제이션을 잘 설정을 해야 돼요
+원하는 값을 찾아야 되는데
+초창기에 세팅을 해놨던거는
+무지성으로 그냥 딱 넣어 놓은 거고
+터지지 않게 막으려고 한거고
+오픈 오더나 이런 상황에 대비해서
+스케일을 설정한 건 아니거든요
+그래서 타깃을 파악하기 위한
+디텍션과 스케일링 타임이 있다는 거를 인지를 하고
+줄이기 위해서도 노력을 해야 되고
+빠르게 스케일링이 될 수 있도록 만들어야 된다
+이런 식으로 타깃 메트릭에 대해서 계산이 나온다 이건데
+저희가 팔십 프로니까
+오십 프로로 하면 훨씬 빨리 대응은 되겠죠
+근데 돈이 두 배로 들 수 있어요
+왜냐하면 쓸데없이 오십 프로 밖에 사용 안 하는데
+팟을 너무 왕창 띄워 놓으면 노드 수가 늘어나잖아요
+타겟 CPU를 삼십 프로로 하면 반응을 엄청 빨리 하겠죠
+조금만 올라도 스케일링 돼버리니까
+근데 이러면 돈을 효율적으로 써야 되는데
+그래서 팔십 프로는 좀 프로덕션에서 힘들다 싶으면
+조금씩 내려가면서 민감도를 좀 체크해보는 것도
+데이터 독같은 그래프를 그려보면서
+스케일링이 충분히 민감하게 잘 발생을 하는건지
+모니터링을 할 필요가 있습니다
+이런 경우도 있죠
+만약에 아주 짧은 스파이크를 견뎌야 된다면
+저희가 겪는 스파이크 는 사실 충분히 인터벌을 뛰어넘는 스파이크잖아요
+그것보다 엄청 초단기로 들어오는 스파이크 도 있을 수 있지만
+오픈 오더같은 경우
+그래도 분 단위로 일어나는 트래픽이 있으니까
+근데 만약에 십초만 엄청 미친듯이 치고 내려와 버리면
+이거는 메트릭 레졸루션 인터벌 보다 짧기 때문에
+안 걸릴 수도 있거든요 이 사이에
+이런 거는 어떻게 견딜 수 있냐
+그러면 버스터블 QoS를 할 수도 있다
+설정할 때 예시인데
+쿠바네티스는 팟의 사용량을 리소스 사용량을
+리퀘스트와 리밋 둘 다 설정을 할 수 있어요
+리퀘스트는 정말 할당하겠다는 얘기고
+리밋은 최대한 사용할 수 있는 리소스지만
+만약에 노드에서 이 리소스가 없어요
+실제 남은 메모리라던지 CPU가 없으면
+리밋이 메모리 1.5기가가 2 코어여도 사용을 못해요
+리밋은 저희가 충분히 크게 잡아줘도
+실제 할당하는 게 아니고
+자원이 남는다면 사용할 수 있게 해주겠다
+그래서 버스터블 QoS다
+이렇게 설정을 지금도 해놨습니다
+그래서 스케일링이 일어나는 동안 조금 버틸 수 있게
+갭이 있어서
+메모리 조금 더 사용해도 되게
+CPU도 좀 더 사용할 수 있게
+그래도 OOM 안 나고
+CPU도 다 처리할 수 있는 그런 상태로 만들 수 있고
+또 빠르게 스케일링을 하는 것도 중요한데요
+아까 있었던 컨트롤러가 스케일링을 해야 된다는 걸 알았어요
+열개로 늘리기 위해서 실제로 그 다음에 일어나는 작업은
+이미지를 다운로드 받죠
+이미지가 이미 존재를 했으면 상관이 없는데
+새로운 노드가 띄워졌고
+거기에 팟이 띄워지면 이미지를 새로 받습니다
+다운로드 받는데 시간이 걸리기 때문에
+스케일링이 잘 안 되겠죠
+그리고 init procedure도 넣을 수가 있어요
+서버 바이너리가 시작하기 전에
+디비의 init script 라던지
+이런거를 넣을 수 있는데
+그런 걸 최대한 피해라
+그런 것 때문에 오래 걸린다
+그리고 Readiness 체크 딜레이 도 최소화해라
+Readiness에 대해서도 있다가 얘기를 할 건데
+확인을 하거든요 너는 일을 잘하고 있는지
+요 딜레이까지 최소화하면 좀 더 빠르겠습니다
+그래서 이렇게 하면 다 되냐
+이렇게 해도 다 안됩니다
+이렇게 팟을 빨리 감지하고
+스케일링을 해도 잘 안 되거든요
+근본적인 문제
+저희가 가지고 있는 또 다른 문제가 있어요
+터졌을 때 메모리 사용량인데
+OOM이 나기 전까지에
+팟이 최대한
+내가 받은 리퀘스트는 다 하고 죽어야지
+열심히 하거든요 몇 분 동안
+얘는 사실 더 이상 리퀘스트를 처리를 할 수가 없어요
+이미 내 메모리는 맥스고 디비 커넥션도 맥스고
+더 이상 나는
+리스폰스를 더 이상은 할 수가 없어
+그러면 주면 안 되잖아요 요 시점이 됐을 때는
+근데 이 시점에도 새로운 카트체크아웃 이라든지 주문이라든지
+이런 게 계속 들어오기 때문에
+팟이 더 이상 더 못 견디고 가다가 사망을 한다
+이렇게 안 되려면
+팟이 힘든 상황이 됐을 때  안 하려면
+어떻게 해야 되냐
+요 그림이 딱 저희의 그립니다
+유저가 토코톡을 호출하면
+쿠버네티스 입장에서는 이 트래픽을 어느 팟에 보낼지를
+어떻게 생각을 하냐
+헬스가 좋은 데로 보내야 되잖아요
+니가 괜찮은 애야? 오케이야?
+그러면 오케이 그러면 여기로 라우트를 해요
+근데 실제로 이 컨테이너는 사실은 얘는 동작을 안하는 애에요
+쿠버네티스한테 안 알려준 거죠 제대로 헬스를
+그래서 유저가 500 에러 이런걸 보는 상황이거든요
+그러면 컨테이너가 거짓말을 안하고 진실을 말할 수 있게
+헬스체크가 필요하다
+이게 또 다른 핵심인데
+헬스체크 API가 있어야
+진짜 건강한 애들한테만 리퀘스트가 계속 가고
+만약에 이 헬스체크 API가 false를 주면
+죽이지는 않고 하던 일은 하게 만들고
+새로운 스케일링을 해요
+그렇게 해서 안정적인 서비스를 할 수 있다
+그래서 오늘의 결론은
+HPA 잘 쓰려면
+비용과 속도의 트레이드 오프도 이해해야 되고
+어느 정도의 타깃을 해야 될지도 생각을 해야 되고
+코드 레벨에서도 도와줘야 되고
+이렇게 다 필요합니다
+자 그럼 이제 해산입니다
+
+## 주의: 다음 영상들은 YouTube 요청 제한(HTTP 429)으로 인해 자막 추출에 실패했습니다
+
+### 영상 1: 12분 안에 알아야 할 모든 것: 쿠버네티스의 포드 요청 및 제한 (https://www.youtube.com/watch?v=lKH1K5R3kqg)
+- 상태: 추출 실패 (HTTP 429 Too Many Requests)
+- 언어: 한국어
+- 원인: YouTube IP 기반 Rate Limiting
+
+### 영상 3: Autoscaling in Kubernetes (https://www.youtube.com/watch?v=jyBDbm1FHiM)
+- 상태: 추출 실패 (HTTP 429 Too Many Requests)
+- 언어: 영어
+- 원인: YouTube IP 기반 Rate Limiting
+
+### 영상 4: Kubernetes CPU Limits & Requests EXPLAINED (Stop Wasting Resources!) (https://www.youtube.com/watch?v=2CrprvnzPXY)
+- 상태: 추출 실패 (HTTP 429 Too Many Requests)
+- 언어: 영어
+- 원인: YouTube IP 기반 Rate Limiting
+
+이 문제는 현재 시스템의 IP가 YouTube에 의해 요청 빈도 제한을 받고 있습니다.
+대응 방법:
+1. 몇 시간~하루 후 재시도
+2. youtube-scout에게 동일 주제의 대체 영상 재검색 요청
+
+============================================================
+
+## 영상 3: Autoscaling in Kubernetes (https://www.youtube.com/watch?v=jyBDbm1FHiM)
+
+hey guys welcome back to the kubernetes
+series in the deployments chapter of
+this series we have seen how to scale
+our deployments manually that way
+Whenever there is unusual traffic we can
+scale our deployments accordingly but
+monitoring our traffic continuously and
+manually scaling our application to
+handle such traffic spikes is a tedious
+process
+what if there is a way to monitor our
+pods and scale them automatically
+Whenever there is an increase in CPU
+usage memory or some other metric like
+queries per second
+this is called Auto scaling scaling
+automatically based on some metrics
+kubernetes can do the job for us not
+only Parts if you are running on cloud
+infrastructure kubernetes can spin up
+additional nodes if the existing nodes
+can't accept any more parts in this
+chapter we will learn how many types of
+Auto scalers are available in kubernetes
+and how do they work with complete
+Hands-On so without any further delay
+let's get started kubernetes offers
+three types of Auto scalers namely
+horizontal power Auto scalar vertical
+pod Auto scaler and cluster Auto scaler
+horizontal pod Auto scaler increases the
+number of replicas Whenever there is a
+spike in CPU memory or some other metric
+that way the load is distributed among
+the pods
+and as we are increasing the number of
+PODS this is called scaling up
+increasing number of replicas with
+horizontal Part auto scalar is not
+always a solution for example we can
+make a database handle more connections
+by increasing the memory and CPU in such
+cases we need to increase the resources
+of existing parts instead of creating
+new parts with vertical pod Auto scaler
+we can analyze the resources of a
+deployment and adjust them accordingly
+to handle the load please note that with
+vertical pod Auto scalar we increase the
+resources of existing pods instead of
+creating new pods and finally if there
+is no capacity in the cluster it doesn't
+make any sense to increase the number of
+ports with horizontal pod Auto scalar or
+increase the resources with vertical pod
+Auto scalar as needed we should be able
+to add nodes to the cluster
+automatically to accommodate the more
+number of PODS cluster Auto scalar can
+and do the job for us it adds the nodes
+to the cluster if there are any pods
+stuck in pending State because of lack
+of resources in the cluster not only
+scaling up these three Auto scalers can
+scale down also meaning decreasing
+number of Parts decreasing the resources
+and decreasing the number of nodes when
+there is no load
+let us learn about these three Auto
+scalars in detail with complete Hands-On
+starting with horizontal pod Auto scaler
+let's say our application is an
+e-commerce application and on a big
+billion sale we get so many orders when
+there is such unusual traffic our
+application should be able to serve all
+the users without any downtime for that
+when demand increases the app should
+scale up that is increasing the number
+of replicas to stay responsive and when
+demand decreases the app should scale
+down that is decreasing the number of
+replicas to not waste any resources but
+how does kubernetes know when to scale
+up or when to scale down a deployment
+for that kubernetes offers a resource
+named horizontal pod Auto scaler with
+horizontal pod Auto scaler we can
+instruct kubernetes when and how to
+scale our deployment based on a specific
+metric let us see how horizontal pod
+Auto scalar Works in kubernetes
+architecture we learned that on every
+worker node tubelet runs and there is an
+agent in cubelet called C advisor or
+container advisor by Google when we have
+our parts running on the worker node
+this C advisor can scrape the Pod CPU
+and memory usage for every 10 seconds
+and for every minute the metric server
+will aggregate those metrics and expose
+them to the kubernetes API server and
+the horizontal pod Auto scaler
+controller queries the API server for
+every 15 seconds for these metrics once
+this controller gets the desired pod
+metrics it checks these metrics against
+our definition and decides to scale up
+or scale down our replicas please note
+that this HPA controller just updates
+the replica account in the Target
+deployment spinning up a new pod or
+deleting the existing part will be taken
+care by the replication controller and C
+advisor starts collecting metrics of the
+new pod as well horizontal pod Auto
+scaler uses this formula to calculate
+the number of of replicas in this
+formula D is the desired number of
+replicas a is the actual or current
+number of replicas C is the current
+value of the metric and T is the target
+value let us understand this by an
+example let's say we have a deployment
+with two parts and both parts are
+consuming 90 percent of the CPU on an
+average but assume that we Define to
+scale our deployments when the CPU usage
+is 70 percent for every 15 seconds
+horizontal pod Auto scalar calculates
+the desired number of replicas now this
+gives rise to three parts instead of
+both parts struggling not only
+deployment but we can also scale
+stateful sets replica sets with
+horizontal pod Auto scalar we can even
+Define multiple metrics for scaling like
+based on CPU and memory when Auto
+scaling is based on multiple Parts the
+auto scaler calculates the replica count
+for each metric individually and then
+takes the highest value in this case for
+replicas in summary the purpose of
+horizontal pod Auto scalar is to
+calculate the replica count that brings
+the current metric value as close as
+possible to the Target value let's see
+this in action for this purpose I have
+created a simple spring boot API with a
+stress endpoint when this API is fired
+this code gets executed which creates
+some load on the CPU let's deploy this
+API with kubernetes deployment so this
+is the deployment manifest for the
+utility API here we are giving the two
+replicas please refer to the deployments
+chapter of the series to get a better
+understanding on how a deployment works
+all also will create the kubernetes
+service to access this application now
+let us Define the horizontal pod Auto
+scaler for this deployment this Min
+replicas and Max replicas indicate to
+scale up our deployment to maximum of
+five replicas if the average CPU usage
+is more than 70 percent and to scale
+down to a minimum of one replica when
+the CPU is not being used let's apply
+this just like we applied any other
+kubernetes resource first let's apply
+the deployment of our springboot
+application
+chipctl apply iPhone f deployment.yaml
+let's apply the service also to access
+this application
+and finally let's apply the horizontal
+pod Auto scaler awesome all the
+resources we need to demonstrate the
+horizontal powered Auto scaler are ready
+so the expectation is that horizontal
+pod Auto scalar controller should scrape
+the metrics of our thoughts because here
+we give the scaling Target reference as
+the utility API that we just deployed
+Cube CTL get parts
+now we have two parts running let's list
+on The Matrix of these parts if you are
+new to metrics please watch the resource
+management chapter of this series to
+understand how to enable metric server
+and how to play with this metrics as you
+can see the CPU usage is too many cores
+and the memory it is consuming is 89 MB
+bytes Did You observe one thing we
+defined two replicas in our deployment
+but here we can see only one pod if you
+list on the parts again Cube City will
+get parts we can see only one part this
+is because the average CPU usage of our
+deployment is less than 70 percent and
+here we defined to scale down our
+application to one replica if there is
+no load on the pods and as our
+application is just consuming two Milli
+cores it scaled down to one pod we can
+verify that horizontal pod Auto scaler
+scaled it down by describing the
+horizontal pod Auto scaler so Cube CTL
+get HPA which is the short name for the
+horizontal pod Auto scaler and as you
+can see only one percent of the CPU is
+being used and the current replicas are
+one and now let's try to describe this
+HP
+tube CTL describe HPA and HPA name as
+you can see the new size is one and the
+reason is all metrics are below the
+target so this is how horizontal pod
+Auto scaler works so we have seen the
+horizontal Part auto scalar
+automatically scaled down the parts
+because the CPU usage was less than 70
+percent now let us try to add some load
+onto the parts and see what happens for
+that I'm just creating a simple Alpine
+pod from which I can easily communicate
+to the utility API so let's apply this
+Cube CTL apply iPhone f
+traffic generator dot ml
+so it created a simple Alpine part now
+let's try to get into this part Cube CTL
+exact iPhone ID card name iPhone sh so
+now we are in the traffic generator
+Alpine pod now our job is to generate
+the load on the utility API ports so
+that the CPU utilization goes beyond 70
+percent and we can see how the parts are
+scaling up automatically so for that all
+we need to do is call the stress API
+continuously so that the CPU usage goes
+up here I want to introduce to a HTTP
+benchmarking tool called wrk with the
+wrk we can generate the load onto the
+parts seamlessly by writing a simple
+command so let's go to the Pod and
+install the wrk with Apk add wrk cool w
+r k tool is installed now let's simulate
+the load with a simple command here we
+are making five connections with five
+threads for the duration of 300 seconds
+to utility API service and as you can
+see I'm just fighting the stress
+endpoint
+so let's enter now let's open the new
+tab and see the Pod Matrix cubicle top
+Parts as you can see the CPU usage is
+increased to 43 Milli cores and the
+memory usage is increased to one or two
+maybe bytes let's wait for some time
+because it takes a while for the C
+advisor to get the CPU metrics and also
+for the metric server to collect them
+before the auto scaler can take action
+let's try to list on The Matrix again as
+you can see the utility API parts are
+increased to 5. this is the power of
+horizontal pod Auto scalar now let's try
+to get the HPA chipctl get HPA as you
+can see the CPU usage is more than 70
+percent and because we restricted the
+maximum parts to Phi it is only scaled
+up to 5. if you could have given the
+higher value for the maximum replicas
+the more number of Parts would have been
+created so as you can see the load is
+distributed across the ports we can also
+verify that by describing the HPA as you
+can see the new size was 1 and then it
+increased to 4 the reason is CPU
+resource was more than the Target and
+later it went to 5 with the same reason
+so now the 300 seconds that we defined
+here was over and the double arcade tool
+stopped firing our stress API so now the
+expectation is that the CPU usage of our
+Port should go down and the extra parts
+that were created should get deleted
+because there will not be any CPU usage
+now let's try to list down the Matrix of
+the parts
+as you can see the CPU usage went down
+to two melee cores in the each pod and
+now the HPA controller should take a
+action of scaling these parts down to
+one replica because this CPU usage is
+less than 70 percent let's get the HPA
+Cube CTL get HPA as you can see the CPU
+is almost zero percent so now let's wait
+for the HPA controller to take the
+action so let's watch the pods Cube CTL
+get ports iPhone W as you can see all
+the parts are getting terminated now
+let's try to list on the pods and we are
+left with only one part because there is
+no CPU usage I hope you understand how
+to increase or decrease the number of
+replicas with horizontal pod Auto scalar
+now let's look at the vertical pod Auto
+scaler vertical scaling means increasing
+or decreasing the compute resources of a
+replica without vertical pod Auto scaler
+if we over allocate the resources with
+request and limits our cost increases if
+they are not fully used and if we under
+allocate the resources and they are full
+our application performance will suffer
+and the cubelet May kill the pods
+vertical part Auto scalar helps us to
+solve these two issues vertical part
+autoscaler performs three steps first it
+reads the resource Matrix of our
+deployment similar to the HPA based on
+these metrics it recommends the resource
+requests and if we prefer to auto update
+it it updates the resources if you are
+new to resources and limits please watch
+the resource management chapter of this
+series let's see this in action let's go
+to the vs code and look at the simple
+vertical pod Auto scalar manifest here
+our Target is the same utility API and
+the update mode we are just preferring
+off for this demo and this update mode
+can be of three values Auto off and
+initial Auto means apply the
+recommendations that are suggested by
+the vertical pod Auto scaler directly by
+updating the pods off means it just
+gives you the recommendations but it
+doesn't update the replicas and
+initially means it applies the
+recommended values only to the new
+created pots please note that update
+mode off is preferred in the production
+the reason is that when vertical pod
+Auto scalar applies the changes the
+parts will be restarted which might
+cause the workload disruption so the
+best practice is we should set the
+update mode to off in production and
+feed this recommendation to a capacity
+monitoring dashboard like grafana and
+apply the recommendations in the next
+deployment cycle let's apply this
+vertical pod Auto scaler and see what
+happens let's go to the terminal
+Cube CTL apply iPhone F vpa dot yaml
+oops there is something wrong it says
+that vertical part Auto scalar is not
+found the reason is that by default
+vertical pod Auto scalar is not
+available in our cluster we need to
+install it explicitly by cloning this
+repository let's clone that the
+repository is cloned this repository is
+being maintained by the kubernetes now
+let's get into the repository and run
+this command to install the vertical pod
+Auto scaler as you can see the vertical
+pod Auto scaler is installed now let's
+try to apply the vertical pod Auto
+scaler as you can see the vertical pod
+Auto scalar is created we can verify
+that with Cube CTL get vpa as you can
+see this is the vpa that we just created
+let's try to describe this vpa here the
+lower bound is the minimum estimation
+for the container and the upper bound is
+the maximum recommendation resource
+estimate mission for the container so
+indirectly lower bound is the request
+and upper bound is the limits so that's
+how the vertical pod Auto scaler
+recommends as the resources instead of
+guessing the requests and limits for our
+application well now we know how to
+scale up and scale down our application
+both horizontally and vertically but
+what if we don't have the enough
+capacity in the cluster to scale our
+pods for example when a pod requests one
+CPU but the cluster has only 0.5 CPU
+available the scheduler marks the Pod as
+unschedulable we have seen this in the
+advanced scheduling chapter of the
+series in this case we have multiple
+options the first option is free up
+resources in the cluster by deleting
+unwanted workloads second option is
+manually adding the new nodes and the
+third option is let kubernetes deal with
+adding nodes automatically Whenever
+there is a need obviously why would
+someone want to struggle when there
+isn't automated approach so we need
+third option that's where cluster
+autoscaler comes into the picture it
+checks for any unschedulable parts for
+every 10 seconds once one or more
+unschedulable parts are detected by the
+cluster Auto scaler it will run an
+algorithm to decide how many nodes are
+necessary to deploy all pending parts
+and what type of nodes should be created
+the same goes for the downscaling for
+every 10 seconds the cluster Auto scaler
+decides to remove a node only when the
+resource utilization Falls below 50
+percent as cluster Auto scaler detected
+one pod in the unscalable state it will
+create a new node and automatically the
+scheduler will schedule this unscalable
+pod onto the new node please note that
+the cluster Auto scaler doesn't look at
+the memory or CPU available when it
+triggers the auto scaling it looks at
+the unscalable parts if you are using
+AWS the cluster Auto scaler will
+provision a new ECT instance if you are
+on Azure it will create a new virtual
+machine and if you are on gcp it will
+create a new compute engine I am sorry
+to say that we can't demonstrate cluster
+Auto scaler on minicube but if you are
+on any Cloud infrastructure you can give
+it a shot and let me know in the comment
+section if you face any issues I have
+added the link in the description for
+the cluster Auto scaler I am sure that
+you understood how Auto scaling Works in
+kubernetes my name is pavanil tapu and I
+thank you very much for watching this
+video if you liked it please share it
+with your friends and do not forget to
+subscribe to my channel do not miss any
+updates
+
+============================================================
+
+## 영상 4: Kubernetes CPU Limits & Requests EXPLAINED (https://www.youtube.com/watch?v=2CrprvnzPXY)
+
+In Kubernetes, every container needs its fair share of CPU,
+resources, in order to function. We need to make sure that they get enough, but not more than
+their fair share. That is where requests and limits come into play. And to help picture this,
+here's a big old pile of CPU sandwiches. That's a whole pile of sandwiches. But let's say that
+three of them have our pods containers name written on them. This means our pod is guaranteed
+these three sandwiches, it will always have this much to eat. But here's the thing, there's a lot
+of sandwiches here, what's stopping your container from just pigging out and eating more than its
+fair share. Nothing. And that's why we have limits limits describe the maximum of that resource
+that your pods container is able to use. So if our pod tries to consume more than the limit,
+Kubernetes will throttle the pod, forcing it to slow down. So let's try this in an actual manifest.
+And in this pod, you can see we have a busy box container. It has no limits, no requests.
+Without those one of two possibilities could happen starvation, your little pod is thrown into the
+cold, cold cluster without even a crumb to support itself and its starves, or overindulgence,
+it might just devour all the cluster resources, not leaving anything for other pod containers.
+So that is why we are adding this section right here. Now the way the Kubernetes measures CPU
+is through Millicore 1000 Millicore equals one virtual CPU. And what we're doing here is we're
+guaranteeing that this container has at least 250 Millicore or 0.25 virtual CPU. But it may not
+consume more than 500 Millicore or half of a VCPU. And remember, if it tries to go above that limit,
+it's going to get throttled. So let's make this pod inside of a real Kubernetes cluster. And we
+can check if these requests and limits are in place by just describing the pod after it's been
+created. And once we look up through that output, we can see that our requests and limit are exactly
+as we said in our manifest. Now, checking on whether or not your pods are actually approaching
+those limits, or even if they're using all of the resources allocated to them through requests,
+can be done through all sorts of monitoring tools. But if you use kube control top, we can see we're
+using a bare three Millicore of CPU for this very simple container. Just goes to show, even if you
+guarantee through a request a lot of resources, it doesn't necessarily mean that the container is
+going to use all of them. So to help you configure requests and limits the right way, here are some
+best practices for you to keep in mind. Start small, then adjust. Don't just guess, start with a low
+request and work your way up kind of sneaking up on it. Low limits are bad. Because if your pod
+exceeds those limits, then it's going to be throttled and your application is going to suffer.
+High requests are also bad, because those are wasted resources. Even if they are not being used,
+they still cannot be touched. They belong to that container. So don't be writing blank checks for
+your containers. And I would also recommend that you take a look into resource quotas and limit
+ranges. These are administrator tools that can be applied to Kubernetes namespaces and are a big,
+big part of the whole resource management features of Kubernetes. If you'd like to learn more about
+those, then we can make a future video on that. This video helped let us know down inside of the
+comments what other Kubernetes topics you'd like to know more about. Don't forget to like and subscribe,
+and I'll see you next time.

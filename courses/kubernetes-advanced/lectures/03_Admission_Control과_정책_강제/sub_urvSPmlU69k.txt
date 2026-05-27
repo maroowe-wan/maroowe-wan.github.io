@@ -1,0 +1,220 @@
+Kind: captions
+Language: en
+we should enforce security practices in
+kubernetes clusters
+like for example a namespace should have
+some specific
+labels or container should
+never run as the root user
+we can allow for deploying containers
+coming only from certain container
+registries
+and each pod should have a specific
+resource
+quota limits and requests
+those different policies could be
+created with opa
+open policy agent gatekeeper
+which is an open source project that is
+supported by the cncf
+in this demonstration i'll show you how
+to use opa
+gatekeeper in kubernetes to define
+policies
+the source files and the commands that
+i'll be using during this demo
+are available on this github repository
+and to start the demo i have already
+provisioned a kubernetes cluster on
+azure using the aks service
+but you can also do the same demo on any
+other kubernetes cluster whether that is
+a managed cluster
+or mini cube in my vs code they have
+cloned the github repositories so here i
+have the different files and the
+commands
+and the first thing i'm going to do here
+is to deploy opa
+gatekeeper into the kubernetes cluster
+for that here i'll be using the cube ctl
+apply command and i'll go to deploy this
+file that i showed to you in a few
+seconds
+so here i'm already comment connected to
+my kubernetes cluster so i
+go to new clear and then i run the
+command
+to deploy the yaml manifest
+that one will go to deploy the different
+resources needed to run
+opa and my kubernetes cluster so you see
+here a bunch of resources have been
+created let's take a look at the content
+of that
+file so here it's available on the
+official github repository for opa where
+here
+we find the different resources that
+will be created from the namespace
+the crd definitions and the
+different resources needed there
+so with that we have now opi gatekeeper
+deployed into our kubernetes cluster so
+let's check
+for the different pods that were created
+with that deployment let's go to clear
+this and let's go to
+cube control get ns get the different
+namespaces
+and we'll see here that we'll create a
+new namespace
+call it gatekeeper
+dash system so i'll take that namespace
+i copy it and then i run the command
+cube
+control get pods i'll get the pods from
+the namespace gatekeeper dash system and
+here we see
+four pods were created for that so
+it will deploy actually the msa that
+will deploy a pod into each
+machine in my cluster i have three vms
+for that i have here three
+uh controllers managers that will be
+deployed into there so here we used
+the native kubernetes manifest files in
+order to
+deploy opa but there is a work
+in progress for creating a helm chart
+that supports the helm v3
+in order to deploy gatekeepers so keep a
+look on their github repository that
+will be released so
+soon let's now go to define
+and deploy a policy using opa for that
+here i'll be using
+yaml manifest files the constraint
+template is one of the crd objects that
+were deployed by the opa
+this will define the parameters used
+inside
+the policy so here we have an array of
+string
+and then we have the policy itself the
+definition of the policy here
+is created using rego which is
+the policy language
+used with apa a policy will be
+always associated to a package so here
+we have the name for that package
+this policy will define a violation that
+will compare
+provided and required provided is
+actually
+the diff the real labels use it with a
+namespace
+and then we have the required those will
+define the labels that should be used
+within the namespace we'll define that
+into the missing
+a property so here we'll see the
+difference between
+required and provided if the difference
+is more than
+zero if we have any uh difference there
+then we'll consider that this is a
+violation for that will be showing
+a message and then this measures will
+say hey you
+you must provide those different labels
+for your namespace
+and we'll add details to that message
+violation to say
+here you are missing some labels
+into your namespace now how can we
+provide those required
+labels so here where we have the second
+part of this
+policy which defines here the kubernetes
+required labels which is a custom
+kind that we are created by the cons
+by the policy itself and to here
+where here we have the different names
+for the kind kubernetes required labels
+so this will link both parts of this
+policy that will define the properties
+for labels
+and we have labels is defined also into
+this
+constraint here where here we have a
+parameter
+section we have the labels and the label
+here should have the parameter
+and note how we are using that inside
+the
+namespace inside any object that have
+the kind
+namespace and kubernetes and note also
+how we are excluding some namespaces
+from
+this from these checks so here we have
+the namespaces for the cube system for
+example and so on
+let's now go to deploy the template and
+the constraints for that i'll use the
+command line for cube control
+apply dash f then the name for the
+template itself so first
+and after the template i'll go to deploy
+the constraints now so
+group control apply dash f
+then the name of the constraints
+file
+now both are created now i'll go to
+try if this works as i expect
+so here i have defined two namespaces
+let's start by the first namespace which
+here is a namespace that have just a
+name and doesn't have
+labels and remember in our policy we are
+denying and deploying those
+namespaces without the label
+so i'll try to deploy this first
+namespace i've called
+it bad namespace because this shouldn't
+work
+cubecontrol apply f then
+my first namespace that doesn't have any
+label and here
+note how i get error from server denied
+by must have gc for gatekeeper
+you must provide labels gatekeeper
+and here error when creating the
+admission webhook that's the admission
+controller used
+by opa and that one have denied me
+for creating the namespace because
+doesn't have the right
+labels great now let's try
+with another namespace that have
+the required labels which is the
+gatekeeper
+so i'll go now to deploy not the bad
+namespace but now i'll go to deploy the
+good namespace that have the required
+label
+and here tells me my namespace was
+successfully
+created because it respects the
+policy that i have defined with opa
+using
+gatekeeper and this was how to create
+policies and kubernetes using the open
+policy agent
+if you are looking for more content
+about kubernetes
+devops and azure i would invite you to
+check out my youtube channel where here
+i post regularly
+lots of videos about those topics

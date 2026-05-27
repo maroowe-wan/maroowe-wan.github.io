@@ -1,0 +1,573 @@
+## 영상 1: Kafka Tutorial for Beginners | Everything you need to get started
+https://www.youtube.com/watch?v=QkdkLdMBuL0
+
+Kind: captions
+Language: en
+if you've been hearing about Kafka but
+you don't understand what it is and why
+all the hype let me clarify it using
+real life examples that will make
+everything finally click for you imagine
+we're building an e-commerce application
+called stream store and we have some
+microservices handling payments orders
+inventory and so on and when something
+happens in our application like customer
+places an order it's like dominoes where
+a chain reaction of updates and events
+by other services get triggered like
+stock needs to be updated in the
+database now that we sold some of it a
+notification or confirmation email needs
+to be sent to the customer an invoice
+needs to be generated with the right
+sales tax and sent per email to the
+customer um maybe revenue and sales data
+needs to be updated on our sales
+dashboard and so on now we are a small
+startup so we are starting with the
+simplest straightforward microservices
+architecture where the microservices
+just call each other like the order
+service would say hey all you guys we
+just closed an order go update your
+stuff accordingly and it all worked
+great at first but suddenly we become a
+hit and people are loving our store or
+we just announced Black Friday sales and
+our store is getting hundreds of
+thousands of customers which is amazing
+but suddenly our application starts
+crashing everything is slowing down
+users are sitting in front of loading
+screens because our architecture cannot
+handle this load we get in panic because
+we are losing cells every minute our
+architecture that looked pretty clean
+and straightforward on the Whiteboard
+becomes a nightmare so here is what's
+happening in the background first of all
+we have what's called tight coupling
+between the services which means when
+the payment service goes down for
+example because some API in the
+background isn't responsive or the
+service itself just crashes under load
+and when that happens our entire order
+process freezes we have synchronous
+communication so each order feels like a
+game of dominoes one slow service and
+everything backs up and as I said during
+peak times customers are literally
+staring at loading screens and we also
+have lots of single points of failure
+which means a 10-minute inventory
+service outage meant 2 hours of order
+backlogs and countless lost sales and we
+are also losing a lot of analytics data
+when the analytics service goes down for
+an hour we're losing important Black
+Friday sales data after another hectic
+and chaotic week we thought what if we
+redesign the system so that the orders
+flow through the system like items on a
+conveyor belt instead of our current
+game of hot potato and instead of apps
+calling each other directly and waiting
+for reply we remove that tide coupling
+we basically make space between them and
+introduce a tool that sits in the middle
+and acts as a broker think of it as post
+office when you order something online
+the sellers don't come knocking on your
+door to deliver package themselves
+they hand it over to the post office or
+some middleman to deliver your package
+or if you are returning your purchase or
+sending a package to someone you don't
+fly to their place to give them the
+package in person post office has this
+infrastructure and handles the
+processing so Kafka is like the mail
+delivery service or post office which
+sits in the middle so now the order
+service goes to Kafka and hands over a
+package called event that says
+hey order was made for this customer for
+these products and here are all the
+details please make this information
+available for anyone who needs it to
+update and do stuff in the background
+bye and it just basically goes back and
+continues its work and an event looks
+like this with very simple structure
+with key value pair and metadata
+information so the order service does
+not need to wait there to make sure that
+the others actually got the information
+it can trust this broker that it will be
+delivered to the right services and all
+this will happen in the background like
+in the post office you just drop off
+your package and go home you don't wait
+there sitting and checking whether they
+actually ship the package or not because
+you know that will take care of the rest
+and the order service that gives that
+information to Kafka or basically a
+service that produces this event and
+hands it over to kfka is called a
+producer because it produces events and
+in code this is how it would look like
+using Kafka producer API so in
+JavaScript or Java code you basically
+use that API to create an event and give
+it to CFA now where does this
+information or these events get saved
+when producers of those events give them
+to Kafka because we have bunch of other
+services like inventory payment and so
+on that also produce certain events and
+hand it over to kka with all the
+information that other services may need
+when inventory gets updated or the
+payment service says that the payment
+just failed and so on so do all these
+events from different producers get
+dumped into a giant bucket in Kafka or
+are they organized somehow if we had one
+big bucket handling all the rights and
+reads it will not be very performant
+right it's like having one single queue
+in the post office so if weather sending
+a letter or package or picking up your
+delivery everyone would be standing in
+the same queue instead imagine that post
+office will add sections with their own
+cues like a section for letters another
+one for large packages and so on so
+Kafka has what's called topics to group
+the same type of events so for example
+order service will write events to
+orders topic the payments service May
+update payments topic and so on now how
+do those topics get created or who
+defines them well just like you define a
+SQL schema for your database based on
+what your application needs and what
+objects you have you as an engineer
+decide how to group these events in
+Kafka in what topics so now that the
+order service added an event to the
+order topic what happens next that event
+May trigger other actions like updating
+stock in the database because we just
+sold something or sending notification
+to customer or updating invoice and
+sales status plus what other topics may
+exist that would need an event data
+entry as a result of an order which will
+in turn trigger other actions so how
+does all that get handled well on the
+other side of events we have consumers
+basic basically microservices who are
+subscribed to these different topics and
+whenever a new event happens and gets
+added to this topic all consumers who
+are subscribed get notified by Kafka and
+they then do their stuff in this case we
+have three microservices that subscribe
+to the order event notification service
+we'll see that a new order event was
+added which means a order was placed in
+our application
+and based on the payload of that event
+it will send a confirmation email to the
+customer and maybe a purchase
+notification to your email then an
+inventory service May update the
+database by updating the stocks of every
+product that was sold in that order and
+maybe in addition to that database
+update we'll generate a new event and
+write it into an inventory topic and
+then finally the payment service May
+generate invoice and send it to the user
+now I hope you're learning a lot and the
+topic of Kafka is becoming clear for you
+it takes us on average two or 3 weeks to
+produce one such video so if you find it
+valuable we would appreciate if you left
+your feedback or liked the video and
+we'd be happy to have you as our
+subscriber as well now you may be asking
+is kfka a replacement of a database
+somehow since we are SA saving all these
+data as events and basically updating
+the status of things so is it kind of a
+new way of saving things a simple answer
+is no it's not a replacement database
+let's explain by following our story so
+when the inventory service updates the
+stock for each product in the database
+why does it produce an event and write
+it to the inventory topic what kind of
+event that may be and why would we have
+it in addition to the dat in the
+database well that's another use case of
+kfka where one event basically creates
+this chain reaction of events when
+multiple things need to happen as a
+result of one event happening which we
+saw an example you may have another
+service that is subscribed to the
+inventory topic and calculates whether
+any of the products just gone below the
+inventory threshold and produce a low
+inventory alert which maybe as a chain
+reaction will trigger another service
+that may trigger an inventory restock
+service that will order more inventory
+of that specific product another very
+important use case of Kafka is realtime
+analytics for example again when sales
+happen in your application you may have
+a sales dashboard where your service is
+updating real time sales numbers and
+other such use case is driver location
+updates in an application like uber
+where the driver location
+changes get sent constantly to the
+application which then updates the UI of
+the user to display those changes and
+for all these use cases Kafka actually
+uses what's called Stream apis So on one
+side you have these regular consumers
+that will process one event at a time
+for example a notification service that
+will read an order event and based on
+that we'll send an email or notification
+to the customer streams on the other
+hand will process continuous flow of
+data with aggregations and joints and so
+on in order to do realtime processing
+and analytics on them so for example low
+inventory validations to check
+constantly with every event and do the
+calculation to see whether inventory
+just dropped below the threshold or get
+the location changes from the drivers so
+this analytic services will stream the
+events Contin ly doing various analytics
+and calculations on them and in code you
+would have a streams API that will read
+the orders and do all these kinds of
+calculations on them now as I mentioned
+these are streams of constant data saved
+as events in kfka because you have an
+application like uber with millions of
+users and tens of thousands of drivers
+with their locations getting updated
+constantly that's a lot of data and
+events that are being produced right and
+all consumers need to read from it so
+millions of writes and reads in
+different Kafka topics which can of
+course affect performance so we need to
+scale and that's where kafka's partition
+concept comes in which is kind of a core
+of kafka's ability to scale and become
+really performant so partitions are
+basically what make processing large
+amounts of data easy to handle and
+process without compromising the
+performance so how does it work exactly
+with our post office example remember we
+edit sections for letters large packages
+small packages and so on partitions are
+like adding more workers per section to
+help out so suddenly Before Christmas
+the letters section get overloaded
+because everyone's sending letters to
+centa well sadly that doesn't happen but
+if it did we would add more workers in
+that section but not just randomly
+instead you say an processes letters
+going to Europe Steve handle's letters
+to us Jay handle's ones to Asia and so
+on same way in Kafka in the orders topic
+you may create EU orders partition us
+orders Asia orders and so on and again
+you would decide how to partition your
+topic as part of your schema design now
+let's think about the consumer side
+let's say suddenly millions of orders
+are coming in and we said we can can
+scale this with partitions so producers
+can write into multiple partitions at
+the same time but what about the
+consumers how can they consume so much
+data at once because even if you have
+partitions you'll have one consumer
+let's say inventory service trying to
+process all the events that it's
+subscribed to which is like all the
+parcels going to one person recipient
+like thousands of letters going to Santa
+those post office workers are being
+super quick and are delivering them to
+the recipient but he's getting buried
+under the pile but we need some people
+helping him sort through this and that's
+where consumer groups come in so when
+you start additional instances of that
+microservice like replicas in kubernetes
+they can all consume from CFA partitions
+and process events faster in parallel
+now how does Kafka know which consumers
+form a group and how to divide and which
+ones Belong Together simple they are
+grouped by the group ID attribute when
+they register as consumers with kfka so
+replicas of the same application will
+have the same group IDs and will
+automatically be grouped together and
+when you start replicas Kafka
+distributes the load automatically by
+assigning partitions to Consumers so
+kfka says oh we have a new helper now
+you can process this pile of letters
+here and when that helper stops working
+it will take the pile and give it to
+another active one now the final
+question is where is this data
+physically saved data in topics is saved
+on CFA servers called Brokers and you
+can think of each broker like a post
+office branch that stores the actual
+messages on disk handles requests from
+producers and consumers and replicates
+the data for fault tolerance even if
+something happens with the dis the data
+is stored somewhere else as a backup and
+this is actually what makes Kafka
+different from standard message Brokers
+so while regular message cues would
+delete messages after consumption so as
+soon as consumers see that message and
+do something with it that message is
+gone kavka however persists every event
+or message as long as you need and you
+can configure how long you want to store
+them with a retention policy so think of
+it like our post office keeping a log of
+all package deliveries but not just for
+record keeping but for analyzing
+patterns and improving service so that
+unique feature of kfka for real-time
+data processing and general analytics
+means that kfka needs to store those
+events long-term so the consumers can
+read those events anytime they want even
+multi multiple times if they need to and
+as I said this capability to process
+streams of data in real time while
+keeping the original data for later
+analysis is what really differentiates
+Kafka from simple message Brokers so
+that's the main difference and for even
+clearer comparison think of this as
+difference between watching Netflix and
+watching TV Netflix is on demand so
+consumers or people who are the viewers
+can decide themselves what they want to
+watch when they want to watch it and at
+what pace so they can stop and pause
+anytime and continue whenever they want
+or they can replay or start from the
+beginning with TV you have predefined
+programs and people who want to view
+those programs need to tune in at
+specific time to watch specific stuff so
+everyone watches the same thing at the
+same time at the same Pace you can't
+pause and continue later if you miss a
+movie or show you just miss it and it's
+not automatically saved to watch later
+and that's exactly the difference
+between Kafka architecture versus other
+traditional message Brokers and finally
+Kafka needs a way to keep track of which
+Brokers are alive elect leaders to
+coordinate manage all the configuration
+and traditionally Kafka used an external
+tool called zookeeper for this type of
+coordination so it was like a central
+management for all the Kafka Brokers
+however important to note that the newer
+versions of Kafka from version 3.0
+introduced K raft or Kafka raft which
+removes the need for zookeeper as this
+external dependency with centralized
+control by building that coordination
+directly into Kafka now I hope I made
+Kafka finally clear for you share it
+with one colleague who you think will
+benefit from it and with that thanks for
+watching and see you in the next video
+
+
+## 영상 2: Topics, Partitions and Offsets: Apache Kafka Tutorial #2
+https://www.youtube.com/watch?v=UHjSP7nxk7g
+
+Kind: captions
+Language: en
+In the previous video, we discussed why&nbsp;
+companies decide to use Apache Kafka.&nbsp;
+In this video, we're going to focus on how data is&nbsp;
+actually transferred. Specifically, we'll look at&nbsp;&nbsp;
+Kafka topics. So, Kafka topics are specific&nbsp;
+streams of data within your Kafka cluster.
+So, a Kafka cluster can have as many topics&nbsp;
+as you want, and especially with the new&nbsp;&nbsp;
+Kafka mode that completely removes&nbsp;
+ZooKeeper from Kafka's architecture,&nbsp;&nbsp;
+it can handle millions of topics and partitions.
+It could have names like "logs," "purchases,"&nbsp;
+"tweets," "trucks_gps," and so on.&nbsp;
+So, a topic in Kafka is a stream of data.
+If you want to compare it with databases, a&nbsp;
+Kafka topic is like a table in the database&nbsp;&nbsp;
+but without all the constraints. There is no data&nbsp;
+verification, and you can send any data you want.
+And the way to identify a topic in a Kafka cluster&nbsp;&nbsp;
+is by its name. That's why I have&nbsp;
+'logs', 'purchases', and so on.
+So, these Kafka topics support any&nbsp;
+kind of message formats. For example,&nbsp;&nbsp;
+you can send JSON, Avro, text, binary, or&nbsp;
+any other format you want. The sequence&nbsp;&nbsp;
+of the messages in a topic is called&nbsp;
+a data stream. And this is why Kafka&nbsp;&nbsp;
+is called a data streaming platform,&nbsp;
+because you work with data streams.
+You cannot query topics. So, while&nbsp;
+topics are similar to a database table,&nbsp;&nbsp;
+you cannot query them. Instead,&nbsp;
+you add data to a Kafka topic.
+For that, we are going to use Kafka Producers. To&nbsp;
+read data from a topic, we’ll use Kafka Consumers.&nbsp;
+So, the Kafka topic itself is divided into&nbsp;
+partitions. Each partision can be located on&nbsp;&nbsp;
+different broker which enables to horizontally&nbsp;
+scale kafka. Also each topic can be made up of&nbsp;&nbsp;
+hundreds of partisions. More partisions you have&nbsp;
+more paralelism and high troughput you can achive.
+But in this example, I have a Kafka&nbsp;
+topic that consists of three partitions,&nbsp;&nbsp;
+which are labeled as partition zero, one, and two.
+Now, the messages sent to the Kafka topic&nbsp;
+are going to be written to these partitions,&nbsp;&nbsp;
+and the messages within each partition&nbsp;
+are going to be ordered, 0, 1, 2, etc.
+It's important to understand that only messages&nbsp;
+within a specific partition follow the same&nbsp;&nbsp;
+order. That's why it's not an easy task&nbsp;
+to maintain this order at the topic level,&nbsp;&nbsp;
+and not many messaging systems even&nbsp;
+try to support it, but Kafka can.
+So, the first message goes into partition&nbsp;
+zero and will have the ID zero, one,&nbsp;&nbsp;
+and then two, and all the way up to six.
+As I continue to write messages into&nbsp;
+partition 0, this ID will keep increasing.
+So, the same scenario applies&nbsp;
+when I write data into partition&nbsp;&nbsp;
+one of my Kafka topic. The ID will&nbsp;
+continue to increase, and so forth.
+So, the messages being written into&nbsp;&nbsp;
+these partitions are assigned an ID&nbsp;
+that increments from zero upwards.
+This ID is referred to as&nbsp;
+a Kafka partition offset.&nbsp;
+So as we can see, each&nbsp;
+partition has different offsets.&nbsp;
+Now, Kafka topics are also immutable.
+That means that once the data is&nbsp;&nbsp;
+written into a partition,
+it cannot be changed.
+We can't delete or update data in Kafka. All we&nbsp;
+can do is keep adding more data to the partition.
+Let’s take a look at a real-world&nbsp;
+example. Let’s say a company has a&nbsp;&nbsp;
+fleet of trucks. Each truck has a GPS module and&nbsp;
+it reports its location to Apache Kafka. Then,&nbsp;&nbsp;
+each truck will send a message to Kafka&nbsp;
+every 30 seconds, for example, and each&nbsp;&nbsp;
+message will contain some information&nbsp;
+such as the truck's ID and position.
+So, we have a bunch of trucks that&nbsp;
+are going to act as data producers.&nbsp;&nbsp;
+They will send data into a Apache&nbsp;
+Kafka, specifically to ‘trucks_gps'&nbsp;&nbsp;
+topic. This topic will contain the&nbsp;
+location details of all the trucks.
+Just for this example, we decided to create&nbsp;
+12 partitions, which is an arbitrary number.&nbsp;&nbsp;
+We'll talk more about how you can decide the&nbsp;
+number of partitions you need at a later point.
+Let's discuss the potential use cases for&nbsp;
+Kafka in this scenario, specifically what&nbsp;&nbsp;
+can be done with the location data. From&nbsp;
+a management point of view, you'd want a&nbsp;&nbsp;
+dashboard that shows a map and the locations of&nbsp;
+each truck. And if you run a delivery business,&nbsp;&nbsp;
+like Amazon, you might want to notify your&nbsp;
+customers when the delivery truck is nearby.
+In the real world, there would be many&nbsp;
+more services that would want access&nbsp;&nbsp;
+to this data and could use it for different&nbsp;
+purposes. That's why Kafka is very beneficial&nbsp;&nbsp;
+for companies. It eliminates the need to&nbsp;
+connect each service directly with a truck.
+Let's take note of some important things about&nbsp;
+topics, partitions, and offsets. Once data is&nbsp;&nbsp;
+written to a partition, it cannot be changed&nbsp;
+- this is referred to as 'immutability'. It's&nbsp;&nbsp;
+crucial to understand this. Data in Kafka is only&nbsp;
+kept for a limited time, the default is one week,&nbsp;&nbsp;
+but this can be configured. That means&nbsp;
+after a week, your data will disappear.
+Offsets only have meaning for a&nbsp;
+specific partition. As you can see,&nbsp;&nbsp;
+offsets are repeated across partitions. So,&nbsp;
+offset 4 in partition 1 represents a message,&nbsp;&nbsp;
+but it isn't the same data as offset 2&nbsp;
+in partition 0. Offsets won't be reused,&nbsp;&nbsp;
+even if previous messages have been deleted.&nbsp;
+They keep increasing incrementally as you&nbsp;&nbsp;
+send messages into your Kafka topic.
+That also means the order of messages is&nbsp;&nbsp;
+guaranteed only within a partition but not across&nbsp;
+partitions. This is very important to understand.
+Messages within each partition&nbsp;
+have increasing offsets, which&nbsp;&nbsp;
+means they're in order. We read them in the&nbsp;
+order of the offsets. But across partitions,&nbsp;&nbsp;
+we have no control. We'll see later&nbsp;
+how we can achieve it if we need it.
+Data sent to a Kafka topic is assigned&nbsp;
+to a random partition, for example,&nbsp;&nbsp;
+zero, one, or two in this example,&nbsp;
+unless you provide a key. Later,&nbsp;&nbsp;
+I’ll also show you what happens when we use&nbsp;
+a key. In a Kafka topic, you can have as many&nbsp;&nbsp;
+partitions as you want. Sometimes there are&nbsp;
+three, sometimes 10, or sometimes 100. We'll&nbsp;&nbsp;
+discuss how to determine the right number&nbsp;
+of partitions for our topic later as well.&nbsp;
+That's all for this video, more to come about&nbsp;
+Kafka and other frequently used systems in&nbsp;&nbsp;
+companies. Thank you for watching&nbsp;
+and I'll see you in the next video.
+

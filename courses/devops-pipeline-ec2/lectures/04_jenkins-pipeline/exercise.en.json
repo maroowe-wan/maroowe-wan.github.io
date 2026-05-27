@@ -1,0 +1,48 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "Warm-up: Start Jenkins as a Docker container with a persistent volume. Retrieve the initial admin password from the container logs, complete the setup wizard, and confirm the Jenkins web UI is accessible at http://localhost:8080.",
+      "starter": "# Run Jenkins as a container:\ndocker run -d --name jenkins \\\n  -p 8080:8080 -p 50000:50000 \\\n  -v jenkins_home:/var/jenkins_home \\\n  jenkins/jenkins:lts\n\n# Wait ~30 seconds, then retrieve the initial admin password:\ndocker logs jenkins 2>&1 | grep -A 3 'initial admin password'",
+      "solution": "# Start the container:\ndocker run -d --name jenkins \\\n  -p 8080:8080 -p 50000:50000 \\\n  -v jenkins_home:/var/jenkins_home \\\n  jenkins/jenkins:lts\n\n# Retrieve initial admin password (two equivalent methods):\ndocker logs jenkins 2>&1 | grep -A 5 'Please use the following password'\n# OR:\ndocker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword\n\n# Expected output: a 32-character hex string, e.g.:\n# a3f7b2c1d4e5f6a7b8c9d0e1f2a3b4c5\n\n# Open http://localhost:8080, paste the password, choose 'Install suggested plugins',\n# create an admin account, and complete the wizard.\n# Verification: the Jenkins dashboard loads and shows 'Welcome to Jenkins!'",
+      "explanation": "The two port mappings serve different purposes: 8080 is for the browser UI, and 50000 is the JNLP port that inbound build agents use to connect to the controller. The named volume 'jenkins_home' persists all configuration, jobs, and credentials; without it, every container restart loses everything. Running Jenkins in a container mirrors the philosophy applied to the app itself — reproducible, clean, and portable.",
+      "hints": [
+        "If 'docker logs jenkins' shows no password line after 60 seconds, the container may have exited. Run 'docker ps -a' to check the status and 'docker logs jenkins' to read any startup errors.",
+        "If port 8080 is already in use on your machine, change the host-side mapping: '-p 9090:8080'. Then access Jenkins at http://localhost:9090 instead.",
+        "If you lose access to the container later, you can always recover the admin password with: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
+      ]
+    },
+    {
+      "prompt": "Core practice: Write a minimal declarative Jenkinsfile with a single 'Hello' stage, create a Pipeline job in Jenkins that uses an inline script, run the build, and verify the stage turns green in the Jenkins stage view.",
+      "starter": "// Jenkinsfile content (paste into Jenkins inline script box):\npipeline {\n    agent any\n    stages {\n        stage('___') {\n            steps {\n                echo '___'\n            }\n        }\n    }\n}",
+      "solution": "// Complete Jenkinsfile:\npipeline {\n    agent any\n    stages {\n        stage('Hello') {\n            steps {\n                echo 'Pipeline is alive!'\n            }\n        }\n    }\n}\n\n// Jenkins setup steps:\n// 1. New Item → enter a name (e.g. 'myapp-pipeline') → select 'Pipeline' → OK\n// 2. Scroll to 'Pipeline' section → Definition: 'Pipeline script'\n// 3. Paste the Jenkinsfile above into the script box → Save\n// 4. Click 'Build Now'\n// 5. Click the build number → Stage View shows a green 'Hello' box\n// 6. Click 'Console Output' and confirm the line: 'Pipeline is alive!'",
+      "explanation": "The declarative pipeline syntax nests pipeline → agent → stages → stage → steps. Every stage name you provide becomes a column in the Stage View, giving a visual progress bar of the build. 'agent any' means Jenkins will run this on whichever executor is available. Even this trivial pipeline demonstrates the essential pattern: if the 'echo' step returned a non-zero code, the stage would turn red and the pipeline would stop.",
+      "hints": [
+        "If the build fails with 'No such DSL method echo', the suggested plugins were not installed during setup. Go to Manage Jenkins → Plugins → Installed and verify the Pipeline plugin is present.",
+        "If you see 'Started' but no stage boxes appear in the UI, your browser may need to reload. The Stage View requires the Pipeline Stage View plugin — check it is installed."
+      ]
+    },
+    {
+      "prompt": "Core practice: Commit the Jenkinsfile to your GitLab repository and reconfigure the Jenkins job to read the pipeline definition from SCM ('Pipeline script from SCM'). Add a 'Checkout' stage that uses 'checkout scm'. Push a change and verify that Jenkins loads the Jenkinsfile from the repo and runs the Checkout stage successfully.",
+      "starter": "// Jenkinsfile to commit to the ROOT of your GitLab repository:\npipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                // Use the built-in step that checks out\n                // the commit that triggered this build:\n                ___\n            }\n        }\n    }\n}",
+      "solution": "// Jenkinsfile (commit to repo root as 'Jenkinsfile', no extension):\npipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                checkout scm\n            }\n        }\n    }\n}\n\n// Steps to apply 'Pipeline script from SCM':\n// 1. In Jenkins: open the pipeline job → Configure\n// 2. Pipeline section → Definition: 'Pipeline script from SCM'\n// 3. SCM: Git\n//    Repository URL: https://gitlab.com/<your-namespace>/<your-project>.git\n//    Credentials: select or add the GitLab credentials\n//    Branch: */dev (or */main)\n//    Script Path: Jenkinsfile\n// 4. Save\n//\n// Commit and push Jenkinsfile:\n// git add Jenkinsfile\n// git commit -m \"Add Jenkinsfile with Checkout stage\"\n// git push\n//\n// Jenkins receives the webhook (from Lecture 3), reads Jenkinsfile from GitLab,\n// and runs the Checkout stage. Console Output should show:\n// 'Checking out Revision <SHA> (refs/remotes/origin/dev)'\n// Stage View: one green 'Checkout' box.",
+      "explanation": "'checkout scm' is a shorthand step that clones the exact commit that triggered the build, using the same repository and credentials already configured in the job. It avoids repeating the repository URL inside the Jenkinsfile, which would create a maintenance burden. By reading the Jenkinsfile from SCM, the build process becomes part of your source history: every change to the pipeline is versioned, reviewable, and revertable, just like application code. This is the 'Pipeline as Code' philosophy.",
+      "hints": [
+        "If Jenkins cannot clone the repo (authentication error), add a 'Username with password' credential in Manage Jenkins → Credentials using your GitLab username and a Personal Access Token as the password.",
+        "If Jenkins reads an old Jenkinsfile, make sure you pushed the commit to the branch Jenkins is configured to watch (the Branch Specifier in the SCM configuration).",
+        "If the Jenkinsfile is in a subdirectory rather than the repo root, update the 'Script Path' field in the Pipeline configuration to the relative path, e.g. 'ci/Jenkinsfile'."
+      ]
+    },
+    {
+      "prompt": "Applied challenge: Extend the Jenkinsfile with a second stage called 'Verify Workspace'. In this stage, use an 'sh' step to list the files checked out by the Checkout stage (run 'ls -la') and print the current Git commit SHA ('git rev-parse --short HEAD'). Push the updated Jenkinsfile and confirm both stages appear green and the output is visible in the console.",
+      "starter": "pipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                checkout scm\n            }\n        }\n        stage('Verify Workspace') {\n            steps {\n                // sh command to list files:\n                sh '___'\n                // sh command to print the short commit SHA:\n                sh '___'\n            }\n        }\n    }\n}",
+      "solution": "pipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                checkout scm\n            }\n        }\n        stage('Verify Workspace') {\n            steps {\n                sh 'ls -la'\n                sh 'git rev-parse --short HEAD'\n            }\n        }\n    }\n}\n\n// Push and trigger:\n// git add Jenkinsfile\n// git commit -m \"Add Verify Workspace stage\"\n// git push\n\n// Expected Console Output:\n// [Checkout] Checking out Revision abc1234 ...\n// [Verify Workspace] $ ls -la\n// total 32\n// drwxr-xr-x ... Dockerfile index.js package.json ...\n// [Verify Workspace] $ git rev-parse --short HEAD\n// abc1234\n\n// Stage View shows two green boxes: 'Checkout' and 'Verify Workspace'.",
+      "explanation": "This challenge solidifies two key mechanics. First, it confirms that 'checkout scm' actually wrote files to the workspace — 'ls -la' makes the checkout tangible. Second, capturing the commit SHA with 'git rev-parse --short HEAD' previews the tagging strategy used in Lecture 6: this SHA is what you'll use to tag the Docker image, creating a traceable link between running containers and source code. Every new stage added to the Jenkinsfile appears as a new column in the Stage View — the pipeline's visual progress board.",
+      "hints": [
+        "If 'sh' gives 'sh: command not found', your Jenkins agent may be running on a Windows executor. Use 'bat' instead of 'sh' for Windows (bat 'dir' and bat 'git rev-parse --short HEAD').",
+        "If 'git rev-parse --short HEAD' returns an error, confirm that 'checkout scm' ran first — the git command requires a cloned repository in the workspace."
+      ]
+    }
+  ]
+}

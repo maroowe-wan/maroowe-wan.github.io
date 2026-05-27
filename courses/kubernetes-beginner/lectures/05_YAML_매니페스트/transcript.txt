@@ -1,0 +1,69 @@
+## 영상 1: Kubernetes Pods: From kubectl Commands to YAML Manifests (https://www.youtube.com/watch?v=YZ3cdDBYY9I)
+
+Hello everyone, welcome back to the channel. I am Nikhil Kumar. Today we are moving forward and getting our hands dirty with Kubernetes. We will create our first pod and I will show you two ways to do it. The quick way is to use the kubectl run command, which we showed in our earlier videos using the kubectl run and create command. The structured way is using a YAML manifest file. Today we are going to cover both of them. By the end of this video, we will know exactly how to spin up a pod in any Kubernetes cluster.
+
+If you're new to Kubernetes, you might wonder why do we even need pods? Why not just run containers directly? Because Kubernetes does not manage individual containers. Instead, it manages pods. It acts as a wrapper around one or more containers. Networking and storage containers inside a pod share the same network namespace and can easily communicate with each other.
+
+Scalability and resilience: pods are disposable and can be restarted and replicated whenever needed. Multi-container use cases: sometimes multiple containers need to work together inside the same pod. Let's take an example for this. Imagine an nginx web server that serves content. You can add a logging sidecar container inside the same pod to collect the logs. Since both containers are inside the same pod, they share storage and network, making communication seamless.
+
+What is a pod? A pod is the smallest deployable unit in Kubernetes. It encapsulates one or more containers, networking, and storage into a single unit. Types of pods: single container pod is the most common use case where we need to deploy an nginx web server. Multi-container pod uses multiple containers that need to work closely together. If we need one container to get the file to process and another container will be using that information to update onto the website. For example, if you are running an nginx web server, you will deploy an nginx container inside a single-container pod.
+
+Let's start with the fastest way to create a pod using a kubectl run command. So this is my Kubernetes cluster. I'm going to run an nginx pod. For that, I'm going to use the command: kubectl run my-web-server and the image name is nginx. What happens here? Kubernetes run directly creates a pod and uses the official nginx image.
+
+Now let's check the status of the pod. That is the kubectl get pod command to check the status. We can see the pod is running. Now to delete the pod, we have a command that is kubectl delete pod and the pod name is my-web-server. So the pod got deleted. Let's verify that. kubectl get pod is a command to verify that. Now the pod got deleted. Let's create a pod again.
+
+If we want to see the information about the pod, we can use a command that is kubectl describe pod and the pod name. This particular command gives a complete set of events that happen in the pod and it also gives a complete set of information about the pod: under which namespace it was created, on which node it was created, what are the labels, what is the IP of the pod, and which image is being used here. If we go down, these are the events. First of all, it assigned the pod to the respective node. Then it will pull the image. Once the image got pulled successfully, it will create a container called my-web-server.
+
+Now let's do the same thing but using a YAML file for better control. Here I'm going to create a file called nginx-pod.yaml. First of all, we need to specify the API version. We have a keyword called API version, which is the version of the Kubernetes API. Here I'm going to use v1. Then we need to specify the kind. What kind of resource do we need to create? For now, we are going to create a pod, so we need to use pod. It is case-insensitive, but we should use the resource name with uppercase, so it always starts with uppercase.
+
+Then we need to give metadata. Metadata is the information about the pod like what is the name of the pod. I'm giving my-nginx. If we want to specify some labels, we can use labels and use app and web. Then we have a spec. Spec is the main thing where we need to specify the container information, like which image to use and how many containers we can create. We can create multi-container pods as well, so we can specify the multi-container information here. For now, I'm going with one container, which is nginx.
+
+Here we need to use containers, and it will be a list because we can specify multiple containers. We can specify multiple containers in the form of a list. I'm giving a name that is nginx and I'm specifying the image as well, which is nginx. This is the basic layout of the manifest file. The four components like API server, kind, metadata, and spec remain the same for all resources, whether it's deployment, namespace, or the replica set. I am going to cover replica set and deployment in my next video in very much detail.
+
+Now let's apply these changes using the kubectl create -f and the filename. The pod got created and we can verify that using the kubectl pod command. We can see the pod got created with the name called my-nginx. To see more detailed information about this, we can use the hyphen o wide option and we can see on which node the pod got created and what IP is assigned to that particular pod.
+
+The key benefits of using YAML is that it's easier to version control. It's a repeatable and reusable configuration. We can share the configuration with any of our teammates to create a similar kind of pod on their environment as well. We can define more settings like label, port, and resources in this. If you are experimenting, kubectl is fine, but for real-world applications, YAML is the way to go.
+
+Now you know how to create Kubernetes pods with and without YAML. In our next video, we will explore replication controller and deployment and how they differ from pods and why they are the real way to manage applications in Kubernetes.
+
+
+## 영상 2: What really happens when we run "kubectl create deployment"? (https://www.youtube.com/watch?v=Dn3RkWlPDAk)
+
+Let's see what happens when we create a deployment on Kubernetes. I do kubectl create deployment. That's my control plane in the middle. That big cylinder here means storage, so that's etcd. I have two nodes on the right. I run my kubectl create command. You will see that on each step, the components that are active kind of light up in red.
+
+I talk to the API server. The API server talks to etcd and creates the deployment, putting the deployment in etcd. Then it tells me deployment created. Note that when the control plane tells me deployment created, my container is not running at all. This is like when I put the order at the restaurant. They're like, yep, we got it. Now the kitchen is going to work on that, but I don't have my blue cheeseburger yet.
+
+Next step, I have a controller that wakes up. The controller responsible for deployments. Basically it's like, oh, what's a deployment? A deployment is a replica set. Just like tea is an infusion of tea leaves, a deployment is a replica set. Do we have a replica set yet? No? OK, let's create the replica set. The deployment controller is going to create the replica set, and then it goes back to sleep.
+
+Then at the next step, the replica set controller, the controller responsible for replica sets wakes up. It's like, ah, I see that you have a replica set. It says that you want to have one nginx. OK, so you want to have one nginx pod. Fine, let's create the pod and let's go back to sleep. Again, at that point when we say create the pod, that's just an entry in etcd. We don't have an actual container running on the cluster yet.
+
+So now we have a pod that is in state pending. Pending means it's kind of queuing outside of the cluster because we don't know yet where it's going to run. Next, we have another controller that wakes up, a special one: the scheduler. The scheduler is our Tetris player responsible for optimizing the placement of the containers as tightly as possible. It has to decide on which node the pod will be running.
+
+It's going to look at all kinds of factors. How much RAM do you need? How many CPUs? Do you have placement constraints? Do you want to be in the same availability zone as another thing or whatever? It's like, no, no constraints at all. OK, and what's running currently on the cluster? Nothing. All right, I'm going to arbitrarily decide that you go on node 1. Then the scheduler goes back to sleep.
+
+Next step, we have kubelet on node 1. Remember, the job of kubelet is to register with the control plane and say, hello, I'm node 1. Do you have any containers for me? At that point, the control plane says, well, precisely, I have an nginx pod for you. Kubelet is going to update the manifest here to say "creating," basically saying I'm working on it. It's going to pull the image, allocate the IP address, start the containers. When everything is running, it's going to report back and mark the pod as running. At this point, we have truly created our container, our deployment, I mean. But at that point, we have kind of reconciled and it's truly up and running.
+
+All these steps I was showing you, like the pods being pending and creating, et cetera, this is exactly what's going on. I'm going to prove it. I'm going to run kubectl get pods dash o wide. I'm going to add two really interesting flags: dash dash watch, dash dash output watch events. And now I'm going to do kubectl create deployment web with image nginx. You will see here all these events happening. First, it's pending. Then it's pending but it's now on a node. Then it's container creating. And then if I come later, it's running with an IP address. So that's what's going on, what's happening when we create a deployment on Kubernetes.
+
+
+## 영상 3: Kubernetes Pods Creating and Managing with YAML | How to Define Pod Specifications with YAML (https://www.youtube.com/watch?v=HkVYcfva9vw)
+
+Hello everyone, welcome back to my channel. In this video, I will be discussing Kubernetes pods as well as how you can create, manage, and scale your containerized application inside the pod. Kubernetes does not deploy the container in the worker node. For that, you need a Kubernetes object called pod to deploy your application. A pod is a single instance of your application, or you can say it is a smallest unit to deploy your application inside Kubernetes.
+
+You can deploy one or more containers inside the pod and it will share the same resources and same volumes. Now, there are two ways you can create a pod. You can create a pod using the kubectl command or a YAML file. We can discuss both methods. Let's first create a pod using the YAML file.
+
+So let me open the terminal here. I'm going to use nginx image for simplicity. So kubectl, and I'm going to give the container name "my-nginx" and give the image name "nginx" and click enter. OK, let's wait. OK, so let me first export the config file and let me check. OK, great.
+
+Actually, let me use kubectl run my-nginx image my-nginx and enter. So now you can see here "my-nginx" pod is created. Let's quickly check. Kubectl get pods. So now here you can see my-nginx pod is running. Status is running. Here I am using the Lens software for better visualization. Let me open the Lens and here you can see my-nginx is deployed.
+
+Now quickly, do the port forwarding. Let me open the terminal again. For the port forwarding, kubectl port-forward my-nginx and give the port and target port. OK, and let me just copy this address and open the Chrome browser and here you can see "Welcome to nginx." So nginx is a web server and we have successfully installed it and it is working correctly.
+
+Now let's create the same pod using a YAML file. For that, let me open Visual Studio. So here I'm using Visual Studio. To create any Kubernetes object, you only have four properties. First is API version. Second is kind. Third is metadata. And fourth is spec. OK, now here, after each colon, you have to give a space and it's YAML format.
+
+API version: you can define "app/v1". API version name could be "core" or "app". For metadata, you can define metadata. You have to give two spaces. One, two. Name. Again, space. My-nginx. Using YAML and insert the specs. Again, you have to give two spaces. One, two. Containers. And inside the container, you have to define the properties. So one, two, name. Again, you have to put a colon, then again a space. Name: my-nginx. YAML file. Image: you have to define the image: nginx.
+
+Now what else is required? You need to define the port number. Ports. One, two. Container port. OK, either here you can either use API version "app/v1" or "core/v1." Let me quickly check. Yes, "app/v1." OK, and pod my-nginx. OK, let me correct the spelling. Container port. And let me copy this and open the Lens. Create a resource and paste. OK, so this is mapping not found. Mine is OK, no match of kind "Power" in edge dot v1. OK, sure, no issues. Let me remove this and create. Now you can see we have created the pod using the YAML file.
+
+Let's quickly do the port forwarding. nginx is a web server and is successfully installed and working. OK, so in both ways, you can create a pod using the kubectl command or using the YAML file. Now here I am using the Lens software. So I do not require creating a YAML file. Ready-made templates are already available in the Lens software. If you can see, select the template and let's support. Now by default, the templates are there. I need to just change the image name and name of the pod and it will automatically create.
+
+OK, so this is all about Kubernetes pods. If you have a doubt, just comment below. If you like it, please subscribe to my channel. Thank you very much. See you in the next video.

@@ -1,0 +1,171 @@
+## Video 1: CI/CD Explained: The DevOps Skill That Makes You 10x More Valuable (https://www.youtube.com/watch?v=AknbizcLq4w)
+
+Let's learn what CI/CD is, but more interestingly, why these concepts are so important and what problems they solve using real world scenarios from actual engineering projects. If you want to have a simple but actionable CI/CD checklist, you can grab one below that we created specifically for this video.
+
+Imagine you and your team are developing an application. The first version is done. So now it's time to deploy the app on a server. You check in your code and try to merge it into the main branch. You get merge conflicts because other engineers in your team also made some code changes before you. So you fix those issues manually. You try to merge again. Now a simple Jenkins job runs tests on the main and discovers a bunch of issues. We rush to fix them because we just broke the main branch. After all these fixes and code changes from different developers all in the main branch, it's end of sprint. We want to deploy all our changes because we need to release them at some point. We do a code freeze which means no one's allowed to merge anything to main until we deploy the current state with all those changes.
+
+You and your team start testing the latest state of the main branch to make sure that new features all work properly but also make sure that we didn't break any previous features and functionality. We do this intense testing manually before we deploy. We find some issues so we jump on it to fix it immediately because the clock is ticking on deployment. Once all the issues are resolved and the main branch is tested to the best of our ability, it's deploy time. Someone on the team checks out the main branch locally and bumps the release version maybe and pushes that to git. We have a simple Jenkins build that runs some tests, builds a Docker image and pushes to the Docker repository.
+
+Now let's manually modify a Docker compose file or Kubernetes manifest file or maybe we added a new service. So let's add that Kubernetes YAML file manually as well. Someone who is knowledgeable and senior in our team connects to Kubernetes cluster with kubectl command and applies the new manifest files or if the app is running on a simple server they SSH into the server, stop the containers and restart them with a modified docker compose file. They give testers the URL and say the new version has been deployed so they can test.
+
+We also need to manually prepare the deployment for production environment which will be the same process but with more anxiety because we are going live now. When deploying to production, we need to be prepared for some surprises. Let's not do that production deployment on a Friday evening because if something happens and users cannot access the app and no one's there to fix it overnight that would be pretty bad.
+
+We have tons of constraints at every stage because of one common element which is human, because human deployment and monitoring system is always time constrained and much more error-prone. If you're an engineer who has been implementing CI/CD you will probably cringe at this story but it is and has been a reality in many projects.
+
+How do we take this manual mess of a workflow fully constrained by human in the loop to a beautifully streamlined CI/CD pipeline that would be a dream of every developer team?
+
+Let's start from the very beginning. How do we cure the problem of bunch of issues and failed tests every time we merge our feature branch into the main? Wouldn't it be more efficient if we ran those tests in the feature branch itself before trying to merge it? If we have multiple branches, let's test each one individually before we merge them back into the main. We run those tests on individual branches to find any bugs right before we merge. Developers working on those branches can fix their own code.
+
+Why are we waiting right before merge to run those tests? Let's run them on every commit to the branch so it's easy to isolate the issue. Instead of waiting to run tests, let's run them more frequently and if there are any issues developers can fix those before making even more changes. We commit smaller code changes more frequently and we test them right away and that is called continuous integration CI. We integrate our code changes often in small sizes into the main branch.
+
+We are catching the issues faster and earlier in the development workflow. Instead of complex entangled issues that testers would find later, we have simpler isolated issues which means developers can fix those right away even while working on their current feature. The whole stress is not piling up at the end right before release. Developers aren't frustrated because other developers in the team commit code changes that mess up their functionality. No entangled merge conflicts.
+
+We reduce the stress of testing before deployment using CI. What are the problems and bottlenecks in deployment? How can we make sure that we don't need a code freeze and developers locally checking out the code to build docker image and then SSH into the server or connect to cluster and manually deploy the new application version? Magic word is automation.
+
+We go back to our build automation like Jenkins or GitHub actions and we say if all these extensive tests were successful, if they're all green, no issues were found after being merged into the main branch, build the app into a Docker image, give it the next version tag, push it to the Docker registry. Now we have a new artifact that is deployable. Then connect to the server or cluster and run that newly built docker image container there.
+
+All that logic of checking out the code locally and building a new version, then changing the Kubernetes deployment manifest file with the new Docker image version, connecting to the cluster, doing kubectl apply and so on, all of that logic is automated in a Jenkinsfile script or GitLab CI or GitHub actions pipeline file. The manual steps are now automated by a CI/CD tool, a build automation tool that was made specifically for that.
+
+We need to configure those tools on Jenkins. We need to secure the accesses, give Jenkins permissions to deploy to the dev environment and test the workflow. We need to build out this entire system to execute that logic automatically. The question is, is it worth one-time investment to build all of that that will serve us for years, or do we continue doing it manually each time we want to release?
+
+Setting up the whole process of connecting it with Docker registry and cluster or servers and securing the whole thing and deploying automatically will actually be a matter of just two or three days. So it's actually not that hard if you've done it a few times.
+
+Instead of waiting for release to do thorough end-to-end tests, we test them simply every time code changes get merged into the main. These are more extensive tests because the application needs to be tested in a running environment as well to make sure the connectivity is fine, the configuration, the setup, the underlying infrastructure and so on.
+
+When merging we tested the code, the syntax, maybe the functionality and these are unit tests and functional tests. Maybe we did code scanning for security issues. But here we need to test the whole environment end to end. Click around in UI, see that stuff gets updated in the database. But here's the key part. We don't do any of this manually. We write automated end to end and integration tests because we want to remove the human from the loop at every stage as much as possible and we run those tests also from the pipeline.
+
+Right after deploying to dev, the pipeline checks the new version of the application is up and running. We also want to run tests to see if we're introducing any security issues. We run dynamic application testing by basically running tests that try to hack into our systems maybe with SQL injection scripts. There are security tests that we can do at every level of application release. The important thing is that at this stage we run much more extensive tests against a running system.
+
+The automated tests play a crucial role in this entire release process because we are trying to reduce the human involvement while also reducing the bugs and issues slipping through. It would require writing a lot of automated tests for complex use cases, but is it worth investing time to write automated tests that will run every time, multiple times every week, and save you tons of hours of manual testing over months or years? Yes.
+
+Once those tests are green, we validated that the developers didn't mess up anything in the code changes. We can go to the next stage which is sometimes called test or staging environment. We are releasing the code changes in stages where it gets tested at every stage and that workflow of deploying a release all the way to the staging or testing environment is called continuous delivery or CD and that's how we get CI/CD, continuous integration continuous delivery.
+
+From the code being pushed to the repository all the way to the deployment on the staging environment, which is also pre-production right before production, with the validation that not only the code itself is valid and well tested but the application functionality works just fine, and for all this testing and deployment to happen, no one in the team even needed to open a terminal and execute scripts or commands. It all happened automatically.
+
+This means no human errors, no forgetting or missing steps because we're doing stuff manually. No code freezes or depending on that one senior engineer in the team to release the new version. Even if they go on a holiday, we don't panic because the release process is fully automated and nobody's shivering right before the release because we know our app has been extensively tested. Our confidence level is much higher when deploying.
+
+We still have one last step because our end users haven't seen our code changes yet. We're going all the way to production with our fully automated release pipeline because we have the tools to do it.
+
+After staging, if we are developing a customer facing app, we want to release the new feature for them. What else do we need to validate to be 100% sure that we're not going to mess up our live app? Let's do performance tests and additional compliance and security tests and let's run all those against staging and validate that everything is 100% fine.
+
+Very often we don't want to automatically deploy into production. Sometimes staging may be used by the team or PM or product owner to demo the new features first to maybe higher level decision makers in the company to get input and make any adjustments if needed or someone needs to make the final approval before going live. So it's very common to have a manual confirmation right before deploying to production. However, this is just a button, just one click. The deployment logic is still in the CI/CD pipeline tool itself. Even a non-technical person, a decision maker, can go and click deploy and the logic will be automatically executed in the background to deploy to production. This is called continuous deployment, a concept of automatically deploying every release all the way into production.
+
+No matter how many tests we run, there's always a slight little chance that an issue slipped through that we just didn't catch with all this extensive testing. Imagine we have 1% chance that an issue slips into production and we have 99% confidence. So we will still be kind of anxious at deployment because what if that 1% kicks in. How do we reduce the risk even further? That's where deployment strategies like canary deployment or blue green deployment come in.
+
+Canary deployment is super simple. We roll out the new feature to 1% of users or 5% and we observe for an hour and see if nothing blows up. OK, that's great. Let's crank it up to 10%. Let's observe for two more hours. OK, let's do 20%, let's see overnight, nothing crazy happens. Now we're good. Let's switch to 100%. Canary deployment is a progressive roll out of an application that splits the traffic between an already deployed version and a new version that we just deployed. It rolls out the new version to a subset of users before rolling it out fully. Canary deployments select a small number of servers or nodes for the initial deployment and then gradually or progressively deploy that new version everywhere.
+
+Alternatively, we also have green blue deployment. You create two separate but identical environments. One environment, call it blue, is running the current application version and one we call it green is running the new application version. The main idea is that if the new deployment has any issues, we can immediately switch the entire traffic back to the older version. If something goes wrong, you can easily fall back to the previous version or environment.
+
+This requires some work to set up, including setting up monitoring that will continuously check the deployment and alert on any issues instead of human sitting in front of a monitor and watching for an hour if something happens. But it's definitely worth it to set it up once to not be sweating every time you release a new version to production and having that peace of mind by reducing the risk of production deployments.
+
+If we reduce the risk of production deployments, we naturally increase the frequency of deploying to production with automation because we have this safety net. That whole thing is CI/CD which is the core of DevOps. It's basically this beautifully efficient process of automating deployment from code changes to testing to releasing, monitoring, fallbacks and so on.
+
+It has this huge value for teams because of how much manual workload it eliminates and how faster it makes the entire process. That's exactly why CI/CD is the main focus of DevOps training because it's literally the backbone of the entire DevOps automation.
+
+## Video 2: CI/CD Explained | How DevOps Use Pipelines for Automation (https://www.youtube.com/watch?v=M4CXOocovZ4)
+
+CI/CD stands for continuous integration and continuous deployment. In DevOps, which is short for development and IT operations, it refers to the software development life cycle. The steps are usually written out within an infinity loop since it's a cycle that repeats forever.
+
+The steps in the cycle are: developers write the code, then it gets built or compiled together, then it's tested for bugs, then it's deployed into production where it's used by end users or customers, then we monitor and collect feedback, and finally we plan improvements around that feedback. Rinse and repeat.
+
+In the case of continuous deployment, the main point here is frequency. Today companies can ship new features within minutes. For example, Ticketmaster used to build, test and publish pipeline deployments within two hours, but now with CI/CD they're able to do everything within just eight minutes.
+
+How is that possible? Continuous integration, which is the CI, is a development practice that requires developers to integrate code into a shared repository several times a day. The code is verified by an automated build which allows teams or the project owner to detect any problems early on.
+
+When the code is written and pushed to a repository like GitHub or GitLab, that's where the magic begins. From there, the code is analyzed and given a series of automated tests. Three examples are unit testing, this tests the individual units of the source code. Validation testing, this makes sure that the software satisfies or fits the intended use. And you have format testing, this checks for syntax and other formatting errors.
+
+These tests are created as a workflow and then are run every time you push to the master branch. Pretty much every major development team has some sort of CI/CD workflow.
+
+On a development team, the new code could be coming in from teams all over the world at different times of the day from developers working on all sorts of different projects. It's more efficient to build an automated workflow of tests that make sure that everyone is on the same page before the code is accepted. It would take much longer for a human to do this each time.
+
+Some popular CI/CD environments include Jenkins, which is an open source solution, Circle CI, GitLab, GitHub actions and then there's Team City, which is a proprietary solution.
+
+Why use CI/CD? Because it automates things that otherwise would have to be done manually. It finds small problems before it sneaks into the main codebase. You can imagine that if you push bad code out to your million customers then you're going to have a bad week or maybe even a bad month.
+
+It also helps to prevent something that we call technical debt, which is the idea that since main code repos are constantly being built upon over time, then a shortcut fix taken on day one is now an exponentially more expensive fix years later because now that band-aid of a fix would be so deeply intertwined and baked into all the code bases and logic.
+
+What's the CI/CD workflow look like? Let's say that you have a team of developers writing the code. They use source code management like GitHub or GitLab. Next you have the build, this is where the application gets compiled. This runs the packages installations. Then you have the release pipeline, this deploys the app for example to a web server.
+
+In the build pipeline we'll add a unit test. In the release pipeline we'll add an integration test and maybe a UI test as well. Some pipelines have a dozen tests or more.
+
+What are some of the benefits of CI/CD? Three examples are shorter cycle times. This is the speed at which a DevOps team can deliver a functional application from the moment work begins to when it is providing value to an end user. It also leads to happier employees. Giving your engineers the tools to be successful makes everything better than having a manual solution. And it gets to market faster because code that has run through a pipeline and is now in production is making money whereas code sitting on a hard drive somewhere is not.
+
+To recap: CI/CD stands for continuous integration, continuous deployment. This deals with how software is continuously written, integrated, analyzed and then deployed to its customers. CI/CD helps to test new code to ensure that its logic makes sense, is formatted correctly, and fulfills the scope of the project. CI/CD allows for faster speed in the marketplace, higher quality code, limiting the fears of technical debt, and creating happier employees.
+
+## Video 3: What is CICD Pipeline? CICD process explained with Hands On Project (https://www.youtube.com/watch?v=G1u4WBdlWgU)
+
+What is CI/CD? This is one of the most asked DevOps interview questions and also a very popular DevOps practice that every company is following these days.
+
+If I ask you what is CI/CD process, most of you will stop by saying it is a continuous integration and continuous deployment process. Let me explain what is CI/CD in a very simple manner along with different stages in CI/CD pipeline, benefits of using CI/CD in DevOps, some popular CI/CD tools and also a hands-on demo to set up CI/CD pipeline for a Python application using GitHub actions.
+
+Let's begin with what is CI/CD and I am going to explain this in a very simple and short manner. CI/CD is a way to make software faster, safer and efficient by streamlining and automating processes like building, testing and delivering of the software.
+
+To understand this properly, let's look at the traditional way of deploying an application or a website without using CI/CD. Imagine you are working in a team responsible for deploying an application without using CI/CD. There are going to be different phases or stages.
+
+The first phase is the coding phase or development phase where the developers are going to write the code for the application. There can be multiple developers site in the code so they need to make sure that the code is integrated at a central place. They might use version control systems like git so they can store their application code on GitHub or GitLab.
+
+When the source code is ready, they need to compile it, which is known as the compilation phase. You combine the code to create a build. A build is something which has code along with dependencies and libraries which runs the software. Android code will have APK as a build, Java code has JAR, and Docker image is also one kind of build.
+
+When the build is ready and your software is running as you expected, you need to test it out. The third phase is the testing phase. Here the QA engineers are going to manually test the application to make sure everything is working fine. This is also a manual process.
+
+Once the testing is done and everything is OK, you need to plan the deployment. In this you need to set up a staging server which should replicate the exact production environment and you will deploy your build or your application in this staging server. You need to manually check and test out if everything is working in the staging server before you deploy your application on the production environment.
+
+If everything is working as you want on the staging server, you will plan a maintenance window or downtime to deploy an application on production. After deployment to production is done and your application is up, you still need to create monitoring and testing manually to make sure that your application is working fine. But if there are any issues, you need to manually roll back and go back to the previous version.
+
+There are so many manual processes, so many human interventions which can cause issues and errors in the deployment process. Not just this, if you wanted to play a new version of your application, you will have to continue the same cycle again and again. This can cause so much issues and can take so much time.
+
+This is why companies are using CI/CD because CI/CD can automate all this process. It can automate the building, testing and deploying of an application.
+
+CI/CD stands for continuous integration, continuous delivery and continuous deployment, which is a DevOps process to automate software delivery. Using CI/CD pipeline you can build code, run tests and deploy your applications on various different platforms or cloud environments.
+
+Continuous integration is a process in CI/CD pipeline where the team members are going to integrate their work or push their code on a central repository system where their code or their work is going to be checked automatically and tested out.
+
+Continuous delivery is where you compile the code that you got from the repository and you create the build, test it out and be ready to deploy. Continuous delivery is a process of making sure that the software is ready and it can be released anytime you want.
+
+Continuous deployment is the process of deploying your application or software that you have built to the cloud or servers or Kubernetes cluster whatever you intend to. This is used to automatically deploy new features and new versions of your application whenever the code is integrated in the repository.
+
+These three processes together create a CI/CD pipeline. A CI/CD pipeline will have different stages including source stage, build stage, test stage and deploy stage.
+
+The first one is source stage, which is the starting point of the CI/CD pipeline. When any change is made into your code and pushed to your repository, a CI/CD pipeline will be triggered to go into the next stage which is the build stage.
+
+In the build stage, your code is combined with dependencies and libraries to create a build or an artifact that can be deployed in your platform. After the build is created, it is going to go in the next stage which is the test stage.
+
+In the test stage, there are going to be automated tests to test your application code and to check if it behaves correctly. If there are any issues to your application, you can find them in your test stage and also resolve them.
+
+Once the test stage is done, it is going to move to the next stage which is the deploy stage. Finally, in the deploy stage, your application goes live because in this your application will be deployed on a server after it has passed all the tests and everything works as you want.
+
+Now let's look at the benefits of using CI/CD concepts in your application deployment. The first benefit is obviously quicker time to market. Using CI/CD we can automate the process, reduce manual intervention which allows us to deploy application faster and bring software releases quicker.
+
+Second is higher quality. Automated testing in CI/CD can help us find bugs and issues early in the development process.
+
+Third is reduced risk. Using CI/CD we can push smaller changes and more frequent updates which are less likely to cause major problems or bring production down.
+
+Fourth is collaboration. Using CI/CD, developers, testers and operation teams can collaborate more effectively.
+
+Another benefit could be continuous improvement. The insights that you get throughout the CI/CD stages can be useful to improve future releases.
+
+Some big companies that have seen drastic changes after implementing CI/CD include companies like NBC, Netflix, Adobe who deploy more than 50 times every day. Not just this, Amazon deploys new releases every 11.7 seconds and this is possible only through CI/CD.
+
+Some popular CI/CD tools in DevOps include Jenkins, GitLab CI, GitHub actions, Travis CI, AWS code pipeline, Azure DevOps Services, Team City, and many more.
+
+Now let's do a hands-on demo to set up a CI/CD pipeline for a Python application on GitHub. I have a very simple Python application created using Flask module to show us hello world message on our website and this application is containerized using Docker. If I were to do this manually I need to run commands like Docker build and Docker push to push this image on Docker Hub. But I'm going to automate all of it along with some tests.
+
+I have a test.py file that I created to run tests on this particular application. In this test file I am running a test to check that the message should always be hello world. If it is something else than hello world, you should give an error.
+
+The CI/CD pipeline file is triggered whenever a push is made on the main branch. In this there are two jobs: the first is a build job and then there's a test job. In the build job, the CI/CD pipeline is going to run on Ubuntu latest with some steps like check out the code, log into Docker Hub. After this, we are going to build, tag and push the image to Docker Hub. So when the app is ready, the CI/CD pipeline is going to go ahead and create an image and push it on Docker Hub.
+
+When the build is done, it is going to test the code. It will check out the code, install dependencies in requirement.txt and then using pytest we are going to test the application.
+
+Now I'm going to make a change. Instead of hello world I'll say hello CI/CD world. Let's commit and push this change.
+
+When I commit this change, it should trigger the pipeline. You'll see a pipeline being created which has two jobs: the build job and the test job.
+
+Why is the test field failing? If you see here it says hello CI/CD world instead of hello world. This is the problem because in the pytest we have created a test to see that the message should always be hello world.
+
+In the build stage, you can see it has checked out the code, now it is going to login, it has created the build and now we should see an image created. You can see it's pushed ready a few seconds ago. The repository now has an image which has been pushed.
+
+With automated CI/CD pipeline, your application deployment is very very fast.
+
+If you want to try this out you can clone the code. Make sure to insert secrets like Docker Hub username and Docker Hub password in the secrets and variables section. You don't need any access key ID or secret access key unless you are deploying this app on ECS or EKS or EC2 instances. You just need Docker Hub token, Docker Hub username, and also check other variables if needed.
+
+I hope this demo has helped you understand how CI/CD works in real life. CI/CD is not just limited to automating building, testing and deployment. You can also use CI/CD with tools like Terraform and Ansible to automate infrastructure provisioning, configuration management and much more.

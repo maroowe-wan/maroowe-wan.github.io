@@ -1,0 +1,239 @@
+Kind: captions
+Language: en
+in this video we will go through a quick
+overview and demo of argo rollouts argo
+rollouts
+is a progressive delivery controller
+which provides additional
+update strategies such as blue green and
+canary to kubernetes
+and it does this by integrating with
+various service meshes and
+ingress controllers for the purposes of
+shaping
+and safely shifting traffic to versions
+of the application
+during an update argo rollouts will
+query metric providers
+and perform analysis on the update and
+based on these metrics
+is able to either automatically promote
+the rollout to the new version
+or roll back to the previous stable
+version
+so first off let's explain what exactly
+is progressive delivery
+progressive delivery is the practice of
+gradually rolling out an
+update to a progressively larger and
+larger subset
+of users and by doing this you are able
+to limit the potential negative
+impact of the update in the event that
+something goes wrong
+let's see how this can be applied in
+practice using argo rollouts
+let's say we want to deploy version 2 of
+our application
+after updating our spec rollouts can
+expose a small percentage of traffic to
+that new version
+let's say five percent the controller
+then waits while metrics are collected
+on the application behavior after the
+update
+next those metrics will be analyzed to
+determine whether or not the change is
+causing any problems
+if it's going smoothly the update
+continues and the weight
+is increased again and the process
+repeats
+otherwise if the analysis fails
+inaugural rollouts will abort the update
+and automatically roll back to the
+previous stable version
+our goal rollouts introduces some new
+custom resources to your cluster
+the rollout custom resource is intended
+to be a drop-in
+replacement for a deployment it has an
+identical spec
+but with added blue-green and canary
+strategies
+the rollout manages your networking and
+service mesh related resources
+in order to shape the traffic according
+to your rollout steps
+it then automates the promotion of your
+rollout based on analysis
+analysis is a custom resource which lets
+you describe how to perform analysis
+it lets you define what metrics to
+measure and when
+and how to interpret those measurements
+as
+an update is happening analysis
+continuously queries metric providers
+to measure the success of an update
+so now we'll go through a quick demo of
+argo rollouts in action
+at the top left is the cubesat argo
+rollouts plugin
+showing a visual representation of
+varela
+this rollout is using the canary
+strategy with the istio traffic routing
+integration
+it's running with a single replica and
+it's currently running revision 1 of our
+application
+at the top right we have our demo
+and every bubble that you see folding by
+is a request
+which our browser is making to the
+backend
+the backend responds with a color which
+indicates which version
+of the app it is there's a bar chart at
+the bottom
+which represents the percentage of
+requests that were handled by
+the different versions of the backend
+and right now
+since we are only running a single
+version it's showing
+it as 100 of the blue
+at the bottom right of the screen is
+kiali which is a
+management console for the istio service
+mesh
+currently it's showing us that we have
+traffic coming from the
+istio gateway which is being split
+between
+two services istio rollout stable
+and istio rollout canary and 100
+of that traffic is being directed to the
+stable version
+and currently both of the surfaces are
+reaching the same
+set of pods finally at the bottom left
+is the rollout
+specification and as you can see the
+rollout
+looks nearly identical to the deployment
+resource
+but it does have a new section
+which contains the canary update
+strategy
+the strategy describes the steps that
+the rollout will take during an update
+and for now you should understand that
+the rollout will initially direct
+10 of the traffic to the canary and then
+pause
+indefinitely so let's go ahead and
+perform an
+update i am going to change the
+image from the blue to the yellow image
+so what you see happening is that the
+controller has started spinning up the
+new version of the application
+which you can see by the revision 2
+replica set and once the new version is
+running
+if you can recall from our steps the
+rollout will send 10
+of the traffic to the canary and then
+pause indefinitely
+in our demo application you can now see
+the yellow version that the back end is
+servicing
+some of our requests and from the bar
+chart
+roughly 10 of the requests are being
+handled by the yellow version
+the rollout controller also kicked off
+analysis run and that's going to take
+some time to
+gather some measurements so while we're
+waiting let's go ahead and look at the
+analysis spec
+so this is the analysis template that
+our rollout is using
+this analysis is using the prometheus
+metric provider
+and performing queries at 20 second
+intervals
+the query that is performing is taking
+the total number of
+non 500 requests and dividing it by
+total request which is
+effectively our success rate that result
+is then
+evaluated by the success condition
+which if it ever drops below 90
+the analysis will fail and we will
+automatically
+roll back in the plug-in
+each of these green ticks represents a
+measurement which was taken
+and it as successful
+and in kyali we can now see that roughly
+10 of the traffic is reaching our canary
+service
+which is then being directed to the
+canary
+pods
+so now let's introduce some errors in
+and see how the rollout behaves so our
+demo app allows me to adjust
+the error rate using this slider
+and i will do that for the
+yellow yellow surface
+okay so i basically injected errors for
+our yellow backend
+and what should now happen is that the
+next measurement that the controller
+takes
+should evaluate to a success rate
+below 90 which will then abort the
+and looking at kyoli we if you look at
+the traffic pack
+we can confirm that this success rate
+has
+dropped and and now
+and sure enough on the plug-in
+we see that it took a failed measurement
+indicated by this red x and the analysis
+run
+has been marked failed
+and the replica set has then been scaled
+down
+and the rollout is now degraded
+and from our demo app we can see that
+our back-end is no longer servicing any
+uh requests
+by our yellow version
+so that's a quick demo of vargo rollouts
+argument rollouts integrates with many
+common service meshes and ingers
+controllers
+including the ones listed here one thing
+to note is that the use of a service
+measure english controller is optional
+since it is possible to achieve canary
+and blue-green updates without the use
+of a traffic provider
+in addition rollouts also integrates
+with common metric providers
+you can also perform queries against
+your own custom metric provider
+or even run kubernetes jobs to determine
+the
+success of analysis using your own
+container and scripts
+to learn more about rollouts please
+visit our github page
+read our blog or join our slack

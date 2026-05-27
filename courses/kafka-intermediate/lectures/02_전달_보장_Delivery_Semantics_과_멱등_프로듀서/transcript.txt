@@ -1,0 +1,661 @@
+## 영상 1: Kafka Delivery Semantics | At-Least-Once, At-Most-Once & Exactly-Once (https://www.youtube.com/watch?v=V0c0qAP7sWk)
+
+hi guys welcome back to the channel hope
+you all are doing well
+today we're going to talk about Kafka
+delivery semantics
+Kafka gives you three different delivery
+modes that you can pick from
+whenever your Kafka producer is writing
+to the broker your Kafka producer can be
+configured to pick one of the three
+delivery modes
+the first one we're going to talk about
+is going to be at least once and then
+we're going to talk about at most once
+and finally we're going to talk about
+exactly once
+so let's start with at least once
+in at least once it is acceptable to
+deliver the same message more than once
+however no message should be lost right
+so if you look at the Kafka producer
+here and the message with ID 10 and cost
+10.
+it's okay if the producer writes the
+theme message multiple times to the
+broker however it is not okay if the
+producer just does not uh just just does
+not send the message to the broker or
+somehow just drops the message
+so message duplication is possible
+because you might be sending the same
+message multiple times but message loss
+is not possible at all
+for an application that uses this kind
+of a delivery mode it can support
+moderate throughput
+that's because the way the the way the
+application makes sure that no message
+is lost is by waiting for an
+acknowledgment from the broker what that
+means is let's say the producer sends a
+message to the broker it waits for a
+period of time and it does not get a
+reply back or an acknowledgment from the
+broker then the producer is going to
+send the same message yet again
+and let's say now it gets a reply or an
+acknowledgment back from the broker only
+then it's going to stop sending the
+message over and over again and move on
+to the next message
+because the producer has to wait until
+the acknowledgment comes from the broker
+you can see why there might be some
+latency or some delay between the before
+the producer goes on to send another
+send a different message
+so because of that reason you cannot
+support very very high throughput but uh
+any application that you can have
+moderate throughput in a this kind of a
+delivery semantic works very well
+the next one we have here is at most
+once for at most ones a message can be
+delivered a maximum of one time only
+right so you're okay so it is acceptable
+to lose a message unlike in at least
+once where it was not acceptable to lose
+or drop any message
+and at most once it is acceptable to
+lose a message however it is not
+acceptable to duplicate a message
+okay that's the key difference between
+at least once and at most ones in at
+least once you are
+you are okay
+duplicating the message right because it
+is at least one so you can deliver the
+same message once twice three times or
+more however it is not acceptable to to
+lose or drop a message
+okay for at most ones it's literally the
+opposite
+you are capping the number of times the
+same message can be sent to Once however
+it is okay if it's not once right it
+it's okay if you are sending a message
+to the broker and on the way you either
+drop it or lose it
+duplicate message is not acceptable just
+as I said you want to make sure that the
+message at most is delivered one time
+only
+this is the delivery mode that can give
+you the highest throughput because it
+uses a policy called fire and forget
+what this means is whenever the producer
+needs to send a message to the broker
+it's gonna attempt to send the message
+to the broker only once
+that's because unlike at least once
+at most once does not need to wait for
+an acknowledgment from the broker
+because according to this policy it is
+totally okay if you lose a message every
+now and then so what the producer is
+going to do is it's going to send the
+message to the broker not wait for an
+acknowledgment and just move on to the
+next message
+because you're putting so little work on
+the producer in this policy
+the producer can act very very fast and
+pump out messages without waiting uh for
+any acknowledgment from the broker
+the third delivery semantic is the one
+that is most complex to set up
+and that would be exactly once just like
+the name says in this policy every
+message should be delivered only once it
+cannot be delivered less than once it
+also cannot be delivered more than once
+the message is not allowed to be lost
+as I mentioned this is most difficult to
+set up because you need to configure
+both your producer your consumer and the
+broker and you massively reduce the
+throughput compared to both the other uh
+both the other modes that we talked
+about
+so yeah it does need some coordination
+between the producer broker and consumer
+it's complex to set up so unless your
+application really really needs the
+exactly one's policy it's better to
+avoid it altogether it is possible to
+set it up so it's not impossible to do
+it in Kafka but you will have to make
+quite a few configuration changes to
+make this happen
+so those are the three delivery
+semantics of Kafka as you can see all
+three have different pros and cons and
+depending on the application you are
+using Kafka in you have to be careful
+about which delivery mode you actually
+choose the only thing I'm going to say
+is
+unless you really need ordering within
+your application
+you don't really want to use exactly
+once because this is going to be the
+most complex to set up and also going to
+give you the lowest throughput compared
+to the other two
+the easiest one and the highest
+throughput is going to be at most ones
+but of course in that policy you might
+lose some messages
+if you can't afford to lose any messages
+at all but you're okay with some
+duplication you can go ahead and choose
+at least once up that has a good
+throughput too but again for exactly
+once you want to use it only when you
+know for sure that this is the policy
+that you need
+all right so hopefully that was helpful
+if you have any questions leave them in
+the comments below I will have a few
+videos coming up next on stream
+processing which works or which acts on
+Kafka so if you're interested in that
+please give a like And subscribe and
+you'll be notified whenever I upload the
+videos related to stream processing
+with that being said I hope you guys
+have a good rest of the day and I'm
+gonna catch you in the next one bye
+
+## 영상 2: Idempotent Producer in Apache Kafka [Apache Kafka Tutorials #16] (https://www.youtube.com/watch?v=_9et90BCRnc)
+
+Hello and welcome back to the channel.
+In this short video, we will discuss
+what are item important producers in
+Apache CFKA and how can we make our
+producers become item important. So if
+you have not subscribed to this channel
+already, please click subscribe, hit the
+bell icon and let's quickly get started.
+Now just consider a normal scenario of
+producing messages into Apache CFKA. The
+producer will send the right request. In
+this case, it wants to write X into a
+CFKA topic. The broker will append X
+into that CFKA topic and then it will
+acknowledge the producer.
+Now consider a scenario in which things
+don't quite go as expected and duplicate
+rights happen because of that. In this
+case, after the broker has written the
+message Y into the CFKA topic, it
+acknowledges the producer. But due to
+some reason, as you can see in step
+number three in the diagram below, the
+acknowledgement of Y does not reach the
+producer. After the producer times out,
+it will again try to write Y into the
+CFKA topic because as far as the
+producer is concerned, the message Y has
+still not been written into the CFKA
+topic. Now the broker thinks that this
+is a new message and again writes the
+message Y into the CFKA topic and
+acknowledges the producer that the right
+was successful.
+And as you can see now we have to deal
+with the problem of duplicate rights.
+Now an item important producer is what
+exactly solves this problem. An item
+important producer is a CFKA producer
+which writes a message into a CFKA topic
+exactly once.
+Let us see how it works.
+So what have we done here? Well, while
+sending any write request to the broker,
+the producer introduces a producer ID as
+well as a sequence number for that
+request. Now when this message is
+written by the broker into the CFKA
+topic, it also includes the producer ID
+as well as the message sequence number.
+After a successful write, the broker
+acknowledges the producer.
+Let us now come back to the failed
+acknowledgement case. Now in this case
+when the producer retries to write to
+the CFKA topic the broker can figure it
+out very easily that this producer ID
+has already sent a message with a given
+sequence ID and this message has already
+been successfully written into the CFKA
+topic. Therefore the producer sends back
+a duplicate acknowledgement without
+writing any more messages into the CFKA
+topic. And in this way our problem of
+duplicate rights into CFKA is solved.
+Now how do we actually make our
+producers work in an item important
+fashion? Well, the only thing that we
+have to do is set one of the producer
+properties which is enable do it
+importance to be equal to true. As you
+can read from the official CFKA
+documentation, when the enable item
+portance property is set equal to true,
+the producer will ensure that exactly
+one copy of each message is written in
+the stream.
+If set to false, producer retries may
+write duplicates of the retried message
+in the stream.
+Please also make note of the fact that
+there are restrictions on other
+properties as well. If you want to
+enable item importance to name a few,
+max inflight request per connection
+should be less than or equal to five,
+retries should be greater than zero and
+acknowledgements must be set to all. If
+we don't set these properties
+explicitly, the suitable properties will
+be set for us and in case of any
+incompatibility config exception will be
+thrown.
+All right, that's all we had for this
+short video, guys. And I really hope
+that you have learned something new
+today. If you like the content of the
+video, please do hit the like button. If
+you like the content of my channel,
+please click subscribe. You can hit the
+bell icon to never miss any new updates.
+Like always, thanks a lot for watching
+and let's see you very soon with a brand
+new tutorial.
+
+## 영상 3: Apache Kafka Transactions: Message Delivery and Exactly-Once Semantics (https://www.youtube.com/watch?v=Ki2D2o9aVl8)
+
+hi everyone welcome back uh to this
+session this is general farm confluent
+in this module i want to talk about
+transactions in apache cloud
+well first of all why do we need
+transactions where people may be
+familiar with transactions in a database
+world so if you in typically in a
+database world if you want to write to
+multiple tables having transaction
+transactions give you the ability to
+achieve this all or nothing behavior so
+either
+have the rights to order a table or
+succeed or none of them succeed
+well we probably need the same thing in
+the kafka land as well so let's take a
+look at this example for example let's
+say you have this
+conceived application called the
+transfer fund so the input would be this
+uh transfer table which recorded the
+intention of transferring money from one
+person to another in this case alice to
+bob what you want to do in this
+application is to take this event right
+which included the transfer and it will
+add two
+output records into output topic we're
+going to add debit event for alice and
+want to add credit event for bob that
+completes the transaction once this is
+done
+we'll be committing the input offsets by
+advancing the offset for the input topic
+and this will translate to a write into
+the internal consumer offset topic as we
+mentioned earlier
+so
+for a lot of applications it'll be nice
+to have all those three rights right for
+the two output topics and then this
+internal topic to be done
+in the all or nothing way
+so that will make the developing of the
+application easier to understand that's
+exactly what kafka transaction provides
+it's
+it's a feature that allows this kind of
+application to do the processing and the
+right to the output topic once and only
+once even when the application can fail
+and get restarted in the middle
+before i talk about details of
+transactions enabling transaction is
+pretty easy in typically the way
+you do that is to do enable this through
+a kafka stream application so there's
+only one configuration you need to set
+in the kafka stream configuration which
+is processing guaranteed to exactly once
+and we have a version two now for some
+of the performance improvement
+then if you produce some output in this
+transactional application to read that
+output topic you can set the isolation
+to be recommitted then only the
+committed data will be exposed to this
+reader now let's first look at some of
+the issues without transaction let's
+still continue with that example where
+you read the input from intention topic
+and then you try to add some of the
+credit events and the debit event right
+to an output topic let's say you you
+finished reading the input event and
+then you write you wrote the first debit
+event for alice
+now let's say at exactly this point
+the application failed now what do you
+do in this case well typically when you
+fail you just restart the application
+right and the application will resume
+from where it's left off since
+previously we didn't really commit
+finish processing the first event so we
+didn't really commit offset in the
+consumer officer topic so when this
+application is restarted it will pick up
+this event again and it will try to do
+the same steps as it did before try to
+add a debit event for alice and add a
+credit event for bob
+and eventually it will commit the offset
+into this commit offset topic
+now the application step is done but
+notice that now if you have application
+reading this output topic it will see
+the account for alice is
+debited twice
+this is actually annoying because
+it's very hard for applications to
+reason about this and deal with it okay
+now let's take a look of how this issue
+is solved with kafka transactions
+if you have configured let's say this is
+a streaming application
+with exactly one semantic
+then
+the stream processing will automatically
+set the internal configuration called
+transaction id to uniquely identify this
+particular application
+when this application is started the
+first thing it will do is to find a
+transactional coordinator to coordinate
+for this transaction
+now how is the coordinator determined
+it's actually turned in the same way as
+we had for the consumer coordinator if
+you remember it
+so what's happening is there's an
+internal topic we use for storing all
+the transactional related information it
+has multiple partitions
+and
+the leader of the partition this
+transactional
+id hashes into isb is the coordinate
+transactional coordinator for this
+application
+once the coordinator is determined then
+the coordinator can generate a unique
+producer id for this transactional
+application and a corresponding epoch
+and will send this information back to
+the application
+the next thing the
+application will do is start reading
+from the input input event and then it's
+about to write the output before it
+writes that it needs to inform the
+coordinator that it tends to update or
+write to an output topic
+so it sends this information to the
+coordinator and the coordinator will
+persist the partition that will be part
+of this transaction into this internal
+topic
+once this is recorded then
+the application can start writing the
+event to the output topic notice at that
+point at this point even though we have
+written this debited event for alice but
+the data hasn't been exposed to the
+consumer yet because it's still in this
+pending state
+let's say now at exactly same point the
+application failed and is restarted
+so when the application is restarted it
+will do exactly the same thing as it did
+before the first thing is it will try to
+request a producer id through the
+transactional coordinator
+the coordinator will notice that
+it actually already know there is a
+pending transaction for the previous
+instance of this application and then
+since this one is trying to register
+a producer id again it must be a new
+instance of this particular particular
+so what a transactional coordinator will
+do first is try to
+abort all the pending transactions
+from the previous instance of this
+application it does that by adding a
+broad marker to the internal
+transactional log and it will also add
+an abort marker to each of the partition
+this transaction has written data into
+in this case it's just this particular
+partition
+once this is done
+the transaction coordinator will bump up
+the epoch for this producer id this will
+be used to fence off the old instance of
+this application so in case this
+application didn't really die completely
+and mysterious come back it cannot do
+any more rights for this for the new
+transaction because it will notice that
+its epoch is too old compared with the
+latest epoch associated with this
+so after all this is done if now you can
+see if the consumer is trying to read
+this output topic it actually will
+ignore this debit event because it's
+marked as about it and it shouldn't be
+exposed to the application at this point
+we have avoided this issue of exposing
+aborted data to the application
+now let's look at what happens to a
+successful transaction
+so you go through pretty much the same
+space as steps as before when the
+application started it first requests
+produce id from the transaction
+coordinator
+then it will read the input
+but before it writes the output topic it
+will send the coordinator the lit set of
+partitions that you need to add data
+into in this case there will be three
+partitions these two partitions and the
+internal
+partition for the offset topic
+the coordinator will record all those
+partitions in the transactional log
+after that the
+application can start writing the new
+records those three output topics
+including the offsets
+once this is done the application can
+send a commit request to the transaction
+coordinator and the transaction
+coordinator will
+will write the commit marker within its
+internal commit log with an internal
+transaction lock at that point that
+decision is made and can't be changed
+after that you will be adding the same
+committed marker to each of the output
+topic based on the information it has
+recorded at this point all the
+committing information will be exposed
+to the consumer application if they are
+reading in this read committed mode
+so let's take a detailed look how we
+expose transactional data for consumers
+with this really committed mode in
+general we still want to expose red
+cards in offset order but notice that at
+this point the high water mark is before
+offset 66 but
+record whose offset is at 64 is actually
+not committed yet because there's no
+commit or a board marker for this
+particular transaction so its state is
+pending so in this case we don't want to
+like expose this data to the consumer
+yet so what the broker does is to
+maintain a new position called last
+stable offset this is the offset of all
+the first open
+pending transaction
+all the records whose offset is before
+this mark their state has been
+determined which means they are either
+aborted and
+or committed and they can be exposed to
+the consumers and we can return those
+another thing that's a bit tricky is
+if we are returning let's say the first
+three records in this uh in this picture
+back to the consumer some on red cards
+like the record at offset 57 is about it
+and the consumer should ignore it
+what we do is when the broker sends this
+this records back to the consumer it
+also returns a little metadata so that
+the consumer application can ignore the
+aborted records like this
+so since in general abortion is like
+relatively rare there's actually very
+little overhead to the application
+earlier we talked about
+producer can enable item potency to
+avoid issues of introducing duplicates
+or out of ordering when the can when the
+application fails
+so if yeah if your application is set
+with
+exactly one semantic
+item potency is automatically enabled so
+in this case let's say if you are
+sending
+some of the events right uh to the to
+the leader the first thing you will do
+is you will get your producer id back
+and then as you are sending the events
+each of the records will be tagged with
+the corresponding producer id and a
+sequence id and the broker will be
+storing those records with those
+producer id and sequence id and remember
+what's the last sequence id it has seen
+for a particular producer id now if the
+leader fails in the middle then when the
+producer tries to send new data to the
+the same data to the new leader the
+neuter will notice that some of the
+records are really duplicated and they
+can ignore those so by enabling exactly
+one's capability in the streaming
+application we automatically enabled
+item potency and together they can
+guarantee this exact one semantic for
+the processing of the data
+now let's talk about some of the
+considerations with transaction one of
+the things with transaction is you have
+to decide how often you want to commit
+those transactions there's some tradeoff
+there
+you can earlier you have seen that
+there is a little bit overhead to set up
+with the coordinator every time when you
+try to send the very first record to a
+particular partition if you are
+committing only like one record per
+transaction then that overhead could be
+significant
+on the other hand if you are including
+too many rare cards within a transaction
+that tend to delay the exposing of the
+data to the downstream applications so
+you want to balance the two by default
+the
+commit interval is set to be 100
+millisecond but you may want to tune
+that based on the application and the
+performance you want to have the last
+thing i want to talk about is a little
+bit caveat of using transaction so far
+all we have to talk about transaction
+only covers the interactions within the
+land of kafka
+but sometimes you may want to do some
+processing generate some output and
+eventually you want that output to be
+exposed to some external systems maybe
+like an external database now how do you
+coordinate between these two separate
+systems
+in kafka we don't really support
+two-phase commit so the transactional
+support we have is only within kaka so
+to support interaction with two systems
+the typical way you do that is to turn
+that into two separate single
+transactions you will first design your
+application so that you can generate
+output in a transaction application
+within kafka and you want to design it
+such that the transactional output can
+be itempotent
+then you will read this output and then
+write the output the records from this
+output into the external system like a
+database
+if the output of the topic is item
+potent then you can apply the same
+changes potentially more than once to
+the external database but you will get
+the same effect so that way you can
+bridge the two systems
+better without introducing too much
+overhead like the two-phase commit would
+do and that's it for this module thanks
+for listening
+you

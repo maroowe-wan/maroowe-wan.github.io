@@ -1,0 +1,50 @@
+{
+  "lecture_no": 1,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "[워밍업] kubectl api-resources 명령을 실행해 현재 클러스터에 등록된 리소스 종류를 확인하라. 출력에서 NAMESPACED, KIND, APIVERSION 컬럼을 읽고, 'apps' API 그룹에 속한 리소스 목록만 따로 필터링하라.",
+      "starter": "# 전체 API 리소스 조회\nkubectl api-resources\n\n# apps 그룹만 필터링\nkubectl api-resources --api-group=___\n\n# 커스텀 리소스 정의(CRD) 목록 확인 (아직 없어도 됨)\nkubectl get crd",
+      "solution": "# 전체 API 리소스 조회\nkubectl api-resources\n# 출력 예시 (일부):\n# NAME                  SHORTNAMES  APIVERSION         NAMESPACED  KIND\n# pods                  po          v1                 true        Pod\n# deployments           deploy      apps/v1            true        Deployment\n# ...\n\n# apps 그룹만 필터링\nkubectl api-resources --api-group=apps\n# 출력 예시:\n# NAME                  SHORTNAMES  APIVERSION  NAMESPACED  KIND\n# controllerrevisions               apps/v1     true        ControllerRevision\n# daemonsets            ds          apps/v1     true        DaemonSet\n# deployments           deploy      apps/v1     true        Deployment\n# replicasets           rs          apps/v1     true        ReplicaSet\n# statefulsets          sts         apps/v1     true        StatefulSet\n\n# CRD 목록 확인 (클러스터에 따라 결과 다름)\nkubectl get crd\n# 아무것도 설치되지 않은 경우: No resources found",
+      "explanation": "kubectl api-resources는 클러스터에 등록된 모든 리소스 종류를 나열한다. APIVERSION은 그룹/버전 형태(예: apps/v1)이며, 코어 그룹(v1 등)은 그룹명 없이 버전만 표시된다. CRD를 추가하면 이 목록에 새 항목이 추가되어 빌트인 리소스와 동일하게 취급된다. --api-group 플래그로 그룹별 필터링이 가능하다.",
+      "hints": [
+        "kubectl api-resources의 출력이 길면 '| grep apps' 파이프로 필터할 수 있다.",
+        "NAMESPACED 컬럼이 true이면 네임스페이스 범위 리소스, false이면 클러스터 범위 리소스다.",
+        "kubectl api-resources -o wide 를 추가하면 VERBS 컬럼도 확인할 수 있다."
+      ]
+    },
+    {
+      "prompt": "[핵심 실습] 아래 스키마를 갖는 CRD 'databases.myapp.example.com'을 작성해 클러스터에 등록하라. 필드는 name(string, 필수), engine(string, 기본값 'postgresql'), replicas(integer, 1~5 범위)를 가진다. 등록 후 kubectl get crd로 확인하고, 스키마 검증이 동작하는지 확인하기 위해 replicas를 10으로 설정한 잘못된 커스텀 리소스 생성을 시도해 오류 메시지를 확인하라.",
+      "starter": "# database-crd.yaml 작성 시작\napiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: databases.myapp.example.com\nspec:\n  group: myapp.example.com\n  versions:\n    - name: v1\n      served: true\n      storage: true\n      schema:\n        openAPIV3Schema:\n          type: object\n          properties:\n            spec:\n              type: object\n              required:\n                - ___          # 필수 필드 지정\n              properties:\n                name:\n                  type: ___\n                engine:\n                  type: string\n                  default: ___\n                replicas:\n                  type: integer\n                  minimum: ___\n                  maximum: ___\n  scope: Namespaced\n  names:\n    plural: databases\n    singular: database\n    kind: Database\n    shortNames:\n      - db",
+      "solution": "# database-crd.yaml\napiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: databases.myapp.example.com\nspec:\n  group: myapp.example.com\n  versions:\n    - name: v1\n      served: true\n      storage: true\n      schema:\n        openAPIV3Schema:\n          type: object\n          properties:\n            spec:\n              type: object\n              required:\n                - name\n              properties:\n                name:\n                  type: string\n                engine:\n                  type: string\n                  default: postgresql\n                replicas:\n                  type: integer\n                  minimum: 1\n                  maximum: 5\n  scope: Namespaced\n  names:\n    plural: databases\n    singular: database\n    kind: Database\n    shortNames:\n      - db\n\n---\n# 적용\nkubectl apply -f database-crd.yaml\n# 출력: customresourcedefinition.apiextensions.k8s.io/databases.myapp.example.com created\n\n# CRD 등록 확인\nkubectl get crd databases.myapp.example.com\n# NAME                           CREATED AT\n# databases.myapp.example.com    2024-01-01T00:00:00Z\n\n# 검증 테스트: replicas=10 (범위 초과) 시도\nkubectl apply -f - <<'EOF'\napiVersion: myapp.example.com/v1\nkind: Database\nmetadata:\n  name: bad-db\nspec:\n  name: test\n  replicas: 10\nEOF\n# 오류 예시:\n# The Database \"bad-db\" is invalid:\n#   spec.replicas: Invalid value: 10: spec.replicas in body should be less than or equal to 5",
+      "explanation": "CRD의 spec.versions[].schema.openAPIV3Schema는 커스텀 리소스의 필드 타입과 제약을 정의한다. required 배열에 필드명을 넣으면 해당 필드 없이 생성 시 API Server가 거부한다. minimum/maximum은 정수 범위 검증에 사용되며, default는 필드 미지정 시 자동으로 채워준다. 이 모든 검증이 API Server 단계에서 일어나므로 컨트롤러 없이도 잘못된 리소스 생성이 차단된다.",
+      "hints": [
+        "CRD의 metadata.name은 반드시 '<plural>.<group>' 형식이어야 한다. 예: databases.myapp.example.com",
+        "scope를 Namespaced로 설정하면 네임스페이스별로 분리되고, Cluster로 설정하면 클러스터 전역 리소스가 된다.",
+        "CRD 등록 후 Established 상태가 될 때까지 수 초가 걸릴 수 있다. kubectl get crd <name> -o yaml | grep -A5 'status:' 로 상태를 확인할 수 있다."
+      ]
+    },
+    {
+      "prompt": "[핵심 실습] 이전 단계에서 등록한 Database CRD를 이용해 커스텀 리소스 2개를 생성하라. 첫 번째는 name='prod-db', engine='mysql', replicas=3이고, 두 번째는 name='dev-db'만 지정해 engine 기본값이 자동으로 채워지는지 확인하라. 생성 후 kubectl get db, kubectl describe db prod-db, kubectl get db -o yaml 명령으로 리소스를 빌트인 리소스처럼 조회하라.",
+      "starter": "# prod-db 커스텀 리소스\napiVersion: myapp.example.com/v1\nkind: Database\nmetadata:\n  name: prod-db\n  namespace: default\nspec:\n  name: ___\n  engine: ___\n  replicas: ___\n\n---\n# dev-db: engine을 생략해 default 동작 확인\napiVersion: myapp.example.com/v1\nkind: Database\nmetadata:\n  name: dev-db\n  namespace: default\nspec:\n  name: ___\n\n# 파일로 저장 후 적용\n# kubectl apply -f databases.yaml\n\n# 조회 명령 (아래 빈칸을 채워 실행)\nkubectl get ___\nkubectl describe ___ prod-db\nkubectl get ___ -o yaml",
+      "solution": "# databases.yaml\napiVersion: myapp.example.com/v1\nkind: Database\nmetadata:\n  name: prod-db\n  namespace: default\nspec:\n  name: prod-db\n  engine: mysql\n  replicas: 3\n\n---\napiVersion: myapp.example.com/v1\nkind: Database\nmetadata:\n  name: dev-db\n  namespace: default\nspec:\n  name: dev-db\n\n# 적용\nkubectl apply -f databases.yaml\n# database.myapp.example.com/prod-db created\n# database.myapp.example.com/dev-db created\n\n# shortName 'db'로 조회\nkubectl get db\n# NAME      AGE\n# dev-db    5s\n# prod-db   5s\n\n# 상세 조회\nkubectl describe db prod-db\n\n# YAML 출력 (engine 기본값 확인)\nkubectl get db dev-db -o yaml\n# spec:\n#   engine: postgresql   <-- default가 자동으로 채워짐\n#   name: dev-db",
+      "explanation": "커스텀 리소스는 CRD를 등록하면 빌트인 리소스(Pod, Deployment 등)와 동일하게 kubectl get/describe/delete/apply 명령으로 다룰 수 있다. shortNames(예: db)를 정의하면 kubectl get db 처럼 축약 명령이 가능하다. API Server는 커스텀 리소스를 etcd에 저장하지만, 이것만으로는 실제 DB가 만들어지지 않는다. 커스텀 리소스에 반응해 실제 작업을 수행하는 것은 다음 강의에서 배울 컨트롤러(Operator)의 역할이다.",
+      "hints": [
+        "apiVersion은 CRD의 spec.group + '/' + spec.versions[].name 형태다. 예: myapp.example.com/v1",
+        "kubectl get databases 또는 kubectl get db 둘 다 동작한다. shortNames는 편의를 위한 별칭이다.",
+        "dev-db의 engine 기본값 확인은 '-o yaml' 출력의 spec 섹션에서 postgresql이 채워졌는지 보면 된다."
+      ]
+    },
+    {
+      "prompt": "[응용] 앞서 만든 커스텀 리소스를 정리하고 CRD를 삭제하라. CRD 삭제 시 해당 CRD로 만든 커스텀 리소스들도 함께 삭제되는지 관찰하라. 그리고 kubectl api-resources 출력에서도 Database 종류가 사라졌는지 확인하라.",
+      "starter": "# 1. 커스텀 리소스 먼저 삭제 (선택)\nkubectl delete db prod-db dev-db\n\n# 2. CRD 삭제\nkubectl delete crd ___\n\n# 3. CRD 삭제 후 DB 리소스 조회 시도 (오류 예상)\nkubectl get db\n\n# 4. api-resources에서 사라졌는지 확인\nkubectl api-resources | grep ___",
+      "solution": "# 1. 커스텀 리소스 삭제\nkubectl delete db prod-db dev-db\n# database.myapp.example.com \"prod-db\" deleted\n# database.myapp.example.com \"dev-db\" deleted\n\n# 2. CRD 삭제\nkubectl delete crd databases.myapp.example.com\n# customresourcedefinition.apiextensions.k8s.io \"databases.myapp.example.com\" deleted\n\n# 3. 삭제 후 조회 시도\nkubectl get db\n# error: the server doesn't have a resource type \"db\"\n\n# 4. api-resources 확인\nkubectl api-resources | grep databases\n# (출력 없음 — 완전히 제거됨)\n\n# 참고: CRD를 먼저 삭제하면 해당 CRD의 커스텀 리소스도 cascade 삭제된다\n# kubectl delete crd databases.myapp.example.com\n# (prod-db, dev-db도 함께 삭제됨)",
+      "explanation": "CRD를 삭제하면 해당 그룹/버전/Kind에 속한 모든 커스텀 리소스가 cascade 방식으로 함께 삭제된다. 이후 kubectl get으로 조회하면 API Server가 해당 리소스 타입 자체를 모르는 상태가 되어 에러가 반환된다. CRD는 API 확장 메커니즘이므로 CRD 등록 = 새 API 엔드포인트 추가, CRD 삭제 = 해당 API 엔드포인트 제거로 이해하면 된다.",
+      "hints": [
+        "CRD를 삭제하기 전에 커스텀 리소스를 먼저 삭제하는 것이 안전하다. finalizers가 설정된 경우 CRD 삭제가 블로킹될 수 있다.",
+        "kubectl delete crd <name>은 비동기로 처리될 수 있다. kubectl get crd로 완전히 사라졌는지 확인하라.",
+        "운영 환경에서 CRD 삭제는 해당 CRD를 사용하는 Operator나 애플리케이션이 없는지 반드시 먼저 확인해야 한다."
+      ]
+    }
+  ]
+}

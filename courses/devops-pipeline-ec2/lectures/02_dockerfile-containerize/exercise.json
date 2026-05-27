@@ -1,0 +1,48 @@
+{
+  "lecture_no": 2,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "준비 확인: Dockerfile, 이미지, 컨테이너의 관계를 자신의 말로 설명하라. 그런 다음 터미널에서 'docker --version'과 'docker images'를 실행해 Docker가 정상 설치되어 있는지 확인하라.",
+      "starter": "# 코드 없이 터미널을 열면 됩니다.\n# 실행할 명령:\n# docker --version\n# docker images",
+      "solution": "Dockerfile은 레시피(명령이 담긴 텍스트 파일)다. 'docker build'를 실행하면 이미지 — 앱과 실행 환경을 담은 불변의 독립 스냅샷 — 가 만들어진다. 컨테이너는 그 이미지의 실행 인스턴스이며, 같은 이미지로 여러 컨테이너를 동시에 띄울 수 있다.\n\n예상 터미널 출력:\n$ docker --version\nDocker version 24.x.x, build ...\n\n$ docker images\nREPOSITORY   TAG   IMAGE ID   CREATED   SIZE\n(비어 있거나 기존 이미지 목록이 표시됨)",
+      "explanation": "세 가지 핵심 용어를 실제로 무언가를 만들기 전에 정리하는 단계다. Docker가 설치되어 있고 데몬이 실행 중이어야 이후 모든 단계가 작동한다. 'docker images'는 데몬이 응답하는지 확인하고 이전에 빌드된 이미지 목록을 보여 준다. 목록이 비어 있어도 괜찮다.",
+      "hints": [
+        "'docker --version'이 'command not found'를 반환하면 Docker가 설치되지 않았거나 PATH에 없는 것이다. macOS/Windows는 Docker Desktop을, Linux는 해당 배포판의 Docker Engine 패키지를 설치한다.",
+        "'docker images'가 멈추거나 'Cannot connect to the Docker daemon'을 반환하면 Docker 데몬이 실행 중이지 않은 것이다. Docker Desktop을 시작하거나 Linux에서 'sudo systemctl start docker'를 실행한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습: 올바른 Dockerfile을 갖춘 최소한의 Node.js 웹앱을 만들어 빌드하고, 'http://localhost:5000'에서 응답이 오도록 로컬에서 실행하라.\n\n요구사항:\n1. 'index.js' 작성 — 포트 8080에서 'Hello from container!'를 응답하는 Node.js HTTP 서버.\n2. 'start' 스크립트가 있는 'package.json' 작성.\n3. 다음 조건을 갖춘 Dockerfile 작성: 'node:20-alpine' 사용, WORKDIR을 /app으로 설정, 소스 코드 복사 전에 의존성을 복사·설치(레이어 캐싱), 포트 8080 EXPOSE, CMD는 exec 형식 사용.\n4. 'node_modules', '.git', '*.env'를 제외하는 '.dockerignore' 작성.\n5. 'docker build -t myapp:local .'로 이미지를 빌드하고 'docker run -p 5000:8080 myapp:local'로 실행.\n6. http://localhost:5000을 열어 응답을 확인한다.",
+      "starter": "# 생성할 디렉터리 구조:\n# myapp/\n#   index.js\n#   package.json\n#   Dockerfile\n#   .dockerignore\n\n# index.js 뼈대:\nconst http = require('http');\nconst server = http.createServer((req, res) => {\n  res.writeHead(200);\n  res.end('Hello from container!');\n});\nserver.listen(/* 포트 입력 */, () => console.log('Listening...'));\n\n# package.json 뼈대:\n{\n  \"name\": \"myapp\",\n  \"version\": \"1.0.0\",\n  \"scripts\": { \"start\": \"node index.js\" }\n}\n\n# Dockerfile 뼈대:\nFROM ___\nWORKDIR ___\nCOPY ___ ___\nRUN ___\nCOPY . .\nEXPOSE ___\nCMD [\"___\", \"___\"]",
+      "solution": "# index.js\nconst http = require('http');\nconst server = http.createServer((req, res) => {\n  res.writeHead(200);\n  res.end('Hello from container!');\n});\nserver.listen(8080, () => console.log('Listening on port 8080'));\n\n# package.json\n{\n  \"name\": \"myapp\",\n  \"version\": \"1.0.0\",\n  \"scripts\": { \"start\": \"node index.js\" }\n}\n\n# Dockerfile\nFROM node:20-alpine\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\nEXPOSE 8080\nCMD [\"node\", \"index.js\"]\n\n# .dockerignore\nnode_modules\n.git\n*.env\n\n# 빌드 및 실행:\ndocker build -t myapp:local .\ndocker run -p 5000:8080 myapp:local\n# http://localhost:5000을 열면 'Hello from container!'가 반환된다",
+      "explanation": "'COPY . .'보다 먼저 'package.json'을 복사하고 'npm install'을 실행하는 것이 레이어 캐싱의 핵심이다. 의존성은 자주 바뀌지 않으므로, 소스 코드만 바뀐 다음 빌드에서 Docker가 설치 레이어를 재사용할 수 있다. 'node:20-alpine'을 쓰면 이미지 크기가 ~1 GB가 아닌 ~150 MB 수준으로 유지된다. 포트 매핑 '-p 5000:8080'은 호스트 포트 5000을 컨테이너 포트 8080(EXPOSE한 포트)에 연결한다. 이 플래그 없이는 컨테이너 네트워크가 격리되어 localhost에 아무것도 표시되지 않는다.",
+      "hints": [
+        "'docker build'가 'COPY failed: file not found'로 실패하면, Dockerfile과 같은 디렉터리에 'package.json'이 있는지 확인하고 'docker build'를 그 디렉터리에서 실행했는지 확인한다(끝의 '.'이 중요하다).",
+        "'http://localhost:5000'에서 'connection refused'가 뜨면 컨테이너가 종료됐을 수 있다. 'docker ps -a'로 상태를 확인하고 'docker logs <컨테이너-id>'로 오류를 읽는다. 흔한 원인은 index.js의 포트 번호가 잘못된 것(예: 8080 대신 3000)이다.",
+        "'.dockerignore'를 추가하는 것을 잊었다면 'docker image prune'으로 용량이 큰 이미지를 삭제하고, 파일을 추가한 뒤 다시 빌드한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습(계속): 'docker ps', 'docker logs', 'docker stop'으로 실행 중인 컨테이너를 관리하라. 그런 다음 index.js의 응답 텍스트만 바꿔 이미지를 재빌드해 Docker가 어떤 레이어를 재사용하는지 확인하라.",
+      "starter": "# 이전 실습에서 'docker run -p 5000:8080 myapp:local'이 실행 중이라고 가정한다.\n# 1단계: 컨테이너 ID / 이름 확인\ndocker ps\n# 2단계: 로그 읽기\ndocker logs <컨테이너-이름-또는-id>\n# 3단계: 중지\ndocker stop <컨테이너-이름-또는-id>\n# 4단계: index.js의 응답 텍스트를 바꾼 뒤 재빌드\ndocker build -t myapp:local .\n# 빌드 출력에서 'CACHED' 줄을 확인한다",
+      "solution": "# 'docker ps' 실행 후 다음과 같이 표시된다:\n# CONTAINER ID   IMAGE         COMMAND           STATUS          PORTS\n# a1b2c3d4e5f6   myapp:local   \"node index.js\"   Up 2 minutes   0.0.0.0:5000->8080/tcp\n\n# docker logs a1b2c3d4e5f6  →  'Listening on port 8080'\n\n# docker stop a1b2c3d4e5f6  →  컨테이너 종료\n\n# index.js 편집: 'Hello from container!'를 'Hello, CI/CD!'로 변경\n# 그런 다음: docker build -t myapp:local .\n# 예상 빌드 출력:\n#  => CACHED [2/5] WORKDIR /app\n#  => CACHED [3/5] COPY package.json ./\n#  => CACHED [4/5] RUN npm install       <-- 캐시 재사용, 재실행 안 됨\n#  => [5/5] COPY . .                     <-- 소스 변경으로 무효화됨\n# npm install 레이어가 재사용되어 재빌드가 빠르다.",
+      "explanation": "Docker는 변경된 레이어와 그 이후 레이어만 재빌드한다. 소스 변경이 'COPY . .' 레이어(5단계)만 건드리기 때문에, 비용이 큰 'npm install'을 포함한 그 이전 레이어는 모두 캐시에서 제공된다. Dockerfile에서 의존성 복사·설치가 'COPY . .' 앞에 와야 하는 이유가 바로 이것이다. 순서를 바꾸면 소스가 바뀔 때마다 설치 캐시가 무효화되어 빌드가 불필요하게 느려진다.",
+      "hints": [
+        "'docker ps'가 빈 목록을 반환하면 컨테이너가 종료됐을 수 있다. 'docker ps -a'(종료된 컨테이너 포함 전체 목록)로 찾는다.",
+        "재빌드 시 npm install 단계에 'CACHED'가 뜨지 않으면 Dockerfile에서 'RUN npm install' 전에 'COPY . .'을 먼저 쓴 것이 아닌지 확인한다. 그렇게 하면 소스 변경이 그 레이어를 무효화한다."
+      ]
+    },
+    {
+      "prompt": "응용 도전: 동료의 Dockerfile에 세 가지 문제가 있다. 빌드가 느려지거나, 이미지가 커지거나, 동작이 잘못될 수 있는 문제들이다. 각 문제를 찾아내고 수정된 Dockerfile을 작성하라.\n\n문제 있는 Dockerfile:\n```\nFROM node:20\nWORKDIR /app\nCOPY . .\nRUN npm install\nEXPOSE 8080\nCMD node index.js\n```",
+      "starter": "# 위 Dockerfile을 검토하고 답하라:\n# 1. 어떤 베이스 이미지 선택이 불필요하게 큰 이미지를 만드는가?\n# 2. COPY와 RUN의 순서 중 레이어 캐싱을 망치는 부분은 어디인가?\n# 3. CMD 명령의 문법에 어떤 문제가 있는가?\n# 그런 다음 수정된 Dockerfile을 작성하라.",
+      "solution": "# 문제 1: 'FROM node:20'은 전체 Debian 기반 이미지(~1 GB)를 사용한다.\n#   수정: 'FROM node:20-alpine' (~150 MB)\n\n# 문제 2: 'RUN npm install' 전에 'COPY . .'이 온다.\n#   소스 코드가 바뀔 때마다 COPY 레이어가 무효화되어 매번 npm install이 강제된다.\n#   수정: package.json만 먼저 복사하고 설치한 뒤 소스를 복사한다.\n\n# 문제 3: 'CMD node index.js'는 shell 형식이다(/bin/sh -c로 감쌈).\n#   Docker가 shell에 시그널을 보내므로 Node 프로세스가 제대로 종료되지 않는다.\n#   수정: 'CMD [\"node\", \"index.js\"]' (exec 형식)\n\n# 수정된 Dockerfile:\nFROM node:20-alpine\nWORKDIR /app\nCOPY package.json ./\nRUN npm install\nCOPY . .\nEXPOSE 8080\nCMD [\"node\", \"index.js\"]",
+      "explanation": "이 세 가지는 실무에서 가장 흔한 Dockerfile 실수다. 베이스 이미지 선택은 CI 빌드마다 이미지 push/pull 시간에 직접 영향을 준다. 레이어 캐시 순서는 Dockerfile에서 성능에 가장 큰 영향을 주는 결정이다 — 잘못 작성하면 코드를 한 줄 바꿀 때마다 전체 의존성 재설치가 발생한다. CMD exec 형식 대 shell 형식의 차이는 시그널 전달에 영향을 미친다. 시그널을 제대로 받지 못한 프로세스는 SIGTERM 대신 SIGKILL로 강제 종료되어 데이터 손실이나 비정상 종료로 이어질 수 있다.",
+      "hints": [
+        "이미지 크기 확인: 'FROM node:20' 버전과 'FROM node:20-alpine' 버전 둘 다 빌드한 뒤 'docker images'를 실행해 SIZE 열을 비교한다.",
+        "캐싱 차이 확인: 잘못된 버전으로 빌드하고, index.js를 수정한 뒤 재빌드하여 몇 개 레이어가 'CACHED'로 표시되는지 본다. 그런 다음 수정된 버전으로 같은 작업을 해 비교한다.",
+        "CMD shell 대 exec 형식은 쉽게 구분된다. exec 형식은 대괄호와 따옴표가 있는 JSON 배열을 쓰고, shell 형식은 대괄호 없는 일반 문자열이다."
+      ]
+    }
+  ]
+}

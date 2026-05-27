@@ -1,0 +1,54 @@
+{
+  "lecture_no": 7,
+  "mode": "practical",
+  "tasks": [
+    {
+      "title": "워밍업: 보존 기간 변경과 토픽 설정 확인",
+      "prompt": "기존 토픽 `my-events`의 보존 기간을 1시간(3,600,000 ms)으로 변경하고, 변경이 실제로 반영됐는지 `kafka-configs.sh`로 확인하세요.",
+      "starter": "# 사전 준비: 토픽이 없으면 먼저 생성\nkafka-topics.sh --create --topic my-events \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 1 --replication-factor 1\n\n# 여기부터 실습 시작 — 보존 기간 변경 명령을 작성하세요\n",
+      "solution": "# 1. 보존 기간 변경\nkafka-configs.sh --alter --topic my-events \\\n  --bootstrap-server localhost:9092 \\\n  --add-config retention.ms=3600000\n\n# 2. 변경 결과 확인\nkafka-configs.sh --describe --topic my-events \\\n  --bootstrap-server localhost:9092",
+      "explanation": "`kafka-configs.sh --alter`는 브로커에 저장된 토픽 설정을 동적으로 덮어씁니다. 브로커를 재시작하지 않아도 즉시 반영되며, `--describe`로 현재 설정 값을 조회할 수 있습니다. `retention.ms=3600000`은 1시간(60 × 60 × 1000 ms)으로, 이 값을 넘긴 세그먼트는 다음 정리 주기에 디스크에서 삭제됩니다. 보존 기간 단축은 디스크를 절약하지만, 기간이 너무 짧으면 뒤처진 컨슈머가 데이터를 영영 못 읽는 위험이 있습니다.",
+      "hints": [
+        "`kafka-configs.sh`의 주요 플래그: `--alter`(설정 변경), `--describe`(설정 조회), `--add-config KEY=VALUE`(값 지정), `--delete-config KEY`(기본값으로 되돌리기).",
+        "`--describe` 결과에서 `retention.ms=3600000 sensitive=false synonyms=...' 형태로 변경된 값이 보여야 성공입니다. 아무것도 표시되지 않으면 기본값(7일)이 그대로입니다.",
+        "1시간을 ms로 계산: 1 × 60분 × 60초 × 1000ms = 3,600,000."
+      ]
+    },
+    {
+      "title": "핵심 실습 1: 로그 압축(compaction) 토픽 생성 및 최신값 유지 확인",
+      "prompt": "직원 급여 정보를 관리하는 압축 토픽 `employee-salary`를 만들고, 같은 키(직원 ID)로 급여를 두 번 보낸 뒤 컨슈머가 최신값만 읽는지 확인하세요.\n\n구체적인 단계:\n1. `cleanup.policy=compact`, `min.cleanable.dirty.ratio=0.001`, `segment.ms=5000` 설정으로 토픽 생성\n2. 콘솔 프로듀서로 아래 레코드를 순서대로 전송 (키 구분자 `:`)\n   - `1:100`  (직원1, 초기 급여)\n   - `2:200`  (직원2)\n   - `1:400`  (직원1, 급여 인상)\n3. 30초 이상 대기(압축기 동작 시간 확보)\n4. 처음부터 다시 읽어 키 1의 값이 400만 남았는지 검증",
+      "starter": "# 1단계: 압축 토픽 생성 (아래 명령을 채워 실행하세요)\nkafka-topics.sh --create --topic employee-salary \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 1 --replication-factor 1 \\\n  # --config ... (cleanup, dirty.ratio, segment.ms 추가)\n\n# 2단계: 콘솔 프로듀서 실행\nkafka-console-producer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 \\\n  --property parse.key=true --property key.separator=:\n# 프롬프트(>) 에 아래를 한 줄씩 입력 후 Ctrl+C\n# 1:100\n# 2:200\n# 1:400\n\n# 3단계: 30초 대기 후 컨슈머 실행\nkafka-console-consumer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 --from-beginning \\\n  --property print.key=true --property key.separator=:\n",
+      "solution": "# 1단계: 압축 토픽 생성\nkafka-topics.sh --create --topic employee-salary \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 1 --replication-factor 1 \\\n  --config cleanup.policy=compact \\\n  --config min.cleanable.dirty.ratio=0.001 \\\n  --config segment.ms=5000\n\n# 2단계: 콘솔 프로듀서로 데이터 전송\nkafka-console-producer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 \\\n  --property parse.key=true --property key.separator=:\n# 입력:\n# 1:100\n# 2:200\n# 1:400\n# (Ctrl+C로 종료)\n\n# 3단계: 30초 이상 대기 후 처음부터 소비\nkafka-console-consumer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 --from-beginning \\\n  --property print.key=true --property key.separator=:\n\n# 기대 출력 (키 1의 값 100은 사라지고 400만 보여야 함):\n# 2:200\n# 1:400",
+      "explanation": "`cleanup.policy=compact`로 생성된 토픽에서 Log Cleaner는 dirty 영역(아직 압축되지 않은 세그먼트)을 스캔해 각 키의 최신 offset만 남기고 옛 레코드를 제거합니다. `min.cleanable.dirty.ratio=0.001`은 dirty 비율이 0.1%만 되어도 즉시 압축을 시작하게 해 학습 환경에서 빠르게 결과를 볼 수 있게 합니다. `segment.ms=5000`은 5초마다 새 세그먼트를 열어 오래된 세그먼트가 압축 대상이 되도록 유도합니다. 압축 후 `1:400`만 남는 이유는 키 1에 대해 마지막으로 전송된 값(offset이 가장 높은 레코드)이 400이기 때문입니다. 이 방식으로 토픽이 항상 '키별 최신 상태'의 스냅샷 역할을 합니다.",
+      "hints": [
+        "`--config` 플래그는 토픽 생성 시 여러 번 반복해 사용할 수 있습니다. `--config cleanup.policy=compact --config min.cleanable.dirty.ratio=0.001` 처럼 각 설정을 별도의 `--config`로 지정하세요.",
+        "컨슈머 출력에 여전히 `1:100`이 보인다면 압축이 아직 실행되지 않은 것입니다. `sleep 60`으로 더 기다린 뒤 재시도하거나, 프로듀서로 메시지를 몇 개 더 보내 dirty 비율을 높여 보세요.",
+        "압축 결과 오프셋에 '구멍'이 생길 수 있습니다(예: 0번 오프셋이 제거되고 1, 2만 남음). 컨슈머는 이를 자동으로 건너뛰므로 오류 없이 정상 동작합니다."
+      ]
+    },
+    {
+      "title": "핵심 실습 2: Consumer Lag 발생 및 측정",
+      "prompt": "컨슈머 그룹을 일시 정지한 상태에서 메시지를 쌓아 Consumer Lag를 인위적으로 만든 뒤, `kafka-consumer-groups.sh --describe`로 LAG 값을 읽어 보세요.\n\n구체적인 단계:\n1. 토픽 `lag-test`를 생성 (파티션 1, 복제 1)\n2. 컨슈머 그룹 `lag-group`으로 컨슈머를 실행하되 백그라운드로 돌린 뒤 바로 종료(Ctrl+C)해 오프셋 커밋 기록만 남깁니다\n3. 컨슈머를 멈춘 상태에서 프로듀서로 메시지 5개를 전송 (`msg-1` ~ `msg-5`)\n4. `kafka-consumer-groups.sh --describe`로 LAG 열 값이 5 이상인지 확인\n5. 컨슈머를 다시 실행해 모두 소비한 뒤 LAG이 0이 되는지 재확인",
+      "starter": "# 1단계: 토픽 생성\nkafka-topics.sh --create --topic lag-test \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 1 --replication-factor 1\n\n# 2단계: 컨슈머 그룹 오프셋 초기화 (한 번 연결 후 Ctrl+C)\nkafka-console-consumer.sh --topic lag-test \\\n  --bootstrap-server localhost:9092 \\\n  --group lag-group\n# (Ctrl+C로 즉시 종료)\n\n# 3단계: 컨슈머 정지 상태에서 메시지 전송\nfor i in 1 2 3 4 5; do\n  echo \"msg-$i\" | kafka-console-producer.sh \\\n    --topic lag-test \\\n    --bootstrap-server localhost:9092\ndone\n\n# 4단계: Consumer Lag 확인 명령을 작성하세요\n# (kafka-consumer-groups.sh 사용)\n",
+      "solution": "# 1단계: 토픽 생성\nkafka-topics.sh --create --topic lag-test \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 1 --replication-factor 1\n\n# 2단계: 그룹 연결 후 즉시 Ctrl+C (오프셋=0 커밋)\nkafka-console-consumer.sh --topic lag-test \\\n  --bootstrap-server localhost:9092 \\\n  --group lag-group\n\n# 3단계: 컨슈머 정지 상태에서 메시지 5개 전송\nfor i in 1 2 3 4 5; do\n  echo \"msg-$i\" | kafka-console-producer.sh \\\n    --topic lag-test \\\n    --bootstrap-server localhost:9092\ndone\n\n# 4단계: Consumer Lag 확인\nkafka-consumer-groups.sh --describe \\\n  --group lag-group \\\n  --bootstrap-server localhost:9092\n# 기대 출력 예시:\n# GROUP       TOPIC    PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG\n# lag-group   lag-test 0          0               5               5\n\n# 5단계: 컨슈머 재실행으로 모두 소비\nkafka-console-consumer.sh --topic lag-test \\\n  --bootstrap-server localhost:9092 \\\n  --group lag-group\n# (msg-1 ~ msg-5 수신 확인 후 Ctrl+C)\n\n# 6단계: LAG=0 재확인\nkafka-consumer-groups.sh --describe \\\n  --group lag-group \\\n  --bootstrap-server localhost:9092\n# 기대: LAG 열이 0",
+      "explanation": "Consumer Lag는 `LOG-END-OFFSET - CURRENT-OFFSET`으로 계산됩니다. 컨슈머가 멈춰 있는 동안 프로듀서가 메시지 5개를 써서 `LOG-END-OFFSET`이 5가 됐지만 `CURRENT-OFFSET`은 0 그대로이므로 `LAG=5`가 됩니다. 컨슈머를 다시 실행해 5개를 모두 읽으면 `CURRENT-OFFSET=5`, `LOG-END-OFFSET=5`가 되어 `LAG=0`입니다. 운영에서 LAG이 지속적으로 증가하는 그룹은 처리 속도가 프로듀서 속도를 따라가지 못하는 것이므로 컨슈머 스케일아웃(파티션 수 이하로 인스턴스 추가), 처리 로직 최적화, 또는 배치 크기 조정이 필요합니다.",
+      "hints": [
+        "`kafka-consumer-groups.sh`의 주요 플래그: `--describe`(그룹 상태 조회), `--list`(그룹 목록), `--group GROUP_ID`(대상 그룹 지정). `--describe` 없이 `--group`만 쓰면 아무것도 출력되지 않습니다.",
+        "2단계에서 컨슈머를 연결하지 않고 바로 프로듀서를 돌리면 `CURRENT-OFFSET`이 `-` 로 표시될 수 있습니다. 이는 해당 그룹이 오프셋을 한 번도 커밋하지 않은 경우입니다. `--from-beginning` 플래그로 초기 오프셋을 0으로 강제 지정 후 즉시 종료하면 커밋 기록이 생깁니다.",
+        "출력 열 순서: `GROUP / TOPIC / PARTITION / CURRENT-OFFSET / LOG-END-OFFSET / LAG / CONSUMER-ID / HOST / CLIENT-ID`. LAG 열 값이 늘어나는 추세를 보려면 `watch -n 2 kafka-consumer-groups.sh --describe ...` 처럼 주기적으로 재실행하면 됩니다."
+      ]
+    },
+    {
+      "title": "응용: tombstone 메시지로 압축 토픽에서 키 삭제",
+      "prompt": "앞서 만든 `employee-salary` 토픽에서 직원 2의 데이터를 완전히 삭제하세요. Kafka 압축 토픽에서 키를 삭제하는 방법은 value가 null인 tombstone 메시지를 보내는 것입니다.\n\n구체적인 단계:\n1. 콘솔 프로듀서에서 `null-marker` 옵션을 활성화해 직원 2에게 tombstone을 전송\n2. 30초 대기 후 처음부터 소비해 키 2가 보이지 않는지 확인\n3. 왜 tombstone을 즉시 삭제하지 않고 `delete.retention.ms` 동안 보관하는지 설명하세요 (서술형)",
+      "starter": "# 1단계: tombstone 메시지 전송\n# --property null.marker=NULL 설정 시,\n# 값 자리에 NULL 문자열을 입력하면 value=null 레코드가 전송됩니다\nkafka-console-producer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 \\\n  --property parse.key=true \\\n  --property key.separator=: \\\n  --property null.marker=NULL\n# 프롬프트에 입력: 2:NULL\n# (Ctrl+C)\n\n# 2단계: 30초 대기\nsleep 30\n\n# 3단계: 처음부터 소비해 키 2 확인\nkafka-console-consumer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 --from-beginning \\\n  --property print.key=true --property key.separator=:\n",
+      "solution": "# 1단계: tombstone 전송\nkafka-console-producer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 \\\n  --property parse.key=true \\\n  --property key.separator=: \\\n  --property null.marker=NULL\n# 입력: 2:NULL\n# (Ctrl+C)\n\n# 2단계: 압축기 동작 대기\nsleep 60\n\n# 3단계: 소비\nkafka-console-consumer.sh --topic employee-salary \\\n  --bootstrap-server localhost:9092 --from-beginning \\\n  --property print.key=true --property key.separator=:\n\n# 기대 출력:\n# 1:400\n# (키 2는 전혀 보이지 않아야 함)\n\n# 4단계 (선택): delete.retention.ms 확인\nkafka-configs.sh --describe --topic employee-salary \\\n  --bootstrap-server localhost:9092\n\n# [서술형 정답]\n# tombstone을 즉시 삭제하지 않는 이유:\n# 일부 컨슈머가 오프라인 상태이거나 느릴 경우,\n# tombstone이 사라지기 전에 해당 컨슈머가 '키 2 삭제' 사실을 읽어야 한다.\n# tombstone이 delete.retention.ms(기본 24시간) 내에 사라지면,\n# 뒤늦게 복구된 컨슈머는 키 2가 삭제됐다는 사실을 영영 알 수 없고\n# 자신의 로컬 상태(예: KTable)에 키 2가 남아 있는 채로 운영된다.\n# 따라서 묘비를 충분히 오랫동안 보관해 모든 컨슈머가 반드시 삭제 신호를 받도록 한다.",
+      "explanation": "압축 토픽에서 키 삭제는 두 단계를 거칩니다. 첫째, value=null인 tombstone 메시지를 전송합니다. 콘솔 프로듀서에서 `--property null.marker=NULL`을 지정하면 값이 NULL 문자열인 경우 null 바이트로 변환해 전송합니다. 둘째, 압축기가 실행될 때 tombstone을 확인하고 해당 키의 모든 이전 레코드와 tombstone 자체를 제거합니다. 단, tombstone을 바로 지우지 않고 `delete.retention.ms`(기본 86,400,000ms = 24시간) 동안 유지합니다. 이는 오프라인이었다가 복구된 컨슈머나 CDC 파이프라인이 '이 키가 삭제됐다'는 사실을 놓치지 않도록 보장하기 위함입니다. delete.retention.ms가 지난 뒤에야 tombstone도 최종 삭제됩니다.",
+      "hints": [
+        "`--property null.marker=NULL`을 사용하면 `2:NULL` 입력이 key=`2`, value=null 레코드로 변환됩니다. null.marker를 설정하지 않으면 `NULL`이 문자열 값으로 저장되어 tombstone 효과가 없습니다.",
+        "압축 후에도 키 2가 여전히 보인다면 압축이 아직 실행되지 않은 것입니다. 프로듀서로 더 많은 더미 메시지를 추가해 dirty 비율을 높이거나 `sleep 120`으로 더 기다려 보세요.",
+        "tombstone이 보이는 중간 단계(압축 전)에는 컨슈머가 `2:` 처럼 키만 있고 값이 빈 행을 출력할 수 있습니다. 이것이 압축 전 tombstone의 모습입니다. 압축 완료 후에는 이 행도 사라집니다."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+Kind: captions
+Language: en
+Woo, buddy, not gonna lie to you, this is looking pretty rough.
+Yeah, you got pods that are talking to services they shouldn't even have access to, you got
+no ingress rules, your DNS is just flapping all over the place, you got this sidecar container
+that's just crying, and I haven't even touched your network policies yet, okay, so how much
+to fix it? Honestly, to fix this mess, you're looking at about six days, three thousand dollars
+and your cluster's soul. You know what, forget it, I'll just fix it myself. What? You take
+an Alta3 course or something? You're damn right I did.
+Try and understand how networking works and Kubernetes can be a nightmare.
+Fortunately, we're going to crack open this nut and we're going to take a look under the hood
+with how Kubernetes networking objects work, how they connect to each other, what has changed,
+and what you need to know in order to implement it inside of your cluster.
+Let's get started. First thing we're going to do is we're going to make something that we're
+actually going to network to. This is the deployment, there's nothing sexy about it at all.
+I just want to point out that these are the labels that are going to be on the pods,
+they're going to be app engine x demo, make sure you remember that for later. Now what this
+deployment did is that it just spun up two pods, both of which are running an engine x image inside
+of them. That's not really important. But what you should notice is that both of these pods have
+their own IP addresses, Kubernetes gives every pod its own IP address. And the thing is, is that
+Kubernetes networking is flat means that all pods can talk to each other by default. So what we're
+going to do is that we are going to create another pod. The whole purpose of the second pod here,
+which as you can see is running a busy box image inside of it, is that we can actually execute
+curl commands. So I am inside of one of my containers at the moment. And inside of this busy
+box container, I'm going to send a W get command to the IP address of that very first pod. And
+check it out. What you're seeing is the index page of engine x. Remember how I said that's what was
+running inside of our deployment. Well, the fact that we're seeing it from this busy box container
+guarantees that yes, we are accessing engine x from another pod. So that's proof that this is
+working whenever you see it. Now the thing about deployments is is that if you should happen to
+delete them, like I'm doing right now, they will be recreated automatically. Now, the next thing to
+see is that those IP addresses are different. So if I were to go back inside of my original busy
+box pod, and I were to run this W get a command, obviously, it's not working, because that IP
+address is no longer valid. Just goes to show just because you can do this doesn't mean that you
+should. We're going to take a look at a much better option. That better option is this a service.
+A service is kind of like a great big neon arrow that you would see like in Las Vegas or something.
+And it's just constantly flashing at pod saying, Here it is, here it is that IP address you're
+looking for. Here it is. Inside of the service, you can see that in its selector field, it's pointing
+to app engine x demo. Can you remember anything that has that particular label? Yeah, it's those
+pods that are being created by our deployment. Now I just created that service. And what I'll
+point out that you can see here is, is that the type is cluster IP. There are three different types
+of services cluster IP, node port, and load balancer cluster IP is the most common type,
+it is used strictly for internal communication. So just pod to pod inside of the cluster. There's
+nothing external about it. And it's therefore the most common type of service there is. Anyway,
+if we were to describe this pod here real quick, take a look at rather describe this service,
+take a look down at that endpoints line. Do you see those IP addresses that it's pointing to?
+And you see how those IP addresses are the exact same as the ones that belong to our deployment.
+Now here's something really cool. I'm going to delete all of the pods that you see up there at
+the top. And because their deployments, they're going to come back. And as we've seen, they're
+going to have different IP addresses. But do you see that service? It's automatically grabbing the
+new IP addresses of that pod. So there's nothing that we can do to these pods,
+they will always have their IP addresses found. So now that we have a service created,
+let's make this busy box pod one more time. And this time, instead of running my W get command
+against a static IP address, I'm just going to call the name of the service. Check it out. It's
+still working. And this is the primary means through which pods talk to each other inside of
+a cluster. Okay, so cluster IP services, let us communicate between pods. But here's the thing,
+Kubernetes by default, allows all traffic. It's peace and love, man. You can talk to anybody you
+want to man. And that's to that. That's terribly not secure. We need to come up with a better
+solution. So what we're going to do is we are going to learn about our next type of object,
+a network policy. So a network policy, I often describe it in my classes as being kind of like
+an overprotective parent, like they've got their kid, their pod that belongs to them, at least
+that's how they see it. And they're like, you can't talk to that kid across the street, or no,
+you can't talk to that girl down the road, you can only talk to you can only talk to that nice
+boy just down the the other side of the street. So what we're doing this network policy is that
+we are attaching it to a namespace demo. And that's where our deployment was located. And
+what we're going to say is is that all the little pods that have the label app engine x demo,
+you belong to us, you're my little pod. And my rules are what go for you. Now, the rules that
+we're setting are what ingress can these pods receive app engine x demo, there's that label again,
+those are pods that belong to our deployment. What would happen next is, is that we would
+describe where these pods allowed to receive traffic from. Clearly, we're not doing that,
+which means that this is what's called a deny all network policy. So if we were to create this
+network policy here, and if one more time we were to fire up this busybox pod,
+we saw that this was working just a moment ago. But when we run this W get again,
+it's hanging. And if we wait long enough, it's going to have like a bad connection message.
+So the network policy is doing its job, it is preventing any connection from occurring. Now,
+the thing about network policies is is that they are incredibly granular, as you can imagine,
+you can be very precise about Oh, I only want to receive ingress from pods that are like this,
+or in this IP address range, or from this namespace. And likewise, you can set rules for egress,
+like you're only allowed to talk to pods in this range and that namespace with da da da.
+There's many different options on how to do that. But we're going to keep things simple.
+What we're going to do is that I'm going to add just right here under the spec a new section.
+Which is now saying that all of my little pods inside of the demo namespace that have the label
+app engine x demo, you are allowed to receive ingress from any pods that have the label
+access granted is what the new rules are. So if we go back down and we were to apply that deny
+all that YAML, the rules have changed. What we're going to do is that we are going to stop
+and rebuild this busy box container. But notice this time, we're going to put the label access
+granted on top of it. And as it turns out, that is going to be the secret sauce that when we run
+this W get command again, this time it works. There's that engine x welcome page, because we
+have configured the network policy to allow that communication to occur. So now we're going to
+start getting into some more complicated stuff. What we're now going to take a look at are ingress
+controllers. And ingress controllers are meant to just be another layer of abstraction on top of
+what we've already built, a deployment, a service that points to that deployment. And now we're
+going to be placing ingress controllers and ingress on top. This is just a tool that gives you the
+means of providing like more granular control over how access to that service and therefore your
+pods actually works. And the thing is, is that ingress controllers are third party, there are
+many different ones to choose from. Pretty popular one is the engine x controller and I'll put the
+link down in the chat to this particular page. As you can see, there are many different ways to
+install it because there are many different ways to launch a Kubernetes cluster. But I'm going to
+go ahead and get this installed and set up, you'll just have to find the instructions that work for
+you and your setup. Now once you get the ingress controller installed, and once you've got your
+service and you got your deployment written, then you're ready to get started, right? Well,
+not so much. What I'm going to do is in this diagram, we're going to work our way from the right
+to left to understand what exactly is running in my cluster right now. And then we're going to
+actually see it work. So we already wrote that deployment is running an engine x image. And
+then we made a service that exposes that engine x image. What we're going to do in just a moment
+is that we're going to write what is called an ingress manifest. And the whole purpose of that
+is that if somebody we're trying to access our cluster from an external URL, it will be redirected
+to that particular service. Now, in order for an ingress controller to work, you do need to have
+a load balancer. If you are using a cloud setup, that's super easy, you're super spoiled. All right,
+they get spun up for you automatically and like Eks and GKE, right? But what I'll be doing inside
+of my setup is that I'm going to be configuring my Linux machine, which has engine x installed as a
+service to basically be its own janky little load balancer, it's going to listen for incoming requests.
+And if one of those requests goes to a particular port two to two four, that will be redirected
+to our node to the ingress controller to ingress, which will then go to our service. Clear as mud.
+Well, you'll see what I'm doing here in just a second. But the base URL that first part is going
+to be this really weird URL, I'm going to show you in just a minute. So that really long and strange
+URL that starts with aux one, I work for all two three, we have our own training platform. And this
+is the unique URL to my setup that I have that is connected to port two to two four on my local
+host virtual machine here, beachhead. Basically, what I want to do is that if I go to that particular
+URL, I want it to point straight to my deployment that's running inside of my cluster. What I'll
+be doing inside of this lab is and this is just unique to me, this is not necessarily something
+that you have to do inside of your own setup, is that I am configuring engine x on my local
+beachhead, so that it is listing on port 2224. And it will send upstream that traffic to either
+of the nodes inside of my cluster node one and node two. That 30934 number that you're seeing,
+that is a node port. Remember how I said there are multiple kinds of services.
+A node port is another type of service. And what it allows is external communication. And what I've
+got on my screen here is a quick output of our ingress controller that got installed when I
+installed it inside of my cluster. Take a look under ports. Do you see how next to 443 that in
+engine x that is its HTTPS port 30934. That's the node port that I had configured my load balancer
+to redirect to. So that's just what I'm doing for this to work inside of my environment,
+as long as you've got that mapped, it'll work. Okay, so what I'm showing you here is that I'm
+just keeping myself honest, that pain up at the top, which is student at bchd beachhead,
+that is a virtual machine that is not part of the cluster. It is not a node. It is just a work
+station, right? It has cube control installed. But that's it. I'm going to use this curl command
+against that aux one URL. And inside of that deployment, we swapped out from engine x to
+something else, just a little message that will make you feel good when it works. It works. Okay,
+and now we're going to be getting into our last topic, gateway API's. We are now at the tip of
+the pyramid that we've built our way up since the beginning, that we started with our deployment,
+which we exposed with a service, which we controlled with a network policy, which we were
+then able to expose externally with an ingress controller. And now here we are at gateway API's
+gateway API, very complicated, and also still kind of in the new side of what's going on with
+Kubernetes. As of right now, when you are creating a gateway API, you're actually making multiple
+objects. The ultimate goal, ultimately, is to be able to have a lot more control, like in granularity,
+over routing and like what it is that you are allowing like extensibility and multi tendency,
+it's a whole bunch of things. But if you just want to see how it works, that's the purpose of this
+video, and we can get into greater detail on another one, let us know down inside of the comments.
+So you can see from this diagram here from the Kubernetes documentation itself, the only part
+of this picture that is missing is in our environment, a gateway and HTTP route. Like
+when we were working with ingress, in order for you to be able to make these objects, you need to
+have gateway API ingress controller compatible installed inside of your cluster. That's maybe
+easier said than done. But there are a lot of different third party versions out there,
+you're gonna have to go with the one that works for you. So what we're looking at here is a manifest
+for a gateway. So you can think of this as kind of like a router or like an entry point for incoming
+traffic. First, I want to point out that gateway class name engine X would imply that, yes, there
+are many different types of gateways you can write from the many different types of gateway
+classes that there are, they are a third party. What we're also configuring here is that our
+gateway is listening on port 80 for incoming HTTP requests. And what we're also having here is
+just a little measure of security is that we're only accepting requests that are from things on
+the same namespace as this particular gateway. And this is our HTTP route, which is really a lot
+like the ingress manifest that we made earlier, where its ultimate goal is that it's able to direct
+traffic that if it's coming into like this particular route, then it's going to be sent
+on to a particular service, and then further on to a particular pod. So what we're doing here is
+that we are referring back to the gateway that we made inside of the previous manifest. Our host
+name is web.example.com, just as a quick throw away. And for our back end refs, ha, remember that
+service engine x service, that's what we're going to be pointing to. And that's what we are going
+to test and see, can we make a connection to that service through this API gateway, now that we've
+created the HTTP route. So to test this, here's what we're going to do. First, I'm going to describe
+the gateway service, which you'll notice is the third type of service that we discussed. This
+is load balancer. So for a engine x gateway to work or any gateway, it needs to be part of a
+gateway compatible ingress controller ingress controllers and therefore API gateways do sit
+on top of and use load balancers. What we're going to do is a little workaround is is that I am going
+to grab that node port that you see there next to port 80. So that's HTTP. And what I'm also going
+to do is I'm going to grab the IP address, one of my nodes here. And then what I'm going to do is I'm
+going to write out this curl command to that URL that we're looking at web.example.com. If I put
+those together, and then we try that out. Nice. Learning all this stuff is hard enough. But also
+trying to like get together a dependable environment to do it in, as well as you know, maybe some
+really clear instructional labs that tell you what to do, as well as plenty of support, as well as
+certain handsome instructors that make all sorts of really easy to follow videos, you can find all
+of that. If you click on that link down inside of the description, Alt to three Academy, where you
+can try us out for three days for just $3. All right, gang, I hope that helped. Make sure you
+like and subscribe if you haven't. And I'll see you next time.

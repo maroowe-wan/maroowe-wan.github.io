@@ -1,0 +1,50 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "[워밍업] Schema Registry가 localhost:8081에서 실행 중이라고 가정합니다. users 토픽에 대한 subject 이름은 'users-value'입니다. curl 명령어로 이 subject의 호환성 모드를 BACKWARD로 설정하세요. 설정 후 GET 요청으로 현재 호환성 모드를 조회해 BACKWARD가 제대로 적용되었는지 확인하세요.",
+      "starter": "# Schema Registry URL\nSR=http://localhost:8081\nSUBJECT=users-value\n\n# 1) 호환성 모드를 BACKWARD로 설정하는 PUT 요청을 작성하세요\ncurl -X PUT $SR/config/$SUBJECT \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '___'\n\n# 2) 설정된 호환성 모드를 조회하는 GET 요청을 작성하세요\ncurl $SR/config/$SUBJECT",
+      "solution": "# 1) 호환성 모드 BACKWARD 설정\ncurl -X PUT http://localhost:8081/config/users-value \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '{\"compatibility\": \"BACKWARD\"}'\n\n# 예상 응답: {\"compatibility\":\"BACKWARD\"}\n\n# 2) 설정 확인\ncurl http://localhost:8081/config/users-value\n\n# 예상 응답: {\"compatibilityLevel\":\"BACKWARD\"}",
+      "explanation": "Schema Registry의 호환성 모드는 subject 단위로 설정됩니다. subject 이름은 관례상 '<topic명>-value' 또는 '<topic명>-key' 형식을 사용합니다. PUT /config/{subject} 엔드포인트에 JSON 바디로 모드를 전달하면 해당 subject에 대한 규칙이 저장됩니다. BACKWARD 모드에서 Schema Registry는 새 스키마가 등록될 때마다 '새 스키마로 이전 버전 데이터를 읽을 수 있는가'를 자동으로 검증합니다. GET /config/{subject} 응답의 키는 'compatibilityLevel'로 내려옵니다(설정 시 응답 키인 'compatibility'와 미묘하게 다릅니다).",
+      "hints": [
+        "Content-Type 헤더를 'application/vnd.schemaregistry.v1+json'으로 정확히 써야 합니다. 일반 'application/json'은 Schema Registry가 거부할 수 있습니다.",
+        "PUT 요청 바디는 {\"compatibility\": \"BACKWARD\"} 형식의 JSON입니다. 키 이름이 'compatibilityLevel'이 아니라 'compatibility'임에 주의하세요.",
+        "GET 요청은 별도 헤더 없이 URL만으로 가능합니다: curl http://localhost:8081/config/users-value"
+      ]
+    },
+    {
+      "prompt": "[핵심 실습 1] users-value subject에 User 스키마 v1을 등록하세요. v1 스키마는 int 타입의 'id'와 string 타입의 'name' 두 필드를 가집니다. 등록 후 등록된 버전 목록과 v1 스키마 내용을 조회해 올바르게 저장됐는지 확인하세요.",
+      "starter": "SR=http://localhost:8081\nSUBJECT=users-value\n\n# v1 스키마 등록 (id: int, name: string)\ncurl -X POST $SR/subjects/$SUBJECT/versions \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '___'\n\n# 등록된 버전 목록 조회\ncurl $SR/subjects/$SUBJECT/versions\n\n# 버전 1의 스키마 상세 조회\ncurl $SR/subjects/$SUBJECT/versions/1",
+      "solution": "# v1 스키마 등록\ncurl -X POST http://localhost:8081/subjects/users-value/versions \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '{\"schema\": \"{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"User\\\",\\\"fields\\\":[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"int\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"string\\\"}]}\"}'\n\n# 예상 응답: {\"id\":1}  ← 전역 고유 스키마 ID\n\n# 등록된 버전 목록 조회\ncurl http://localhost:8081/subjects/users-value/versions\n# 예상 응답: [1]\n\n# 버전 1 스키마 상세 조회\ncurl http://localhost:8081/subjects/users-value/versions/1\n# 예상 응답: {\"subject\":\"users-value\",\"version\":1,\"id\":1,\"schema\":\"{...}\"}",
+      "explanation": "POST /subjects/{subject}/versions 에 스키마를 등록하면 Schema Registry가 전역 고유 ID를 부여하고 해당 subject의 버전 1로 저장합니다. 응답의 'id' 필드는 전역 ID로, 프로듀서가 직렬화할 때 메시지 바이트 앞 5바이트(매직 바이트 1 + 스키마 ID 4)에 심어서 보냅니다. 바디의 'schema' 값은 Avro 스키마 JSON을 **문자열로 escape한 값**입니다(JSON 안의 JSON이므로 큰따옴표를 역슬래시로 이스케이프해야 합니다). GET /subjects/{subject}/versions 는 등록된 버전 번호 배열을, GET /subjects/{subject}/versions/{version} 은 해당 버전의 상세 정보를 반환합니다.",
+      "hints": [
+        "바디 형식은 {\"schema\": \"<avro JSON을 문자열로 escape한 값>\"}입니다. Avro 스키마 자체가 JSON이므로 내부 큰따옴표를 \\\"로 이스케이프해야 합니다.",
+        "등록 성공 시 응답은 {\"id\": N} 형태입니다. 이 ID가 메시지 직렬화 시 페이로드 앞에 심기는 전역 스키마 ID입니다.",
+        "버전 목록 조회(GET /versions)와 특정 버전 조회(GET /versions/1)는 별개 엔드포인트입니다. 전자는 숫자 배열, 후자는 subject·version·id·schema 객체를 반환합니다."
+      ]
+    },
+    {
+      "prompt": "[핵심 실습 2] 스키마 진화를 실습합니다. 다음 두 가지 시나리오를 각각 시도하고 결과를 비교하세요.\n\n시나리오 A (BACKWARD 호환): string 타입의 'email' 필드를 default 값 \"\"로 추가해 v2로 등록하세요. 성공 여부와 응답을 기록하세요.\n\n시나리오 B (BACKWARD 비호환): string 타입의 'phone' 필드를 default 없이 추가한 스키마를 등록 시도하세요. 실패 여부와 HTTP 상태 코드를 확인하세요.\n\n두 시나리오의 결과 차이를 BACKWARD 호환성 규칙으로 설명하세요.",
+      "starter": "SR=http://localhost:8081\nSUBJECT=users-value\n\n# --- 시나리오 A: default가 있는 email 필드 추가 (v2) ---\ncurl -X POST $SR/subjects/$SUBJECT/versions \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '___'\n\n# --- 시나리오 B: default 없는 phone 필드 추가 시도 ---\ncurl -X POST $SR/subjects/$SUBJECT/versions \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '___'\n\n# 버전 목록 확인 (A 성공, B 실패라면 버전은 2개여야 한다)\ncurl $SR/subjects/$SUBJECT/versions",
+      "solution": "# --- 시나리오 A: email 추가 (default 있음) → 성공 ---\ncurl -X POST http://localhost:8081/subjects/users-value/versions \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '{\"schema\": \"{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"User\\\",\\\"fields\\\":[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"int\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"email\\\",\\\"type\\\":\\\"string\\\",\\\"default\\\":\\\"\\\"}]}\"}'\n\n# 예상 응답: {\"id\":2}  ← 새 전역 ID 발급, 버전 2 등록 성공\n\n# --- 시나리오 B: phone 추가 (default 없음) → 실패 ---\ncurl -v -X POST http://localhost:8081/subjects/users-value/versions \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '{\"schema\": \"{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"User\\\",\\\"fields\\\":[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"int\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"email\\\",\\\"type\\\":\\\"string\\\",\\\"default\\\":\\\"\\\"},{\\\"name\\\":\\\"phone\\\",\\\"type\\\":\\\"string\\\"}]}\"}'\n\n# 예상 응답: HTTP 409 Conflict\n# {\"error_code\":409,\"message\":\"Schema being registered is incompatible with an earlier schema\"}\n\n# 버전 목록 확인\ncurl http://localhost:8081/subjects/users-value/versions\n# 예상 응답: [1, 2]  ← B 실패로 버전 3은 생기지 않음",
+      "explanation": "BACKWARD 호환성의 핵심 규칙: '새 스키마로 이전 버전 데이터를 읽을 수 있어야 한다'입니다.\n\n시나리오 A (성공): email 필드에 default=\"\"를 주었습니다. v1으로 기록된 구 메시지에는 email이 없지만, 새 스키마로 역직렬화할 때 Avro가 default 값으로 채워줍니다. 따라서 구 데이터를 새 스키마로 읽는 것이 가능하므로 BACKWARD 호환입니다.\n\n시나리오 B (실패): phone에 default가 없습니다. v1 메시지를 새 스키마로 역직렬화하면 phone 필드가 없어서 필수 필드가 없다는 오류가 납니다. 즉 구 데이터를 새 스키마로 읽을 수 없으므로 BACKWARD 비호환이고, Schema Registry가 409로 거부합니다. 이것이 '배포 전에 깨지는 변경을 잡는다'는 Schema Registry의 핵심 가치입니다.",
+      "hints": [
+        "시나리오 B는 일부러 실패시키는 것이 목적입니다. -v 옵션을 추가하면 HTTP 상태 코드(409)와 에러 메시지를 함께 볼 수 있습니다.",
+        "시나리오 B에서 phone 필드를 [\"null\", \"string\"] union 타입으로 선언하고 default를 null로 주면 BACKWARD 호환이 됩니다. optional 필드 패턴으로 자주 쓰입니다: {\"name\":\"phone\",\"type\":[\"null\",\"string\"],\"default\":null}",
+        "등록이 거부돼도 이전에 성공한 v2(email 추가)는 그대로 유지됩니다. GET /subjects/users-value/versions 로 현재 버전이 [1,2]임을 확인해 격리된 실패임을 눈으로 확인하세요."
+      ]
+    },
+    {
+      "prompt": "[응용] 실제 운영에서는 스키마를 등록하기 전에 호환 여부를 미리 확인하는 것이 좋습니다. Schema Registry의 호환성 사전 검증 엔드포인트를 사용해 다음 두 스키마가 현재 등록된 최신 버전(v2)과 BACKWARD 호환인지 배포 전에 확인하세요.\n\n검증 대상 A: 'age' 필드를 int 타입, default 0으로 추가한 스키마\n검증 대상 B: 기존 'name' 필드의 타입을 string에서 int로 바꾼 스키마\n\n두 검증 결과의 차이를 해석하고, 타입 변경이 BACKWARD 비호환인 이유를 설명하세요.",
+      "starter": "SR=http://localhost:8081\nSUBJECT=users-value\n\n# 사전 호환 검증 엔드포인트: POST /compatibility/subjects/{subject}/versions/latest\n# 응답: {\"is_compatible\": true} 또는 {\"is_compatible\": false}\n\n# 검증 대상 A: age(int, default 0) 추가\ncurl -X POST $SR/compatibility/subjects/$SUBJECT/versions/latest \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '___'\n\n# 검증 대상 B: name 타입을 string → int로 변경\ncurl -X POST $SR/compatibility/subjects/$SUBJECT/versions/latest \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '___'",
+      "solution": "SR=http://localhost:8081\nSUBJECT=users-value\n\n# 검증 대상 A: age(int, default 0) 추가 → is_compatible: true 예상\ncurl -X POST $SR/compatibility/subjects/$SUBJECT/versions/latest \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '{\"schema\": \"{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"User\\\",\\\"fields\\\":[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"int\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"email\\\",\\\"type\\\":\\\"string\\\",\\\"default\\\":\\\"\\\"},{\\\"name\\\":\\\"age\\\",\\\"type\\\":\\\"int\\\",\\\"default\\\":0}]}\"}'\n\n# 예상 응답: {\"is_compatible\":true}\n\n# 검증 대상 B: name 타입 string → int 변경 → is_compatible: false 예상\ncurl -X POST $SR/compatibility/subjects/$SUBJECT/versions/latest \\\n  -H \"Content-Type: application/vnd.schemaregistry.v1+json\" \\\n  -d '{\"schema\": \"{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"User\\\",\\\"fields\\\":[{\\\"name\\\":\\\"id\\\",\\\"type\\\":\\\"int\\\"},{\\\"name\\\":\\\"name\\\",\\\"type\\\":\\\"int\\\"},{\\\"name\\\":\\\"email\\\",\\\"type\\\":\\\"string\\\",\\\"default\\\":\\\"\\\"}]}\"}'\n\n# 예상 응답: {\"is_compatible\":false}",
+      "explanation": "POST /compatibility/subjects/{subject}/versions/latest 는 실제로 스키마를 등록하지 않고 호환 여부만 확인하는 드라이런(dry-run) 엔드포인트입니다. CI/CD 파이프라인에서 배포 전 자동 검증에 활용할 수 있습니다.\n\n검증 A (is_compatible: true): age 필드에 default 0이 있으므로 v2 이하 구 메시지를 새 스키마로 읽을 때 age가 0으로 채워집니다. BACKWARD 호환 조건을 만족합니다.\n\n검증 B (is_compatible: false): name 필드의 타입을 string에서 int로 바꾸는 것은 구 메시지에 있는 string 값을 새 스키마로 읽을 때 int로 해석할 수 없으므로 역직렬화가 실패합니다. Avro는 string과 int 사이의 암묵적 타입 변환을 허용하지 않습니다. 타입 변경은 거의 모든 호환성 모드에서 비호환이며, 운영 중인 토픽에서 필드 타입을 바꾸려면 새 토픽을 만드는 것이 안전합니다.",
+      "hints": [
+        "검증 엔드포인트는 /subjects/{subject}/versions 가 아니라 /compatibility/subjects/{subject}/versions/latest 입니다. 앞에 '/compatibility'가 붙는다는 점을 기억하세요.",
+        "검증 대상 B에서 v2 스키마의 필드 목록(id, name, email)에서 name의 타입만 int로 바꿔서 요청해야 합니다. email 필드를 빼면 '필드 삭제'가 추가로 발생해 결과가 달라질 수 있습니다.",
+        "is_compatible가 false로 나왔다면 어떤 필드/이유인지 더 상세하게 보려면 Schema Registry 로그나 응답 메시지를 확인하세요. Confluent Schema Registry는 messages 배열에 비호환 이유를 포함해 반환하는 경우도 있습니다."
+      ]
+    }
+  ]
+}

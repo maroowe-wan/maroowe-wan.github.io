@@ -1,0 +1,435 @@
+Kind: captions
+Language: en
+in this video you will learn about
+service mesh and one of its
+implementations
+which is istio in order to understand
+the concepts
+we will first look at the challenges of
+a microservices application
+and then we will see how different
+features of a service mesh
+solve these challenges we will look at
+how istio implements service mesh
+and learn about istio architecture as
+well as how to configure
+istio for our microservices application
+istio is
+a service mesh so in order to understand
+istio we need to understand what service
+mesh is
+service mesh is a popular solution for
+managing communication between
+individual microservices in a micro
+service application
+so why do we need a dedicated tool for
+microservices communication
+and what are the challenges here
+now when we move from monolith to
+microservices application
+we introduced a couple of new challenges
+that we didn't have
+with a monolith application and let's
+say we have
+an online shop application which is made
+up of several micro services
+we have the web server that gets the ui
+requests
+payment microservice that handles the
+payment logic
+let's say we have a shopping cart
+product inventory
+and database and probably some more
+services
+and we're deploying our micro service
+application inside a kubernetes cluster
+now what does our micro service
+application setup need
+to run successfully or what are some of
+the required
+configurations for such an application
+first of all each micro service has its
+own business logic right
+payment service handles the payment
+logic web server handles ui requests
+database persist data and so on now
+services need to talk to each other
+when user puts stuff in the shopping
+cart request is received by the web
+server
+which hands it over to the shopping cart
+microservice
+which will talk to the database to
+persist the data so how do services
+know how to talk to each other what is
+the endpoint of each
+service all the service endpoints that
+web server talks to
+must be configured for web server so
+when we add a new micro service
+we need to add the endpoint of that new
+service to all the microservices
+that need to talk to it so we have that
+information as part of the application
+deployment
+code now what about security in our
+microservice application setup
+generally a common environment in many
+projects will look like this
+you have firewall rules set up for your
+kubernetes cluster
+maybe you have a proxy as entry point
+that gets the request first so cluster
+can't be
+accessed directly so you have security
+around the cluster
+however once request gets inside the
+cluster the communication is insecure
+microservices talk to each other over
+http or some other insecure protocol
+also services talk to each other freely
+every service inside the cluster can
+talk to any other service so there are
+no restrictions on that
+so this means that from security
+perspective
+if an attacker gets inside the cluster
+it can do anything because we don't have
+any additional security inside
+and maybe for small applications they
+don't really have any sensitive user
+data
+it may be okay but for more important
+applications like
+online banks or apps with lots of
+personal user data
+a higher level of security is very
+important
+so you want everything to be as secure
+as possible
+so again additional configuration inside
+each application is needed to secure
+communication between
+services within the cluster you also
+need
+retry logic in each microservice to make
+the whole application
+more robust if one microservice is
+unreachable or you lose connection for a
+bit you want to retry the connection
+so developers will add this retry logic
+also to the services what about metrics
+for your services you want to be able to
+monitor how the services are performing
+what http errors are you getting how
+many requests are your microservices
+receiving
+or sending or how long does a request
+take
+to identify the bottlenecks in your
+application
+so development team may add a monitoring
+logic
+for prometheus for example using
+prometheus client library
+and collect tracing data using a tracing
+library like zipkin for example
+so as you see teams of developers of
+each microservice
+need to add all this logic to each
+service
+and maybe configure some additional
+stuff in the cluster to handle
+all these very important challenges in
+the microservices application
+and this means that developers of
+microservices are not working
+on the actual service logic but are busy
+adding network logic for metrics and
+security and communication etc
+for each microservice which also adds
+complexity to the services instead of
+keeping them simple and lightweight
+now wouldn't it make more sense to
+extract all the non-business logic
+out of the microservices and into its
+own
+small sitecar application that handles
+all these logic and acts as a proxy and
+this small application
+is a third party application the cluster
+operators
+can easily configure through a simple
+api without worrying about how the logic
+is implemented and developers can now
+focus on developing the
+actual business logic and note that you
+don't have to add this sidecar
+configuration to your
+micro service deployment yaml file
+because
+service mesh has a control plane that
+will automatically
+inject this proxy in every microservice
+pod
+so now the microservices can talk to
+each other
+through those proxies and the network
+layer
+for service to service communication
+consisting of
+control plane and the proxies is a
+service mesh
+in addition to the above features one of
+the most important features of a service
+mesh
+is traffic split configuration so what
+is a traffic split
+when changes are made to a payment
+microservice for example
+a new version is built tested and
+deployed to a production environment
+right
+now of course you can rely on tests to
+validate
+the new version but what if the new
+version has a bug that you couldn't
+catch with the tests
+happens very often depending on the test
+coverage so in this
+case you don't want to end up with a new
+version of payment service in production
+that doesn't work it may cost your
+company a lot of money
+so you want to send maybe only one
+percent or 10
+traffic to the new version for a period
+of time
+to make sure it really works so with
+you can easily configure a web server
+micro service
+to direct 90 of traffic to the payment
+version 2.0 and 10 of traffic
+to the version 3.0 which is also known
+as
+canary deployment
+and as i mentioned at the beginning
+is just a pattern or a paradigm
+and istio is one of its implementations
+and in istio architecture the proxies
+are invoice proxies which is an
+independent open source project
+that istio as well as many other service
+mesh implementations also use
+and the control plane component in istio
+is
+istio d which manages and injects the
+envoy proxies
+in each of the microservice pods
+now note here that in earlier versions
+of
+istio up to version 1.5
+istio control plane was a bundle of
+multiple
+components you had the citadel
+mixer galley and some other components
+so you had multiple pods when you
+deployed istio
+however in version 1.5 all of these
+separate components were combined back
+into
+one single stod component to make it
+easier
+for the operators to configure and
+operate istio so if you have read
+articles or watch videos where all these
+components are explained
+separately note that this is only
+relevant for the earlier versions now
+you only worry about
+one single istio d component
+so istio architecture is comprised of
+the control
+plane which has esteod component and
+control plane manages a data plane
+which is group of all the invoice
+proxies
+so now the question is how do we
+configure all these above features
+for our micro services in istio as i
+mentioned
+you don't have to adjust deployment and
+service dml files for your micro
+so all the configuration for easter
+components will be done in istio itself
+again having a clear separation between
+the application logic
+and configuration and the service mesh
+logic and configuration
+and the great thing is that istio can be
+configured
+with kubernetes yaml files because it
+uses
+crds by extending kubernetes api
+crd is basically a custom resource or
+custom component in kubernetes that can
+be used
+to allow configuring these third-party
+technologies like istio
+prometheus etc using the same kubernetes
+yaml files
+and apply them using cube ctl without
+having to learn a technology specific
+configuration language
+and adjusting that configuration
+directly inside istio for example
+so using a few sdo crds
+we can configure different traffic
+routing rules
+between our microservices like which
+services can talk to each other
+traffic split configuration the retry
+rules
+timeouts and many other network
+configurations
+and there are two main crds for
+configuring
+service to service communication virtual
+which configures how to route the
+traffic to a specific service
+and once that traffic is actually routed
+to that service
+on top of that using destination rule
+component
+we can configure some policies on that
+traffic light what kind of load
+balancing to use
+to talk to the pods behind the
+destination service
+so overall as you see we create
+these crds custom resource definitions
+in kubernetes
+that istiod component which is is the
+control plane
+will read and convert into
+invoice specific configuration and send
+that configuration
+out to all the invoice proxies so we
+don't configure
+proxies we configure control plane and
+control plane itself
+will then push that configuration out to
+all individual
+invoice proxies and the proxies
+themselves
+can now communicate with each other by
+applying this configuration
+that we define without having
+to go back to the easter control plane
+so they can independently talk to each
+other
+because they have all the logic and
+configuration they need
+without talking to the control plane
+in addition to configuring the proxies
+stod also has a central registry for all
+the
+microservices so instead of statically
+configuring the endpoints
+for each microservice when a new
+gets deployed it will automatically get
+registered
+in the service registry without the need
+of any additional configuration from our
+site because
+istio automatically detects the services
+and endpoints in the cluster
+and using this service registry the
+envoy proxies can now
+query the endpoints to send the traffic
+to the relevant services
+in addition to this dynamic service
+discovery feature
+istiod also acts as a ca as a
+certificate authority
+and generates certificates for all the
+microservices
+in the cluster to allow secured tls
+proxies of those microservices and
+finally sdod gets metrics and tracing
+from the invoice proxies that it
+gathers they can be later consumed by
+monitoring server like
+prometheus or tracing servers etc
+to have out-of-the-box metrics and
+tracing
+data for your whole microservice
+istio has another component called istio
+ingress gateway
+that basically is an entry point into
+your kubernetes cluster
+you can think of the istio ingress
+gateway as an alternative
+to nginx ingress controller so istio
+gateway
+runs as a pod in your cluster and
+acts as a load balancer by accepting
+incoming traffic in your cluster
+and gateway will then direct traffic to
+one of your microservices inside the
+cluster
+using virtual service component
+and you can configure istio gateway
+using
+a gateway crd
+so now the traffic flow in your
+with all these istio components will
+look like this
+so user will initiate a request to
+a web server microservice in your
+the request will first hit the gateway
+because it's that entry point
+of the cluster gateway will then
+evaluate
+the virtual service rules about how to
+route the traffic
+and will send it to web server
+microservice and finally that request
+will reach
+the proxy the invoice proxy inside your
+web server
+micro service the invoice proxy will
+evaluate the request
+and forward it to the actual
+web server container within the same pod
+using localhost now the web server will
+initiate another request to a payment
+so the request will move from
+web server container to the web server
+proxy
+which will then by applying the virtual
+service rules as well as
+destination rules and maybe some other
+configuration
+will communicate with the proxy
+envoy proxy of payment microservice
+using mutual tls and the same will
+repeat for communication between the
+payment service and
+database and all the way back the
+response will be
+returned to the ui and during this
+overall request flow
+the proxies will gather all the metrics
+and tracing information
+about the requests and send it back to
+the control plane
+so we automatically have monitoring for
+our application
+so that's it for this video subscribe to
+my channel for
+more content like this and if you want
+to see
+behind the scenes content and previews
+follow me on instagram as well
+thank you and see you in the next video

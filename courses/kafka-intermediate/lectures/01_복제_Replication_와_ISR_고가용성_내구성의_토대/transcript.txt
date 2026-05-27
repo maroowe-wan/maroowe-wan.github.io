@@ -1,0 +1,547 @@
+## 영상 1: Data Plane: Apache Kafka's Replication Protocol (https://www.youtube.com/watch?v=PPDffzAy86I)
+
+hey everyone general from confluent in
+this module we're going to talk about
+how kafka replicates data in the data
+plane
+earlier i mentioned that within the
+cluster we have this control plane and a
+data plane and in this particular case
+we're going to talk about how the data
+handles data replication replication is
+a pretty critical feature within kaka
+it's a critical feature to enable higher
+durability and availability and it's
+used for for build mission critical
+applications on top of kafka
+enabling replication is actually pretty
+easy so when you create a topic you can
+specify how many replicas you want you
+want to have once you specify the number
+then all the partitions within that
+topic will be great with the number of
+replicas if you create a replication
+factor with n in general we can tolerate
+n minus one failures here are a few key
+concepts with replication once you have
+created those replicas one of the
+replicas will be designated as the
+leader of that partition and the rest of
+replicas are core followers
+the producer will be first sending this
+data to the leader and from there
+all the followers will be retrieving the
+data from the leader and the consumer
+typically reads data from the leader but
+as we'll see later on it can be
+configured to consume data from the
+follow as well another key concept
+in kafka is called in-sync replicas or
+isr
+intuitively isr is a set of data that
+captures all the replicas that have
+fully caught up with the leader in the
+normal case when all the replicas are
+alive and are healthy all the replicas
+will be part of isr or this in-sync
+replicas
+each of the leader is also associated
+with a leader epoch so it is actually a
+unique number that's monotonic
+increasing and it's used to capture the
+generation or lifetime of a particular
+leader
+so every time when a leader takes the
+data from the producer requests right to
+its local lock it needs to attack all
+the records of this batch with its
+leader earpock as we'll see later on
+this liter epoch is pretty critical and
+important for doing log reconciliation
+among all the replicas
+so once the leader has appended the
+produced data into its local log
+all the followers will be trying to
+retrieve the new data from the leader
+the follower does that by issuing a
+fetch request the leader including the
+offset from which it needs to fetch data
+after the leader receives this data
+request the leader will be returning the
+new records from that particular offset
+to the follower once the follower
+receives a response it will be appending
+those new records in its own local log
+as you can see as the follower is
+appending the data to its local log it
+keeps the same leader epoch included in
+those record batches
+we need a way to commit the offsets
+meaning that those records have been
+considered safe
+in kafka the way we commit those records
+is defined by once a particular record
+is included in order in sync replicas
+then the record is considered committed
+and then can be safely returned to the
+consumer
+so now how does the leader know whether
+a particular follower has received a
+particular record this is actually
+piggybacked on the fast request from the
+follower so by
+sending a fast request from a particular
+offset in this case offset three the
+leader knows that the follower has
+received all the records up to offset
+three
+and in this case if both followers are
+doing the same thing of fetching issuing
+fetch requests at offset three then the
+leader will know that all the records
+zero one two have been received by order
+in replicas this in this in sync replica
+set and those records can be considered
+as committed the way we model committed
+records is through this concept called
+high watermark it marks the
+offset before which all the records are
+considered as committed in this case
+will be advanced the high water mark on
+the leader to offset three after the
+fetch requests have gone through
+at offset three
+all the
+records up to the high watermark are
+exposed to the consumer
+once the leader has advanced the high
+watermark you will also need to
+propagate this information to the
+followers this is done by piggybacking
+in the fetch response as you can see
+here in fact response the leader will
+also include the latest high watermark
+to the follower
+as you can see
+since this is done asynchronously the
+followers high water mark typically is a
+little bit behind of the true high water
+mark in the leader
+now let's talk about how we handle the
+leader failure let's say in this case
+the old leader broker 101 has failed we
+need a way to elect the new leader the
+leader election in kafka for the data
+plan is pretty simple
+because
+through the protocol we know
+all the replicas that's in isr all those
+in-sync replicas
+have all the previously committed
+records so we can pick any of those
+replicas in isr as the new leader in
+this case both controller 102 and 103
+can be the new leader let's say we
+picked 103 as the new leader
+this information will be propagated
+through the control plane once replica
+103 noticed that it's the new leader it
+can start taking new requests from the
+producer as you can see for the new
+produce request it will be tagged with a
+new bumped up leader epoch which is two
+if you are careful you will notice there
+is a subtle issue with the high
+watermark once a new leader is elected
+as you can see the
+high water mark in this new leader is
+actually
+less than the true high water mark in
+the previous leader now what happens if
+a consumer is issuing a fetch request in
+this time window asking for offsets in
+the middle let's say offset one
+in this case we don't want to send a
+response to give the consumer the wrong
+indication
+its request is invalid because this is a
+transient and a temporary so instead
+what we do is we will be issuing a
+retriable error back to the consumer
+client so that it can keep retrying
+until this high water mark catches up to
+the true high water mark this should be
+done pretty quickly
+once
+a new lease is elected some of the
+followers may need to reconcile his data
+with the new leader as you can see in
+this case
+the follower
+on broker 102 it actually has some data
+in offset three and four those are
+actually the records are never committed
+and you can see they are actually quite
+different from the corresponding records
+in the new leader so we need to have a
+way to clean those records this is done
+through the
+replication reconciliation logic
+the way we do that is through another
+detail in the fetch request when the
+follower is issuing fact requests in
+addition to the offset from which you
+want batch data it also includes the
+latest epoch it has seen its local log
+in this case it's epoch 1.
+once the leader received the fetch
+request it will use the epoch
+information to check the consistency
+with this local lock in this case it
+realized that within this local log
+epoch 1 really ends at offset two
+instead of offset four indicated by the
+follower so the leader will send a
+response indicating to the follower that
+you really need to make the log
+consistent with respect epoch one in
+this case it will tell epoch hand one
+really ends before offset three when the
+follower received this fetch response
+from a leader it will know it needs to
+truncate the data at offset three and
+four and at this point the data is
+consistent with the leader up to offset
+two next
+the follower issue an expat request
+starting with offset three with the last
+epoch one once the leader received it
+you notice this is actually consistent
+with this local log and this will cause
+its local high watermark to be advanced
+to offset three next the follower the
+leader will be returning new data back
+and the follower take this data and then
+panning that to its local log then the
+follower fetch again with latest offset
+on the offset seven this will cause the
+high water mark in the
+leader to be advanced to offset 7. now
+this completes the reconciliation
+between the follower log and the
+leader's log now you can see they're
+identical
+at this point we are still in this
+under-replicated mode because not all
+the replicas are in isr
+at some point this failed replica um
+unbroker 101 will come back
+and it will catch up from the leader and
+will go through a similar reconciliate
+logic as replica 102 and eventually it
+will catch up all the way to the end of
+the log and then it will be added back
+to isr now we are back into the fully
+replicated mode now let's take a look at
+how follow-up failures is handled
+and sometimes a follower can fail or
+sometimes maybe a follower is slow it
+can't catch up with leader in this case
+if we keep waiting for that follower
+then we'll never be able to advance the
+height watermark
+so what we do instead is the leader will
+keep monitoring the progress of the
+follower it will measure what's the last
+time this particular follower has caught
+up all the way with the leader
+and
+if
+it's lagging by more than a configured
+amount of time based on this property
+then this follower is considered out of
+sync then it will be dropped out of isr
+at that point the leader can now advance
+the height watermark based on the
+reduced in sync replica set
+this is how we handle the follow failure
+the last thing i want to talk about is
+balancing the load of the leaders
+as you can see the leader
+replica typically does a little bit more
+work than the followers because all the
+followers are fetching data directly
+from the leader
+so
+in the healthy cluster we want the load
+on all the leaders to be balanced
+this is achieved through a concept
+called preferred replica
+so when you create a topic we'll
+designate the first replica of each
+partition as the preferred replica
+so when we assign the preferred replica
+we try to assign in such a way the
+preferred replica will be distributed
+evenly among all those brokers
+when doing the lead election what we try
+to do is to periodically look at to see
+the preferred replicates heresy and then
+whether the current leader is on the
+preferred one if not we'll try to move
+the leader back to the preferred replica
+so in the end all the leaders were being
+moved onto the preferred replica and
+since these are even distributed among
+all the brokers we can achieve balanced
+load amount of leaders in the cluster as
+well yeah this end of this module and
+thanks for listening
+you
+
+## 영상 2: Kafka Replication and Min Insync Replicas | Learn Kafka | Kafka Tutorial (https://www.youtube.com/watch?v=TGZUQsuhDV0)
+
+hello and welcome to another video on
+the channel today we are going to talk
+about replication in Kafka so what is
+replication replication basically means
+keeping a copy of some data on multiple
+machines and then these machines are
+connected over a network so why do we
+even bother with replication well it has
+a few very important advantages first of
+all replication reduces latency so you
+can keep the data geographically close
+to your users and that way you can
+reduce the response times second it also
+increases the overall availability of
+your system so if some parts of a system
+are down for whatever reason system can
+still continue working if the data is
+properly replicated third it helps
+increase the overall read throughput of
+our application you might have noticed
+that in usual applications the ratio of
+reads to writes is very high so more
+number of read request quests come as
+compared to the right requests so we can
+create more replicas that help us serve
+more of these read requests efficiently
+so coming back to replication in Kafka
+let us look at a diagram as you can see
+we have something known as the Kafka
+cluster Kafka cluster basically consists
+of multiple Kafka Brokers if you
+remember our Kafka introduction Kafka
+Brokers is where the topics are located
+these topics have partitions and we
+write data to these partitions if a
+broker goes down the partition is gone
+and we can end up losing data to prevent
+this loss of data we need replication
+and to achieve replication in Kafka we
+need to replicate partitions across
+multiple Brokers this is because
+partitions is where the data is actually
+stored when a particular partition is
+replicated it basically means that the
+partition is assigned to more than one
+broker if you see in the diagram
+partition 0 of topic a is assigned to
+both broker 1 and broker 2 but these
+Brokers are different from each other
+when a partition is replicated across
+multiple Brokers one of the Brokers acts
+as the leader for the partition the
+other Brokers are followers so in this
+case broker 1 is the leader of partition
+0 and broker 2 is the follower the
+message is received by the leader are
+also copied over to the followers to
+achieve replication so what is the
+difference between leaders and followers
+there is no difference on the consumer
+side because consumers can consume
+messages from the leader broker or even
+the followers however producers can only
+publish messages to the leader broker
+even if you see the diagram our producer
+publishes messages for partition 0 to
+broker 1 and for partition 1 to broker
+2. at this point you might be wondering
+what happens if the leader broker goes
+down for some reason so in that case the
+remaining followers organize an election
+and a new leader is elected this happens
+using some consensus algorithms which we
+will be talking about in some later
+video the main takeaway is that at any
+given point of time there will be at
+least one leader now this concept of
+replication is slightly incomplete
+without understanding one very important
+term and that is Kafka in sync replicas
+so what is a Kafka in sync replica let
+us look at it with the help of another
+diagram in this diagram partition 1 is
+replicated across three Brokers broker
+one broker two and broker three now if
+you notice carefully broker 1 and broker
+2 have the complete data broker 3 on the
+other hand has couple of missing records
+for some reason broker 3 has not been
+able to replicate the partition's data
+complete greatly so in this case broker
+1 and broker 2 are in sync replicas of
+partition 1. broker 3 is not an in-sync
+replica basically Kafka in sync replicas
+are nothing but the replicas of a
+partition that are currently in sync
+with the leader in other words a replica
+is considered to be in sync if it has
+fully caught up with the leader
+partition in a certain amount of time it
+goes without saying that a leader is
+always an in-sync replica right because
+a leader will have the complete data
+however a follower is an in-sync replica
+only if it has fully caught up to the
+partition its following a follower
+cannot be behind on the latest records
+for a given partition to be called an
+in-sync replica so what happens if a
+follower fails for some reason followers
+replicate data from the leader to
+themselves by sending periodic fetch
+requests if a follower fails it will
+stop attending these requests and after
+a set amount of time it will be removed
+from the list of in-sync replicas this
+is the reason why in our diagram we have
+labeled only broker 1 and broker 2 as
+in-sync replicas broker 3 is basically
+an out of sync replica of partition 1.
+mind you three is still a replica only
+it is out of sync it is possible for an
+out of sync replica to catch up and come
+back into the list of in-sync replicas
+so I hope the concept of replication and
+in-sync replicas is sufficiently clear
+we will be using both of these Concepts
+in the next video where we will talk
+about the Kafka producer AC case
+property if you like this video consider
+sharing it with friends and colleagues
+also don't forget to subscribe to the
+channel and press the Bell icon see you
+until the next time
+
+## 영상 3: Replication | Apache Kafka 101 (2025 Edition) (https://www.youtube.com/watch?v=CWe52zSeGxU)
+
+This is the introduction to
+Apache Kafka on replication.
+It would be no good at
+all if we stored each
+partition on only one broker.
+Whether these are bare metal
+servers or instances in the cloud,
+disk and server failure
+can and will happen.
+You can't count on these
+things to live forever.
+And so we need to copy partition data
+to several other brokers to keep up.
+Now that copying that Kafka
+can do is configurable.
+You have to choose the replication
+factor, which here is three.
+As you can see, each partition is
+going to have three copies total.
+You see how one of them is a
+little darker and the others
+are sort of ghosted out.
+The darker one is the lead replica.
+The other ones are the followers.
+So there's always one leader and
+of the replication factor of n,
+n minus one of them
+are then followers.
+And when an application
+is writing or reading,
+it's almost always writing
+or reading from that leader.
+And what the followers are doing
+is they're keeping up as new
+messages are getting written in
+to the lead replica.
+The followers are kind
+of scraping them off,
+trying to make sure they
+have everything replicated
+as quickly as possible.
+Now, thanks to replication, if one
+broker fails, you still have two
+replicas of the lost partitions.
+And if the broker that failed had the
+leader of one of those partitions,
+then the cluster will elect new
+leaders of the remaining partitions.
+And of course, we need
+to make copies now.
+Something's going to have to
+make sure that we still have
+three replicas of each partition.
+So there's more cleanup to do
+or restoring the failed broker.
+You know, we're going to restore
+this to health in some way,
+but basically here for our
+discussion of replication,
+you see that we elect a new leader
+and we haven't lost any data.
+We're still up and
+available and moving along.
+As I said, when we're writing
+data, we write to the leaders.
+That's always the case.
+If you're writing, you
+write to the leader,
+no matter what, whatever
+that current leader is.
+And when you read, you are
+typically, by default, reading
+from those lead replicas also.
+In fairly recent versions of
+Kafka in the last couple of
+years, as of this recording,
+you can configure the client
+application that's reading to
+read from the nearest replica.
+If it's located in some
+lower latency, closer network
+connection to a certain broker,
+you can say, look, I know some of
+these are going to be followers,
+but I want to read from these
+followers because it's faster.
+And so if you're really
+pressed for performance,
+that's a thing that you can do.
+Replication is another one of
+those features that matters a lot.
+If you're operating Kafka yourself,
+if you are running the servers,
+managing the cluster,
+that's really important.
+If you're using a cloud service,
+it's a thing that happens
+and you sort of don't
+need to know how or why.
+But it is, as a feature, a
+cornerstone of Kafka's reliability.
+This is how we ensure fault
+tolerance, load balancing,
+and basically healthy performance
+at scale of a cluster.
+And it's all built-in functionality.
+Super cool stuff.

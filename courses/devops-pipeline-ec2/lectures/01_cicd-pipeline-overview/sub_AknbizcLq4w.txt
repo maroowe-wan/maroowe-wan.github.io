@@ -1,0 +1,509 @@
+Kind: captions
+Language: en
+Let's learn what CI/CD is, but more
+interestingly, why these concepts are so
+important and what problems they solve
+using real world scenarios from actual
+engineering projects. If you want to
+have a simple but actionable CI/CD
+checklist, you can grab one below that
+we created specifically for this video.
+So, let's get to
+it. Imagine you and your team are
+developing an application. The first
+version is done. So now it's time to
+deploy the app on a server. You check in
+your code and try to merge it into the
+main branch. You get merge conflicts
+because other engineers in your team
+also made some code changes before you.
+So you fix those issues manually. You
+try to merge again. Now a simple Jenkins
+job runs tests on the main and discovers
+a bunch of issues. Well, now we rush to
+fix them because we just broke the main
+branch. So we fixed those issues and
+after all these fixes and code changes
+from different developers all in the
+main branch and now it's end of sprint.
+So we want to deploy all our changes
+because we need to release them at some
+point, right? So we do a code freeze
+which means no one's allowed to merge
+anything to main until we deploy the
+current state with all those changes. So
+you and your team start testing the
+latest state of the main branch to make
+sure that new features all work properly
+but also make sure that we didn't break
+any previous features and functionality.
+So we do this intense testing manually
+before we deploy again. We find some
+issues so we jump on it to fix it
+immediately because the clock is ticking
+on deployment. Once all the issues are
+resolved and the main branch is tested
+to the best of our ability, it's a
+deploy time. So we'll take a deep breath
+to prepare mentally. Someone on the team
+checks out the main branch locally. They
+bump the release version maybe and push
+that to git. And let's say we have a
+simple Jenkins build that we scrambled
+together that runs some tests, builds a
+Docker image and pushes to the Docker
+repository. Oh, the build is over. Now
+let's manually modify a Docker compose
+file or Kubernetes manifest file. Or
+maybe we added a new service. So let's
+add that Kubernetes YAML file manually
+as well. And now again someone who is
+knowledgeable and senior in our team
+they connect to Kubernetes cluster with
+cubectl command and apply the new
+manifest files or if the app is running
+on a simple server they SSH into the
+server they stop the containers and
+restart them with a modified docker
+compose file and then they give testers
+the URL and say hey guys just deployed a
+new version you can test now let me know
+when you're done so I can manually
+prepare the deployment for prod
+environment which will be the same
+process but this time with more
+shivering and anxiety because we are
+going live now and deploying to prod we
+need to be prepared for some surprises
+and let's not do that prod deployment on
+a Friday evening or any evening really
+because if something happens and users
+cannot access the app and no one's there
+to fix it overnight that would be pretty
+bad so as you see we have tons of
+constraints here at every stage because
+of one common element which is human
+because human deployment and monitoring
+system is always time constrainted and
+much more errorprone. Now if you're an
+engineer who has been implementing CI/CD
+you will probably cringe at this story
+but it is and has been a reality in many
+projects. So, how do we take this manual
+mess of a workflow fully constrained by
+human in the loop to a beautifully
+streamlined CSD pipeline that would be a
+dream of every developer team? Great
+question. Let's take this project and
+optimize it step by step to understand
+every element of CI/CD.
+Let's start from the very beginning at
+the very left of the workflow first. How
+do we cure the problem of bunch of
+issues and failed tests every time we
+merge our feature branch into the main?
+Well, wouldn't it be more efficient if
+we ran those tests in the feature branch
+itself before trying to merge it? Like,
+why are we waiting for it to be merged
+to test if it breaks anything? Plus, if
+we have multiple branches, let's test
+each one individually before we merge
+them back into the main. Because when
+three different features are merged at
+the same time with large code changes,
+we won't even know which combination
+pieces had issues. Maybe one feature
+affects the other in some way. So,
+untangling the issue may be more
+difficult. So, we run those tests on
+individual branches to find any bugs
+right before we merge. So developers
+working on those branches can fix their
+own code. But wait, this can be done
+better. Why are we waiting right before
+merge to run those tests? Let's run them
+on every commit to the branch so it's
+easy to isolate the issue. Some
+developers program the entire thing
+locally first for like days and then
+push the whole implementation at once to
+the remote. So instead we encourage our
+developers to commit and push to remote
+more often so their smaller changes are
+tested more frequently and if there are
+any issues they can fix those before
+making even more changes. So we are
+committing smaller code changes more
+frequently and we test them right away
+and that my fellow engineers is called
+continuous integration CI. So we are
+integrating our code changes often in
+small sizes into the main branch. Let's
+look at the impact we just made. We are
+catching the issues faster and earlier
+in the development workflow. And instead
+of complex entangled issues that testers
+would find later, we have simpler
+isolated issues which means developers
+can fix those right away even while
+working on their current feature. So the
+whole stress is not piling up at the end
+right before release. Plus developers
+aren't frustrated because other
+developers in the team commit code
+changes that mess up their
+functionality. No entangled merge
+conflicts. Looks pretty good already.
+Speaking of catching issues early and
+making code reviews more efficient, this
+is where our sponsor Code Rabbit comes
+in. You know how frustrating it is when
+your pipeline fails and you have to
+spend hours digging through logs to
+figure out what went wrong. Code Rabbit
+is a brilliant AI powered code review
+tool that helps identify these issues
+much earlier in the process. What
+CodeRabbit does is analyze your pull
+requests automatically, detecting
+potential bugs, security
+vulnerabilities, and performance issues
+before they break your pipeline. It
+provides root cause analysis right in
+your pull request, so you can fix
+problems immediately instead of spending
+hours debugging some cryptic logs later.
+What I really like about Code Rabbit is
+that it doesn't try to replace human
+reviewers. Instead, it handles the
+initial screening so your team can focus
+on the more complex aspects of the code
+review. So basically, think of it as an
+automated first check that catches the
+obvious issues. allowing your human
+reviewers to spend their valuable time
+on architecture and design decisions
+instead of hunting for basic bugs. And
+this fits perfectly into our CI/CD
+philosophy, which is catch issues early,
+integrate frequently, and keep the
+development pipeline flowing smoothly.
+Now, the great news is that Code Rebbit
+is offering our viewers one month
+completely free when you use our code
+tech with Nana at the signup. Link is in
+the description. Now that we reduced the
+stress of testing before deployment
+using CI, let's zoom into the deployment
+part. What are the problems and
+bottlenecks here? How can we make sure
+that we don't need a code freeze and
+developers locally checking out the code
+to build docker image and then SSH into
+the server or connect to current cluster
+and manually deploy the new application
+version. Magic word automation. How?
+Well, we go back to our build automation
+like Jenkins or GitHub actions and we
+say if all these extensive tests were
+successful, if they're all green, no
+issues were found after being merged
+into the main branch, build the app into
+a Docker image, give it the next version
+tag, push it to the Docker registry. So
+now we have a new artifact that is
+deployable. Then connect to the server
+or cluster whatever our dev environment
+is and run that newly built docker image
+container there. Or if we created a new
+deployment or service components for
+Kubernetes cluster or we made
+configuration changes to the application
+apply those changes on the dev
+environment directly from the build
+automation tool. So all that logic of
+checking out the code locally and
+building a new version, then changing
+the Kubernetes deployment manifest file
+with the new Docker image version,
+connecting to the cluster, doing cubectl
+apply and so on. All of that logic is
+automated in a Jenkins file script or
+GitLab CI or GitHub actions pipeline
+file. So the manual steps are now
+automated by a tool, by a CI/CD tool, a
+build automation tool that was made
+specifically for that. Now, easier said
+than done, right? We need to configure
+those tools on Jenkins, for example. We
+need to secure the accesses, give
+Jenkins permissions to deploy to the dev
+environment, uh test the workflow. We
+need to build out this entire system to
+execute that logic automatically. Right?
+However, the question is, is it worth
+one-time investment to build all of that
+that will serve us for years, or do we
+continue doing it manually each time we
+want to release? And by the way, if you
+actually know what you're doing when
+building this pipeline logic, whether
+it's Jenkins or GitLab CI or GitHub
+actions, setting up the whole process of
+connecting it with Docker registry and
+current cluster or servers and securing
+the whole thing and deploying
+automatically will actually be a matter
+of just two or three days. Like I've
+built such pipelines from scratch for my
+projects in just a few days with
+different CI/CD tools. So it's actually
+not that hard if you've done it a few
+times, which by the way is exactly what
+I teach in our DevOps boot camp because
+it's an extremely important skill and a
+complex one, but also very easy to learn
+when you have a clear step-by-step
+instruction on how to do it. Now, we
+aren't done yet because what happens
+after we deploy to dev
+environment. You remember when we had to
+do this intensive manual testing session
+right before release where whole team
+and testers had to go through the entire
+app after different developers had
+merged their various code changes. Yes,
+we need to fix that too. How? Instead of
+waiting for release to do thorough
+end-to-end tests, testing all the
+integrations with databases and other
+services, we test them simply every time
+code changes get merged into the main.
+So these are more extensive tests
+because the application needs to be
+tested in a running environment as well
+to make sure the connectivity is fine,
+the configuration, the setup, the
+underlying infrastructure and so on.
+Because when merging we tested the code,
+the syntax, maybe the functionality and
+these are unit tests and functional
+tests. Maybe we did code scanning for
+security issues and so on. But here we
+need to test the whole environment end
+to end. Click around in UI, see that
+stuff gets updated in the database and
+so on. But here's the key part. We don't
+do any of this manually. We write
+automated end to end and integration
+tests because we want to remove the
+human from the loop at every stage as
+much as possible and we run those tests
+also from the pipeline. So right after
+deploying to dev pipeline checks the new
+version of the application is up and
+running. We also want to run tests to
+see are we introducing any security
+issues that will affect our systems or
+make it easier for hackers to attack
+like do dynamic application testing by
+basically running the tests that try to
+hack into our systems maybe with SQL
+injection scripts and so on. And there
+are security tests that we can do at
+every level of application release and
+we teach this in detail in our devsops
+boot camp actually. But the important
+thing is that at this stage we run much
+more extensive tests against a running
+system. So as you see the automated
+tests play a crucial role in this entire
+release process because we are trying to
+reduce the human involvement while also
+reducing the bugs and issues slipping
+through. Right now, again, I know it's
+easier said than done because that would
+require writing a lot of automated tests
+for complex use cases as well, but is it
+worth investing time to write automated
+tests that will run every time, multiple
+times, every week, and save you tons of
+hours of manual testing over months or
+years? Most probably, yes. So, once
+those tests are green, we validated that
+the developers didn't mess up anything
+in the code changes. So now we can go to
+the next stage which is sometimes called
+test or staging environment. So we are
+releasing the code changes in stages
+where it gets tested at every stage and
+that workflow of deploying a release all
+the way to the staging or testing
+environment is called continuous
+delivery or CD and that's how we get
+CI/CD continuous integration continuous
+delivery CICD. Now let's see the impact
+of this improvement for our team from
+the code being pushed to the repository
+all the way to the deployment on the
+staging environment which is also
+pre-production right before production
+stage with the validation that not only
+the code itself is valid and well tested
+but the application functionality works
+just fine and for all this testing and
+deployment to happen no one in the team
+even needed to open a terminal and
+execute ute scripts or commands. It all
+happened automatically. This means no
+human errors, no forgetting or missing
+steps because we're doing stuff
+manually. No code freezes or depending
+on that one senior engineer in the team
+to release the new version. So even if
+they go on a holiday, we don't panic
+because the release process is fully
+automated and nobody's shivering right
+before the release because we know our
+app has been extensively tested. So our
+confidence level is much higher when
+deploying. But we aren't done here.
+Okay, we have one last step because our
+end users haven't seen our code changes
+yet. So we still have some work to do
+and we're going all the way to
+production with our fully automated
+release pipeline because we have the
+tools to do it. So why stop here? So
+what happens after staging? If we are
+developing a customerf facing app, we
+want to release the new feature for
+them. So, we ask ourselves, what else do
+we need to validate to be 100% sure that
+we're not going to mess up our life app?
+Well, let's do performance tests and
+additional compliance and security tests
+and let's run all those against staging
+and validate that everything is 100%
+fine. Now, very often we don't want to
+automatically deploy into prod.
+Sometimes staging may be used by the
+team or PM or product owner to demo the
+new features first to maybe higher level
+decision makers in the company to get
+input and make any adjustments if needed
+or someone needs to make the final
+approval before going live. So it's very
+common to have a manual confirmation
+right before deploying to prod. However,
+this is just a button just one click. So
+the deployment logic is still in the
+CI/CD pipeline tool itself. So even a
+non-technical person a decision maker
+can go and click deploy and the logic
+will be automatically executed in the
+background to deploy to prod and this is
+called continuous deployment a concept
+of automatically deploying every release
+all the way into production whether with
+the last manual confirmation step or
+not. So we have continuous delivery and
+the extension of it continuous
+deployment. And last but not least,
+there is one final important improvement
+we can do when it comes to production
+deployment. Because no matter how many
+tests we run, there's always a slight
+little chance that an issue slipped
+through that we just didn't catch with
+all this extensive testing. So imagine
+we have 1% chance that an issue slips
+into production and we have 99%
+confidence. So we will still be kind of
+anxious and nervous at deployment
+because what if that 1% kicks in. So how
+do we reduce the risk even further and
+that's where the deployment strategies
+like canary deployment or blue green
+deployment come in? Canary deployment
+the idea is super simple. We roll out
+the new feature to 1% of users or 5% and
+we observe for an hour and see if
+nothing blows up. Okay, that's great.
+Let's crank it up to 10%. Let's observe
+for two more hours. Okay, let's do 20%,
+let's see overnight, nothing crazy
+happens. Now we're good. Let's switch to
+100%. So basically, canary deployment is
+a progressive roll out of an application
+that splits the traffic between an
+already deployed version and a new
+version that we just deployed. And it
+rolls out the new version to a subset of
+users before rolling it out fully. And
+the way it works is usually canary
+deployments select a small number of
+servers or nodes for the initial
+deployment and then gradually or
+progressively deploy that new version
+everywhere. Alternatively, we also have
+green blue deployment. Again, super
+simple idea. You create two separate but
+identical environments. One environment
+call it blue is running the current
+application version and one we call it
+green is running the new application
+version. And the main idea is that if
+the new deployment has any issues, we
+can immediately switch the entire
+traffic back to the older version. So
+the main idea is that if something goes
+wrong, you can easily fall back to the
+previous version or environment. Again,
+this requires some work to set up,
+including setting up monitoring that
+will continuously check the deployment
+and alert on any issues instead of human
+sitting in front of a monitor and
+watching for an hour if something
+happens. But once again, it's definitely
+worth it to set it up once to not be
+sweating every time you release a new
+version to production and having that
+peace of mind by reducing the risk of
+production deployments. And an
+interesting byproduct of that is that if
+we reduce the risk of prod deployments,
+we naturally increase the frequency of
+deploying to prod with automation
+because we have this safety net. And
+that whole thing is CI/CD which is the
+core of DevOps. It's basically this
+beautifully efficient process of
+automating deployment from code changes
+to testing to releasing, monitoring,
+fallbacks and so on. And as you see, it
+has this huge value for teams because of
+how much manual workload it eliminates
+and how faster it makes the entire
+process. And that's exactly why CI/CD is
+the main focus of our DevOps boot camp
+because it's literally the backbone of
+the entire DevOps automation. And
+because of that, I actually teach
+everything whether it's Docker or
+Kubernetes or even monitoring and
+infrastructure automation, everything in
+the context of CI/CD. That's how
+important this concept is. Now, I hope
+this made lots of things clear for you
+when it comes to CI/CD. Please let me
+know below if you had any aha moments
+watching this video and what was it
+exactly. And if you have one colleague
+or friend who you think will benefit
+from this knowledge as well, make sure
+to share it with them. And with that, as
+always, thanks for watching and see you
+in the next video.

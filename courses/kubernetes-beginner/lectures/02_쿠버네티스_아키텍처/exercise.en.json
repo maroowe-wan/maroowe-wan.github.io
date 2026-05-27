@@ -1,0 +1,61 @@
+{
+  "lecture_no": 2,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "Which statement best describes the difference in roles between the control plane and worker nodes?",
+      "options": [
+        "The control plane directly runs the user's application containers, while worker nodes decide which node to place containers on.",
+        "The control plane acts as the brain that manages the entire cluster and makes decisions, while actual application Pods run on worker nodes.",
+        "Both the control plane and worker nodes can run Pods, and the role difference is determined by the amount of resources each holds.",
+        "The control plane alone, without any worker nodes, can serve containerized applications normally."
+      ],
+      "answer_index": 1,
+      "explanation": "Correct answer (B): The control plane handles 'instruction and management,' while worker nodes handle 'execution.' The control plane components (API Server, etcd, Scheduler, Controller Manager) do not directly run application containers — they decide what to run and where, and coordinate accordingly. Actual Pods run exclusively on worker nodes. (A) The roles are reversed — this is incorrect. (C) The control plane does not run app Pods in production, and roles are determined by design, not resource size. (D) Without worker nodes there are no nodes to actually run containers on, so applications cannot be served."
+    },
+    {
+      "question": "Which statement about etcd is correct?",
+      "options": [
+        "etcd directly receives kubectl commands from users and acts as the cluster's front gate by handling authentication and authorization.",
+        "etcd is the scheduling engine that calculates which worker node a Pod should be placed on.",
+        "etcd is a key-value store that holds all of the cluster's state data and serves as the cluster's single source of truth.",
+        "etcd runs on each worker node and acts as an agent responsible for container health checks and execution."
+      ],
+      "answer_index": 2,
+      "explanation": "Correct answer (C): etcd is a key-value store that holds all cluster state data — the list of nodes, Pod placement information, user declarations, and more — and is called the 'single source of truth.' When a Pod is created, it is recorded in etcd; when deleted, it is removed from etcd. (A) Receiving all requests and handling authentication/authorization is the role of the API Server. (B) Deciding the placement node is the role of the Scheduler. (D) Running on each worker node and being responsible for container execution is the role of kubelet."
+    },
+    {
+      "question": "The Scheduler has decided to place a particular Pod on worker node A. After that decision, which component actually runs the container? (analytical)",
+      "options": [
+        "The Scheduler directly instructs worker node A's Container Runtime to start the container.",
+        "The Controller Manager selects worker node A and then commands kubelet to run the container.",
+        "Worker node A's kubelet watches the API Server, discovers the Pod assigned to its node, and instructs the Container Runtime to start it.",
+        "The API Server directly calls worker node A's Container Runtime to start the container."
+      ],
+      "answer_index": 2,
+      "explanation": "Correct answer (C): The Scheduler's role ends at 'deciding (binding) which node to use' — it does not perform the actual execution. The binding decision is written to etcd via the API Server. After that, the kubelet on the assigned node continuously watches the API Server, discovers the Pod bound to its node, and instructs the node's Container Runtime to pull the image and start the container. (A) The Scheduler does not contact nodes directly. (B) The Controller Manager does not appear in this single-Pod creation flow; it creates Pod objects when a Deployment or similar resource needs to maintain a replica count. (D) The API Server relays and validates requests and writes data to etcd — it does not call the Container Runtime directly."
+    },
+    {
+      "question": "When a user requests Pod creation via kubectl, which sequence is correct?",
+      "options": [
+        "kubectl → Scheduler → API Server → etcd → kubelet → Container Runtime",
+        "kubectl → API Server → etcd write → Scheduler (node decision) → kubelet (execution order) → Container Runtime",
+        "kubectl → kubelet → Container Runtime → API Server → etcd → Scheduler",
+        "kubectl → etcd → API Server → Scheduler → Controller Manager → kubelet"
+      ],
+      "answer_index": 1,
+      "explanation": "Correct answer (B): Every request must go through the API Server as the first gate. The flow is: (1) kubectl sends a request to the API Server → (2) API Server validates authentication, authorization, and format, then writes Pod information to etcd → (3) Scheduler finds the unscheduled Pod, selects the optimal node (binding), notifies the API Server, and the binding is also recorded in etcd → (4) The kubelet on that node watches the API Server and discovers its Pod → (5) kubelet instructs the Container Runtime to execute → Pod starts. (A) If the Scheduler comes before the API Server, authentication and authorization would be bypassed — incorrect. (C) kubelet and Container Runtime cannot come before etcd and Scheduler. (D) The Controller Manager is not involved in a single Pod creation flow."
+    },
+    {
+      "question": "You are running 3 Pods via a Deployment. One worker node suddenly goes down and a Pod is lost. When Kubernetes automatically recovers that Pod on another node, which component is the first to 'create the missing Pod object'? (applied)",
+      "options": [
+        "Scheduler — it calculates the optimal position among the remaining nodes and immediately reschedules the Pod.",
+        "kubelet — it detects the dead Pod and creates a new Pod object on its own.",
+        "Controller Manager — it detects the gap between the declared replica count (3) and the actual count (2), and creates the missing Pod object.",
+        "etcd — it automatically reconciles the difference between the stored desired state and current state to recreate the Pod."
+      ],
+      "answer_index": 2,
+      "explanation": "Correct answer (C): The Controller Manager (ReplicaSet controller) continuously monitors the difference between the desired state (3 Pods) and the current state (2 Pods). When it detects a discrepancy, it creates as many new Pod objects as needed to close the gap. Those Pod objects then follow the normal flow — the Scheduler assigns a node and the kubelet on that node actually starts them. (A) The Scheduler 'decides' on a node when a Pod object already exists; it does not create Pod objects. (B) kubelet's role is to run and maintain Pods assigned to its node — it is not the entity that creates new Pod objects. (D) etcd is purely a storage layer; it does not take any action on its own."
+    }
+  ]
+}

@@ -1,0 +1,1184 @@
+## 영상 1: How volumes and storage work in Kubernetes (https://www.youtube.com/watch?v=inJ7YJ-jt8I)
+
+Kind: captions
+Language: en
+.
+>> Hi.
+I'm Brendan Burns from Microsoft
+Azure and I'm going to talk
+about how volumes and
+storage work in Kubernetes.
+Obviously in Kubernetes,
+the base unit is a pod.
+Within that pod can be
+one or more containers.
+But if you want to start
+talking about storage,
+you're starting to
+talk about volumes.
+A volume is a separate object
+defined within the context
+of the Kubernetes pod.
+The volume is associated
+with the pod but
+then mounted into a container
+at a particular path.
+It can actually be mounted into
+one of the other containers
+in that pod at
+a different path or
+you might choose not to mount
+it into that container at all.
+In Kubernetes, there's
+a really wide variety
+of different volume implementations,
+from the simplest volume which is
+a temporary volume that's
+associated with the pod.
+It's called empty Dir,
+where the lifespan of this volume
+is associated with the pod itself.
+The directory itself
+is simply present on
+the machine where the pod is located.
+So really just for caching
+and temporary information
+maybe coordination between
+different containers
+in the application.
+All the way through cloud mounted
+directories that are persistent
+across the lifespan of
+multiple pods possibly
+even multiple clusters.
+So how does all that fit together?
+Well, in Kubernetes
+beyond empty Dir and host
+path and other volume types
+that are associated with
+the cluster itself,
+there's this idea of
+a persistent volume.
+A persistent volume is another
+resource type within Kubernetes,
+and a persistent volume
+can be mapped to something
+like Azure Disk or NFS,
+ISCSI or any number of other
+persistent volume types.
+The important
+distinction here is that
+these disks live longer than
+the lifespan of the pod.
+When the pod dies if
+it changes machines,
+these disks will follow it around.
+So for example, if I have
+this is machine one,
+this is machine two,
+and I have a pod running
+on that machine.
+It has a volume that is
+attached to that pod.
+If this machine happens to
+fail and this pod moves
+onto machine two the volume will
+likewise move onto machine two.
+But when you combine this
+persistent volume with replication,
+things get a little bit complicated
+because the replica spec
+in a replica set or in
+a deployment has to have
+information about the volume.
+But obviously,
+each volume is different.
+Each volume is independent,
+so you can't define
+all of the volumes in
+the context of a replica set.
+So in order to do that
+Kubernetes introduces
+this idea of a
+persistent volume claim.
+The idea behind a
+persistent volume claim is
+that it is responsible for
+saying, "Hey you know what?
+I want aspirationally something
+like 10 gigabytes of disk."
+It's not a literal disk
+that is backed.
+It's more of an assertion
+of a need for a disk.
+This way I can say I want three pods.
+They all have a
+persistent volume claim that
+requests 10 gigabytes of disk
+and when Kubernetes sees that,
+it's going to create
+those pods obviously.
+But it's also going to create
+three independent persistent volumes
+and mount those disks
+into the container.
+Now the good thing about
+this is not only does
+this provide for this replication,
+but also the persistent volume
+claim and persistent volume become
+a abstraction between you and
+a cloud-based storage
+system or really
+between you and any storage system.
+So this persistent volume claim
+on different clusters
+in one cluster could be
+satisfied perhaps by Azure Disk.
+In another cluster, it might
+be satisfied by ISCSI.
+In another cluster, it
+might even be satisfied by
+another public cloud
+provider's disk product.
+So you can write a template that will
+operate across clouds even
+across public cloud and
+private cloud or even onto
+an on-prem environment where
+maybe this is being provided
+by network attached storage.
+It's a real way that you can use
+the same template across a wide
+variety of hybrid environments.
+Again, when you create
+a persistent volume claim much
+like the rest of Kubernetes,
+you're declaring what
+you need rather than
+the specifics of how
+you implement it and
+you're allowing the
+clusters automation to take
+responsibility for
+providing the disks to you.
+Hopefully, that gives you
+a little bit of an illustration of
+how persistent volumes and storage
+work inside of Kubernetes.
+
+
+================================================================================
+
+
+## 영상 2: Day 52 - Storage Classes in Kubernetes | Static vs Dynamic Volume Provisioning (https://www.youtube.com/watch?v=OKBTg2hMnw4)
+
+Hello and welcome back to my channel. My
+name is Piyush. This is day 52 in CK2025
+series and in this video we'll be
+looking into storage class and dynamic
+volume provisioning using storage
+classes. So this video will be all about
+understanding it, how
+dynamic provisioning works, what is
+storage class, why do we use it,
+and all the nitty-gritty around it. Plus
+we'll be doing the demo in a GKE
+cluster, Google Kubernetes Engine
+cluster, because the dynamic
+provisioning needs a storage solution or
+a cloud provider that supports a storage
+solution. So that's why we'll be using
+GKE, but feel free to use AKS, EKS, or
+if you have a storage solution such as
+NFS,
+Portworx, VMware storage, anything
+anything that you like like. But I'm
+just telling you what I'm using in this
+demo.
+Um so let me just share my screen and
+first we'll go through the concept in
+detail like what exactly it is because
+before getting into the demo, we need to
+understand a bit about it.
+Okay.
+I might have explained this a bit in
+one of the previous videos in the
+storage section where we discussed about
+persistent volume, persistent volume
+claims and so on, but I'm just going to
+um
+maybe the demo was missing in that. So
+I'm just going to explain it once again.
+So storage class defines how a storage
+is provisioned in Kubernetes, right? So
+when you create a storage, it has to be
+either statically provisioned or dynamic
+provisioning. So what exactly is a
+static provisioning? So for example,
+your storage admin uh that person
+creates a persistent volume
+and as a user, as a application
+developer, Kubernetes administrator,
+operator, DevOps engineer, like you can
+name any persona who's a user of the
+application, that person can create a
+persistent volume claim,
+and then the persistent volume claim
+will be bound to the persistent volume
+and then later it can be utilized in the
+pod or your workload, right? So that's
+the static provisioning in which
+you as a storage admin are
+pre-provisioning your persistent volume.
+Okay, so you are creating a persistent
+volume
+and a PVC which is a persistent volume
+claim can request a slice from that
+persistent volume, okay? So that's the
+static provisioning model.
+Now,
+we have dynamic provisioning as well in
+which we don't have to create the
+persistent volume. You create the
+persistent volume claim, give the
+storage class reference in the
+persistent volume claim, and then once
+the user requests a persistent volume
+claim,
+a PV will be created and it will be
+bounded to the PVC, okay?
+Um there are several use cases of why we
+use it
+because let's say the storage
+the storage requirement differs from
+workload to workload, right? Some some
+workload require, let's say
+a high performance persistent disk. Some
+some
+workload required an HSD for the cost
+effective method. Some storage required
+a balanced persistent disk and so on,
+right? So we can create storage classes
+of all those persistent disks so that we
+don't have to pre-provision the
+persistent volumes and it will help us
+save a lot of cost and it will help us
+dynamically provision the volume when
+needed and the volume will be deleted
+when it's not required, okay?
+So that's the main difference between
+static and dynamic volume provisioning.
+Now it has different components,
+the storage class. So it defines what
+what type of storage will be
+provisioned, right? Whether it is an
+NFS, SSD, HSD,
+HDD and so many more.
+And how to create it? So there is a
+section in the storage class, it's
+called provisioner and provisioner
+defines how do we create the storage.
+Okay?
+And then it has several configuration
+parameter which is based on the
+performance, durability, stability and
+which defines all those things and it
+defines like
+how much of the how much cost effective
+or costly the solution is, okay?
+Now, how it works? So this is the
+storage class, okay? Storage class has
+as I've told you, it has provisioner
+which defines how the storage will be
+provisioned. For example, whether it is
+AWS EBS, Azure files, GCP persistent
+disk, NFS, Portworx or any other.
+So that's is that is defined in the
+provisioner.
+And then these are the volume plugins,
+okay? Plugins as in it attaches the
+Kubernetes cluster to that respective
+cloud provider. For example, GCP, AWS or
+Azure
+and so on, right? So these are the
+volume plugins that is attached to the
+Kubernetes cluster and it maps your
+Kubernetes cluster with the cloud
+provider so that the storage can be
+provisioned over there.
+Okay? So that's provisioner, okay?
+And then we have parameters, like the
+configuration parameters. We'll look at
+that once we do the demo. Then it has
+the reclaim policy, like what happens to
+the storage when the underlying
+persistent volume will be deleted, okay?
+Or when the underlying persistent volume
+claim will be deleted, what happens to
+the persistent volume? So that's
+part of reclaim policy. It could be
+deleted, it could be retained, recycle.
+Recycle has been I believe it has been
+deprecated, but
+now it is retained or deleted.
+Okay, and then it has several other
+options.
+Now, the way it works is you create a
+storage class
+and when user creates a persistent
+volume claim using the storage class, it
+creates a persistent volume and then the
+persistent volume will be bounded to the
+persistent volume claim over here,
+Now, let's look at the
+example and let's look at the overall
+high level diagram of dynamic volume
+provisioning and static volume
+provisioning.
+So what happens in a static volume
+provisioning? Give me a second, I might
+have
+Okay, so how static provisioning works?
+This is something that we have discussed
+on a high level earlier. Let's have a
+look at that with the help of an
+example.
+So uh you create a persistent volume,
+okay? Like as a storage admin you create
+a persistent volume with 80 GI of
+uh
+storage and the mode is read write once,
+okay? So that's the mode. Mode is also
+part of storage
+like your storage class as well as
+persistent volume.
+And then your developer, when developer
+wants to create an application, it
+creates a pod or a workload.
+Then that person also create a
+let's say 10 GI and
+the same mode as your PV is created,
+read write once.
+Okay? So this
+the storage, it should be less than or
+equal to what is available, okay? That's
+one thing. Other is the mode should be
+same. So read write once, read write
+once. Once these things or these
+condition are matched, only then the PV
+will be bounded to the PVC.
+Okay? And this 10 GB, so we are
+requesting a slice from that persistent
+volume. So we have 80 GB of storage, out
+of that 10 GB we are taking and
+allocating it to the workload. So that's
+static provisioning.
+Okay? Now, what
+Okay, now there is dynamic provisioning
+as well in which
+there is a developer who requests the
+persistent volume claim over here, okay?
+Let's say 70 GI and this time the mode
+is RWX, read write many.
+Now, the persistent volume that we have
+over here, it has a different mode,
+okay? And we don't have this particular
+PV already present. We don't have
+anything that has 70 GI of storage and
+RWX as the
+mode.
+Storage mode, right? We don't have
+anything available. So this
+we cannot bound this, right? It does not
+satisfy the requirement.
+Even though the storage is similar, 70
+GB, but the mode is different. So we
+cannot use this one like. So what
+Kubernetes will do, based on the storage
+class that we have added in this PVC, it
+will create a new
+persistent volume with the same mode as
+this one,
+okay? And it will bound it to that.
+And this will happen with the help of
+storage class and this process is called
+dynamic volume provisioning, okay? So
+this was static provisioning, this is
+dynamic volume provisioning. Over here
+we are creating the PV in advance
+and a persistent volume claim will be
+attached to that PV, but over here we
+are not creating the PV in advance or
+even the one that we had does not
+satisfy our requirement. That's why it
+will dynamically create a PV and bound
+that PV to the persistent volume claim.
+Okay? So we will be doing a demo and in
+that demo we'll be creating
+two storage class, one for high
+performance and one that is cost
+effective. We'll be using the
+provisioner GC persistent disk. And the
+type of this will be PD SSD, the type of
+the other one will be PD standard so
+that separate
+persistent volumes can be used.
+And this has a specific use case for
+high performance computing and this is
+just for the dev test workload, okay? So
+let me share my
+screen and uh here it is. So, I have a
+GKE cluster created.
+Now, I'm going to log in to the cluster.
+So, there are multiple ways. I have
+created multiple videos around GKE, so
+you can walk through that.
+Or
+or you can just simply follow what I'm
+doing right now, okay? So, I'm just
+going to run that in the Cloud Shell,
+and it will help me log in to the
+cluster.
+Let's do that. And while it's doing, let
+me pause the recording. It might take a
+couple of minutes.
+Okay, I have logged in to the cluster.
+Now, what you can do is let me just
+change the prompt. It's too huge.
+All right.
+Okay. Now, let's try to check the
+default
+uh storage classes that are available,
+okay? So, cube CTL get storage class or
+SC.
+Okay, so we have three storage classes,
+as you can see. Uh first is premium RWO,
+that's the name. Second is standard.
+Third one is standard RWO. These are the
+provisioners. Provisioners
+uh GCE PD and PDCS as storage uh GKE. I
+hope so. They all are provisioner for uh
+GKE persistent disk or GKE.
+And it has different volume uh it has
+different
+uh what do you call
+volume binding mode, wait for first
+consumer or immediate. Right? So, wait
+for consumer means it will be bounded to
+the
+um the persistent volume, and persistent
+volume claim will be bounded once the
+pod that is requesting that storage is
+up and healthy. Okay, and immediate
+means the pod doesn't have to be there.
+Even if there is a PVC, PV will be
+bounded to that, okay?
+Now, um there is this default So, uh
+in front of the name, if it's written as
+default, that means that is the default
+storage class. So, when you create a PVC
+without mentioning the storage class, it
+will by default be created as standard
+RWO.
+Okay. So, now let's see if we can
+describe this. So, cube CTL describe
+storage class, name of the storage
+class.
+Okay. So, what does it say?
+Um the provisioner is this,
+and parameter is this. Parameter has a
+type PD-balanced. That means by default,
+PD persistent disk balance will be
+created. Okay, and there are some other
+options
+like mount mount option, reclaim policy
+is is default class is yes. That means
+that is the default storage class.
+Okay. You can also update the default
+storage class to something else. I'll
+show you how you can do that. Okay, so
+first let's let's begin with our demo.
+So, first I'm going to create two
+storage classes. One is for, let's say,
+high performance.
+So, I'm just going to paste the content.
+It's a kind is storage class.
+Okay, and it's um provisioned is GCE
+persistent disk.
+It will use PD-SSD. These are the zones
+that will it will be using, and
+replication type is regional.
+Um there are other details, okay? So,
+I'm just going to save this, and cube
+CTL
+apply {hyphen} f hp.
+Okay, it says created. So, cube CTL get
+storage class.
+Uh here is our storage class, which says
+the name high performance, okay? Now,
+let me try to create another one for our
+development workflow, okay? So, vi
+dev.yaml.
+Oops.
+vi dev.yaml
+Okay, it has a different type. It uses
+PD-standard. The other one was using uh
+was using balanced persistent disk, plus
+it was a regional persistent disk. So,
+now we are only creating a zonal
+persistent disk in one zone,
+because that is a cost-effective uh
+method that we are using, right?
+Cube CTL apply {hyphen} f dev.yaml.
+Okay. So, cost-effective high
+performance, both are
+uh storage classes have been created.
+Now, let's um
+Now, let's change the default storage
+class with what it has to something
+else.
+So, I'm going to run cube CTL patch
+command, and I'm going to make the
+cost-effective one as the default
+Okay. So, cube CTL patch storage class,
+name of the storage class, and this is
+the parameter. So, we are changing in
+the annotation, we are changing storage
+class is true.
+Okay, now it's been patched. And if I do
+get storage class, now we can see
+cost-effective is the default storage
+Now, let's try to create a persistent
+volume claim, and let's try to see how
+does it work, okay?
+So, pvc1.yaml.
+So, it's a persistent volume claim um
+and access mode is read write once,
+which which is matching with the storage
+class. Storage class name is high
+performance, and we are requesting 50 Gi
+of storage.
+So, cube CTL apply {hyphen} f pvc1.yaml.
+Okay, cube CTL get PVC.
+Okay, it says pending.
+And if we do get PV, uh it has not been
+created yet.
+So, let's wait.
+It should dynamically provision the
+Um let's wait.
+Let's check if uh everything is good. Uh
+let's check if it is matching with the
+cube CTL. Let's see.
+Get storage class.
+So, we have created the one for
+production, and it says name is high
+performance.
+Uses uh
+Get PV again. Nothing is there. Get PVC.
+Um
+storage class is high performance.
+And let's check this one more time.
+pvc1.yaml.
+Access mode is read write one. Um
+storage is 50, and
+Storage class name is good as well.
+Okay, let's try to create another one as
+well, and let's see after this.
+So, I'm going to create one for
+uh the development environment as well.
+So, pvc2.yaml.
+And over here, I have not specified the
+storage class name, so that it should
+use the default one.
+So, cube CTL apply {hyphen} f pvc2
+pvc2.yaml.
+Cube CTL get PVC.
+Okay, they both are pending.
+And we don't Okay. So, now dev storage
+is bounded, as you can see over here.
+Something wrong with the other one. I'll
+check that later on, but let's see the
+dev one.
+Cube CTL get PV. So, it created a
+persistent volume, okay?
+Uh with the storage class as
+cost-effective, because cost-effective
+is now the default storage class once we
+patched it.
+Okay, and cube CTL get PVC.
+Uh let's see why this is pending, okay?
+So, I'm going to describe it. Cube CTL
+describe
+PVC.
+Okay, it says waiting for the first
+consumer to be created before binding.
+Okay, and because this is a first
+consumer one, right? And the one that
+we've created earlier, get PVC.
+Let's see. This one, if I describe this
+one,
+cube CTL
+describe PVC
+dev app storage.
+It says waiting for the volume to be
+created. That's okay.
+And succeeded, and its volume mode is,
+let's see.
+I'm going to compare the uh
+storage class YAMLs for both. So, cat
+hp, which is high performance, over
+here.
+volume binding mode is wait for first
+consumer.
+And if I do dev one,
+volume binding mode is immediate. That
+is why it did not provision it. It was
+waiting for the pod to be provisioned
+first.
+So, let's change the one uh let's change
+the HP one.
+And let's change the volume binding mode
+to immediate, or you can create a pod
+and consume the volume. That's one and
+the same thing.
+Okay, and now let's apply the changes.
+Is invalid. Oh.
+Okay, field is immutable. It cannot be
+changed, so I have to delete it and then
+apply it again. Okay.
+Delete and then apply it again.
+Okay, if I do kubectl get PV.
+Okay, still not created. Let's wait for
+it.
+Still pending.
+kubectl Oh, it did not created It did
+not deleted the PVC actually. So, let's
+delete the PVC first.
+kubectl delete PVC.
+Okay, and we add PVC one.
+Over here, everything is good. Let's try
+to provision this again. kubectl apply
+hyphen f PVC one.
+Okay, kubectl get PVC.
+Still pending. Now, it's bound.
+Okay, says it's bound. And if I do
+kubectl get PV.
+So, you will see it is It has created
+another storage as well over here. So,
+we have two storage because I have
+created it twice.
+Um, I have not deleted the other one,
+and the reason over here is retained.
+That means when I deleted the earlier
+one, it was already bounded.
+And it retained it. Okay, and now when I
+created the PVC again, it created a new
+PV.
+So, that's what I wanted you to see. So,
+we have covered both the scenarios. We
+have covered all from the exam
+perspective as well, and all the
+fundamentals of PV, PVC, storage class.
+So, yeah, that's it for this video. I'm
+going to just clean up my cluster now.
+Make sure you delete the cluster once
+you are done, otherwise it will cost you
+a lot of money. So, thank you so much. I
+will see you soon with the next one, and
+you have a good day. Happy learning.
+
+
+================================================================================
+
+
+## 영상 3: Kubernetes Storage Explained in 30 Minutes | PV, PVC, Static vs Dynamic Provisioning | Chapter 9 (https://www.youtube.com/watch?v=YW3BFbXIB9U)
+
+Hey everyone, welcome back to Tech World
+with Sahana. Today I'm back with chapter
+9 of Kubernetes 0ero2 interview hero
+series. So some of our application may
+want to store some data even when the
+application pod is restarted or deleted.
+So that is why today our chapter 9 will
+focus on persistent volume, persistent
+volume claim and storage. And if you
+haven't watched from chapter 1 till
+chapter 8, make sure to check those
+chapters as well. I'll make sure to put
+the link in the description and I'll
+also pin them to the comment. So let's
+get started.
+This is a list of all the topics that we
+are going to cover today.
+Let's start with our first topic
+difference between volumes and
+persistent volumes.
+So in Kubernetes whenever you create a
+pod the container inside it is basically
+temporary and what that means is if that
+pod dies or gets recreated
+everything inside the container all your
+files logs whatever it generated is
+gone. Now obviously that's not always
+what we want. Sometime we need storage
+that lives longer than the port and
+that's where Kubernetes gives us two
+things volumes and persistent volumes.
+Now the first one volume is actually a
+very simple thing. Think of it like a
+temporary workspace. Kubernetes creates
+this space when your pod starts and the
+moment your pod is deleted, this space
+disappears too. So any data you saved
+inside this volume is also gone. It's
+good for short-term stuff. Maybe your
+application needs some temporary space
+to store files while it's running. But
+on the other side, we have persistent
+volume and this is different.
+Persistent volume is storage that lives
+independently of a pod. Even if your pod
+dies, Kubernetes does not delete the
+data. So if you're running databases or
+anything that needs long-term storage,
+persistent volumes are the way to go. So
+the big difference is a volume dies with
+the pot and the persistent volume lives
+outside the pot and continues to store
+data even after the pot is recreated.
+Let's check out this pod yl for normal
+volume. Here we are using a empty
+directory.
+This creates a temporary directory. When
+the pod starts and as soon as the pod is
+deleted, the storage disappears.
+The container is mounting that directory
+at user share engine xhtml path. So
+anything written there will go inside
+this temporary storage and it will be
+lost when the pod goes away.
+Now let's check out this YAML for
+persistent volume. But with this we also
+need a PVCL and a pod YAML. In this YAML
+we first create a persistent volume with
+1gi storage using a host path.
+This is storage. This storage is
+independent from any pod. Even if pods
+are deleted, the data inside this PV
+stays. Then we create a PVC which is
+basically the request for storage.
+And finally the pod mounts this PVC. So
+now whenever the pod writes to user
+share engine HTML path will be stored on
+the persistent volume and won't
+disappear when the pod is removed. This
+is just the basic connection which I'm
+showing you. In the next topic, we will
+go deeper into how PV and PVC work, how
+binding works and how a pod actually
+claims storage.
+Moving on with our next topic, deep dive
+with PV and PVC. So now that we
+understand the basic difference between
+a volume and a persistent volume, let's
+go a little deeper into how persistent
+volume actually works inside Kubernetes.
+A persistent volume or a PV is simply a
+piece of storage in the cluster. It
+could be coming from anywhere, your
+local machine, NFS, cloud storage or a
+CSI driver. The important part is that
+the PV exist independently of your pod.
+But a PV alone isn't enough. Your pod
+does not directly talk to PV. Instead,
+Kubernetes introduces something called
+persistent volume claim or PVC. And the
+PVC is basically the request for
+storage. Your application does not care
+about where the storage physically comes
+from. It just says like, hey, I need 1GI
+of storage with this access mode. And
+the PVC is what sends that request. Now
+when a Kubernetes sees a PVC requesting
+storage, it looks around for a PV that
+matches the claim, same size, same
+access mode, same storage class if
+required. And if it finds one, it binds
+the PVC to that PV. This binding is
+oneonone and once they are bound, the
+PVC will always point to that specific
+PV unless you delete the claim.
+After that your pot can mount the PVC.
+So the PV is the actual storage. PVC is
+the request for that storage and the pod
+only cares about the PVC. It never
+directly interacts with PV. Now let's
+understand the YAML for persistent
+volume. In this PV definition, we are
+describing a piece of storage that
+physically exist in the cluster. We are
+giving Kubernetes a 5GI storage space
+telling it how this volume can be
+accessed and where this storage actually
+lives on the node using host path. The
+reclaim policy is set to retain which
+means that even if the claim using this
+volume is deleted, Kubernetes will keep
+the data instead of wiping it out. The
+storage class name is set to manual
+which simply groups this PV so that only
+PVCs with the same class can bind to it.
+Now let's understand the YAML for
+persistent volume claim. This PVC is
+simply the application's request for
+storage. It asks Kubernetes for 5GI
+opace with the same access mode and the
+same storage class as the PV we created
+earlier. Because these details match
+exactly, Cubanetus automatically binds
+this PVC to the PV. Once the binding is
+done, the PVC becomes linked to that
+specific PV and won't switch to another
+one unless it's deleted. From this point
+onwards, the PV acts as a stable handle
+that application can use to access the
+underlying storage without ever needing
+to know the physical location or how the
+PV is configured. Now let's check out
+how do we configure this for a
+particular port. In this part YAML, we
+are simply mounting the PVC that was
+previously bound to the PV. The port
+never talks to PV directly. instead uses
+the PVC as the access point. When the
+pod starts, Kubernetes looks at the PVC
+name, finds the PV that the PVC is
+already bound to, and mounts that
+storage into the container at V data.
+From inside the container, it feels like
+a regular directory, but every file
+written there is actually stored on the
+PV. This means the data survives spot
+deletion, restarts, recreation because
+the PVC PV connection stays intact. So
+at this point the entire chain is
+complete. The PV provides the actual
+storage. PVC claims and reserves that
+storage and the pod consumes the PVC and
+uses the underlying PV transparently. So
+pods may come and go but the storage
+remains stable and consistent allowing
+your application to keep its data even
+in a dynamic environment.
+Moving on with our next topic static
+provisioning.
+Static provisioning means you manually
+create the storage before any
+application asks for it. As a cluster
+admin, you first define a persistent
+volume and make it available in the
+cluster. Later, when an application
+creates a persistent volume claim,
+Kubernetes checks if there's already a
+persistent volume that matches the
+request. If a matching persistent volume
+exist, Kubernetes binds the persistent
+volume claim to it. Nothing is created
+automatically here. Everything depends
+on persistent volumes that were defined
+in advance.
+This approach gives you full control
+over where the storage comes from and
+how it is managed.
+Now let's check out the persistent
+volume YAML. Here we are statically
+creating a persistent volume with 10 GI
+of storage. This volume is created ahead
+of time and exist even if no application
+is using it. By defining the storage
+size, access mode, reclaim policy and
+storage class, we are telling Kubernetes
+exactly what this persistent volume
+offers. At this stage, the persistent
+volume is available but unused. waiting
+for a persistent volume claim that
+matches its requirement. And in the
+persistent volume claim YAML, the this
+persistent volume claim request for 10
+GI of storage using the same storage
+class and access mode as the stratically
+created PV. When Cubernetus processes
+this claim, it searches for an existing
+persistent volume that matches these
+required details.
+Since the persistent volume already
+created
+and matches perfectly, cubernetus binds
+this persistent volume claim to that
+particular persistent volume. This
+binding confirms that the stratically
+provisioned storage is now reserved for
+this particular claim. Now let's look at
+this pod yl which mounts the persistent
+volume claim that is already bound to
+the stratically created persistent
+volume. When the pod starts, kubernetes
+attaches the existing persistent volume
+to the pod through persistent volume
+claim and makes the storage available at
+v data. Even if the spot is deleted and
+recreated, the same persistent volume
+will continue to be used because the
+persistent volume claim remains bound.
+This shows that the key idea behind
+static provisioning is that storage is
+created first and applications simply
+claim and use it later.
+Next we have dynamic provisioning.
+So dynamic provisioning removes the need
+to manually create persistent volumes in
+advance. Instead of an admin precreating
+the persistent volumes, Kubernetes
+automatically creates the storage when
+an application asks for it. This happens
+using something called storage class.
+When a persistent volume claim reference
+a storage class that supports dynamic
+provisioning, Kubernetes talks to a
+storage back end and creates a new
+persistent volume on the fly. The
+persistent volume is then immediately
+bound to the persistent volume claim. So
+here the storage is created only when it
+is actually needed.
+First we need storage class YAML. This
+storage class defines how the storage
+should be created dynamically.
+The provisioner tells Kubernetes which
+storage system should be used to create
+volumes.
+The volume binding mode controls when
+the actual volume gets created and
+bound. With this storage class in place,
+Cubernetus now knows how to dynamically
+create storage when a persistent volume
+claim asks for it.
+Then we need a persistent volume claim
+YAML and this does not rely on
+pre-existing persistent volume. Instead,
+it reference the storage class meant for
+dynamic provisioning.
+When Kubernetes processes this
+persistent volume claim, it sees that no
+persistent volume exist yet and
+automatically creates a new persistent
+volume using the rules defined in the
+storage class. The newly created
+bound to this persistent volume claim.
+Now let's understand this pod. So when
+this pod starts, Kubernetes sees that it
+is using a dynamically provisioned
+persistent volume claim. Since the
+persistent volume claim is already bound
+to a dynamically created persistent
+volume, Kubernetes attaches that storage
+to the pod at data. From the
+application's perspective, nothing
+changes. It just sees a directory and
+behind the scenes, Kubernetes handled
+the creation, binding, attachment of
+storage automatically.
+So finally with dynamic provisioning you
+no longer manage persistent volume
+manually. The storage class defines how
+the storage should be created. The
+persistent volume claim triggers the
+creation of a new persistent volume and
+the pot simply consumes the persistent
+volume claim.
+Kubernetes takes care of the entire life
+cycle making dynamic provisioning ideal
+for large clusters and cloud environment
+where storage need to scale
+automatically.
+Now moving on with our next topic access
+modes. So far in all the YAML we have
+been writing you must have noticed one
+field showing up again and again access
+modes. Now let's slow down a bit and
+actually understand what this field
+controls in Kubernetes. Access modes
+define how a persistent volume can be
+mounted and shared. It control how many
+pods and how many nodes are allowed to
+use the same storage at the same time.
+Among all the access mode, Kubernetes
+supports the two most commonly used ones
+are readr once and read many. Let's
+understand what each of them really
+means in practice. First, let's
+understand read write once RWO.
+With read write ones, the volume can be
+mounted as readrite by only one node at
+the time. This means that even if
+multiple pods are using the same
+persistent volume claim, they must all
+run on the same node.
+This access mode is commonly used for
+workloads like databases where you want
+to make sure that only one node is
+writing to the disk to avoid data
+corruption.
+Now look at this YAML here read write
+once. This tells Kubernetes that this
+storage can be mounted in readr mode but
+only from a single node.
+If Kubernetes tries to schedule another
+pod using the same persistent volume
+claim on a different node, it will not
+allow that pod to start inside the
+container. The volume might be mounted
+at path like v data but the restriction
+is enforced at the node level not at the
+directory level. Now let's understand
+readrite many rwx.
+Rewrite many allows the same volume to
+be mounted as a readr by multiple nodes
+at the same time. This means pods
+running on different nodes can all read
+from and write to the same storage
+simultaneously.
+This is useful for shared storage use
+cases such as shared applications like
+files upload or workload where multiple
+replicas need access to the same data.
+Not all storage type supports retrried
+many. Typically this requires
+networkbased storage like NFS or CSI
+driver that supports shared storage. Now
+look at this YAML here. Readrite many
+tells Kubernetes that multiple nodes are
+allowed to mount this volume at the same
+time. From the port's perspective,
+nothing changes. The persistent volume
+claim is still mounted at path like v
+data but behind the scenes cubernetus
+now allows multiple board across
+different nodes to access the same
+storage.
+Moving on with our next topic reclaim
+policies in Kubernetes a reclaim policy
+defines what should happen to the actual
+storage after the persistent volume
+claim is deleted. Up until now,
+everything we discussed was about how
+the storage is used by a pod. Reclaim
+policy is about what happens after the
+application is gone. When the pod is
+deleted, nothing happens to the storage.
+But when a persistent volume claim is
+deleted, Kubernetes looks at the reclaim
+policy of the persistent volume and
+decides what to do next. So reclaim
+policy controls the end of the storage
+life cycle, not the runtime behavior.
+Now let's see what actually happens with
+each reclaim policy.
+First we have the retain reclaim policy.
+When a persistent volume uses the retain
+reclaim policy, Kubernetes keeps the
+data exactly as it is after the
+persistent volume claim is deleted. The
+persistent volume moves into a released
+state. But Kubernetes does not delete
+the data and does not make the volume
+available for automatic reuse. The
+storage is still there, but it's now the
+administrator's responsibility to decide
+what to do with it. This is commonly
+used when data is important and should
+never be deleted automatically like
+database storage. Next reclaim policy we
+have is delete.
+So with the delete reclaim policy,
+Kubernetes removes the underlying
+storage automatically. When the
+persistent volume claim is deleted, once
+the claim is gone, Kubernetes deletes
+the persistent volume and also deletes
+the actual storage resource behind it.
+This is very common in cloud environment
+where the volumes are dynamically
+provisioned. This policy is useful when
+the data is temporary and you don't want
+to manage cleanup manually.
+Last topic we have is volume life cycle.
+So now let's talk about what actually
+happens to a volume over time. Storage
+in Kubernetes is not just created and
+used forever. It goes through a life
+cycle from the moment it becomes
+available to the moment it is finally
+released or deleted. The life cycle
+mainly revolves around three things. The
+persistent volume, the persistent volume
+claim and the pod. Each one has a role
+and cubernetes moves the volume through
+different phases based on what happens
+to these objects. Phase one is volume
+creation. A volume first comes into
+existence as a persistence volume. This
+can happen in two ways. You can create
+it manually via static provisioning or
+cubernetes creates it automatically via
+dynamic provisioning. At this point the
+persistent volume exist in the cluster
+but is not attached to any application.
+It is just available storage waiting to
+be used. Phase two is claiming the
+volume. Here a persistent volume claim
+is created. When Kubernetes sees this
+persistent volume claim, it tries to
+find the matching persistent volume
+based on storage size access mode
+storage class. If a suitable persistent
+volume is found or dynamically created,
+Kubernetes binds the persistent volume
+claim to the persistent volume. From
+this moment, the persistent volume is
+reserved and cannot be claimed by
+anything else. Phase three is pod uses
+the volume. Once the persistent volume
+claim is bound, a pod can reference it.
+When the pod starts, Kubernetes attaches
+the underlying persistent volume, mounts
+it into the container at the specific
+path. At this stage, the application is
+actively reading from and writing to the
+volume.
+The pod may restart or be recreated, but
+as long as the persistent volume claim
+exist, the same storage is reused. Phase
+four is pod deletion. When a pod is
+deleted, nothing happens to the data.
+The volume is simply detached from the
+pod. The persistent volume claim remains
+bound to persistent volume and thus data
+stays exactly as it was.
+This is a critical idea that ports are
+temporary but volumes are not.
+Phase five, persistent volume claim
+deletion. When the persistent volume
+claim is deleted, the persistent volume
+enters the new state. What happens next
+depends on your reclaim policy of the
+persistent volume.
+If you use retail, the data is kept and
+the persistent volume must be cleaned up
+manually. If you use delete, cubernetes
+deletes the underlying storage
+automatically. At this point, the
+persistent volume is no longer usable by
+the application unless it is reclaimed
+or recreated.

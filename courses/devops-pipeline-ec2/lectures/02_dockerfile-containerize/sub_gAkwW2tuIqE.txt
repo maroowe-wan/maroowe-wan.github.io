@@ -1,0 +1,407 @@
+Kind: captions
+Language: en
+one of the leading causes of imposter
+syndrome among developers is not knowing
+docker it makes it hard to go to parties
+where everybody's talking about
+kubernetes
+swarms shuffle sharding while you hide
+in the corner googling what is a
+container we've all been there at one
+point or another
+in today's video you'll learn everything
+you need to know about docker to survive
+as a developer in 2020
+we'll take a hands-on approach by
+containerizing a node.js application
+i'll assume you've never touched a
+docker container before so we'll go
+through installation and tooling
+as well as the most important
+instructions in a dockerfile in addition
+we'll look at very important advanced
+concepts like port forwarding
+volumes and how to manage multiple
+containers with docker compose
+we'll do everything step by step so feel
+free to skip ahead with the chapters in
+the video description
+what is docker from a practical
+standpoint it's just a way to package
+software so it can run on any hardware
+now in order to understand how that
+process works there are three things
+that you absolutely must know
+docker files images and containers a
+docker file is a blueprint for building
+a docker image
+a docker image is a template for running
+docker containers
+a container is just a running process in
+our case we have a node application we
+need to have a server that's running the
+same version of node and that has also
+installed these dependencies
+it works on my machine but if someone
+else with a different machine tries to
+run it with a different version of node
+it might break
+the whole point of docker is to solve
+problems like this by reproducing
+environments the developer who creates
+the software can define the environment
+with a docker file
+then any developer at that point can use
+the docker file to rebuild the
+environment which is saved as an
+immutable snapshot known as an image
+images can be uploaded to the cloud in
+both public and private registries
+then any developer or server that wants
+to run that software
+can pull the image down to create a
+container which is just a running
+process of that image in other words one
+image file can be used to spawn the same
+process multiple times in multiple
+places
+and it's at that point where tools like
+kubernetes and swarm come into play
+to scale containers to an infinite
+workload the best way to really learn
+docker
+is to use it and to use it we need to
+install it if you're on mac or windows i
+would highly recommend installing the
+docker desktop application it installs
+everything you need for the command line
+and also gives you a gui where you can
+inspect your running containers
+once installed you should have access to
+docker from the command line and here's
+the first command you should memorize
+docker which gives you a list of all the
+running containers on your system
+you'll notice how every container has a
+unique id and is also linked to an image
+and keep in mind you can find the same
+information from the gui as well now the
+other thing you'll want to install is
+the docker extension for vs code or for
+your ide
+this will give you language support when
+you write your docker files and can also
+link up to remote registries and a bunch
+of other stuff
+now that we have docker installed we can
+move on to what is probably the most
+important section of this video and
+that's the docker file
+which contains code to build your docker
+image and ultimately run your app as a
+container
+now to follow along at this point you
+can grab my source code from github or
+fireship io or better yet
+use your own application as a starting
+point in this case i just have a single
+index.js file
+that exposes an api endpoint that sends
+back a response
+docker is easy then we expose our app
+using the port environment variable
+and that'll come into play later the
+question we're faced with now is how do
+we dockerize this app
+we'll start by creating a docker file in
+the root of the project
+the first instruction in our docker file
+is from and if you hover over it it will
+give you some documentation about what
+it does
+you could start from scratch with
+nothing but the docker runtime however
+most docker
+files will start with a specific base
+image for example
+when i type ubuntu you'll notice it's
+underlined and when i control click it
+it will take me to all the base images
+for this flavor of linux and then you'll
+notice it supports a variety of
+different tags which are just different
+variations on this base image
+ubuntu doesn't have nodejs installed by
+default we could still use this image
+and install node.js manually
+however there is a better option and
+that's to use the officially supported
+node.js image
+we'll go ahead and use the node version
+12 base image which will give us
+everything we need to start working with
+node in this environment
+the next thing we'll want to do is add
+our app source code to the image
+the working directory instruction is
+kind of like when you cd into a
+directory
+now any subsequent instructions in our
+docker file will start from this app
+now at this point there is something
+very important that you need to
+understand
+and that's that every instruction in
+this docker file is considered its own
+step or layer
+in order to keep things efficient docker
+will attempt to cache layers
+if nothing is actually changed now
+normally when you're working on a node
+project
+you get your source code and then you
+install your dependencies but in docker
+we actually want to install our
+dependencies first so they can be cached
+in other words we don't want to have to
+reinstall all of our node modules every
+time we change our app source code we
+use the copy instruction which takes two
+arguments
+the first argument is our local package
+json location
+and then the second argument is the
+place we want to copy it in the
+container which is the current working
+and now that we have a package json we
+can run the npm install command
+this is just like opening a terminal
+session and running a command
+and when it's finished the results will
+be committed to the docker image as a
+layer
+now that we have our modules in the
+image we can then copy over our source
+code
+which we'll do by copying over all of
+our local files to the current working
+but this actually creates a problem for
+us because you'll notice that we have a
+node modules folder here in our local
+file system
+that would also be copied over to the
+image and override the node modules that
+we install there
+what we need is some kind of way for a
+docker to ignore our local node modules
+we can do that by creating a docker
+ignore file
+and adding node modules to it it works
+just like a git ignore file which you've
+probably seen before
+okay so at this point we have our source
+code in the docker image
+but in order to run our code we're using
+an environment variable we can set that
+environment variable in the container
+using the env
+instruction now when we actually have a
+running container we also want it to be
+listening on port 8080 so we can access
+the nodejs express app publicly
+and we'll look at port some more detail
+in just a minute when we run the
+and that brings us to our final
+instruction command there can only be
+one of these per docker file and it
+tells the container how to run the
+actual application
+which it does by starting a process to
+serve the express app you'll also notice
+that unlike run
+we've made this command an array of
+strings this is known as exec form
+and it's the preferred way to do things
+unlike a regular command it doesn't
+start up a shell session
+and that's basically all there is to it
+we now have a full set of instructions
+for building a docker image
+and that brings us to the next question
+how do we build a docker image
+you build a docker image by running the
+docker build command there's a lot of
+different options you can pass with the
+command but the one you want to know for
+right now
+is tag or t this will give your image a
+name tag that's easy to remember so you
+can access it later
+when defining the tag name i'd first
+recommend setting up a username on
+docker hub
+and then do that username followed by
+whatever you want to call this image
+so in my case it would be fireship slash
+demo app and you could also add a
+version number separated by a colon
+from there you simply add the path to
+your docker file which in our case is
+just a period for the current working
+when we run it you'll notice it starts
+with step one which is to pull the node
+12 image remotely
+then it goes through each step in our
+docker file and finally it says
+successfully built the
+image id and now that we have this image
+we can use it as a base image to create
+other images or we can use it to run
+containers
+in real life to use this image you'll
+most likely push it to a container
+registry somewhere
+that might be docker hub or your
+favorite cloud provider and the command
+you would use to do that is
+docker push then a developer or server
+somewhere else in the world could use
+docker pull to pull that image back down
+but we just want to run it here locally
+in our system so let's do that with the
+docker run command
+we can supply it with the image id or
+the tag name and all that does
+is create a running process called a
+container and we can see in the terminal
+it should say app listening on localhost
+8080. but if we open the browser and go
+to that address we don't see anything
+so why can't i access my container
+locally remember we exposed port 8080 in
+our docker file
+but by default it's not accessible to
+the outside world let's refactor our
+command to use the p
+flag to implement port forwarding from
+the docker container to our local
+machine
+on the left side we'll map a port on our
+local machine 5000 in this case
+to a port on the docker container 8080
+on the right side
+and now if we open the browser and go to
+localhost 5000 we'll see the app running
+there
+now one thing to keep in mind at this
+point is that the docker container will
+still be running even after you close
+the terminal window
+let's go ahead and open up the dashboard
+and stop the container you should
+actually have two running containers
+here if you've been following along
+when you stop the container any state or
+data that you created inside of it will
+be lost
+but there can be situations where you
+want to share data across multiple
+and the preferred way to do that is with
+volumes a volume is just a dedicated
+folder on the host machine
+and inside this folder a container can
+create files that can be remounted into
+future containers or multiple containers
+at the same time
+to create a volume we use the docker
+volume create command
+now that we have this volume we can
+mount it somewhere in our container when
+we run it
+multiple containers can mount this
+volume simultaneously and access the
+same set of files
+and the files stick around after all the
+containers are shut down
+now that you know how to run a container
+let's talk a little bit about debugging
+when things don't go as planned you
+might be wondering how do i inspect the
+logs and how do i get into my container
+and start interacting with the command
+line
+well this is where docker desktop really
+comes in handy if you click on the
+running container you can see all the
+logs right there
+and you can even search through them you
+can also execute commands in your
+container by clicking on the cli button
+and keep in mind you can also do this
+from your own command line using the
+docker exec command
+in any case it puts us in the root of
+the file system of that container so we
+can then ls to see files
+or do whatever we want in our linux
+environment that's useful to know but
+one of the best things you can do to
+keep your containers healthy
+is to write simple maintainable micro
+services each container should only run
+one process
+and if your app needs multiple processes
+then you should use multiple containers
+and docker has a tool designed just for
+that called docker compose
+it's just a tool for running multiple
+docker containers at the same time
+we already have a docker file for our
+node app but let's imagine that our node
+app also needs to access a mysql
+database
+and we also likely want a volume to
+persist the database across multiple
+we can manage all that with docker
+compose by creating a
+docker-compose.yaml file in the root of
+our project
+inside that file we have a services
+object where each key
+in that object represents a different
+container that we want to run
+we'll use web to define our node.js app
+that we've already built
+and then we'll use build to point it to
+the current working directory which is
+where it can find the docker file
+and then we'll also define the port
+forwarding configuration here as well
+then we have a separate container called
+db which is our mysql database process
+after services we'll also define a
+volume to store the database data across
+multiple containers
+and then we can mount that volume in our
+db container and hopefully you're
+starting to see how much
+easier it is to define this stuff as
+yaml as opposed to writing it out as
+individual commands
+and now that we have this configuration
+set we can run docker compose up from
+the command line which will find this
+file
+and run all the containers together we
+can mess around with our app for a
+little while
+and then run docker compose down to shut
+down all the containers together
+i'm going to go ahead and wrap things up
+there if this video helped you please
+like and subscribe and consider becoming
+a pro member at fireship io
+where we use docker in a variety of
+different project-based courses
+thanks for watching and i will see you
+in the next one

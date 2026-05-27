@@ -1,0 +1,260 @@
+Kind: captions
+Language: en
+This is the third part of the Amazon EKS&nbsp;
+tutorial. Let’s say you have created a&nbsp;&nbsp;
+development EKS Kubernetes cluster. If&nbsp;
+you used an IAM user to create the EKS,&nbsp;&nbsp;
+only you have access to that cluster.&nbsp;
+It’s very likely that you have other&nbsp;&nbsp;
+team members who would like to do something&nbsp;
+with that cluster. You may have other DevOps&nbsp;&nbsp;
+team members that would need admin&nbsp;
+privileges to maintain the cluster.
+You may also have, let’s say,&nbsp;&nbsp;
+development team 1 that needs access to a&nbsp;
+specific namespace like team1 namespace.
+You could create a namespace&nbsp;
+resource quota; for example,&nbsp;&nbsp;
+this team can only use 10 CPU and 20Gi of&nbsp;
+memory and create a maximum of 12 pods.
+You create quotas to avoid any&nbsp;
+interference between teams.
+One team could use all the EKS resources,&nbsp;
+and if the other team tries to deploy,&nbsp;&nbsp;
+sometimes pods will be in a pending state,&nbsp;&nbsp;
+and you can be sure that they will blame&nbsp;
+you for the EKS cluster being broken.
+You could also have another&nbsp;
+development team, let’s say team 2,&nbsp;&nbsp;
+that needs read and write access to another&nbsp;
+team2 namespace for their development work.
+You can grant access to an individual user,&nbsp;&nbsp;
+but the better approach would be to&nbsp;
+create a common IAM role for the team,&nbsp;&nbsp;
+assign all the permissions to that role,&nbsp;
+and allow team members to assume that role.
+Later, you may create a dedicated EKS&nbsp;
+cluster for the production environment.
+Typically, you would only grant read access to the&nbsp;&nbsp;
+developers for them to be&nbsp;
+able to debug if necessary.
+By using RBAC, you could also grant&nbsp;
+them only permissions to access the&nbsp;&nbsp;
+application logs in their namespaces. So&nbsp;
+there is a lot of flexibility in RBAC.
+Now, on the AWS side, we can use IAM users or&nbsp;
+IAM roles as objects that represent identities.
+On Kubernetes, for the identities,&nbsp;&nbsp;
+we can use Kubernetes service&nbsp;
+accounts, users, and RBAC groups.
+In this video, we’ll map an IAM user and, in&nbsp;
+the second part, an IAM role to custom RBAC&nbsp;&nbsp;
+groups that would have different permissions.
+I have another tutorial that covers&nbsp;
+RBAC in detail if you want to&nbsp;&nbsp;
+learn how to grant your identities&nbsp;
+granular access within Kubernetes.
+For the first example, we’ll&nbsp;
+use an IAM user as well as an&nbsp;&nbsp;
+IAM policy with a minimum set&nbsp;
+of permissions for that user.
+It will only allow updating the local Kubernetes&nbsp;
+config and connecting to the EKS cluster.
+On the Kubernetes side, we’ll create a viewer&nbsp;
+role with read-only permissions to access&nbsp;&nbsp;
+certain objects from the core Kubernetes&nbsp;
+API, such as deployments and configmaps.
+Then we’ll use ClusterRoleBinding to bind this&nbsp;
+viewer RBAC role to a new my-viewer RBAC group.
+And finally, in order to link the&nbsp;
+IAM user with this RBAC group,&nbsp;&nbsp;
+we’ll use the EKS API instead of&nbsp;
+the old deprecated auth configmap.
+The best practice is not to use identities&nbsp;
+such as IAM users with long-term credentials.
+Instead, for the second part,&nbsp;
+we’ll create an IAM role and an IAM&nbsp;&nbsp;
+policy that would grant that IAM role&nbsp;
+admin access to EKS on the AWS side.
+On the Kubernetes side, we can’t use built-in&nbsp;
+RBAC groups that start with system prefix,&nbsp;&nbsp;
+so we’ll use the default cluster-admin cluster&nbsp;
+role and bind it with our new my-admin group.
+Next, we’ll create a manager&nbsp;
+IAM user and an additional IAM&nbsp;&nbsp;
+policy that would allow this user&nbsp;
+to assume the eks-admin IAM role.
+Finally, we’ll bind that IAM role with the&nbsp;
+Kubernetes my-admin RBAC group using the EKS API.
+First of all, let’s go over the&nbsp;
+Kubernetes RBAC part. Let’s create a&nbsp;&nbsp;
+ClusterRole with read-only permissions for&nbsp;
+all namespaces. Those users will get get,&nbsp;&nbsp;
+list, and watch permissions for objects&nbsp;
+like deployments and secrets. The star&nbsp;&nbsp;
+indicates the core API group. You can call&nbsp;
+this role reader or viewer, it’s up to you.
+Now we need to bind this role to some kind&nbsp;
+of Kubernetes entity. We can use users,&nbsp;&nbsp;
+Kubernetes service accounts, or, like in&nbsp;
+this case, we can create a my-viewer RBAC&nbsp;&nbsp;
+group. I intentionally use different&nbsp;
+names to make it obvious in the next&nbsp;&nbsp;
+step which entity we will link with&nbsp;
+AWS IAM User. Besides the group,&nbsp;&nbsp;
+we need to specify which role we want to bind&nbsp;
+to this group. In this case, it’s viewer.
+Let’s go ahead and apply the role and binding.
+Next, we need an IAM user to play with.&nbsp;
+You can create this user from the console,&nbsp;&nbsp;
+but I’ll use Terraform to create the user and&nbsp;
+the AWS console to generate keys. However,&nbsp;&nbsp;
+you can do everything through Terraform.
+First of all, let’s use the aws_iam_user Terraform&nbsp;
+resource to create a developer IAM user in AWS.&nbsp;&nbsp;
+Then, we need to grant access to EKS in AWS to&nbsp;
+at least be able to update the local Kubernetes&nbsp;&nbsp;
+config and connect to the cluster. This is the&nbsp;
+minimum requirement. This user won’t be able&nbsp;&nbsp;
+to view workloads in the AWS console, just&nbsp;
+connect to the EKS cluster. And, of course,&nbsp;&nbsp;
+you can restrict it to a certain cluster only,&nbsp;
+for example, to only the development EKS cluster.&nbsp;
+Next, we directly attach this policy to&nbsp;
+our user. The best practice, of course,&nbsp;&nbsp;
+is to attach those permissions to an IAM&nbsp;
+group and place the user in that group.
+Next, the most important part is to bind the&nbsp;
+developer IAM user with the RBAC my-viewer&nbsp;&nbsp;
+group using the EKS API. This part used to be&nbsp;
+managed through the Kubernetes auth configmap,&nbsp;&nbsp;
+but now it is deprecated, and this&nbsp;
+is the only recommended option.&nbsp;
+Alright, let’s go ahead and apply Terraform.
+Now we have the developer user,&nbsp;
+and the next step is to generate&nbsp;&nbsp;
+security credentials for our user. It’s&nbsp;
+pretty much the same as we did in the&nbsp;&nbsp;
+first section. The difference here is that&nbsp;
+we’ll create a custom profile for that user.
+Let’s run aws configure and&nbsp;
+give this profile a name,&nbsp;&nbsp;
+developer. Copy the access key ID&nbsp;
+as well as the secret access key.
+Next, let’s make sure that we configure&nbsp;
+that profile correctly and can access&nbsp;&nbsp;
+AWS. You can see the ARN of the user is developer.
+The next step is to connect to the EKS&nbsp;
+cluster. It’s pretty much the same command;&nbsp;&nbsp;
+just add the profile developer. Most of&nbsp;
+the AWS CLI commands accept this flag.&nbsp;
+Now we can quickly check that the local&nbsp;
+Kubernetes config uses the developer&nbsp;&nbsp;
+profile. You can see below the profile&nbsp;
+that was used to connect to the EKS.
+Let’s check if we have access&nbsp;
+to the cluster. If you remember,&nbsp;&nbsp;
+we created a custom cluster role for this user&nbsp;
+and bound it with the my-viewer group. So,&nbsp;&nbsp;
+we should be able to get pods in all namespaces.
+Kubectl has a subcommand that can help you check&nbsp;&nbsp;
+access to Kubernetes. First, the verb is for the&nbsp;
+action, like get; second, for the type of object,&nbsp;&nbsp;
+in this case, pod. So the answer is yes. Now,&nbsp;
+let’s see if we can get nodes. We have an error&nbsp;&nbsp;
+since the viewer cluster role does not have&nbsp;
+permissions for global resources. We can use&nbsp;&nbsp;
+the same auth subcommand and get the no answer.
+Also, to check if the user has admin privileges,&nbsp;&nbsp;
+you use a star for the action&nbsp;
+and for the resource type. So,&nbsp;&nbsp;
+the developer obviously doesn’t have admin access.
+Next, we’ll create another manager IAM user and&nbsp;&nbsp;
+IAM role and grant admin privileges in the&nbsp;
+cluster. Kubernetes ships with a default&nbsp;&nbsp;
+cluster-admin role and group. However, the EKS&nbsp;
+API for managing access won’t let us use default&nbsp;&nbsp;
+groups that start with the system prefix. So, we&nbsp;
+need to create our own admin group in Kubernetes.&nbsp;
+It’s actually very easy; we’ll&nbsp;
+use the existing cluster-admin&nbsp;&nbsp;
+role and bind it to our new my-admin group.
+Now, before we can apply this cluster binding,&nbsp;&nbsp;
+we need to switch to the previous user that&nbsp;
+created the EKS cluster and has admin access. Just&nbsp;&nbsp;
+run the update one more time without specifying&nbsp;
+the profile; it will use the default profile.
+Let’s apply the binding and create the my-admin&nbsp;
+RBAC group. Next, we need to create a manager&nbsp;&nbsp;
+IAM user and role using Terraform.
+First, we need an AWS account number&nbsp;&nbsp;
+for the IAM role. You can hardcode it, but a&nbsp;
+better approach would be to use the Terraform&nbsp;&nbsp;
+data resource to dynamically retrieve it.
+Next, we create an IAM role that would get admin&nbsp;&nbsp;
+privileges inside the Kubernetes cluster,&nbsp;
+and you can share this role with anyone who&nbsp;&nbsp;
+needs it. There are a couple of ways to define&nbsp;
+trust relationships with users. One way is to&nbsp;&nbsp;
+create a role and use root as a principal.&nbsp;
+In this way, potentially all users in that&nbsp;&nbsp;
+AWS account will get access to that role.
+Next, we need to create an IAM policy with&nbsp;&nbsp;
+admin access inside the AWS account, so&nbsp;
+these permissions are granted on the AWS&nbsp;&nbsp;
+side. You can also grant additional&nbsp;
+permissions to view all EKS tabs.&nbsp;
+Next, we bind the IAM role with those permissions.
+Alright, the next step is to create another IAM&nbsp;&nbsp;
+user and let that user assume this role. We’ll&nbsp;
+also use Terraform to create the user and will&nbsp;&nbsp;
+generate keys manually. Keep in mind that when&nbsp;
+you decide to tear down the infrastructure, for&nbsp;&nbsp;
+example, to run terraform destroy, first you would&nbsp;
+need to manually delete keys from AWS, otherwise,&nbsp;&nbsp;
+Terraform won’t be able to delete these users.
+Next, let’s create an IAM policy that would allow&nbsp;&nbsp;
+assuming the EKS IAM admin role. It’s very simple;&nbsp;
+we just use the ARN for that role under the&nbsp;&nbsp;
+resource. Next, we attach that policy to the user.&nbsp;
+Again, best practice is to create an IAM group.&nbsp;
+Then we use the EKS API and&nbsp;
+bind the IAM role, in this case,&nbsp;&nbsp;
+with the my-admin RBAC group inside Kubernetes.
+Alright, let’s go ahead and apply it.&nbsp;
+Now we have a manager user, and&nbsp;
+we need to generate security&nbsp;&nbsp;
+keys to create a local AWS profile.
+Let’s configure the manager profile, but&nbsp;&nbsp;
+we will not use it directly to access EKS, so keep&nbsp;
+watching. Copy the access key and the secret key.&nbsp;
+Now, this is an important check: if we can&nbsp;
+assume the eks-admin IAM role. If you get&nbsp;&nbsp;
+temporary credentials back, it means&nbsp;
+you configured everything correctly.&nbsp;
+Now we need to create another AWS profile&nbsp;
+manually. You can use any text editor.&nbsp;
+Right, under the manager profile, let’s create&nbsp;
+another one and call it eks-admin profile. That&nbsp;&nbsp;
+profile doesn’t have any credentials; instead,&nbsp;
+it will use the manager profile to assume&nbsp;&nbsp;
+this role and obtain a temporary session&nbsp;
+token. So, we have the eks-admin profile,&nbsp;&nbsp;
+IAM role, and manager source profile.
+Again, let’s update the Kubernetes config,&nbsp;&nbsp;
+but this time use the eks-admin profile, not&nbsp;
+manager. Check if the correct profile is used.&nbsp;&nbsp;
+Try to get the pods and check if you are an&nbsp;
+admin in that cluster. And the answer is yes.
+Lastly, let’s see what the&nbsp;
+access tab in EKS shows.&nbsp;&nbsp;
+So we have the eks-admin role bound to&nbsp;
+my-admin and the IAM user developer bound&nbsp;&nbsp;
+to the my-viewer RBAC group. Don’t forget to&nbsp;
+delete security keys manually from the AWS&nbsp;&nbsp;
+console before running terraform destroy and&nbsp;
+use IAM roles instead of binding single IAM&nbsp;&nbsp;
+users to groups in Kubernetes. The next part&nbsp;
+will cover the Horizontal Pod Autoscaler and&nbsp;&nbsp;
+how to install the metrics server in&nbsp;
+EKS using the Helm Terraform provider.

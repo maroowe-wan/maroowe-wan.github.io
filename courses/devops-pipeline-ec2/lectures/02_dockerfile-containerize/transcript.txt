@@ -1,0 +1,255 @@
+## Video 1: Learn Docker in 7 Easy Steps - Full Beginner's Tutorial (https://www.youtube.com/watch?v=gAkwW2tuIqE)
+
+One of the leading causes of imposter syndrome among developers is not knowing Docker. It makes it hard to go to parties where everybody's talking about Kubernetes, swarms, shuffle, sharding while you hide in the corner googling what is a container.
+
+In today's video you'll learn everything you need to know about Docker to survive as a developer. We'll take a hands-on approach by containerizing a Node.js application. We'll go through installation and tooling as well as the most important instructions in a Dockerfile. We'll also look at very important advanced concepts like port forwarding, volumes and how to manage multiple containers with Docker Compose.
+
+What is Docker? From a practical standpoint it's just a way to package software so it can run on any hardware. There are three things that you absolutely must know: Dockerfiles, images and containers.
+
+A Dockerfile is a blueprint for building a Docker image. A Docker image is a template for running Docker containers. A container is just a running process.
+
+In our case we have a Node application. We need to have a server that's running the same version of Node and that has also installed these dependencies. It works on my machine but if someone else with a different machine tries to run it with a different version of Node, it might break.
+
+The whole point of Docker is to solve problems like this by reproducing environments. The developer who creates the software can define the environment with a Dockerfile. Then any developer at that point can use the Dockerfile to rebuild the environment which is saved as an immutable snapshot known as an image.
+
+Images can be uploaded to the cloud in both public and private registries. Then any developer or server that wants to run that software can pull the image down to create a container which is just a running process of that image. In other words one image file can be used to spawn the same process multiple times in multiple places.
+
+And it's at that point where tools like Kubernetes and Swarm come into play to scale containers to an infinite workload.
+
+The best way to really learn Docker is to use it. If you're on Mac or Windows, I would highly recommend installing the Docker Desktop application. It installs everything you need for the command line and also gives you a GUI where you can inspect your running containers.
+
+Once installed you should have access to Docker from the command line. Docker ps gives you a list of all the running containers on your system. Every container has a unique ID and is also linked to an image.
+
+You'll also want to install the Docker extension for VS Code or for your IDE. This will give you language support when you write your Dockerfiles and can also link up to remote registries.
+
+Now that we have Docker installed, the most important section is the Dockerfile, which contains code to build your Docker image and ultimately run your app as a container.
+
+You can grab the source code from GitHub or better yet use your own application as a starting point. In this case we just have a single index.js file that exposes an API endpoint that sends back a response.
+
+The question we're faced with now is how do we dockerize this app. We'll start by creating a Dockerfile in the root of the project.
+
+The first instruction in our Dockerfile is FROM. You could start from scratch with nothing but the Docker runtime, however most Dockerfiles will start with a specific base image. When I type Ubuntu, it will give me all the base images for this flavor of Linux, and then you'll notice it supports a variety of different tags which are just different variations on this base image.
+
+Ubuntu doesn't have Node.js installed by default. We could still use this image and install Node.js manually, however there is a better option and that's to use the officially supported Node.js image. We'll go ahead and use the Node version 12 base image which will give us everything we need to start working with Node in this environment.
+
+The next thing we'll want to do is add our app source code to the image. The WORKDIR instruction is kind of like when you cd into a directory. Now any subsequent instructions in our Dockerfile will start from this app directory.
+
+Every instruction in this Dockerfile is considered its own step or layer. In order to keep things efficient Docker will attempt to cache layers if nothing is actually changed.
+
+Normally when you're working on a Node project you get your source code and then you install your dependencies but in Docker we actually want to install our dependencies first so they can be cached. We don't want to have to reinstall all of our Node modules every time we change our app source code.
+
+We use the COPY instruction which takes two arguments. The first argument is our local package.json location and then the second argument is the place we want to copy it in the container which is the current working directory.
+
+Now that we have a package.json we can run the npm install command. This is just like opening a terminal session and running a command and when it's finished the results will be committed to the Docker image as a layer.
+
+Now that we have our modules in the image we can then copy over our source code. But this actually creates a problem because you notice that we have a node_modules folder here in our local file system that would also be copied over to the image and override the node_modules that we install there.
+
+What we need is some kind of way for Docker to ignore our local node_modules. We can do that by creating a .dockerignore file and adding node_modules to it. It works just like a .gitignore file.
+
+So at this point we have our source code in the Docker image. But in order to run our code we're using an environment variable. We can set that environment variable in the container using the ENV instruction.
+
+When we actually have a running container we also want it to be listening on port 8080 so we can access the Node.js Express app publicly.
+
+And that brings us to our final instruction, CMD. There can only be one of these per Dockerfile and it tells the container how to run the actual application, which it does by starting a process to serve the Express app. We've made this command an array of strings, which is known as exec form, and it's the preferred way to do things. Unlike a regular command, it doesn't start up a shell session.
+
+We now have a full set of instructions for building a Docker image.
+
+You build a Docker image by running the docker build command. The tag or -t flag will give your image a name tag that's easy to remember so you can access it later.
+
+When defining the tag name I'd first recommend setting up a username on Docker Hub and then do that username followed by whatever you want to call this image. You could also add a version number separated by a colon.
+
+When we run it, it starts with step one which is to pull the Node 12 image remotely. Then it goes through each step in our Dockerfile and finally it says successfully built the image ID.
+
+In real life to use this image you'll most likely push it to a container registry somewhere that might be Docker Hub or your favorite cloud provider. But we just want to run it here locally in our system.
+
+Let's do that with the docker run command. We can supply it with the image ID or the tag name and all that does is create a running process called a container.
+
+If we open the browser and go to that address we don't see anything. Why can't I access my container locally? Remember we exposed port 8080 in our Dockerfile but by default it's not accessible to the outside world.
+
+Let's refactor our command to use the -p flag to implement port forwarding from the Docker container to our local machine. On the left side we'll map a port on our local machine, 5000 in this case, to a port on the Docker container, 8080 on the right side.
+
+Now if we open the browser and go to localhost:5000 we'll see the app running there.
+
+One thing to keep in mind at this point is that the Docker container will still be running even after you close the terminal window.
+
+When you stop the container, any state or data that you created inside of it will be lost. But there can be situations where you want to share data across multiple containers, and the preferred way to do that is with volumes.
+
+A volume is just a dedicated folder on the host machine and inside this folder a container can create files that can be remounted into future containers or multiple containers at the same time.
+
+To create a volume we use the docker volume create command. Now that we have this volume we can mount it somewhere in our container when we run it. Multiple containers can mount this volume simultaneously and access the same set of files and the files stick around after all the containers are shut down.
+
+Now that you know how to run a container, let's talk a little bit about debugging. When things don't go as planned you might be wondering how do I inspect the logs and how do I get into my container and start interacting with the command line.
+
+Well this is where Docker Desktop really comes in handy. If you click on the running container you can see all the logs right there and you can even search through them. You can also execute commands in your container by clicking on the CLI button.
+
+You can also do this from your own command line using the docker exec command. It puts us in the root of the file system of that container so we can then ls to see files or do whatever we want in our Linux environment.
+
+One of the best things you can do to keep your containers healthy is to write simple maintainable microservices. Each container should only run one process. If your app needs multiple processes then you should use multiple containers.
+
+Docker has a tool designed just for that called Docker Compose. It's just a tool for running multiple Docker containers at the same time.
+
+We already have a Dockerfile for our Node app but let's imagine that our Node app also needs to access a MySQL database and we also likely want a volume to persist the database across multiple containers.
+
+We can manage all that with Docker Compose by creating a docker-compose.yaml file in the root of our project.
+
+Inside that file we have a services object where each key in that object represents a different container that we want to run. We'll use web to define our Node.js app that we've already built and then we'll use build to point it to the current working directory which is where it can find the Dockerfile.
+
+Then we'll also define the port forwarding configuration here as well. Then we have a separate container called db which is our MySQL database process.
+
+After services we'll also define a volume to store the database data across multiple containers and then we can mount that volume in our db container.
+
+You can see how much easier it is to define this stuff as YAML as opposed to writing it out as individual commands.
+
+Now that we have this configuration set we can run docker compose up from the command line which will find this file and run all the containers together. We can mess around with our app for a little while and then run docker compose down to shut down all the containers together.
+
+## Video 2: What is Dockerfile | How to create and build Dockerfile | Dockerfile Basic Commands (https://www.youtube.com/watch?v=LQjaJINkQXY)
+
+Hello and welcome to this session on Dockerfile. This is going to be a very easy and interesting session on Dockerfile. We will go very basic step by step and learn what is a Dockerfile, how to create a Dockerfile, how to build images from Dockerfile and then we will also run these images to create containers.
+
+Dockerfile is a simple text file with instructions to build an image. Dockerfile is a simple text file where we give some instructions to build an image and when we do docker build for this Dockerfile, an image gets created.
+
+Until now we have been getting our images from Docker Hub. If you want to create your own image you can use a Dockerfile. Dockerfile is basically automation of Docker image creation.
+
+There are some basic instructions that you use in a Dockerfile. Step one is we have to create a file named Dockerfile. By default when you run the docker build command, Docker searches for a file named Dockerfile, however it is not compulsory. You can also give some different name and then you can tell Docker that this particular file is a Dockerfile.
+
+If you are on Mac or Windows you can create a folder and a new file named Dockerfile without any extension. For people who are following this on Linux and a command line operating system, you can do this from the command line itself.
+
+The very first instruction that a Dockerfile starts with is FROM, and you have to give a base image. For example, if I want to get a base image from Ubuntu, I will say FROM ubuntu.
+
+Ideally we always use some base image but just in case you do not want to use any base image, you can also say FROM scratch. If you go to Docker Hub, there is another image called scratch and this is basically an empty image which is used for building images from scratch.
+
+The other instruction is that you have to give a MAINTAINER. This is optional but it's best practice that you give a maintainer of this image so that it is very easy to find out who is the maintainer and you can give your name and email as well.
+
+Then let's say I want to run something, so I will say RUN. For example, if you want to run something on the command line during container creation, you can give this RUN instruction.
+
+If you want to set a command that executes only when you create a container out of the image, you can use CMD and inside square brackets I will echo a hello world message.
+
+The difference between RUN and CMD is RUN gets executed during the building of the image, however the command that you give inside CMD gets executed only when you create a container out of the image.
+
+To build the image, you can use docker build. You have to give the location of your Dockerfile, either you can give the absolute location or if you are already on that location, you can say docker build and a dot so that means the Dockerfile is present inside this folder itself.
+
+You can also use the -t flag for tagging your images so I can give a name to my image. This will be easy to find out this image later on.
+
+When you run the docker build command, you can see it is running step one from Ubuntu, so it will get the Ubuntu image. It did not find it locally so it is pulling from the Docker Hub library and it is now extracting.
+
+You can see step two which is MAINTAINER, step three where we do apt-get update and it is running all this command in the image and then step 4 is CMD and it is saying successfully built.
+
+If I say docker images, you can see the image we created. The tag is 1.0, this is the image ID and this was created recently.
+
+To run this image I will say docker run. I can give the image name or the image ID. Yes, you can see it is saying hello world from my first Docker image. This is what we have put in our Dockerfile.
+
+So our image is created successfully and we are able to run it to create a container as well.
+
+## Video 3: Build YOUR OWN Dockerfile, Image, and Container - Docker Tutorial (https://www.youtube.com/watch?v=SnSH8Ht3MIc)
+
+You may have noticed that we spin up all kinds of containers. They range from containers for media consumption, containers for creating content, containers for monitoring, containers for logging and metrics, containers for home automation, containers for custom code and even containers for gaming.
+
+While all these containers are really awesome and give us a ton of utility, I realized that I might have skipped over a very important and essential part of containers and that's creating our own container.
+
+What is a container? A container is a standard unit of software that packages up code and all of its dependencies so that applications run quickly and reliably from one environment to another. That helps prevent the works on my machine symptoms you sometimes hear in software development.
+
+A Docker container image is a lightweight standalone executable package of software that includes everything needed to run an application: code, runtime, system tools, libraries and settings. Think of it like software that has batteries included. Once you bundle all of that up, it's called an image and these images become containers when they run.
+
+This image can be lifted and shifted to Windows, Mac or Linux and it will run the same regardless of infrastructure. That's what makes images so powerful, not only during development but also during runtime.
+
+We're going to create an image that's a little more useful than the typical hello world tutorials you see out there for Docker. It's going to be a tiny web server to serve out a web page through Nginx. We're going to make sure we can build it, run it and test it on our own machine and then we'll touch briefly on how we can automate this making it repeatable on other machines.
+
+It all starts out with a Dockerfile. At first glance this isn't anything special if you look at it, it's just a file named Dockerfile but that's really all it takes to start your first Docker image.
+
+In the first line, we're going to type FROM. FROM specifies what base image we'll be using to build our own image. Almost every single image for Docker is based on another image and most of them are Linux.
+
+You can specify an image like Ubuntu and this will give you a good starting point with all the dependencies from Ubuntu to build your image. But if we're building a web server, we don't want to base it off of Ubuntu. We want to base it off something much much smaller.
+
+As we mentioned we want to do that off of Nginx. If we set Nginx, now our base image is from Nginx and this is actually coming from Docker Hub. In Docker Hub you can see many different tags for this image.
+
+We have version tags, we have unversioned tags and then we have some that include some additional dependencies like Perl or we have some that are based off an entirely different base image altogether like Alpine.
+
+We can pin this to any of the tags we just saw. If we want to get the latest 1.10.1, this will give us the latest Nginx image but this image although small is a little bit bigger than the Alpine one. The base Nginx image is around 50 megabytes but we wanted this to be tiny so we're actually going to choose the Alpine version.
+
+Alpine is super tiny, it's like 19 megabytes. Alpine Linux is a super tiny Linux distribution, I think it's only like five megabytes so super tiny. A lot of image maintainers base their images off of Alpine because it's so darn small.
+
+Next up are environment variables and they use the keyword ENV. You can see it's just a key value pair. If we wanted to set an environment variable of foo equals bar we could or bar equals bats we could do that too.
+
+We're not going to use any environment variables. If we do need them, we'll pass them in when we create our container rather than specify them here. But if you're inheriting from an image that requires some variables to be passed in, you could do it here too.
+
+The next command we're going to use and you see often is the COPY command. The COPY command takes two parameters: it takes a source and a destination.
+
+What are we going to copy and where are we going to copy it to? The COPY command can actually copy files from the host machine into our actual image. For us that means copying in our website or some static pages for this to serve up.
+
+We need to create a web page. Let's create a source folder and in this source folder let's create a new folder called html and in here let's create an index.html. In this index.html, let's copy some simple HTML. This is a real simple web page with HTML tags, body tag, h1 tag saying hello, then saying it works on my machine and then a paragraph saying it works on every machine.
+
+Let's also add a couple of images: a wave and a whale so let's include these in our web page.
+
+Let's test this really quick. Just did a file open on the index.html with the browser and it works. It's not winning any awards but it does work.
+
+Now that we have our web page, we can go back to the Dockerfile because we were talking about the COPY command. The COPY command takes a source and a destination.
+
+The source is all of the source.html and the destination is going to be /usr/share/nginx/html. I know this because I've used Nginx a few times before but this is where Nginx keeps its default site that it's going to serve out. This is copying it inside of this image where Nginx lives in a location that's going to serve out these files automatically.
+
+So far we've inherited from the base image Nginx that's based on Alpine, we're going to copy in our web page, our source files.
+
+Next, we're gonna expose some ports. We don't really need to do this but let me show you how this works. We can expose a port of 80. We can specify whether it's TCP or UDP. Really we don't need to do this at all because when someone uses this image and they create a container from it they can specify any port they want. So really this is documentation telling the person who uses this which port they should use.
+
+Nginx with the default configuration is set to use port 80, so this is documentation really.
+
+Next, we'll need to define a command, use for the entry point and the keyword we use for that is CMD. We should specify an executable, the executable is Nginx but we also want to pass some arguments to it.
+
+We need to pass -g and turn daemon off. We actually need to pass an array of parameters. This looks kind of funny but we would do it like this. This is saying when this container starts up, run Nginx dash g daemon off.
+
+So the contents are really really simple. But how do we build it? How do we spin it up? It's really simple but first you need to make sure you have Docker installed and you can check by running docker info.
+
+To build our container, we need to make sure we're in the folder where our Dockerfile is. If I cat it out you can see the contents from Nginx, copy some files.
+
+We should be able to just run docker build dot. This is saying Docker engine run build and basically look for a Dockerfile in the relative path, which is here, the current path.
+
+If we run this command we see it's starting to build. We see it loading the Nginx image so it's pulling the Nginx image down, extracting, building and it looks like it's built.
+
+To check this image that was just built, we should be able to run docker images and see our image here. We can see we have an image ID which is the one we just built and it doesn't have a tag.
+
+If we wanted to build one with the tag we would run docker build -t name your image hello-internet and then a path to the Dockerfile which is this current directory.
+
+So we've run this again it'll build the container really quick and if we run docker images again we can now see our tagged image. The name is hello-internet, the tag is latest, image ID and about a minute ago.
+
+We have an image but we don't have a container yet. How do we create a container? Remember we said an image becomes a container when we actually execute it.
+
+We execute it by running docker run -d or daemon, -p to expose some ports and then the ports we want to expose. When we're building our image it really doesn't matter if you expose those ports within the actual image because we're going to expose them here in our container.
+
+Then last, we actually need our image ID. This is saying docker run as a daemon, expose port 80 on the inside to the port of 80 on the outside and use this image ID.
+
+If we run that we get this long ID back and our container should be running. How do we know if it's running? We should be able to run docker ps and see it running here. We see this container that has a name of brave carver and it's running created 11 seconds ago and it's been up for 10 seconds.
+
+You can see on the machine all IPs 480 is mapped to 80 TCP. This is a good sign so we should be able to go to localhost:8080 and see our webpage.
+
+That is awesome so we have a Docker container running that was based on the image we created which was based off of Nginx. We created some HTML and some images and put it inside of that container image.
+
+We ran it on port 8080 and we see it serving our files. This now will work on any machine that supports Docker or containerd. As long as it's running a container engine we could run this on Windows, Mac or Linux and it'll execute and run just the same.
+
+How do we actually stop it now? You can see it's still running and it's going to run indefinitely so to stop it we just run docker stop and then the image name or ID. If we run docker ps we don't see it anymore but it's actually there stopped. We didn't remove it.
+
+If we run docker ps -a we can see this container is here and it's exited and it was stopped recently. If we want to run this again we don't need to create another image. We can just run docker start and this image name to start it back up.
+
+If we were on docker ps we see it's running and if we refresh again it's running again. Let's actually remove this container so we run docker rm and the container name. That removes the container but if we look we still see we have the image there.
+
+If we run docker images that's still there. To remove an image we just run docker rmi and then the image name or ID. Now that deleted the image off of our machine.
+
+Another thing worth mentioning is a .dockerignore file. A .dockerignore file is a simple file that tells Docker to ignore files when it builds your container image, similar to a .gitignore file.
+
+If we create a new file and call it .dockerignore, we get an icon meaning we created the right thing and then we can specify files to ignore.
+
+In ignore files you usually see some of the usual suspects: artifacts of builds or errors or things while you're debugging that you actually don't want to put inside of your container.
+
+Let's say for instance we had a password.txt file in here and we had some secret password. If we have this password file inside of here and we run the docker build, the Docker build is actually going to copy everything from HTML which includes this password.txt and put it inside of our image.
+
+That means that file will live inside of the image and anyone who spins this container up can actually see that file. The solution is to use the .dockerignore file.
+
+We add password.txt to our .dockerignore file. We might think we just add password.txt here and we're covered but we're actually not because .dockerignore files are relative to the file that you want to ignore.
+
+Since this password.txt file is inside src/html it won't get ignored. We can fix that by simply adding ** so this is a glob pattern basically saying ignore password.txt anywhere in the path.
+
+Let's build this container using this .dockerignore file with the ignore for this password.txt file. Docker build dot then we get our ID here then we want to run this image with this ID turning it into a container.
+
+Now we have the container ID then we want to exec into that container ID again and then we want to change directory to where all of our files are and if we do an ls we see that we don't have a password.txt file.
+
+Creating your own custom Docker images can be really easy and really powerful. We started out with nothing, created a Dockerfile, leaned into a base image, created a web page, built our own custom Docker container from that and then created a container running on our very own machine serving up a web page we built ourselves.
+
+If you're interested in how to build these container images during CI, we can add some examples to our repo.

@@ -1,0 +1,365 @@
+Kind: captions
+Language: en
+hi I'm Julius so maybe you just got
+started with Prometheus monitoring and
+now you're wondering how to create
+dashboards based on the data you're
+collecting
+so that's where most people turn to the
+open source grafana dashboard Builder
+since Prometheus itself doesn't actually
+come with full dashboarding features
+that's why in this video I'm going to
+give you a quick intro to using grafana
+with Prometheus first we're going to
+download and run grafana just in case
+you don't have it yet then we're going
+to configure it to fetch data from a
+Prometheus server and finally we're
+going to create a demo dashboard there's
+a billion things we could do with
+grafana but just to get started we're
+going to create three types of panels a
+Time series chart a gauge panel and a
+table
+by the way you don't need a Prometheus
+server to follow along for this video
+I'm also just going to be using the
+publicly available promenaps demo server
+that you can reach at demo.promlabs.com
+if you do want to use your own server
+and you don't have one yet check out
+this setup video I made up here alright
+let's go
+first let's set up grafana there's many
+different ways how you can do this but
+two of the basic alternatives are to
+either run it using Docker or by using
+the pre-built binaries that you can run
+directly on your machine
+if you want to go the docker route you
+can start grafana using their public
+Docker image like this
+starts grafana and makes it listen on
+Port 3000
+you can also run it in the background
+using the Dash D flag give the container
+a proper name and a persistent data
+volume so that it remembers the
+dashboards that you build across
+restarts
+the second alternative is to use the
+pre-compiled binaries that graphina
+offers for that let's head to the
+graphina homepage at grafina.com and go
+to the downloads page and instead of
+cloud we're going to select self-managed
+and finally we're going to click on the
+download button on grafana itself
+I'm going to download the Open Source
+version although it doesn't really
+matter as long as you're only using the
+free features
+it already pre-selected Linux as the
+operating system here which is great
+since I'm on Linux
+now I'll just scroll down to the
+Standalone binary section down here and
+click on the archive name to download it
+now I'll switch to a terminal here and
+go to the downloads folder and I'll
+unpack the tarball and change into the
+unpacked directory
+let's have a look at what got unpacked
+here
+so the conf directory has the default
+configuration files for grafana which
+started on Port 3000. and the bin
+directory has the grafana server binary
+which we can use right now to start
+grafana using the default config
+all right grafana is now listening on
+Port 3000 so let's head there in the
+browser
+the default username and password are
+admin and admin so we can just log in
+with that
+now it asks me to change the admin
+password but for this demo I will just
+skip that
+as a first step before we can even start
+visualizing any data from Prometheus we
+need to First tell grafana about our
+Prometheus server and the URL that it's
+running on to do that I'm going to click
+on add your first data source here and
+select Prometheus as the data source
+type
+we only need to change two Fields here
+first I'm going to choose demo
+Prometheus as the data source name and
+since this is the first data source that
+we are creating it's already set to be
+the default
+and secondly as the URL of this
+Prometheus server I'm going to use the
+prom Labs demo Prometheus server that is
+running publicly on the internet
+there are many other settings here like
+HTTP and authentication options but for
+this demo we can leave all of them at
+their default values since that
+primitive server is not secured in any
+way
+so now we scroll down and click save and
+test to check that the data source is
+working
+great so now grafana is all set up to
+send prom KL queries to Prometheus
+so let's create our first dashboard by
+going to the dashboards menu on the left
+and selecting new dashboard
+that drops us into an empty new
+dashboard where we can add panels like
+time series charts tables histogram heat
+maps and many other visualization types
+so let's start out with just a Time
+series chart showing some data from our
+Prometheus server I'll click on add a
+new panel which puts us into the edit
+view for that new panel now there's a
+lot going on here but there's roughly
+three main sections at the top there's
+the actual visualization itself that
+will end up showing on the dashboard
+below that is where you input the
+queries to fetch the data to display
+above and on the right you can find a
+large number of options to configure
+what the panel should look like
+all right so let's first set the time
+range for the graph to 30 minutes since
+that'll look better with the data that
+we're going to be selecting
+now let's add a query below we can see
+that our demo Prometheus data source is
+already selected here since it was the
+default data source so we can leave that
+as is
+now we can use this graphical promql
+query Editor to select the latency
+histogram metric from a demo service
+that the Primitive server is monitoring
+and rather than showing that metric in
+its raw form let's add some
+transformation steps to it to aggregate
+it and calculate the 95th percentile
+latency from it for every path and
+Method label
+and don't worry if you don't get all the
+prompt L details here we'll definitely
+talk about those in later videos
+by the way in case you're finding this
+video useful and want to see more
+Prometheus content in the future please
+consider liking the video and maybe even
+subscribing to the channel because that
+really helps out the YouTube algorithm
+and more people will be able to find
+these videos
+so now let's run the query and you can
+see that the panel above shows the fetch
+time series data as a chart over the
+last 30 minutes by the way grafana has
+two different modes for inputting prompt
+ql queries you can either use this
+graphical query Builder or you can
+switch over to the code view to see and
+edit the textual prompt URL query itself
+note that this generated query now
+contains a grafana template variable
+that is not part of promptql itself
+those template variables are replaced
+with concrete values by grafana before
+sending a query to Prometheus so in this
+example this rate interval variable
+helps us automatically select the rate
+averaging window that is suitable for
+the resolution of the promql query
+if you look at the legend in the graph
+and hover over the series you'll see
+that grafana has automatically named the
+series as Prometheus wood with label
+pairs in curly braces
+if we want to format the legend
+differently we can open the query
+options down here and change the legend
+option from Auto to custom
+that allows us to enter a custom Legend
+format string where we can interpolate
+label values by referring to the label
+names in double curly braces
+so for example let's change the legend
+to only show the label values for the
+path in method labels and separate those
+by long Dash
+now our Legend already looks nicer
+when looking at a panel on the dashboard
+it's important to be able to quickly
+understand what the panel shows and what
+it means so let's give this a panel a
+title of 95th percentile request latency
+and we can see that the panel now shows
+this title
+another thing that's not clear yet by
+just looking at the panel is the unit we
+might know that the underlying histogram
+metric is in seconds but grafana has no
+clue about that yet so let's search for
+unit in the panel options on the right
+and select seconds to tell grafana that
+our underlining data is in seconds
+now grafana interprets our data
+correctly and automatically shows values
+in milliseconds on the y-axis
+finally let's hit the apply button which
+takes us back to the dashboard with our
+newly created graph panel
+okay let's create a gauge panel next by
+hitting the add panel button and going
+to add a new panel again
+and this time we're going to set the
+panel type to gauge
+and we're going to enter a promptql
+query that shows us CPU usage for three
+different demo service instances with
+the output values varying somewhere
+between 0 and 1 for each of the
+instances
+we can explicitly tell grafana about
+these Min and Max values so that it
+knows how large to make the big value
+bar in each gauge display
+and let's also set the unit to be a
+percentage but a percentage that is
+actually coming in as a ratio between 0
+and 1.
+now that looks a whole lot better
+already with a percentage being
+displayed in the panel now
+we can also add color coding to the
+different value thresholds so let's say
+that we want to consider 80 CPU usage
+high and we want to display everything
+above that as red
+for that let's search for the thresholds
+options up here and change the default
+red threshold of 80 to 0.8 since that's
+the equivalent of 80 in our underlying
+ratio data
+all right now we see where the red
+region would begin
+and finally let's clear the search bar
+up here and give the chart a title again
+we're going to call it instant CPU usage
+and hit apply to save this panel
+as our third and last panel let's
+display some data in a table so we're
+going to create the new panel as before
+but this time we're going to set the
+panel type to table
+in our prompt ql query we're going to
+select the top three request rates that
+our demo service is getting grouped by
+path and Method labels
+Now by default this table won't look
+right yet we see a bunch of different
+values over time for a single selected
+Time series
+and we can select which time series to
+show but we would actually like to see
+all time series at once and only the
+latest value for each one of them
+so first of all let's switch the format
+option from time series to table and
+secondly let's change the query type
+from range to instant so that we only
+fetch One latest value for each series
+if we run the query again now the table
+looks much better already showing us the
+top three request rates
+however maybe we don't want to show the
+timestamp column since that timestamp is
+always going to be the latest one
+so there's actually multiple ways to get
+rid of that and I'll just show you two
+alternatives
+the first option is to add a query
+transform by going to the transform
+section and choosing the organize Fields
+transform in there we can simply click
+the I icon next to the time field to
+hide it from the table
+now I'll just undo that and also remove
+the transform again so I can show you
+the other option
+for this other option we have to scroll
+down all the way in the panel options
+add a field overwrite and then choose
+field width type for that override now
+that allows us to select a specific type
+of field to overwrite and we're going to
+select time
+we then add an override property to hide
+this kind of field in the table
+and finally I still need to enable the
+overwrite we just created now as you can
+see it removed the time field in our
+table again
+and finally let's again choose a unit
+for our panel here which in this case is
+requests per second or RPS
+and we'll set the panel title to be top
+three rates
+great now we have a dashboard with three
+panels as a quick last thing I'll show
+you how you can organize panels within a
+dashboard into thematic rows for example
+we might want to group together the two
+HTTP stats panels into one row and the
+CPU stats into another one
+we are going to do that by clicking add
+panel as before but instead of adding a
+new panel we're going to add a new row
+instead
+let's repeat that one more time
+and now we can rename the rows by
+hovering over them and hitting the
+settings icon
+the first one we're going to call HTTP
+stats
+and the second one we're going to call
+CPU stats
+now we can grab each panel by its title
+bar and drag it into the right row
+you can collapse the rows by clicking on
+them and you can also drag them around
+using the right hand side handles to
+reorder them on the dashboard
+finally let's save the dashboard by
+hitting the save icon and I'm going to
+call it demo dashboard now we got the
+dashboard showing a chart a gauge and a
+table and we organized our panels into
+rows alright so that's how easy it is to
+get started with grafana and Prometheus
+I hope this was useful and I'm going to
+cover a lot more Prometheus topics in
+future videos that go beyond these
+Basics so be sure to like And subscribe
+if you want to get more of that also if
+you would like to learn Prometheus in a
+structured way right now I'm making
+these self-paced training courses at
+training.promlabs.com so check out those
+as well and see you soon

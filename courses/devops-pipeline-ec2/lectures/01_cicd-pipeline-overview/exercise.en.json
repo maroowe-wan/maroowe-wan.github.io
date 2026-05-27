@@ -1,0 +1,61 @@
+{
+  "lecture_no": 1,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "A developer says, 'Continuous Deployment means every change must be manually approved before going to production.' Which part of this statement is incorrect, and why?",
+      "options": [
+        "The statement is fully correct — manual approval is always required in CD.",
+        "Continuous Deployment automatically ships every passing change all the way to production; Continuous Delivery is the variant that keeps a manual approval gate before production.",
+        "Continuous Deployment means deploying only once a week with manual checks.",
+        "Both Continuous Delivery and Continuous Deployment require a manual approval step before production."
+      ],
+      "answer_index": 1,
+      "explanation": "Option B is correct. Continuous Delivery keeps every change in a deployable state but may retain a final manual approval gate. Continuous Deployment removes that gate entirely and ships every change that passes automated checks directly to production. The other options confuse the two terms or invent a weekly deployment cadence that is not part of either definition."
+    },
+    {
+      "question": "Which of the following best explains why ordering pipeline stages as Source → Build → Test → Deploy protects a production environment?",
+      "options": [
+        "It ensures that all developers merge their code at the same time, avoiding conflicts.",
+        "Each stage acts as a gate: a failure stops the pipeline before the artifact progresses, so untested or broken code can never reach the deploy stage.",
+        "Running stages in sequence is faster than running them in parallel.",
+        "The Deploy stage cannot start until the Source stage has been running for at least five minutes."
+      ],
+      "answer_index": 1,
+      "explanation": "Option B captures the core principle of the four-stage pipeline described in the lecture. Because each stage only passes control to the next if it succeeds, a build failure prevents testing, and a test failure prevents image creation and deployment. This 'fail fast' pattern is what keeps bad code from reaching users. Options A, C, and D describe unrelated or fabricated mechanics."
+    },
+    {
+      "question": "In the course pipeline, which component receives the webhook notification from GitLab and then executes the build, test, and deploy stages?",
+      "options": [
+        "AWS EC2",
+        "AWS ECR",
+        "Jenkins",
+        "Docker Compose"
+      ],
+      "answer_index": 2,
+      "explanation": "Jenkins is the automation server in this pipeline. When a developer pushes code, GitLab sends an HTTP POST (the webhook) to Jenkins, which then checks out the code, runs tests, builds a Docker image, pushes it to ECR, and deploys to EC2. EC2 is the deployment target, ECR is the image registry, and Docker Compose is the container orchestration tool on EC2 — none of them react directly to the GitLab push event."
+    },
+    {
+      "question": "A team is still deploying manually on a weekly basis, and they experience a failed deployment at 9 p.m. on a Friday. Which characteristic of manual deployment does this scenario illustrate?",
+      "options": [
+        "Manual deployment is fast but lacks traceability.",
+        "Manual deployment is reproducible but depends on a senior engineer being available.",
+        "Manual deployment is slow, stressful, and depends on a human being available — making off-hours failures hard to recover from.",
+        "Manual deployment is safe because a senior engineer reviews every step."
+      ],
+      "answer_index": 2,
+      "explanation": "The lecture explicitly describes this scenario: if something breaks at 9 p.m. and nobody is watching, customers are stuck until morning. This illustrates that manual deployment requires a human to be available, awake, and careful — and when they are not, recovery is delayed. Option A is wrong because manual deployment is not fast. Option B is wrong because reproducibility is exactly what manual deployment lacks. Option D romanticises manual review as safety, which the lecture contradicts."
+    },
+    {
+      "question": "After completing this course, what happens between the moment a developer runs 'git push' and the moment the new version is live on EC2?",
+      "options": [
+        "The developer must SSH into EC2 and manually run docker compose up.",
+        "A GitLab CI job builds and deploys the image without involving Jenkins.",
+        "Jenkins checks out the code, builds and tests it, builds a Docker image, pushes it to ECR, SSHes into EC2, swaps the container, and confirms with a health check — all automatically.",
+        "The new image is emailed to an operations team who deploy it during business hours."
+      ],
+      "answer_index": 2,
+      "explanation": "Option C accurately describes the automated end-to-end flow presented in the lecture's pipeline overview: GitLab webhook → Jenkins → checkout → build/test → Docker image → ECR push → EC2 SSH → docker compose → health check / rollback. Option A describes the manual process the pipeline replaces. Option B is wrong because Jenkins, not a GitLab CI job, orchestrates the pipeline. Option D is fictional."
+    }
+  ]
+}

@@ -1,0 +1,425 @@
+## 영상 1: Namespaces in Kubernetes (https://www.youtube.com/watch?v=plB3kyZLHe8)
+
+if you're working on kubernetes in a production environment especially on a larger project or team you've probably run into namespaces we haven't talked about them before but today we changed that
+
+hello caslin
+
+hello caslin hmm cousin isn't in this room maybe i'll go into another one
+
+hello caslin oh hi carter what are you doing here
+
+i came to talk to you about namespaces but i don't think i could reach you before
+
+that's kind of ironic actually
+
+namespaces are a tool to keep kubernetes objects separated as well
+
+if you're in the wrong space you won't be able to communicate with your objects
+
+i could see that being useful kind of like how containers allow multiple applications to share one operating system
+
+namespaces allow multiple kubernetes object to share one cluster
+
+right imagining it as a sort of virtual cluster makes a lot of sense because a namespace groups and isolates kubernetes objects across nodes
+
+and it's not quite as strict as container isolation because it's still possible to access kubernetes objects that are in other namespaces
+
+that's good to know so a namespace is a virtual cluster that's used to make it easier for large teams to work i've seen these before i was working on a project where the test and production objects were in separate sure
+
+i've seen that another benefit of namespaces comes in with setting permissions
+
+oh yeah i remember the admin set it up so that only certain people could push a bill to production but anyone could push a bill to test
+
+they would have done that using kubernetes role-based access controls or rbac using our back an administrator can give each user a role which sets their permissions inside a specific name space
+
+that makes sense so the people on my team must have had roles that gave them access to tests but only a few people had roles that gave them access to production
+
+right let's talk more about how to set up the namespaces themselves
+
+we can cover our back or role-based access controls in a future episode
+
+sounds good to me so how do i get started using namespaces
+
+technically you already are kubernetes starts with four initial name spaces
+
+you can check them out with the cube ctl get namespace command
+
+according to the docs cube system is for objects created by the kubernetes system
+
+cube public is mostly reserved for cluster usage in case some resources should be visible and readable publicly throughout the whole cluster
+
+cube node lease is for the lease objects associated with each node which improves the performance of the node heartbeats as the cluster scales
+
+and the default namespace is for objects with no other namespace
+
+it's it's like one of those bottom drawers in the kitchen just throw anything in there
+
+you can get more info about any of these namespaces using the cubectl get and describe commands
+
+for instance you'll see that describing the default namespace returns something like this
+
+note that these details show both resource quota if present as well as resource limit ranges
+
+resource quotas and resource limits
+
+resource quota tracks aggregate usage of resources in the namespace and allows cluster operators to define hard resource usage limits that a namespace may consume
+
+a limit range defines minimum and maximum constraints on the amount of resources a single entity can consume in a namespace
+
+that seems useful if i need to make sure resource usage is staying within certain bounds
+
+yep resource quotas and limits are an important tool for administrators
+
+since namespaces or kubernetes objects i bet i can interact with them using the qctl create and delete commands
+
+yes one thing that's a little different is that since namespaces hold other kubernetes objects if you want to get create delete or otherwise operate on objects in a namespace you must specify that with the dash dash namespaces flag
+
+it seems like a lot of extra typing but i guess the shorthand dash n isn't all that bad
+
+we can actually shorten deployment here to deploy too
+
+there are a lot of convenient shorthand versions of commands in kubernetes
+
+that is convenient though it still seems annoying to have to type the namespace i'm working into every command
+
+well you're in luck if you're going to be working out of the same namespace for a while there's a way to set cubectl to automatically use that namespace for all subsequent cubectl commands
+
+to do that you would use set context
+
+now that sounds handy
+
+so i think that's about it for the basics you should have just about everything you need to know to understand namespaces in case you see them in the workplace
+
+i think so let me see if i've got this right
+
+a namespace is a virtual cluster that lets multiple groups of users share a cluster
+
+each one has its own resources policies and constraints
+
+meaning only people or objects in my namesakes will see my pods services and other kubernetes objects
+
+also i can define rules for who can do what in my name space and i can enforce how many resources can be consumed by objects in my namespace using resource limits and quotas
+
+exactly
+
+namespaces are a very useful tool for everything you just mentioned and more
+
+wow many thanks to caslin for sharing knowledge about namespaces
+
+for more information about how when and why to use them please check out the documentation link below
+
+you
+
+
+## 영상 2: Kubernetes LimitRange Explained | Default Resource Limits & Requests + Resource Quota Demo (https://www.youtube.com/watch?v=tyoaLuaVyuQ)
+
+hello everyone welcome back to the channel
+
+I am Nikhil Kumar
+
+in the last video we have explored how resource quota helps us control total resource usage per namespace but what happens if your developers forget to define resource request or limits in the first place
+
+that's where limit ranges steps
+
+Imagine we have a team where every engineer books any hotel they want for a business trip but we need a rule like a maximum 5,000 per night
+
+we have a limit to book any hotel
+
+that's what limit ranges do
+
+they define default minimum and maximum resource usage per container or a pod in a namespace
+
+so basically how limit ranges work
+
+limit ranges are namespace scoped
+
+you can set default resource request or limits and minimum and maximum bounds
+
+kubernetes will apply these defaults automatically if a pod doesn't define them
+
+this is perfectly complimentary to resource quota which enforce total namespace usage
+
+now that we have understood what is limit ranges and how limit ranges work let's see it in the action
+
+so this is our kubernetes cluster
+
+first we will create a resource called limit range for that we will create our manifest file
+
+let me create a manifest file for the same that is limitrange.yaml
+
+so first of all we need to specify the API version that is v1
+
+then we need to specify the kind that is limit range
+
+then we need to specify the metadata
+
+inside this we are going to specify the name and the name space
+
+name is default limits
+
+then we need to specify the namespace
+
+so here I'm going to specify dev namespace
+
+now here we need to specify the specification spec and we need to set the limits
+
+so first we need to specify the default limits
+
+so default will be CPU which is 500m and then we have a memory that is 512 Mi
+
+similar to this we are going to specify the default request
+
+default request and default request is CPU which is 250m and memory which is 256Mi which is applicable to type that is container
+
+basically if a container in a dev namespace does not define any resources Kubernetes will apply these default request to that particular container
+
+let me apply this
+
+kubectl create -f limitrange.yaml
+
+limit range got created
+
+let's describe this
+
+kubectl describe limit range and the name of limit range that is default-limits and namespace that is dev
+
+as we can see we have a limit that is default limits which is having a default request for the CPU that is 250m and default limit is 500m
+
+similar to this we have a default request for the memory that is 256Mi and default limit is 512Mi and it is applicable to containers
+
+now let's test this by creating a pod without specifying any resources
+
+so let me create a manifest file for the same
+
+vi pod-test.yaml
+
+so API version V1
+
+kind is pod and metadata name is test pod and name space which is our dev and then we have a spec
+
+so inside this I'm just specifying the containers
+
+so I'm going to create one container with nginx and the image is nginx
+
+let's create a pod using this
+
+kubectl create -f pod-test.yaml
+
+the pod got created
+
+now let's check what kubernetes is applied automatically
+
+so kubectl get pods n dev
+
+it's under dev namespace
+
+kubectl describe pod test hyphen pod h - n dev namespace
+
+so container is running and we can see it automatically applied the default request and the limits which we applied via the limit ranges
+
+so limit ranges is very useful when when any user is not specifying any request or the limit in the pod definition file
+
+and if we run the same command to describe the limit range we can see this is the same default request and the limit we have specified in the limit range
+
+in my last video we have covered the resource quota
+
+now it's time to combine both that is resource quota and the limit ranges together
+
+so in this I've already created a limit ranges with the default limits and the request
+
+now let's create a resource quota
+
+i will use the same manifest file which I used in my last video that is resource-quota.yaml
+
+so this is the same manifest file which I used
+
+so I'm going to use the same to create a resource quota as well in the dev namespace
+
+kubectl apply -f resource-quota.yml
+
+so resource quota got created
+
+let me verify that it's under the dev namespace
+
+so now we have a resource quota and the limit ranges both
+
+now let's try to launch 11 pod in the dev name space
+
+so in this we have a limit that is we can create up to 10 pod and one pod is already running in this and we can utilize
+
+we can request CPU up to 2CPU and memory up to 2GB
+
+so for that and we have a limit ranges as well
+
+so let's try to create a pod using this
+
+so limit range will request 250m CPU and 256 mi memory by default
+
+so here I'm going to use a for loop command
+
+so this particular command will create a 11 pod with a different names
+
+let's run this
+
+we can see the seven pod got created but the rest of the pod is getting failed
+
+why because we have a resource quota limit which we have hit by this particular command
+
+if you see here in this particular command we are getting an error while creating a pod that is we are exceeding a quota that is a team a quota
+
+so basically resource quota is a namespace level budget
+
+it will be applicable to the complete dev namespace just like we saw in our demo
+
+but limit ranges will be applicable to each pod or the container and it applies default limit and the default request
+
+together they give you full control and safe boundary in multi-team cluster
+
+that's it for today
+
+now we have seen how limit ranges helps us to set defaults and how they work in perfect harmony with resource quota
+
+if you like this video share it to your friends and subscribe for more content like this
+
+i will add a link of resource quota video in the description area as well
+
+thanks for watching
+
+see you in the next one
+
+
+## 영상 3: What Happens When You Don't Use Kubernetes Resource Quotas? (https://www.youtube.com/watch?v=dYLRW0DZVGk)
+
+Hello everyone welcome back to the channel
+
+I am Nikhil Kumar
+
+in our last video we have explored how setting up CPU memory and the GPU limits helps us manage individual pods
+
+but what happens when multiple teams share the same name space
+
+that's where resource quota comes in
+
+so how resource quota work
+
+resource quota are defined per name space
+
+they can limit total CPU memory GPU pod PVCs and even secrets
+
+kubernetes block any new pod that would exceed the quota
+
+now let's see this in the action
+
+so this is my Kubernetes cluster
+
+so first of all let me create one name space that is kubectl create ns dev
+
+so namespace got created
+
+now we are going to set a resource quota on this particular dev name space
+
+for that I'm going to create a manifest file resource-quota.yaml
+
+similar to the pod definition the same spec will be used here
+
+first of all we need to specify the API version that is v1
+
+then we need to specify the kind that is resource quota
+
+then we need to specify the metadata and I'm going to specify the name here that is team a quota and I'm specifying the name space
+
+it's for dev namespace
+
+then we need to specify the spec
+
+so here we need to specify the keyword called hard and inside this we are specifying the request and limit both
+
+requests dot CPU that is two
+
+requests dot memory that is 2GB and limits for the CPU that is four and limits for memory that is 4 GI
+
+we can also set the request and limit for the GPU but for now I'm not going to use this
+
+and we are specifying the pods that is 10
+
+so here what we are doing we are setting up a total quota for the this name space
+
+so we can request two CPU 2 GB memory and we have a limit that is four CPU and the 4 GB memory and we can create 10 pods
+
+and these limit and request are applicable to all the parts under the Dev namespace
+
+let's create a resource quota
+
+kubectl create - f resource-quota.yaml
+
+now the resource quota got created
+
+let's see the quota it's under dev namespace
+
+we can see we have a quota that is a team a quota and it has a request that is pod
+
+we can create 10 cpu is two and the memory is 2 GB
+
+similar to request we have a limit which we have specified in the manifest file
+
+now let's try creating a pod that exceeds this limit and see what happens
+
+so let me update the pod definition file which we have used in our last video
+
+so in this particular manifest file I'm going to exceed the limit of memory and CPU both
+
+earlier we have used 64 MI now I'm going to use a 3GB and similar to this we are going to request three CPUs and limit is also same
+
+let's apply this changes
+
+pod got created
+
+let's verify the same
+
+let's describe the oh actually we have created under the default namespace but the quota we have created under the dev namespace
+
+so let me create a pod under the dev name space
+
+so hyphen n dev
+
+as we can see the pod creation got failed because we have a resource qota applicable in this
+
+the resource quota says we can request up to 2 CPU but here we are requesting 3 CPU and memory we can specify up to 2 GB but here we are specifying 3GB
+
+that's how kubernetes is protecting your cluster
+
+now let's talk about best practices as well
+
+so how do you use resource quota effectively
+
+set resource quota per team or the namespace label just like we did for the dev name space
+
+particularly as we can see initially we created a part at the default name space it worked fine but as soon as I specified the namespace it got failed
+
+try to combine it with the limit ranges for the per pod defaults
+
+in our next video we are going to cover the limit ranges
+
+so we will see how we can combine it with the resource quota and the limit ranges
+
+at last try to monitor quota using the kubectl describe quota command
+
+just like we did as well in our demo
+
+we describe the quota and we can see how many request and the CPU and the memory we can do for this particular name space
+
+this keeps your cluster fair and balanced
+
+whether it's developer data scientist or a CI jobs
+
+everyone gets a fair slice
+
+and that's all for today
+
+if you found this helpful hit the like button
+
+share it with your friends and subscribe for more content like this
+
+also don't forget to check out my previous videos on pod replicaset and deployment
+
+I will add a link in the description below

@@ -1,0 +1,39 @@
+{
+  "lecture_no": 6,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "Use docker compose to run a single-broker Kafka in KRaft mode locally. Use the docker-compose.yml below, then verify that the container started successfully.",
+      "starter": "# docker-compose.yml contents\nservices:\n  kafka:\n    image: apache/kafka:3.7.0\n    container_name: kafka\n    ports:\n      - \"9092:9092\"\n    environment:\n      KAFKA_NODE_ID: 1\n      KAFKA_PROCESS_ROLES: broker,controller\n      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093\n      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092\n      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093\n      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER\n      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1\n      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk\n\n# Save the contents above as docker-compose.yml, then run the command below\ndocker compose ______\n\n# Check container status\ndocker ps",
+      "solution": "# Run from the directory containing docker-compose.yml\ndocker compose up -d\n\n# Check container status (STATUS should be Up)\ndocker ps\n\n# Example expected output:\n# CONTAINER ID   IMAGE                  COMMAND                  CREATED         STATUS         PORTS                    NAMES\n# xxxxxxxxxxxx   apache/kafka:3.7.0     ...                      10 seconds ago  Up 9 seconds   0.0.0.0:9092->9092/tcp   kafka",
+      "explanation": "docker compose up -d starts the container in the background (-d for detach). KRaft mode allows the broker to also serve as the controller, eliminating the need for ZooKeeper. The KAFKA_PROCESS_ROLES: broker,controller setting reflects this. If docker ps shows the kafka container with STATUS Up and port 9092 mapped, Kafka is running correctly.",
+      "hints": [
+        "Use docker compose up -d to start the container in the background.",
+        "Run docker ps and check that the kafka container STATUS is Up. If STATUS shows Exiting, check the logs with docker logs kafka.",
+        "To stop the container, use docker compose down."
+      ]
+    },
+    {
+      "prompt": "Access the running kafka container's shell, navigate to the /opt/kafka/bin directory, create a 'test-topic' with 1 partition, and verify the result.",
+      "starter": "# Step 1: Access the container shell\ndocker exec -it kafka ______\n\n# Step 2: Navigate to the kafka bin directory\ncd ______\n\n# Step 3: Create the topic\nkafka-topics.sh --create \\\n  --topic test-topic \\\n  --bootstrap-server ______ \\\n  --partitions 1 \\\n  --replication-factor 1\n\n# Step 4: Verify the topic list\nkafka-topics.sh --list --bootstrap-server ______",
+      "solution": "# Step 1: Access the container shell\ndocker exec -it kafka bash\n\n# Step 2: Navigate to the kafka bin directory\ncd /opt/kafka/bin\n\n# Step 3: Create the topic\nkafka-topics.sh --create \\\n  --topic test-topic \\\n  --bootstrap-server localhost:9092 \\\n  --partitions 1 \\\n  --replication-factor 1\n\n# Step 4: Verify the topic list (test-topic should appear)\nkafka-topics.sh --list --bootstrap-server localhost:9092",
+      "explanation": "The command docker exec -it kafka bash opens a bash shell inside the running kafka container. Kafka CLI scripts are located at /opt/kafka/bin inside the container. After navigating there with cd /opt/kafka/bin, you can run kafka-topics.sh. The --list option shows the current topic list, and seeing test-topic in the output confirms a successful creation.",
+      "hints": [
+        "Use docker exec -it kafka bash to open a bash shell inside the container.",
+        "Inside the container, you must run cd /opt/kafka/bin before kafka-topics.sh and other scripts will work.",
+        "Use --list to verify the created topic name appears in the output. If it does not, check whether the --create command produced any errors."
+      ]
+    },
+    {
+      "prompt": "From the container shell (/opt/kafka/bin), complete an end-to-end message flow using the console producer and console consumer. Use two terminals: publish a message with the producer in one and verify it appears immediately in the other consumer terminal.\n\n1. Terminal A: Enter the kafka container and start the console consumer first (subscribe to test-topic, reading from earliest)\n2. Terminal B: Open a new terminal, enter the kafka container, and publish 3 messages with the console producer\n3. Verify that Terminal A displays the published messages in real time",
+      "starter": "# Terminal A: Start the consumer first\ndocker exec -it kafka bash\ncd /opt/kafka/bin\nkafka-console-consumer.sh \\\n  --topic ______ \\\n  --bootstrap-server ______ \\\n  --from-beginning\n\n# Terminal B: Start the producer (in a new terminal)\ndocker exec -it kafka bash\ncd /opt/kafka/bin\nkafka-console-producer.sh \\\n  --topic ______ \\\n  --bootstrap-server ______\n# Enter messages at the prompt:\n# hello kafka\n# my first message\n# end-to-end works",
+      "solution": "# Terminal A: Start the consumer first\ndocker exec -it kafka bash\ncd /opt/kafka/bin\nkafka-console-consumer.sh \\\n  --topic test-topic \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning\n\n# Terminal B: Start the producer (in a new terminal window)\ndocker exec -it kafka bash\ncd /opt/kafka/bin\nkafka-console-producer.sh \\\n  --topic test-topic \\\n  --bootstrap-server localhost:9092\n# Enter at the prompt:\n> hello kafka\n> my first message\n> end-to-end works\n# Exit with Ctrl+C\n\n# All three messages should appear immediately in Terminal A",
+      "explanation": "Starting the consumer first and then sending messages with the producer causes the messages to appear in real time on the consumer screen. This is the produce → Kafka stores → consume end-to-end flow. Inside the container, localhost:9092 points to the Kafka broker. Both terminals must connect to the same container using docker exec -it kafka bash, and each must run cd /opt/kafka/bin before the CLI tools are accessible.",
+      "hints": [
+        "Both terminals must connect using docker exec -it kafka bash, then navigate to /opt/kafka/bin.",
+        "If the consumer is already running when the producer sends a message, the message appears in the consumer's terminal immediately.",
+        "Type a message at the producer prompt (>) and press Enter to publish it. If the same text appears in Terminal A, you have succeeded."
+      ]
+    }
+  ]
+}

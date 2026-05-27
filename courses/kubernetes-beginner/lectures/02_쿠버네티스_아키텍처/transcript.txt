@@ -1,0 +1,235 @@
+## 영상 1: Kubernetes Explained in 6 Minutes | k8s Architecture (https://www.youtube.com/watch?v=TlHvYWVUZyc)
+
+What is Kubernetes? Why is it called k8s? What makes it so popular? Let's take a look.
+
+Kubernetes is an open-source container orchestration platform. It automates the deployment, scaling, and management of containerized applications.
+
+Kubernetes can be traced back to Google's internal container orchestration system, Borg, which managed the deployment of thousands of applications within Google. In 2014, Google open-sourced a version of Borg. That is Kubernetes.
+
+This is a somewhat nerdy way of abbreviating long words. The number 8 in k8s refers to the 8 letters between the first letter "k" and the last letter "s" in the word Kubernetes. Other examples are i18n for internationalization, and l10n for localization.
+
+A Kubernetes cluster is a set of machines, called nodes, that are used to run containerized applications.
+
+There are two core pieces in a Kubernetes cluster. The first is the control plane. It is responsible for managing the state of the cluster. In production environments, the control plane usually runs on multiple nodes that span across several data center zones.
+
+The second is a set of worker nodes. These nodes run the containerized application workloads.
+
+The containerized applications run in a Pod. Pods are the smallest deployable units in Kubernetes. A pod hosts one or more containers and provides shared storage and networking for those containers. Pods are created and managed by the Kubernetes control plane. They are the basic building blocks of Kubernetes applications.
+
+Now let's dive a bit deeper into the control plane. It consists of a number of core components. They are the API server, etcd, scheduler, and the controller manager.
+
+The API server is the primary interface between the control plane and the rest of the cluster. It exposes a RESTful API that allows clients to interact with the control plane and submit requests to manage the cluster.
+
+etcd is a distributed key-value store. It stores the cluster's persistent state. It is used by the API server and other components of the control plane to store and retrieve information about the cluster.
+
+The scheduler is responsible for scheduling pods onto the worker nodes in the cluster. It uses information about the resources required by the pods and the available resources on the worker nodes to make placement decisions.
+
+The controller manager is responsible for running controllers that manage the state of the cluster. Some examples include the replication controller, which ensures that the desired number of replicas of a pod are running, and the deployment controller, which manages the rolling update and rollback of deployments.
+
+Next, let's dive deeper into the worker nodes. The core components of Kubernetes that run on the worker nodes include kubelet, container runtime, and kube proxy.
+
+The kubelet is a daemon that runs on each worker node. It is responsible for communicating with the control plane. It receives instructions from the control plane about which pods to run on the node, and ensures that the desired state of the pods is maintained.
+
+The container runtime runs the containers on the worker nodes. It is responsible for pulling the container images from a registry, starting and stopping the containers, and managing the containers' resources.
+
+The kube-proxy is a network proxy that runs on each worker node. It is responsible for routing traffic to the correct pods. It also provides load balancing for the pods and ensures that traffic is distributed evenly across the pods.
+
+So when should we use Kubernetes? As with many things in software engineering, this is all about tradeoffs. Let's look at the upsides first.
+
+Kubernetes is scalable and highly available. It provides features like self-healing, automatic rollbacks, and horizontal scaling. It makes it easy to scale our applications up and down as needed, allowing us to respond to changes in demand quickly.
+
+Kubernetes is portable. It helps us deploy and manage applications in a consistent and reliable way regardless of the underlying infrastructure. It runs on-premise, in a public cloud, or in a hybrid environment. It provides a uniform way to package, deploy, and manage applications.
+
+Now how about the downsides? The number one drawback is complexity. Kubernetes is complex to set up and operate. The upfront cost is high, especially for organizations new to container orchestration. It requires a high level of expertise and resources to set up and manage a production Kubernetes environment.
+
+The second drawback is cost. Kubernetes requires a certain minimum level of resources to run in order to support all the features we mentioned above. It is likely an overkill for many smaller organizations.
+
+One popular option that strikes a reasonable balance is to offload the management of the control plane to a managed Kubernetes service. Managed Kubernetes services are provided by cloud providers. Some popular ones are Amazon EKS, GKE on Google Cloud, and AKS on Azure.
+
+These services allow organizations to run the Kubernetes applications without having to worry about They take care of tasks that require deep expertise, like setting up and configuring the control plane, scaling the cluster, and providing ongoing maintenance and support. This is a reasonable option for a mid-size organization to test out Kubernetes.
+
+For a small organization, YAGNI - You ain't gonna need it - is our recommendation.
+
+If you would like to learn more about system design, check out our books and weekly newsletter. Please subscribe if you learn something new. Thank you and we'll see you next time.
+
+
+## 영상 2: Day 2 | Kubernetes Architecture explained (https://www.youtube.com/watch?v=vZ9gEqeddxQ)
+
+In this video, I'm going to explain to you the architecture of a Kubernetes cluster. I'm also going to cover the key terminology that you will encounter in your daily life and show you how typical user request flows through the entire system to make things happen.
+
+Having a bird's eye view of a production Kubernetes cluster is very important before you dive into either managing it or using it to run your applications. You need to understand how the different parts of this monster interact with each other.
+
+Welcome to the second chapter of Kubernetes from zero to hero. My name is Raghav. Let's get started.
+
+First of all, a Kubernetes cluster is a bunch of computer processes that work together to run and manage all your containerized applications. Your organization could be running one or several clusters depending on the use case. For example, one production cluster, one staging cluster, and so on.
+
+At the bare minimum, a Kubernetes cluster has one worker node to run your containers. In Kubernetes, Worker nodes are the servers doing all the work. This is where all your workloads run.
+
+A worker node could be a virtual machine like VMware, EC2 instance, or a physical machine like a bare metal server or even your laptop.
+
+The control plane manages all the worker nodes and makes global decisions. It is actually a set of processes that work together to administer the entire cluster. For example, it is responsible for handling user requests, scheduling containers, managing state data and responding to cluster events like container crashes.
+
+Technically you can run an entire Kubernetes cluster on a single machine, but that is not exactly a good strategy for production environments. But if you're just testing things out, then sure, you could even run the entire Kubernetes cluster on your personal computer.
+
+In a production deployment, however, you would usually deploy the control plane processes across tens or even hundreds of servers and your worker nodes would actually be dedicated servers, depending on your use case, Kubernetes could run into. Tens of thousands.
+
+Back to our architecture, let's take a closer look at a worker node. The most important thing you need to know is, a worker node doesn't directly run containers. Rather, it runs a pod.
+
+In Docker, the smallest unit of compute is a container. But in Kubernetes, The smallest unit of compute is a pod. One pod has one or more containers.
+
+You can pack your application and other helper containers like logging and monitoring agents, network proxy, and so on as different containers running inside one pod, and if you want to scale out your application horizontally, you simply run more pods.
+
+How does a worker node know which pod to run? When to run it and what resources to give it.
+
+A kubelet is an agent that runs on every worker node. It talks to the control plane to get specifications about a pod and then ensures that that pod is running and healthy, providing it whatever resources it needs from the host node.
+
+Another very fundamental component that runs on all worker nodes is the container runtime. Look, I know you have probably run Docker containers in the past, but containers are not a technology specific to Docker. The piece of software that actually runs the containers is called a container runtime and Docker engine is just one of the examples of container runtime.
+
+Some of the examples are container D, Mirantis and cryo or cryo. I don't really know. Kubernetes is flexible in the sense that you can pick and run any container runtime as long as it satisfies the container runtime interface and Docker is just one of the options.
+
+The kubelet talks to this runtime to manage all the containers.
+
+Finally, every worker node also runs the kube proxy. which manages network rules on it. These rules are what allow network communication to your pods from both within and outside of the Kubernetes cluster.
+
+So ultimately your containerized applications are run and managed on nodes, thanks to these three processes.
+
+Now let's look at the control plane. This is the decision making body of the Kubernetes cluster. Control plane takes requests from you, the end user, and translates them into instructions for worker nodes.
+
+So to take these requests from clients, at the very front sits the API server. When you use kubectl or the Kubernetes UI to, let's say, run your application, these client interfaces are actually talking to the Kubernetes API. Even the internal components of Kubernetes, like the kubelet, Talk to the API.
+
+It is essentially the single entry point to the cluster. So it also takes care of things like authentication and authorization.
+
+The API server is actually designed to be horizontally scalable. So in production environments, it is actually deployed across multiple nodes to handle the load.
+
+How does a Kubernetes cluster keep track of all its state? How does it know what nodes are part of it? What pods are running in them? What all pod specifications have been submitted by users? What other storage and network resources it controls.
+
+All state data for Kubernetes cluster is kept inside the control plane in EtcD. EtcD is a consistent and highly available key value data store that comes packed with Kubernetes and serves as the single source of truth about the state of the cluster at any given time.
+
+So if you create a new pod in your cluster, the API records it in EtcD. And if you delete the pod, The API deletes the corresponding data from EtcD.
+
+Ultimately, EtcD is a distributed database. So Kubernetes administrators have to manage it like one. They have to think about its scaling, security, storage, backups, compliance, blah, blah, blah.
+
+Another very important component of the control plane is the scheduler. It is responsible to ensure that pods get placed on the most suitable worker nodes, so Kubelet can actually run them.
+
+When you request the API to create a pod, The API is actually forwarding this request to the scheduler.
+
+Scheduler takes into account a lot of different factors like how much resources are required by this pod. Does it need to be physically closer to another pod? What kind of hardware does the pod need to run on? And other user defined constraints.
+
+It also checks for things like Which node is the least busy or least utilized? Maybe run the next workload there.
+
+And based on all these factors, it picks the best worker node to run the pod on.
+
+Scheduler therefore also solves the bin packing problem, which is essentially to take a bunch of applications and deploy them optimally on a bunch of servers, such that. They are run reliably and we can minimize the number of servers required.
+
+Finally, there's the controller manager. This is the background process whose job is to always steer the system towards its desired state.
+
+For example, if a pod crashes, the controller manager will learn about this and take actions to ensure that another pod is spun up in its place, thus bringing the system back to the desired state, the controller manager runs different controller processes and each controller process. is responsible for one type of resource.
+
+For example, the node controller detects and responds when a worker node goes down.
+
+These four processes make up the control plane, but all four of them need not be run on the same server. You can do so to make your life easier, but in production grade clusters, you would usually have dedicated servers for each process.
+
+Now that you understand the purpose of all these components, let's say that I want to create a pod. to run my containerized applications in my Kubernetes cluster.
+
+Here is how my request will flow through the entire system.
+
+I create my container image and publish it to a repository.
+
+I use a client like kubectl to send a request to the Kubernetes API to run my application container as a pod.
+
+The API checks for my authentication and authorization to make sure I am allowed to do this stuff. It then also makes sure that I've sent a valid request with all the necessary information.
+
+The API then creates a pod in etcd storage and sends this pod to the scheduler to find a suitable worker node for it.
+
+The scheduler analyzes the pod specification and the current state of all available worker nodes and tries to find the optimal node.
+
+It then notifies the API server about the node assigned for the pod.
+
+At this point, the deployment controller, which is part of the controller manager, discovers that a pod has been assigned a node but the node is not yet running it. Therefore, the system needs to move towards the desired state.
+
+So the deployment controller notifies the API that a pod needs to be started on the assigned worker node.
+
+API notifies the kubelet of the assigned node, supplying it the pod spec and all the details.
+
+Kubelet then talks to the container runtime on the node to get things going.
+
+The runtime fetches my image from the repository. starts running the containers and hence the pod starts running.
+
+Now the deployment controller is happy. The API is notified and of course all state is saved in etcd.
+
+At this point, if I use kubectl to get the status of my pod, it will show me that my pod is running. So even I'm happy.
+
+Take a moment to understand this entire flow. Replay the section if you need to.
+
+Also notice that all interactions happen via the API only.
+
+Now your assignment for today. is to figure out what will be the request flow if my running pod suddenly crashes.
+
+Think about how the deployment controller would react. Tell me your answer in the comments below.
+
+And so this, my dear friends, is the complete architecture of a Kubernetes cluster.
+
+Every control plane component can be deployed independently, and you can keep adding worker nodes, which is what makes Kubernetes infinitely scalable.
+
+In the next lesson, I will show you how to set up a Kubernetes cluster on your personal computer. Using Minikube.
+
+Until then, keep learning with me.
+
+If this is your first time around here, I have a channel dedicated to making you a world class DevOps engineer. So subscribe and start leveling up.
+
+Give this video a like and share it with your friends. I will see you in the next video.
+
+
+## 영상 3: Kubernetes architecture: Nodes and control plane (https://www.youtube.com/watch?v=VQUZF6k6g88)
+
+Today, it's time to figure out how Kubernetes actually runs containers on nodes. Let's check it out.
+
+With a whole universe of things to learn, it's important to start with the essentials. Let's go over the concepts that make Kubernetes usable, scalable, and just downright awesome.
+
+Are you ready?
+
+So with all of our conversation about how pods run in our containers, I figured it would make sense to talk about nodes, which means it's time to figure out, what are nodes?
+
+That's an important topic. The simple way of looking at it is that a node is a virtual or physical machine that you run your workloads on.
+
+Wow. That's pretty straightforward. And I know that in Kubernetes, we operate on clusters, which are groups of one or more worker nodes.
+
+But in order to get the automation that Kubernetes provides, I'm sure nodes are more than just any old virtual or physical machine, right?
+
+Exactly. Each node actually contains the services necessary to run pods. A container runtime for running containers, a kubelet for making sure that everything that should be running is, and the kube-proxy for handling networking.
+
+Ah-ha. So that's how Kubernetes keeps track of pods. That also explains how pods get IP endpoints and other necessary features for running at scale, like being able to attach to a running pod for debugging.
+
+Yep. Now, if we had to manually manage all of the pods on each node, it would be impossible to handle. That's one of the most important reasons Kubernetes exists.
+
+The way Kubernetes actually manages these pods is through what's called the control plane.
+
+The control plane is responsible for handling all of these details by exposing an API. This is where Kubernetes can define, deploy, and manage the lifecycle of our pods.
+
+Right. There's a lot going on in the control plane. Let's look at some of the components that make up the control plane and what they do.
+
+First, there's the API server itself, which handles data validation and configuration for all of the API objects.
+
+Next, there's etcd, which is a key-value store for holding onto all the important data that Kubernetes uses.
+
+Plus, there's the Scheduler. Here's where the important decisions get made about where exactly a pod will run. The Scheduler can look at the available resources for all the nodes and make sure that a pod goes to a node that can handle it.
+
+And don't forget about the Controller Manager, where the core Kubernetes logic happens. One of the big responsibilities here is lifecycle management, to make sure all the various pieces are working correctly.
+
+Similarly, there is the Cloud Controller Manager, which lets Kubernetes hook into cloud providers. So if you're running Google Kubernetes Engine, the Cloud Controller Manager is what speaks to Google Cloud when something is needed, like a new virtual machine for a node.
+
+Having that abstraction from dealing with the individual details of each cloud provider sure sounds nice.
+
+Wow. The control plane is responsible for a lot. But with all of that, how do you actually declare the details to Kubernetes?
+
+That's where the Kubernetes API comes in. Let's try it out in the next episode.
+
+So that's how Kubernetes does all the things that it does. If you're going to deploy a container, you'd make a pod that uses your container, you'd make sure Kubernetes has nodes, and then it figures out the rest.
+
+That's right. The kubelets on the nodes are watching what's going on on the node itself. So when the control plane needs to schedule a pod on that node, both the control plane and the node itself have enough information to make sure it works.
+
+Plus, if a pod runs into an issue, the control plane will work with the kubelet to remove the unhealthy pod and replace it with a new one.
+
+That was a lot of great info on nodes. But now, it's time to take a deeper dive into the Kubernetes API.
+
+All right. Stay tuned, everybody. If you want to get hands-on, check out the link in the description. And if you enjoyed the episode, subscribe for more.

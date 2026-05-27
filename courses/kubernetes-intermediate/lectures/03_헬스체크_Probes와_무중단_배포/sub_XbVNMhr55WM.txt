@@ -1,0 +1,339 @@
+Kind: captions
+Language: en
+hey y'all welcome to the rolling update
+tutorial
+in today's session we are going to go
+through a rolling update in kubernetes
+we're going to touch on the topics of
+deployments replica sets and rolling
+updates
+as always i will include the manifest
+and the commands that i'm running so you
+can customize all this do it on your own
+it'll be in the description
+without further ado let's get started
+we will kick things off of course with
+talking about what is a rolling update
+it's a really good thing to know about
+because it's actually the default
+strategy for kubernetes so even if you
+don't know that you're doing this it's
+what's going on under the hood
+as simple as possible a rolling update
+is where pods are updated one by one
+when it reaches the desired states the
+new version you want to deploy then
+we've done it it's all rolled through
+and when we say roll them it means that
+kubernetes replica set takes one pod
+down says no more traffic then it spins
+up another one to take its place
+so it runs through the pods and does
+that until everything's done
+and because it does roll through them it
+allows you to run upgrades with no
+downtime
+we've talked a lot about deployments
+before we've built them played around
+with them but something that's going to
+be important when understanding what's
+happening with rolling updates is
+replica sets specifically how they work
+with deployments so let's get into that
+so first off what is a replica set let's
+pull up the docs
+a replica set's purpose as we can read
+here is to maintain a stable set of
+replica pods running at any given time
+as such it's often used to guarantee the
+availability of a specified number of
+identical pods how it works is really
+it's given some ground rules so the
+pause it should be looking after how
+many it should be maintaining and it
+creates and deletes the pods to make
+sure we have the desired number
+you can think of it as someone hosting
+an award show and needing to make sure
+that i have all the seats on camera
+filled in
+someone got sick boom feel that seat
+someone's sleepy can't be seen on camera
+you're going home see you later let's
+get some fresh legs in here
+and what's ultimately going on is
+there's a metadata field called owner
+reference on the pods and it clarifies
+which resource the current object is
+owned by
+you can think of it as like a caller on
+a dog with the name and number there's
+no doubt about the owner there
+and then the replica set uses selectors
+that are set up and if the replica set
+finds a stray pod that matches their
+selector it'll immediately acquire or
+adopt it
+is the replica set the same as a
+deployment you might be asking it's
+close but no
+the difference is exactly what we're
+going to cover when we create a
+deployment it creates a replica set and
+just offloads the whole counting pods
+thing to that
+great leaders know how to delegate and
+that's what a deployment does
+the replica set does one thing it does
+it really well
+each replica sets actually in charge of
+just one type of pod so if i create a
+new version update it won't be able to
+have both let's go ahead and see this in
+practice
+let's start by getting a cluster up we
+are going to use minicube and we're
+going to pin the version at
+for kubernetes at 1.23.3
+so here's the command i'll put it in the
+comments and i'll see on the other side
+so i have a cluster up i'll go ahead and
+prove it with the get nodes you can see
+that it's ready
+and i went ahead and actually created a
+new directory for rolling deployments
+also so you can see i have rolling
+updates i have a service that's actually
+the same one as down here in the demo
+prod so just a standard load balancer
+listening on port 80 and then i created
+a deployment so we're going to go ahead
+and make some updates there
+but before we get into that and the
+manifest i want to clarify some things
+you know if you were listening when i
+was describing rolling updates you might
+have might have noticed that i described
+a situation where a pod goes down and
+another goes up to replace it and then
+you also might have started to think
+about some what ifs
+what if there's a situation where we
+need more pods up or we don't want to go
+below a certain number
+so let's think ahead and maybe we can
+bake that into the deployment actually
+so there's no issues there and we could
+have you know we can ensure that we have
+no downtime
+i'm going to pull up the api docs side
+by side with the deployment and we'll
+talk about what we can do all right so i
+have the deployment over here and then i
+have the api docs over here a couple
+updates before we could actually get
+into the updates that we're making i did
+add some metadata so i have version
+1.1.0 here i did change the replicas to
+five to make some of the percentages
+easier you'll see what i mean
+i then had some metadata down here and
+i'm going to change this to
+the v1
+just uh this is the first version of our
+app
+but over here this is the
+this is the interesting piece i want to
+talk about
+so let's go down to strategy you can see
+there's a deployment strategy stands out
+under the spec
+and we have a strategy type so we are
+using a strategy
+rolling update here
+and we are selecting that it's also the
+default so you can see default is
+rolling update
+and then under strategy.rollingupdate we
+have some other things that we can
+customize we're going to do max surge
+and max unavailable so these are the
+upper and lower boundaries or that
+wiggle room that we're allowing during
+the update
+max surge that's the maximum number of
+pods that can be scheduled above the
+desired number of pods it can be either
+an absolute number or a percentage so
+let's go ahead and let's do one which is
+twenty percent of five
+and then max unavailable down here
+the maximum number of pods that can be
+unavailable during the update so we'll
+do 20 which is
+another cute way to go ahead and say one
+so we're doing both approaches here
+and ensuring that we do have that again
+that wiggle room during the update
+let's go ahead and apply this and then
+we'll see what's going on
+apply kubernetes rolling updates and i'm
+going to apply it into the default
+namespace for demo purposes just to make
+life easier
+gotta
+suggest that it's a file
+so both of these were created let's go
+ahead and check on the deployments
+deployments
+excellent the deployment demo i have
+that three five already it's getting
+it's deploying the rest of that
+for me and let's go ahead and check the
+replica sets so you get
+replica sets
+or to make it easier because if you
+can't spell like me you can do get rs
+and you can see i have the replica sets
+also very very cool stuff i have the
+deployment name that will notice so the
+good old deployment demo and then i have
+this random string here
+this string has been
+added and it is the pod template hash
+let's see what that is in the docs so i
+have the pod template hash information
+over here
+we can see that it is randomly generated
+and the key language is this label
+ensures that the child replica sets of a
+deployment do not overlap
+so that's good to know and that's why
+why they have that
+now let's get into that replica set and
+let's see the ammo we'll pipe it into a
+file and we'll pull it up in the ide
+over there
+so get replica sets
+oh yaml and we'll put it in
+kubernetes
+rolling
+right up look at that.yaml
+and let's pull this thing up over here
+pull up
+really just a few things i wanted to
+call out
+first in the metadata you can see some
+of these annotations so the one that i
+want to draw attention to is the
+deployment
+the revision we are revision one that's
+going to be a good thing to note for
+later
+and then we can also see the pod
+template hash is listed and some of the
+other metadata that we do have so this
+isn't added to the labels that we had
+already created
+and if we also want to take a look at
+the pod we can run another command so
+cube just oh
+let's do get pods get a name of one
+great i have one
+and then
+describe
+pods
+and describe this thing whoa a lot of
+things here one thing i do want to call
+out this controlled by
+we can see
+you know you know what it is that daggum
+replica set the one that was managing
+these pods so this is the as the owner
+that's the the dog tag right there um
+and then also a dog tag over here with
+the owner references as well
+so really cool uh that's
+fantastic but that's the first update um
+we've only done a single deployment
+let's go ahead and apply another update
+and see how things change so up to now
+we've only seen a single deployment when
+we've done a single deployment we're on
+that first revision
+let's go ahead and apply an update and
+see how things change
+so let me change a couple things i'll
+change the version here where v2 we're
+moving on up
+v2 and then i'm going to change this to
+v2
+uh or this is like a december not would
+be v2 it's a minor update but it's just
+a different this new update that we're
+rolling out so that's all that's really
+important there i change the image tag
+and i'm gonna hit a command quickly
+and then we'll see the status as it
+happens so let's run first let's do
+apply
+kubernetes rolling updates
+and then we'll string this command
+together
+ctl
+rollout
+status
+demo
+then it's going to do exactly it says
+it's going to do it's going to show the
+rollout status and we're going to see
+this in action
+so we see that the update did get
+applied this is configured
+and then it's rolling out the the
+to the replica sets rolling this out the
+deployment to to finish
+uh it's going to roll down here but it's
+really cool to actually see those
+replicas in action and wow that will
+actually already finished up i'll move
+my head and we can see that it was
+successfully rolled out so really cool
+to actually see that going on
+let's go and get the the replica sets
+now
+so
+get replica sets
+so we see we have two different replica
+sets here one has a desired state of
+five and then the other has a desired
+state of zero
+the desired state of five is the new one
+so why is that zero there
+great question i'm so glad you asked
+that's in case we need to roll back to
+another prior state let's say there's
+something that we find in this
+deployment after it's out it just isn't
+right and we need to undo it well
+there's a built-in way to do this we'll
+cover that in another video but for now
+just know that it's the reason it's set
+up like this
+and then let's go ahead and see
+cube get keep cuddle get replica set the
+name of this new replica set
+and then we'll just run the output again
+we'll take a look
+so we are seeing wow now we can see the
+revision number is two
+so we're on the second revision we're
+going into the replica set again
+that's been incremented so we know we're
+on the new version that's that is really
+cool so that's really it we did a
+if you have any questions or comments
+please chime in the comments section
+if you like this please like and
+subscribe thanks very much for joining
+along and i will see you the next time

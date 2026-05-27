@@ -1,0 +1,436 @@
+Kind: captions
+Language: en
+In this video, we’ll build a simple&nbsp;
+but secure CI/CD pipeline for your&nbsp;&nbsp;
+applications deployed in AWS EKS from scratch.
+Let’s say we have an application repository.&nbsp;
+When we make any source code change,&nbsp;&nbsp;
+it will trigger a GitHub Actions pipeline.
+This pipeline will first increment your&nbsp;
+Git tag—let’s say from 0.1.0 to 0.1.1—and&nbsp;&nbsp;
+use that tag to build and publish a&nbsp;
+Docker image to an ECR repository.
+On the EKS side, we will deploy ArgoCD,&nbsp;
+which will monitor for any new images.
+Once it detects one, it will perform a rolling&nbsp;
+upgrade on your application and carefully roll out&nbsp;&nbsp;
+a new version while ensuring that each instance&nbsp;
+is healthy before proceeding to the next pod.
+To authenticate GitHub Actions with AWS, we’ll&nbsp;
+use an OpenID Connect provider and dynamically&nbsp;&nbsp;
+obtain temporary credentials—so no more static&nbsp;
+secrets stored anywhere on the GitHub side.
+For the ArgoCD to authenticate with&nbsp;
+ECR, we’ll use pod identity to link&nbsp;&nbsp;
+the ArgoCD Kubernetes service&nbsp;
+account with an AWS IAM role.
+Now, to authenticate GitHub Actions to publish our&nbsp;
+Docker images to ECR, we only need to specify the&nbsp;&nbsp;
+AWS region and the IAM role in our AWS account—no&nbsp;
+need to use any environment variables anymore.
+On the AWS side, we’ll create&nbsp;
+an OpenID Connect provider with&nbsp;&nbsp;
+the GitHub URL to establish trust and&nbsp;
+allow GitHub to authenticate with AWS.
+At this point, potentially any GitHub&nbsp;
+user or repository can assume our role.
+To fix this, first we need to create a&nbsp;
+regular IAM policy that defines permissions.
+This policy would allow pushing images to&nbsp;
+only specific ECR repositories in our account.
+And finally, we need to create an IAM&nbsp;
+role with a trust policy that would&nbsp;&nbsp;
+only allow specific organizations or specific&nbsp;
+repositories on GitHub to assume this role.
+In this example, we define the principal,&nbsp;&nbsp;
+which is an entity that can use that&nbsp;
+role, and it’s going to be GitHub.
+Next, we limit access to this role&nbsp;
+to only specific repositories.
+We can use wildcards; we can&nbsp;
+whitelist entire organizations;&nbsp;&nbsp;
+or we can just limit it to specific repositories.
+In this case, only two of my repositories would&nbsp;
+be able to assume this role: frontend and backend.
+Now, how does ArgoCD actually work? Let’s say&nbsp;&nbsp;
+we have a Kubernetes cluster with&nbsp;
+ArgoCD and Image Updater deployed.
+Then, we have an application repository and&nbsp;
+a Kubernetes repository where we keep all our&nbsp;&nbsp;
+Kubernetes deployment files, such as deployments,&nbsp;
+services, ingresses, etc. And finally, we have ECR&nbsp;
+.
+So,&nbsp;&nbsp;
+when you initially deploy ArgoCD to your cluster&nbsp;
+and point it to the Kubernetes repository, it will&nbsp;&nbsp;
+start synchronizing and applying all missing&nbsp;
+Kubernetes resources, such as our application.
+The default interval is 3 minutes, but&nbsp;
+you can adjust it—just keep in mind that&nbsp;&nbsp;
+GitHub might throttle your requests&nbsp;
+if you set it to a very low value.
+Next, if we want to release and redeploy&nbsp;
+a new version of our application,&nbsp;&nbsp;
+we’ll make changes in the source code, commit&nbsp;
+them, and push to the remote application repo.
+GitHub Actions will then release a new version,&nbsp;&nbsp;
+build the Docker image, and&nbsp;
+push it to the ECR repository.
+Meanwhile, in the background, we’d set the ArgoCD&nbsp;&nbsp;
+Image Updater to periodically&nbsp;
+check for new image tags in ECR.
+The default poll interval is about 2 minutes.
+So, when ArgoCD detects a new image, it will&nbsp;
+create a new file in the Kubernetes repository.
+Then, ArgoCD will detect a drift between&nbsp;
+the Kubernetes state and the Git repo,&nbsp;&nbsp;
+apply the changes, and release the new version.
+In the worst case, it will take up to 5 minutes&nbsp;
+to redeploy a new version of the application.&nbsp;
+Let me run a quick demo: when we create a new&nbsp;
+commit or just merge a pull request to the main&nbsp;&nbsp;
+branch in the application Git repository,&nbsp;
+GitHub Actions will pick up this change,&nbsp;&nbsp;
+build and publish a new Docker image to the&nbsp;
+ECR repository. On the other hand, ArgoCD will&nbsp;&nbsp;
+detect that image, create a new commit, and&nbsp;
+perform a rolling upgrade of your application&nbsp;&nbsp;
+in about 3 minutes on average, up to 5.
+If you want to learn more about Ingress,&nbsp;&nbsp;
+Let's Encrypt, integration with AWS&nbsp;
+secrets, and many other common use cases,&nbsp;&nbsp;
+I have a full course here on YouTube. Also,&nbsp;
+if you need any help with your infrastructure,&nbsp;&nbsp;
+you can always reach out to me, and you can&nbsp;
+find more information in the video description.&nbsp;
+Alright, let’s get started. First, you need to&nbsp;
+clone my public repository—link in the video&nbsp;&nbsp;
+description as well. Here, you’ll find mostly&nbsp;
+Terraform code to provision all the necessary&nbsp;&nbsp;
+infrastructure for our pipeline. First of&nbsp;
+all, we need to create an S3 bucket that&nbsp;&nbsp;
+we’ll use to store Terraform code. In the global&nbsp;
+folder, you’ll need to change a few variables.&nbsp;
+First of all, update the AWS region. Then, you&nbsp;
+need to create a unique S3 bucket across all AWS,&nbsp;&nbsp;
+so pick a random name. A common pattern is to&nbsp;
+use your domain as a prefix, and then list all&nbsp;&nbsp;
+your GitHub repositories that need access to&nbsp;
+the ECR. First, your username or org name,&nbsp;&nbsp;
+and the repo name exactly how it’s structured&nbsp;
+on GitHub. So, for example, app-lesson-268&nbsp;&nbsp;
+will contain the application source code.
+Next, update the same parameters in the&nbsp;&nbsp;
+S3 backend partial configuration.
+First, we’ll create the S3 bucket,&nbsp;&nbsp;
+and we no longer need a DynamoDB table&nbsp;
+to lock the Terraform state. Now,&nbsp;&nbsp;
+in the backend configuration, keep it commented&nbsp;
+out since we don’t have an S3 bucket yet.&nbsp;
+In the IAM, we’ll create an OpenID&nbsp;
+Connect provider to link with GitHub&nbsp;&nbsp;
+Actions, an IAM policy and role with&nbsp;
+only access to our ECR repositories.&nbsp;&nbsp;
+For example, here you’ll only list your actual ECR&nbsp;
+repositories for which you want to grant access.&nbsp;
+In the IAM role, you would list only the&nbsp;
+GitHub repositories that need access to ECR.&nbsp;
+And finally, we need to create ECR repositories,&nbsp;
+and optionally, you can create a policy to&nbsp;&nbsp;
+remove old Docker images.
+Alright, let’s go ahead,&nbsp;&nbsp;
+switch to the S3 bucket folder, and create&nbsp;
+the S3 bucket. First, initialize Terraform.&nbsp;
+And then apply and supply&nbsp;
+global variables. By the way,&nbsp;&nbsp;
+all the commands are available in the README file.
+It’s done. Now we have an S3 bucket. And for now,&nbsp;&nbsp;
+this bucket is empty, as you would expect, since&nbsp;
+we used the default local Terraform backend.&nbsp;&nbsp;
+This Terraform state file is stored locally as&nbsp;
+a JSON file, which is fine if you’re testing&nbsp;&nbsp;
+something, but it’s almost impossible to work&nbsp;
+in a team with that approach because anyone&nbsp;&nbsp;
+who runs Terraform needs access to it. What we&nbsp;
+want to do is upload that file to the S3 bucket.&nbsp;
+Uncomment the backend section, and as you can&nbsp;
+see, we have empty region and bucket values,&nbsp;&nbsp;
+which will be derived from the state.config&nbsp;
+file. Let’s go ahead and migrate the local&nbsp;&nbsp;
+state to S3 by using this command.
+Now, in the S3 bucket, you’ll find&nbsp;&nbsp;
+the same folder structure and the Terraform&nbsp;
+state as we have locally with our project.&nbsp;
+Next step: to create the necessary IAM&nbsp;
+components, let’s switch to that folder&nbsp;&nbsp;
+and initialize the state as well.
+After it’s done, apply Terraform.&nbsp;
+Now we have an OpenID Connect provider,&nbsp;
+an IAM policy with only&nbsp;
+access to selected ECR repos,&nbsp;
+and finally, an IAM role which only GitHub Actions&nbsp;&nbsp;
+and our own repositories can assume. I’m&nbsp;
+allowing all branches to use this role,&nbsp;&nbsp;
+but you can restrict it even more.&nbsp;
+And the principal is GitHub Actions.&nbsp;
+The last step here is to create ECR repositories.&nbsp;
+Switch to ECR, initialize the state, and apply.&nbsp;&nbsp;
+I keep it separate just to simulate a&nbsp;
+real-world project, and you would have a&nbsp;&nbsp;
+high-level abstraction script or Terragrunt that&nbsp;
+can apply all of your infrastructure in one step.&nbsp;
+So now we have 2 ECR repositories. In this&nbsp;
+tutorial, I’ll be using only the first one.&nbsp;
+And in the Terraform S3 bucket, we have&nbsp;
+3 components so far: S3, IAM, and ECR.&nbsp;
+Alright, now we’ll switch to the application&nbsp;
+repository, which you’ll find in the main repo&nbsp;&nbsp;
+under this tutorial; it’s called app-lesson-268.&nbsp;
+And this is the source code for the application.&nbsp;&nbsp;
+I have a version.txt file just for the&nbsp;
+demo to show the rolling upgrade—we’ll&nbsp;&nbsp;
+modify this file from the CI/CD pipeline. And&nbsp;
+a simple Go application with two endpoints,&nbsp;&nbsp;
+one of which reads the version file and returns&nbsp;
+it to the client. It’s a very simple application.&nbsp;
+Then we have a multistage Dockerfile.&nbsp;
+And finally, the GitHub Actions pipeline.&nbsp;&nbsp;
+You only need to change the region and&nbsp;
+the ARN of the role with your account ID.&nbsp;
+Now we need ID token write permission&nbsp;
+for the OpenID Connect provider and&nbsp;&nbsp;
+contents write to create a new tag in GitHub.
+We also have a "release a new version" step,&nbsp;&nbsp;
+which takes the current Git tag and increments&nbsp;
+it based on your policy—either major, minor,&nbsp;&nbsp;
+or patch version. Then we write this&nbsp;
+version to the txt file, and the final&nbsp;&nbsp;
+step is to build and upload this image to&nbsp;
+the ECR repo. It’s a very simple pipeline,&nbsp;&nbsp;
+which you can adjust based on your needs.
+And we have a script to fetch the Git tag&nbsp;&nbsp;
+and increment the version. You&nbsp;
+can run it with 3 arguments,&nbsp;&nbsp;
+possibly in different GitHub Actions workflows.
+And at the end of the script, we write that new&nbsp;&nbsp;
+tag to the GitHub environment variable to make&nbsp;
+it available to other steps in the workflow.&nbsp;
+Alright, so this is the application repository&nbsp;
+already on GitHub with no Git tags so far.&nbsp;
+Now we just want to test and verify&nbsp;
+that our GitHub Actions pipeline&nbsp;&nbsp;
+works and uploads to ECR. Let’s create&nbsp;
+an empty commit and push it to GitHub.&nbsp;
+So you can see it’s already running; you&nbsp;
+can find it under the Actions tab as well.&nbsp;
+The important step is to configure AWS credentials&nbsp;
+when GitHub Actions tries to assume the role. If&nbsp;&nbsp;
+you misconfigured something, it will get stuck&nbsp;
+on this step with some kind of error. But in&nbsp;&nbsp;
+our case, it was able to assume the role and is&nbsp;
+already building a Docker image. There is also&nbsp;&nbsp;
+a new tag, so if the repo does not have a tag,&nbsp;
+this script starts with v0.1.0 and increments it.&nbsp;
+Let’s wait until the actions finish the&nbsp;
+build and upload the Docker image. Okay,&nbsp;&nbsp;
+looks good from the GitHub Actions.
+We have a new tag v0.1.1, and we should&nbsp;&nbsp;
+have exactly the same tag in the ECR. So at&nbsp;
+this point, we verified that we can build,&nbsp;&nbsp;
+release a new version, and upload the Docker&nbsp;
+image. Next, let’s create the VPC and EKS.&nbsp;
+I’m going to switch to the original&nbsp;
+repo with Terraform, and under dev,&nbsp;&nbsp;
+you can find the VPC folder.
+Don’t forget to update the region&nbsp;&nbsp;
+and change the S3 bucket in the tfvars file,&nbsp;
+as well as to update the state.config file.&nbsp;
+Now, under VPC, it’s a typical setup with a&nbsp;
+static Elastic IP address for the NAT gateway,&nbsp;&nbsp;
+with two private and two public subnets&nbsp;
+with some tags specific to the EKS cluster.&nbsp;
+Also, if you use a different region, don’t&nbsp;
+forget to replace the availability zones here&nbsp;&nbsp;
+as well. And we have the partial backend config&nbsp;
+with a different key. By the way, Terragrunt&nbsp;&nbsp;
+automatically generates the backend and follows&nbsp;
+the folder structure for the Terraform state. If&nbsp;&nbsp;
+you like automation, take a look at Terragrunt.
+Let’s switch to the VPC folder&nbsp;&nbsp;
+and initialize the state.
+And then apply it. This time,&nbsp;&nbsp;
+we need to provide two environment files: one&nbsp;
+common for the entire dev environment, and the&nbsp;&nbsp;
+second only specific for the VPC component.
+Alright, it’s done. Let’s take a look at the&nbsp;&nbsp;
+VPC components in AWS.
+We have the VPC itself.&nbsp;
+4 subnets.
+3 route tables.&nbsp;
+Internet gateway.
+Elastic IP address.&nbsp;
+And finally, NAT gateway.
+That’s all for the VPC; next is EKS.&nbsp;
+Under EKS, you’ll find the bare minimum for&nbsp;
+the tutorial: a policy for the load balancer&nbsp;&nbsp;
+controller, ArgoCD values to run ArgoCD without&nbsp;
+TLS (which we never need inside Kubernetes),&nbsp;&nbsp;
+and the most important config is&nbsp;
+for the image updater. You need to&nbsp;&nbsp;
+carefully review and replace all values, such&nbsp;
+as the region and your account number. If your&nbsp;&nbsp;
+CI/CD pipeline won’t work, it’s most likely&nbsp;
+because of this. And we use Pod Identity to&nbsp;&nbsp;
+allow the image updater to assume the role.
+Next, we have the ArgoCD Helm deployment. In&nbsp;&nbsp;
+the data.tf file, we dynamically retrieve&nbsp;
+VPC output variables, which is a common&nbsp;&nbsp;
+pattern to split a large Terraform state&nbsp;
+into smaller, more manageable pieces.&nbsp;
+Then we have the EKS itself.
+Don’t use anything smaller than large for&nbsp;&nbsp;
+now—you might not be able to deploy all the pods.
+Then we have the image updater with a policy and&nbsp;&nbsp;
+the role. And as you can see, we use&nbsp;
+Pod Identity to bind its Kubernetes&nbsp;&nbsp;
+service account with the IAM role in AWS.
+Load balancer controller: it’s kind of optional,&nbsp;&nbsp;
+but I need this for the demo.
+Then we have nodes, the Pod&nbsp;&nbsp;
+Identity add-on, and that’s pretty much it.
+Let’s switch to EKS and initialize Terraform.&nbsp;
+Next, let’s apply it, and this time we&nbsp;
+have dev and EKS variables that we supply&nbsp;&nbsp;
+to Terraform. It takes maybe up to 20 minutes&nbsp;
+to create a cluster and deploy all components.&nbsp;
+When the cluster is ready, we need to&nbsp;
+update our local Kubernetes config.&nbsp;&nbsp;
+And we can check if we can access EKS.&nbsp;
+So far, so good. If you need to debug,&nbsp;&nbsp;
+you most of the time need to tail the controller&nbsp;
+logs and image updater logs for permission errors.&nbsp;
+Let me open a new tab and get an admin&nbsp;
+secret that was automatically generated&nbsp;&nbsp;
+when we deployed ArgoCD with Helm. And we&nbsp;
+can port forward to access the ArgoCD UI.&nbsp;
+It’s going to be available on localhost:8080,&nbsp;&nbsp;
+with the username "admin" and the&nbsp;
+password from the Kubernetes secret.&nbsp;
+Alright, so far we don’t have any&nbsp;
+applications deployed using ArgoCD yet.&nbsp;
+Now let me switch to another repository, which&nbsp;
+is called k8s-lesson-268; it contains only&nbsp;&nbsp;
+Kubernetes deployment files. When using ArgoCD,&nbsp;
+you can only use Helm charts or Kustomize for&nbsp;&nbsp;
+the image updater to work, but with FluxCD,&nbsp;
+for example, you can use plain YAML files. I&nbsp;&nbsp;
+personally don’t like to create Helm charts for&nbsp;
+each application unless it’s generic and can&nbsp;&nbsp;
+work with many of your applications. I prefer&nbsp;
+Kustomize, which in my opinion is simpler and&nbsp;&nbsp;
+still provides enough flexibility to adjust or&nbsp;
+modify your deployment in different environments.&nbsp;
+So this base folder will be shared between&nbsp;
+all your environments. In the deployment,&nbsp;&nbsp;
+don’t use namespace, and make sure you update&nbsp;
+the ECR image. Then we have a Kustomize file&nbsp;&nbsp;
+with all the Kubernetes resources that we want&nbsp;
+to deploy. Namespace—don’t worry, we’ll override&nbsp;&nbsp;
+this in each environment. And finally, service&nbsp;
+of type load balancer. We’re using IP mode,&nbsp;&nbsp;
+and it’s internet-facing so I can run a demo.
+Now, under the envs folder, we have similar&nbsp;&nbsp;
+environments: prod, which is&nbsp;
+empty for now, and dev. Under dev,&nbsp;&nbsp;
+we have my-app with custom variables that we can&nbsp;
+override based on the environment, for example,&nbsp;&nbsp;
+namespace, count, and maybe ingress hosts.
+We can also specify the initial version&nbsp;&nbsp;
+that we want to deploy. So far, we have&nbsp;
+only the v0.1.1 image tag. And finally,&nbsp;&nbsp;
+the reference to the base folder.
+For now, we’ll use the App of Apps pattern,&nbsp;&nbsp;
+and in the next video, we’ll convert this to&nbsp;
+ApplicationSet and discuss the benefits of doing&nbsp;&nbsp;
+so. So in this folder, you would place ArgoCD&nbsp;
+application resources for each app you want to&nbsp;&nbsp;
+deploy. Don’t forget to update the image name&nbsp;
+and GitHub repository, and that’s all we need.&nbsp;
+So it’s already on GitHub. But now we need&nbsp;
+to somehow grant ArgoCD running in our EKS&nbsp;&nbsp;
+cluster access to clone this repo, and the&nbsp;
+most common approach is to use deploy keys.&nbsp;
+Let’s go ahead and generate a key pair locally&nbsp;
+for ArgoCD, and keep the passphrase empty.&nbsp;
+Alright, first get the private key. And&nbsp;
+we need to create a Kubernetes secret with&nbsp;&nbsp;
+this key. It’s in the main repository&nbsp;
+with Terraform under the k8s folder.&nbsp;&nbsp;
+Just replace this key. By the way, I have&nbsp;
+a full ArgoCD course on YouTube as well,&nbsp;&nbsp;
+where I show how to seal these secrets. And&nbsp;
+replace the Git URL, which is very important,&nbsp;&nbsp;
+but the secret name can be an arbitrary&nbsp;
+string. So this is on the EKS side;&nbsp;&nbsp;
+now we need to get a public key and upload it&nbsp;
+to GitHub. It’s under settings, deploy keys.&nbsp;&nbsp;
+Let’s call it ArgoCD and paste the key.&nbsp;
+We also need write access since ArgoCD&nbsp;&nbsp;
+will make a new commit with each new image tag,&nbsp;
+but you can opt out and use a Kubernetes secret&nbsp;&nbsp;
+instead. But in my opinion, this approach&nbsp;
+is better, especially if you need to quickly&nbsp;&nbsp;
+restore your EKS from scratch—you get&nbsp;
+all your current versions committed.&nbsp;&nbsp;
+But in the case of a secret, they will be lost.
+So we can start deploying applications to EKS. So&nbsp;&nbsp;
+in the main repo, you’ll find the apps application&nbsp;
+that would apply all your applications in the dev&nbsp;&nbsp;
+environment. You only need to replace the Git URL.
+The first step is to create a secret. Then apply&nbsp;&nbsp;
+the apps application. And in a few seconds, you’ll&nbsp;
+see that ArgoCD will start to deploy applications.&nbsp;&nbsp;
+So now we have the v0.1.1 version deployed.
+In EKS, you’ll find that your applications&nbsp;&nbsp;
+should be running in the custom namespace&nbsp;
+that you set in the Kustomize file.&nbsp;
+Now for the demo, I need the public load&nbsp;
+balancer to be ready; let’s make sure it’s&nbsp;&nbsp;
+in active state first. It usually takes a few&nbsp;
+minutes for the load balancer to be ready. Also,&nbsp;&nbsp;
+let’s take a look at the target group. Since we’re&nbsp;
+using IP mode, the target group will consist of&nbsp;&nbsp;
+Kubernetes pods' IP addresses. Now let me check&nbsp;
+if the DNS for the load balancer is ready as well.&nbsp;
+Yep, I can resolve it to the public IP address.
+Now I can use curl to hit my application’s version&nbsp;&nbsp;
+endpoint. Alright, so far we have the same&nbsp;
+v0.1.1 version. Let me run this in a loop so&nbsp;&nbsp;
+you can see that the application was upgraded.
+Now let’s switch to the application repo and&nbsp;&nbsp;
+create another empty commit to trigger the&nbsp;
+CI/CD pipeline. So like I mentioned before,&nbsp;&nbsp;
+it takes up to 2 minutes to detect a new image&nbsp;
+and up to 3 minutes to sync the state with GitHub.&nbsp;
+Now while we wait, let’s see if we have a&nbsp;
+new version in Git first. So GitHub Actions&nbsp;&nbsp;
+is running, which is a good sign, and it’s almost&nbsp;
+finished already since it’s a tiny image. In Git,&nbsp;&nbsp;
+we have a new tag v0.1.2. And let’s&nbsp;
+see if we have it in ECR as well.&nbsp;
+If you don’t want to wait, you can just&nbsp;
+click refresh and it will sync immediately,&nbsp;&nbsp;
+but I’ll wait instead. So in about 3 minutes,&nbsp;
+ArgoCD deployed a new version, and I can&nbsp;&nbsp;
+confirm it from the application endpoint.
+When you use the Git write-back method,&nbsp;&nbsp;
+ArgoCD, after it detects a new image, creates a&nbsp;
+new commit to Git, and that’s the file. You can&nbsp;&nbsp;
+find it under dev and your application folder.
+Now if for some reason it didn't work,&nbsp;&nbsp;
+you may want to tail the controller logs to see&nbsp;
+if there are any problems with your pipeline.&nbsp;
+Also, you can check the logs for the image&nbsp;
+updater, which is responsible for monitoring&nbsp;&nbsp;
+ECR repositories, and if you misconfigured&nbsp;
+permissions, you’ll find errors in those logs.

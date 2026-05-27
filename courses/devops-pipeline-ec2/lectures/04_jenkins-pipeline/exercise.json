@@ -1,0 +1,48 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "준비 실습: Jenkins를 영구 볼륨이 있는 Docker 컨테이너로 실행하라. 컨테이너 로그에서 초기 관리자 비밀번호를 가져와 설정 마법사를 완료하고, http://localhost:8080에서 Jenkins 웹 UI에 접속되는지 확인하라.",
+      "starter": "# Jenkins를 컨테이너로 실행:\ndocker run -d --name jenkins \\\n  -p 8080:8080 -p 50000:50000 \\\n  -v jenkins_home:/var/jenkins_home \\\n  jenkins/jenkins:lts\n\n# 약 30초 대기 후 초기 관리자 비밀번호 가져오기:\ndocker logs jenkins 2>&1 | grep -A 3 'initial admin password'",
+      "solution": "# 컨테이너 시작:\ndocker run -d --name jenkins \\\n  -p 8080:8080 -p 50000:50000 \\\n  -v jenkins_home:/var/jenkins_home \\\n  jenkins/jenkins:lts\n\n# 초기 관리자 비밀번호 확인 (두 가지 방법):\ndocker logs jenkins 2>&1 | grep -A 5 'Please use the following password'\n# 또는:\ndocker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword\n\n# 예상 출력: 32자리 16진수 문자열, 예:\n# a3f7b2c1d4e5f6a7b8c9d0e1f2a3b4c5\n\n# http://localhost:8080 을 열고 비밀번호를 붙여넣기 한다.\n# '권장 플러그인 설치'를 선택하고 관리자 계정을 만들고 마법사를 완료한다.\n# 확인: Jenkins 대시보드에 'Welcome to Jenkins!'가 표시되면 성공",
+      "explanation": "두 포트 매핑은 서로 다른 역할을 한다. 8080은 브라우저 UI 포트이고, 50000은 인바운드 빌드 에이전트가 컨트롤러에 연결하는 JNLP 포트다. 'jenkins_home'이라는 명명된 볼륨은 모든 설정, 잡, 자격증명을 유지한다. 볼륨 없이 컨테이너를 재시작하면 모든 것이 사라진다. Jenkins를 컨테이너로 실행하는 것은 앱 자체에 적용한 것과 같은 철학이다 — 재현 가능하고, 깔끔하고, 이식 가능하다.",
+      "hints": [
+        "'docker logs jenkins'가 60초 후에도 비밀번호 줄을 보여주지 않으면 컨테이너가 종료됐을 수 있다. 'docker ps -a'로 상태를 확인하고 'docker logs jenkins'로 시작 오류를 읽는다.",
+        "로컬 8080 포트가 이미 사용 중이라면 호스트 측 매핑을 바꾼다. '-p 9090:8080'으로 지정하면 http://localhost:9090 에서 접속할 수 있다.",
+        "나중에 컨테이너 접근 권한을 잃어도 언제든 다음 명령으로 관리자 비밀번호를 복구할 수 있다: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
+      ]
+    },
+    {
+      "prompt": "핵심 실습: 'Hello' 스테이지 하나가 있는 최소한의 선언적 Jenkinsfile을 작성하고, 인라인 스크립트를 사용하는 Pipeline 잡을 Jenkins에 만들어 빌드를 실행한 뒤, Jenkins 스테이지 뷰에서 스테이지가 초록색으로 표시되는지 확인하라.",
+      "starter": "// Jenkinsfile 내용 (Jenkins 인라인 스크립트 박스에 붙여넣기):\npipeline {\n    agent any\n    stages {\n        stage('___') {\n            steps {\n                echo '___'\n            }\n        }\n    }\n}",
+      "solution": "// 완성된 Jenkinsfile:\npipeline {\n    agent any\n    stages {\n        stage('Hello') {\n            steps {\n                echo 'Pipeline is alive!'\n            }\n        }\n    }\n}\n\n// Jenkins 설정 단계:\n// 1. New Item → 이름 입력(예: 'myapp-pipeline') → 'Pipeline' 선택 → OK\n// 2. 'Pipeline' 섹션으로 스크롤 → Definition: 'Pipeline script'\n// 3. 위 Jenkinsfile을 스크립트 박스에 붙여넣기 → Save\n// 4. 'Build Now' 클릭\n// 5. 빌드 번호 클릭 → Stage View에 초록색 'Hello' 박스 확인\n// 6. 'Console Output' 클릭 → 'Pipeline is alive!' 줄 확인",
+      "explanation": "선언적 파이프라인 문법은 pipeline → agent → stages → stage → steps 순으로 중첩된다. 지정한 모든 스테이지 이름은 Stage View의 열(column)이 되어 빌드의 시각적 진행 바를 만든다. 'agent any'는 Jenkins가 사용 가능한 어느 실행기에서든 이 파이프라인을 실행한다는 뜻이다. 이 간단한 파이프라인조차 핵심 패턴을 보여준다. 'echo' 스텝이 0이 아닌 코드를 반환하면 스테이지가 빨간색이 되고 파이프라인이 중단된다.",
+      "hints": [
+        "빌드가 'No such DSL method echo' 오류로 실패하면 설정 중에 권장 플러그인이 설치되지 않은 것이다. Manage Jenkins → Plugins → Installed에서 Pipeline 플러그인이 있는지 확인한다.",
+        "'Started'는 보이지만 UI에 스테이지 박스가 나타나지 않으면 브라우저를 새로 고쳐야 할 수 있다. Stage View는 Pipeline Stage View 플러그인이 필요하다 — 설치 여부를 확인한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습: Jenkinsfile을 GitLab 저장소에 커밋하고 Jenkins 잡을 'Pipeline script from SCM'으로 읽도록 재설정하라. 'checkout scm'을 사용하는 'Checkout' 스테이지를 추가한다. 변경을 푸시하고 Jenkins가 저장소에서 Jenkinsfile을 로드해 Checkout 스테이지가 성공적으로 실행되는지 확인하라.",
+      "starter": "// GitLab 저장소 루트에 커밋할 Jenkinsfile:\npipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                // 이 빌드를 트리거한 커밋을 체크아웃하는\n                // 내장 스텝을 사용한다:\n                ___\n            }\n        }\n    }\n}",
+      "solution": "// Jenkinsfile (저장소 루트에 'Jenkinsfile'이라는 이름으로 커밋, 확장자 없음):\npipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                checkout scm\n            }\n        }\n    }\n}\n\n// 'Pipeline script from SCM' 적용 단계:\n// 1. Jenkins: 파이프라인 잡 열기 → Configure\n// 2. Pipeline 섹션 → Definition: 'Pipeline script from SCM'\n// 3. SCM: Git\n//    Repository URL: https://gitlab.com/<your-namespace>/<your-project>.git\n//    Credentials: GitLab 자격증명 선택 또는 추가\n//    Branch: */dev (또는 */main)\n//    Script Path: Jenkinsfile\n// 4. Save\n//\n// Jenkinsfile 커밋 및 푸시:\n// git add Jenkinsfile\n// git commit -m \"Add Jenkinsfile with Checkout stage\"\n// git push\n//\n// Jenkins가 웹훅(강의 3에서 설정)을 받아 GitLab에서 Jenkinsfile을 읽고\n// Checkout 스테이지를 실행한다. Console Output에 다음이 나타나야 한다:\n// 'Checking out Revision <SHA> (refs/remotes/origin/dev)'\n// Stage View: 초록색 'Checkout' 박스 하나.",
+      "explanation": "'checkout scm'은 잡에 이미 설정된 동일 저장소와 자격증명을 사용해 빌드를 트리거한 정확한 커밋을 클론하는 단축 스텝이다. Jenkinsfile 안에 저장소 URL을 다시 적지 않아도 되므로 유지 보수 부담이 줄어든다. SCM에서 Jenkinsfile을 읽음으로써 빌드 프로세스가 소스 기록의 일부가 된다. 파이프라인에 대한 모든 변경이 버전 관리되고, 리뷰 가능하고, 애플리케이션 코드처럼 롤백할 수 있다. 이것이 'Pipeline as Code'의 철학이다.",
+      "hints": [
+        "Jenkins가 저장소를 클론하지 못하고(인증 오류) 실패하면, Manage Jenkins → Credentials에서 GitLab 사용자 이름과 개인 액세스 토큰을 비밀번호로 사용하는 'Username with password' 자격증명을 추가한다.",
+        "Jenkins가 오래된 Jenkinsfile을 읽는다면 Jenkins가 감시하도록 설정된 브랜치에 커밋을 푸시했는지 확인한다(SCM 설정의 Branch Specifier와 일치해야 함).",
+        "Jenkinsfile이 저장소 루트가 아닌 하위 디렉터리에 있다면 Pipeline 설정의 'Script Path' 필드를 상대 경로(예: 'ci/Jenkinsfile')로 변경한다."
+      ]
+    },
+    {
+      "prompt": "응용 실습: Jenkinsfile에 'Verify Workspace'라는 두 번째 스테이지를 추가하라. 이 스테이지에서 'sh' 스텝으로 Checkout 스테이지가 체크아웃한 파일 목록을 출력하고('ls -la'), 현재 Git 커밋 SHA도 출력한다('git rev-parse --short HEAD'). 업데이트된 Jenkinsfile을 푸시하고 두 스테이지가 모두 초록색으로 표시되며 출력이 콘솔에 보이는지 확인하라.",
+      "starter": "pipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                checkout scm\n            }\n        }\n        stage('Verify Workspace') {\n            steps {\n                // 파일 목록을 출력하는 sh 명령:\n                sh '___'\n                // 짧은 커밋 SHA를 출력하는 sh 명령:\n                sh '___'\n            }\n        }\n    }\n}",
+      "solution": "pipeline {\n    agent any\n    stages {\n        stage('Checkout') {\n            steps {\n                checkout scm\n            }\n        }\n        stage('Verify Workspace') {\n            steps {\n                sh 'ls -la'\n                sh 'git rev-parse --short HEAD'\n            }\n        }\n    }\n}\n\n// 푸시 및 트리거:\n// git add Jenkinsfile\n// git commit -m \"Add Verify Workspace stage\"\n// git push\n\n// 예상 Console Output:\n// [Checkout] Checking out Revision abc1234 ...\n// [Verify Workspace] $ ls -la\n// total 32\n// drwxr-xr-x ... Dockerfile index.js package.json ...\n// [Verify Workspace] $ git rev-parse --short HEAD\n// abc1234\n\n// Stage View에 두 개의 초록색 박스가 나타난다: 'Checkout'과 'Verify Workspace'.",
+      "explanation": "이 실습은 두 가지 핵심 메커니즘을 확인한다. 첫째, 'checkout scm'이 실제로 워크스페이스에 파일을 기록했음을 'ls -la'로 눈으로 확인한다. 둘째, 'git rev-parse --short HEAD'로 커밋 SHA를 캡처하는 것은 강의 6에서 사용할 태깅 전략의 미리보기다. 이 SHA가 Docker 이미지에 태그로 붙어 실행 중인 컨테이너와 소스 코드 사이의 추적 가능한 연결을 만든다. Jenkinsfile에 스테이지를 추가할 때마다 Stage View에 새 열(column)이 생긴다 — 파이프라인의 시각적 진행 보드다.",
+      "hints": [
+        "'sh' 명령이 'sh: command not found'를 반환하면 Jenkins 에이전트가 Windows 실행기에서 실행 중일 수 있다. Windows에서는 'sh' 대신 'bat'을 사용한다(bat 'dir' 및 bat 'git rev-parse --short HEAD').",
+        "'git rev-parse --short HEAD'가 오류를 반환하면 'checkout scm'이 먼저 실행됐는지 확인한다. git 명령은 워크스페이스에 클론된 저장소가 필요하다."
+      ]
+    }
+  ]
+}

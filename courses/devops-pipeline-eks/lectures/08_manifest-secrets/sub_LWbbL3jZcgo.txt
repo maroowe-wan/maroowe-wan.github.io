@@ -1,0 +1,291 @@
+Kind: captions
+Language: en
+Unless you use Kubernetes for your personal
+projects or some kind of POC, you need to
+be able to customize Kubernetes configuration
+files such deployments, services, ingresses,
+etc., to a specific environment.
+For example, if you expose an application
+to the internet using ingress, you definitely
+need to update DNS for different environments.
+Due to the fact that there are so many projects
+out there, and some of them are widely used,
+such as Helm, the problem is still considered
+to be not completely solved.
+One approach to configuration reuse is simply
+copy-paste.
+However, as with code, it makes it harder
+to benefit from ongoing improvements to the
+source.
+Another approach to reuse is to express the
+source material as a parameterized template.
+Then a tool is processing the template executing
+any embedded scripting, and replacing parameters
+with desired values to generate the configuration.
+The challenge here is that the templates and
+value files are not specification of Kubernetes
+API resources.
+They are a necessary new thing, a new language
+that wraps the Kubernetes API.
+The problem here with Helm is that different
+teams want different changes.
+So almost every specification that you include
+in the YAML file becomes a parameter that
+needs a value.
+And finally, a template-free approach.
+Since the Kubernetes configuration is expressed
+as JSON or YAML, it's relatively easy to target
+individual keys and merge them with environment-specific
+values.
+That's where kustomize comes into play.
+It's native to Kubernetes, a template-free
+way to customize Kubernetes objects.
+Kustomize has the concept of bases and overlays.
+A base is a directory with a kustomization.yaml
+file, which contains a set of Kubernetes resources
+such as deployments, configMaps, services,
+etc., and associated customization.
+Overlays directories contain environment-specific
+changes.
+It may be a name prefix, replica count, a
+new image tag, or other changes.
+Kustomize uses an industry-standard declarative
+approach that can be described in YAML and
+stored in git.
+Since it's template free, it expresses the
+full power of Kubernetes API, with no need
+to parameterize every single line compared
+to Helm.
+It can be used for both bespoke (build in-house
+apps) and off-the-shelf applications such
+as Redis, Kafka, Postgres, and other open-source
+projects.
+Kustomize supports bulk management operations:
+creation, deletion, and updates.
+It is built into kubectl, so you can create
+and update resources using kubectl apply -k
+command and similar command to delete.
+Since Kustomize is provided as a standalone
+golang package and cli tool as well as it
+is built into kubectl, it's easy to integrate
+with user's tools and workflows.
+In this video, we will go over 4 examples.
+In this first one, I'll show you how to convert
+a typical Kubernetes deployment object to
+a customizable base and overlay.
+In the second example, we will use configMapGenerator
+to create config maps specific to particular
+environments.
+You are probably aware if you simply update
+configmap with new data, it will not trigger
+a rolling deployment update.
+The recommended approach without kustomize
+is to create a new config map with a new name
+and replace it in deployment.
+Kustomize automates this process.
+Every time you modify the data, kustomize
+generates a new configmap object and appends
+a hash, which triggers a rolling update.
+The third example will focus on secrets and
+how to generate them from multiple sources,
+such as environment variables.
+And the final example demonstrates how to
+update an image name or a tag based on the
+specific environment.
+The common workflow is to set up continuous
+deployment to the development or staging environment
+and when it's properly tested, upgrade the
+production.
+You can find the code and commands that I
+run in the video in a blog post.
+The link will be in the description.
+Alright, let's start.
+I'm going to follow the same naming convention.
+Create a base directory.
+This folder will be used in other environments
+to customize our deployment.
+As I mentioned before, the goal of the first
+example is to show you how to convert a simple
+deployment to a kustomize base and overlays.
+It will be a Kubernetes deployment based on
+an open-source nginx image.
+I specified a namespace as a default, but
+you can easily override it in each environment.
+The important part is that it's a native Kubernetes
+specification.
+It's not a template that needs to be customized.
+We will share this deployment and make some
+environment-specific changes by either merging
+with the original or completely replacing
+it.
+Next, you need to create a kustomization.yaml
+file in the same base directory.
+Optionally you can specify the kind to be
+Kustomization, but it's not necessary if you
+use kustomization.yaml file name.
+In the following examples, we will omit this
+part.
+Then you need to specify what files will be
+used as a base (in other words, shared between
+environments) in this kustomization directory.
+Since we have a single deployment file, let's
+put it there.
+I would say that's the bare minimum that you
+need to get started.
+Now let's create the environments folder.
+The first environment will be staging.
+To modify our nginx deployment to be specific
+to this environment, we need kustomization.yaml
+file again.
+Here, for example, I want to replace the default
+namespace on the original deployment with
+a staging namespace.
+Then same, here, we need to point this kustomization
+to the base directory.
+The base name is an arbitrary name, and you
+can use anything you want; just update the
+path.
+For this example, let's create staging namespace
+manually using the kubectl client.
+Kustomize is built into kubectl, and you can
+apply it by providing the -k flag.
+You can also use a standalone binary if you
+want to build and preview the changes.
+As you can see, we have a single pod running
+in the staging namespace.
+We modified a single deployment attribute,
+namespace.
+Now let's create another production environment.
+In this folder, we can create another deployment
+object; the key is to have the same deployment
+name as the original.
+And we can choose to override any part of
+the deployment; for example, for production,
+we need 20 replicas.
+As you can imagine, with Helm, you need to
+go over the whole Deployment specification
+and parameterize every single attribute if
+you want to be as flexible as kustomize.
+This deployment doesn't have to be a complete
+object if we're going to merge it together
+with the original.
+Also, we need kustomization.yaml file.
+Update the namespace to be production.
+You can open this link to find all possible
+parameters that you can override in the kustomization
+file.
+This list is additional customization that
+you can add to simply modifying the source
+object.
+If you use the same namespace to deploy services,
+you may choose to prepend a prefix to the
+name.
+Then the same path to the base directory.
+In this example, I want kustomize to create
+a production namespace instead so that I will
+specify additional namespace resource here.
+Then we have two options either merge two
+deployments together or choose to replace
+You can do it not only with deployments but
+with all other Kubernetes objects, such as
+roles, stateful sets, configmaps, etc.
+The last item here is a production namespace.
+That will be applied along with deployment.
+To apply, use the same command; just specify
+the path to the production environment.
+Now we have 20 nginx pods in the production
+Also, we have a production prefix at the front
+of the pod and deployment.
+To delete, you can use a similar command;
+just don't forget to use the -k flag.
+In the second example, I'll show you how to
+use config map generators.
+When you change any data, it will trigger
+a rolling update.
+We're going to use the same folder structure.
+Example 2 and a base directory.
+This deployment will use an environment variable
+that we will retrieve from configmap.
+The same very simple kustomization file with
+a single resource.
+We don't need to define configmap in the base
+directory.
+Now under the staging folder, we will create
+kustomization and generate configmap.
+Point to the base directory.
+Then the configMapGenerator.
+There are multiple ways to generate it.
+In this example, we use literals, env equal
+to staging.
+That's it; let's go ahead and apply the folder.
+The pod is already running.
+If you take a look at the configmap, you can
+notice the hash appended to the name.
+Let's print it out.
+Under the data section, you have env equal
+Now there is another way to generate a configmap
+from the file.
+Instead of environment variables, we will
+get the data from configmap and mount it to
+the file.
+Another change we need to make is to add a
+second generator.
+In this case, we will use a file.
+We also need to create a creds.txt file in
+the same directory.
+We have a username and a password here.
+Let's reapply it.
+We have generated two configmaps.
+Let's verify if we can access the credentials
+from the pod.
+We can cat the file from the pod.
+Alright, it's the same username and password.
+The third example will be similar, but instead
+of configmaps, we will generate secrets.
+Under the environments section, we use secret
+instead of configmap.
+The same concept, when the content of the
+secret changes, it generates a new secret
+with a hash which triggers a rolling update.
+To check environment variables in the pod,
+you can run the env command.
+And we have our username admin environment
+variable.
+The second environment variable region will
+be generated from the file.
+Add another generator to kustomize.
+Be careful when generating anything from the
+file, especially environment variables.
+If you add a new line to the file, it will
+be appended to the environment variable as
+well.
+That's the region, us-west-2.
+Finally, let's use the environment variable
+to populate environment variable in the pod.
+Create a .env file and define variables, for
+example, password 123.
+When you apply the configuration, kustomize
+will source it and parse environment variables
+We have all three environment variables here.
+The final example demonstrates how to update
+the image tag or name based on the environment.
+This deployment is without any changes.
+You can include the images section and rewrite
+the name and a tag.
+Kustomize will search for any image in the
+base directory with the name nginx.
+I don't want to update the image name; just
+upgrade the version.
+You can see that we have a new image, version
+1.21.6.
+In my opinion, this is the best tool right
+now to customize configuration files based
+on the environment.
+I want to remind you if you use Helm, to achieve
+the same flexibility, you need to parameterize
+every single attribute.
+Also, it's easier to integrate kustomize to
+existing tools and workflows, such as continuous
+deployment.
+Let me know in the comments if I was able
+to convince you to try kustomize.

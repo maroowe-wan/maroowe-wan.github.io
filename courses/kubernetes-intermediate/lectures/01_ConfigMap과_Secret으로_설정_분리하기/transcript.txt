@@ -1,0 +1,586 @@
+## 영상 1: Kubernetes Secrets in 5 Minutes! (https://www.youtube.com/watch?v=cQAEK9PBY8U)
+
+you're trying to deploy an application into a kubernetes cluster and need to pass it some sensitive information such as an api token or an ssl certificate
+in the next five minutes i'm going to show you exactly how to do that taking advantage of kubernetes built-in secret management
+
+hey team sid here with devops directive where it's my job to help you level up your devops and cloud infrastructure skills
+i don't want to waste your time with a big preamble so let's get right into it
+
+nearly any application doing something more complex than just printing out a hello world will have some sensitive data needed to configure it
+
+luckily for us kubernetes has a primitive designed exactly for this use case which is aptly named a secret
+
+these secrets consist of key value pairs
+for example it could be an api token or an ssl certificate
+
+there are also a few different types of secrets
+
+the first is the opaque type which allows for arbitrary user-defined data
+
+there's also more specific types which have some other requirements and validations applied for their corresponding use cases
+
+for example a docker config type secret should be used to store credentials for a docker registry
+
+for the remainder of the video all the examples will refer to generic opaque secrets
+
+how do we go about actually creating one of these secrets there's two main ways which i'll walk through now
+
+first we can define a yaml file just like any other kubernetes resource
+
+this file will specify that it is of kind secret defines the name of the secret within a metadata and then contains the key and value of the secret within the data portion
+
+one important thing to note here is that the value field looks a little bit different than it did before
+
+this is because the value field is encoded in base 64
+
+to encode your secret you can use the base64 command line utility
+
+you'd echo out the token with the dash n flag to prevent it from including a new line
+
+this is important because white space and new lines can cause your secrets not to work properly
+
+then we pipe it into the base64 utility and get the encoded string out
+
+to create the secret within the cluster we would then run the command
+
+cube cuddle apply f for file and then the name of the file where we stored the configuration
+
+cube cuddle also supports a slight variant that doesn't require you to create a file which is convenient since you likely wouldn't want to store your secrets in a plain text source file anyways
+
+the command to do this is cube cuddle create secret generic the name of the secret and then there's two different options
+
+you can do from literal where you pass the key and value as literal strings into the command
+
+or you can do the from file option in which you pass a key and then the path to the file on your local system
+
+both of these options from literal and from file handle the base64 encoding for you so you can pass in your secret without having to encode it first
+
+okay great we now have the secret stored within kubernetes
+
+how can i actually access it within an application
+
+there's two main methods for consuming secrets within kubernetes
+
+the first is to inject it as an environment variable inside the container
+
+when defining the pod or job spec we can use the end key and indicate that the value should be pulled from a reference to that secret we created earlier and then it references the key value pair to extract
+
+here we're telling the pod to find the secret name my secret and specifically the value corresponding to the api token key within that
+
+it then gets injected as the environment variable api token within the container
+
+the application running within the container can then access it using something like process.nb.api token for javascript or os.environ.get api token for python
+
+the second way to consume a secret is to mount it into a container using a volume
+
+this method works great for applications that are designed to consume sensitive information from configuration files such as nginx reading an ssl certificate
+
+to do this we need to configure two things
+
+first we declare a volume within the pod specification referencing our secret
+
+next we create a volume mount within the container
+
+the name of the volume in the volume mount must match the name of the volume where it was defined
+
+and then the path is where within the container file system the secret will be located
+
+each key in the secret will become a file containing its corresponding value
+
+i know you're probably thinking great now we know how to create and use kubernetes secrets what else could we possibly need to know
+
+i want to call out three potential gotchas
+
+in the kubernetes api server the secrets are stored within edcd the distributed key value store containing most kubernetes configurations
+
+if you're managing your own cluster make sure to encrypt this data and set up role-based access permissions to limit access to those data
+
+second as i mentioned before secrets within a yaml definition file are base64 encoded this is not encryption and those files should be treated as sensitive and not checked into version control
+
+number three you still need to protect your secrets within the applications using them
+
+for example don't log them out and don't send to an untrusted third party
+
+hopefully now you feel confident about how to manage your application credentials using kubernetes secrets
+
+if you still have more questions about general credential management i suggest watching that video in which i walk through the five different levels of credential management ranging from beginner to expert
+
+also if you made it this far into the video and you aren't subscribed to the channel why don't you go ahead and fix that
+
+it only takes a second and it really helps the channel grow
+
+that's it for today and remember just keep building
+
+
+## 영상 2: Kubernetes Tutorial For Beginners | Kubernetes ConfigMap (https://www.youtube.com/watch?v=3RvudbKR1gc)
+
+hello friends welcome back to my channel and today we are back with another tutorial on kubernetes
+
+so in this tutorial uh for kubernetes for beginners we are going to see about kubernetes config maps
+
+so what we will do in this tutorial we will see about what is config maps in we'll also see what are the different use cases for config maps and also we will see how to create config maps through values or files or using manifest file
+
+so we'll see everything in a complete demo like how to config maps using direct value for the data or you can also use some files to map to config files
+
+you can also create a manifest file for config file config map and then we'll create config maps with that okay
+
+so also we will see what is the usage of config maps in parts so once you create the config map we will see how to use make use of that in the pod so that will be the complete agenda for this tutorial
+
+so let's get started with the what is config maps in kubernetes
+
+so in simple term uh we can say conflict map is an api object which is used to store non-confidential data in key value pairs
+
+so what you have to be very clear is it is to store some data in key value pairs so that's the main objective of config map
+
+and this config maps can be used in parts as environmental variables or command line arguments or configuration files in the volume
+
+so those are some of the uses of this config maps so which we will see it in the upcoming part of this tutorial okay
+
+and one thing which you have to be very clear is like config map does not provide secrecy or encryption
+
+so if you're looking for uh you know a secret or encrypted uh data then you have to use uh secrets in kubernetes
+
+so this topic is only about config map not about secrets okay
+
+so also one you have to be you know able to understand is like conflict map cannot use to store high data or you know huge data volume
+
+so you have to be very careful or you have to understand that the data stored in config map cannot exceed one megabytes okay
+
+so that's one of other point which you have to be able to understand from this topic
+
+now let's see what are the different use cases for conflict map which we discussed just uh previously
+
+so just retrading for you like config maps can be used as the environmental variables for container okay that's one of the scenarios
+
+and also we can use config map as command or arguments inside a container and also we can use config maps as a file in read-only volumes
+
+so these are some of the scenarios or use cases for config map
+
+so before i get into the actual demo of this uh topic of conflict map which we will see a complete process of step by step process how to do this in a kubernetes setup
+
+so i would request you like if you are new to my channel or if you have not subscribed to my channel kindly click on the subscribe button also like my videos share and give your feedback
+
+so now let's get started about the demo
+
+so what we are going to use i'm going to use a mini cube setup
+
+so if you see a mini cube status you can see the mini cube is running
+
+let me clear out my screen
+
+so what we have to do is we need to create config map right
+
+so before that let me show you uh what are the config maps already available
+
+so i can use cube ctl gets cm or you can even write the config
+
+so this will list out you know the config map in the default namespace if you want to get you know all the details then it should be all namespace
+
+so now you can see it has listed down all the config maps in this uh kubernetes cluster
+
+so default is this one and we have other name spaces as well right
+
+so let me clear out the screen and also to understand the api version also the kind
+
+you can use cube ctl uh explain cm or config map
+
+so it will give you the details about uh what is the kind which we are going to use and the version which is the v1 which we'll be using in the manifest file
+
+so let me clear out the screen
+
+so what i'm going to do is i'm going to create a config map using you know the direct file values
+
+so i'm just going to run this command
+
+if you see i'm going to use skip ctl create and i'm going to tell that i'm going to create a config map and the name of the config map is config map i have an example hyphen values
+
+and the data which is i'm good literally giving it in this command itself
+
+so i'm going to use this uh argument from literal
+
+and this is the key value pair which is car equal to ferrari and country equal to indian
+
+so this is the data for this config map
+
+so i'll just run it
+
+so you can see the config map is created
+
+so let me go and get the config map details
+
+now you can see this config map is created right and you can see it just created seven seconds ago
+
+now you can describe this config map using cube ctl describe cm and you can just give this name
+
+so now we can see the data for this config map is car is ferrari and countries india right
+
+so that's what we have given literally from here
+
+so that's the one way of creating config map
+
+now let's see the other way like you can create a file and you can save the data in it and then we can call that file for creating the config map
+
+create a file called test config map dot properties
+
+so okay so i'll just run this and let me create you know the key value pair which is similar to cars ferrari and i'll write country india okay
+
+so that's the key value pair i'm just saving this file
+
+now i can create a config map using uh this uh file okay
+
+so in order to create the config map using the this file name
+
+what i have to do is i have to run a command in this format
+
+so the initial statements are similar
+
+so we are going to use cubectl create config map and the name of the config map
+
+this time i'm using test type and copy config map
+
+so rather than using uh from literal i'm going to use from file
+
+and this file is located in the current location
+
+so that's where i just put dot slash and file name okay
+
+the file name is testconfig.properties
+
+so i'll just run that
+
+so you can see the config map is created
+
+so now if i run uh cubectl getcm you can see one more config map is created right
+
+so uh if you want to delete this config map
+
+you can use cubectl delete config map and the config map name okay
+
+so i'm just deleting the both one
+
+so let me clear out the screen
+
+keep ctl get cm
+
+now you can see i have only the default uh config map okay
+
+so when you create the config map
+
+if you want to create on different name space
+
+you can you do that also but the conflict map on the same namespace is what which can use it for the part
+
+if the config map is on a different name space you cannot create make use of that in a different name space for a part okay
+
+let's see how we can write a yaml or manifest file for config map
+
+so as i showed you like in the explain uh for config map the api version is v1 and the kind is config map
+
+and the meta i'm going to give a name like test config map which is the name for this config map
+
+and the data which we have used similar like we are going to use the key value pair car and ferrari okay
+
+so that will be the key value pair for this data
+
+so that's pretty simple right
+
+so you have seen the manifest file which we have done it for parts deployment replica set
+
+so i'm not going to explain much about that
+
+so it's just a simple uh thing here
+
+they just need to copy this and i'm going to create a file
+
+so i'm going to create a file called config map dot demo
+
+and i'm going to paste this content over there okay
+
+and i'm just going to save that file
+
+so and i'm going to use that for creating a config map
+
+so in order to create the config map you need to use skip ctl create and hyphen f and the name of the yaml file which is config map dot yaml
+
+and you can just press enter and you can see the config map is created
+
+now if i go to cube cuttle get cm you can see there is a config map and if you can describe it keep cto describe cm and this config map uh you should be able to see the complete detail like the data which we haven't drive
+
+so that's a pretty simple process
+
+now to create so now we have seen three ways you can create config map right
+
+by literally giving the value in the command line itself or you can use a file or you can use a manifest file
+
+now let's see how we can make use of this config files in a pod
+
+so i'm just going to show you like a manifest file which i have just returned
+
+so you can see the api version one and the kind is par and the name for the port and the container
+
+i'm going to use an http container
+
+and you can see this section which we are defining like i'm going to call uh this config map for an environment
+
+so in this container i want to send some environmental variables and the content will be coming from this config map
+
+so we are going to use this reference conflict map reference and the name of the conflict map is test config map
+
+so this has to be very clear which conflict map which you want to use it for this part
+
+uh so the different what we do are doing in this uh you know uh part is like we are going to get the complete uh config map in this uh uh no container
+
+so we are going to load the complete config map when you call like this
+
+so we are not specifically calling any keys uh like for car we have some values right
+
+so we are not calling any specific values we are just going to load the complete config map to this container okay
+
+create another file called maybe config map part dot gmo okay and i'm going to insert that content over here
+
+so the one which we just returned in that sublime text editor so i'm just going to save it and i'm going to create a part okay
+
+zero apply f config map part dot yaml okay so i'm just going to run it
+
+now you can see the part is created
+
+so your cube ctl get parts
+
+now you can see the part is getting created
+
+so let's just wait for the part to be created
+
+yep now you can see the part is created
+
+so what i'm going to do is i'm going to go to keep ctl exec and i'm going to log into this container okay
+
+i'm going to log into this container zero i think it's a typo here which should be
+
+so if i log into this container using this command
+
+cube ctl i t config map i you know the the part name and the bash okay
+
+so you can see now we are inside the container or part
+
+and you know you can see we are now and if i check print env
+
+you can see it list down all the environmental variable inside this container
+
+now you can see we have something called country india and car ferrari
+
+this is inside the pot or inside the container okay
+
+so what you can see is like these environmental variables are coming from the config map which we have used inside the pod manifest file
+
+so this is one way of using the you know config file
+
+so where you can import the whole data into this container
+
+let me exit out of the screen okay
+
+let me clear out the screen and uh i'm going to delete this part and i'll create uh
+
+let me just get the part first
+
+so let me delete this font and i'll create a new one in a different form well
+
+so that we just pick only the keys specific value out of the data which we have used okay
+
+so let me delete the pod
+
+okay so the power is deleted
+
+so let me just show you how we can write the uh no other way
+
+how we can select the specific value out of the config map
+
+now if you see this uh manifest file we have returned almost the same away like the name of the container or the pawn okay
+
+the name of the container and we are using the image
+
+now if you see the difference is
+
+i'm going to call like environmental the parameter right
+
+it's not environment from which i'm loading everything and i'm going to give a name for this uh value or the environmental value okay
+
+so it's going to be car and this car the value is getting from
+
+i know this config map
+
+so i'm going to call a value from the config map reference key and it's going to be the name of this config map
+
+and the key value should be car
+
+so what that actually will happen is like inside the container you will have a environment available variable as car
+
+and the value should be the value of car which will be ferrari
+
+so car equal ferrari
+
+it's not like car equal to car okay
+
+so the key which we have set inside the config map car which you have a value called ferrari which will be mapped to this environmental variable okay
+
+similar way for country it will be taking the value from country okay
+
+so let me just copy this content and let me create a new file before creating a pod
+
+so let me create a file called config map or one dot yaml okay
+
+and i'm going to insert this content over there and i'm going to save this
+
+and let me create a new part
+
+cube ctl apply hyphen app config map or one dot yaml
+
+now you can see the config map is uh sorry the part is created
+
+so keep ctl get port sorry there's a typo here so it should be part
+
+so now you can see the part is running
+
+the similar way like i'm going to log in to this uh part or container
+
+so keeps it till exec i t the port name and bash
+
+so now you can see we are inside the part okay
+
+so let me use the print env again
+
+now this time if you see the environmental variables
+
+so the country is the name which we have given in the manifest file right and it has taken the value for the country which is reset in the config file
+
+and the same here
+
+so the envioun variable car and the value is taken from
+
+so that's another way like we can set the config map to use it in the parts
+
+so i i hope this is very clear like the two different ways we can use
+
+and this can be also used in a different other ways
+
+so i just want to show you some basics of config map
+
+so i hope we showed you like how to create config map
+
+how to make use of config map for the parts
+
+so that is all for this tutorial
+
+i hope uh this is an informative tutorial for you about config map
+
+so if you are not subscribed to my channel
+
+or if you want to see more videos for my channel
+
+click on the subscribe button and also like my videos
+
+share and comment and i appreciate you for uh
+
+thank you for watching for my channel you
+
+
+## 영상 3: How to Create ConfigMaps in Kubernetes - Civo Academy (https://www.youtube.com/watch?v=6kBNZ9c88FY)
+
+Hi, in this video, we'll be going through ConfigMaps.
+
+ConfigMaps lets you decouple your containerized image and provide different configurations to run in different environments.
+
+Let's create the ConfigMap.
+
+So, you can use the kubectl create configmap command to create the ConfigMap.
+
+There are various options that you can explore.
+
+Like, you can create it from a file. You can create it from a file with a key, from a literal, or the env file.
+
+So let's go through some of these.
+
+First, we will create a ConfigMap from the file.
+
+To create that, we will use the command kubectl create configmap test --from-file=file.prop, where test is the file's name.
+
+Now, file.prop has nothing but just three fundamental values.
+
+So let's see what comes up in the ConfigMap.
+
+To see that, use the command kubectl describe configmap test.
+
+So you can see it takes data as the name of the file and then pulls in all the data in the file.
+
+Now sometimes, what you want is maybe you have multiple key values in a file, and you want it as separate data.
+
+So you can use something called an env file.
+
+Run the command, kubectl create configmap test2 --from-file=env.prop.
+
+And now, if I use the command kubectl describe configmap test2, we can see that we have different data, env, location, and version.
+
+Now, let's create a ConfigMap using literal.
+
+First, use the command kubectl create configmap demo --from-literal=name=saiyam.
+
+Then run the command, kubectl get configmap, and you will see the creation of a ConfigMap from literal.
+
+Now, I have a pod.
+
+Now, how to use ConfigMap in a pod.
+
+So you need to have a basic YAML file.
+
+In that file, you will have apiVersion, kind, metadata with the labels, and a spec section containing the container with the image as busybox.
+
+So in the container, it'll list out all the environment variables.
+
+And in the environment section, we are naming the environment variable HELLO, and we are taking its value from the ConfigMap key reference.
+
+So the name of the ConfigMap will be demo, and the key that we want to refer to is name.
+
+So, we should get env HELLO with the same value.
+
+To see if that happens, run the command, kubectl create -f demo.yaml.
+
+You will see that the creation of the pod is completed, and it is running.
+
+By running the command, kubectl logs demo, you can see that HELLO=saiyam is printed.
+
+So we got our ConfigMap inside the pod.
+
+And now, what we'll be doing is we'll be creating a ConfigMap, and we'll be mounting it as a volume inside a pod.
+
+This process is also another way of creating a ConfigMap.
+
+So you have a YAML file, apiVersion, kind, metadata, and namespace, which has the following data.
+
+So these should be two files created when we mount as a volume.
+
+So, we will now see how to do that.
+
+In the container section, you have volumes.
+
+So in the volume, we specify the ConfigMap that we want to mount inside the container and the volume's mount path.
+
+So let's create the ConfigMap by using the command kubectl create -f cm-for-volume.yaml.
+
+Next, let's create the pod using the command kubectl create -f demo2.yaml.
+
+You will see that the pod is created and is completed.
+
+Now, let's see the logs using the command kubectl logs cm-volume.
+
+You can see that file1 and file2 are present over there.
+
+So they get mounted as files onto the pod, that specific directory inside the folder.
+
+So you can mount a ConfigMap as volume.
+
+You can use ConfigMap as an environment variable.
+
+You can create it using different yaml files, environment files, and you can also create a ConfigMap using literal.
+
+That's it for this lecture.
+
+I'll see you at the next one.

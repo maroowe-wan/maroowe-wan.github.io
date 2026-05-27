@@ -1,0 +1,197 @@
+Kind: captions
+Language: en
+- Hey, Tim Berglund with Confluent
+here to tell you about Kafka topics.
+(mellow music)
+Now, these events that Kafka manages,
+they have a tendency to proliferate.
+I mean, just think of what's happened
+to you today since breakfast.
+There are a lot of events in the world,
+and we're gonna need a
+system for organizing them.
+Now, Kafka's fundamental unit
+of event organization is called a topic,
+and if you've never
+heard of a topic before,
+for now you can think of it being
+something like a table in a
+relational database, right?
+It's got a name, and it's a container
+for things that are probably
+similar to one another.
+As a developer using Kafka,
+when you actually start
+writing code against this thing
+the topic is the unit of abstraction
+that you're probably gonna
+think about the most.
+There are lots of other little pieces,
+and internals, and
+interesting things to know
+but that named topic tends to stand out
+as the thing that you think about.
+You create different topics,
+usually to hold different kinds of events,
+and you can create different topics
+to hold filtered and transformed versions
+of the same kind of event.
+So remember that smart thermostat example
+I'm so fond of talking about?
+You could have one topic that has
+all of the thermostats in the
+whole network phoning home.
+All of those go into one topic,
+and then you could have a filtered one
+that contains only the
+messages from thermostats
+that are in places that are hot right now
+for some value of hot, for example,
+so the same kinds of events transformed
+and filtered from one topic to another,
+and that's completely fine to do in Kafka.
+You may sometimes hear
+topics referred to as queues.
+I hear people say Kafka queue sometime,
+and I gently but firmly
+correct them when they do.
+It's probably not precise to say queue.
+It's right to say log.
+A topic is a log of events,
+and the good news is logs are
+really easy to understand,
+because they are super
+simple data structures
+with well-known semantics.
+First of all, they're append-only.
+When you write a new message
+or new thing, you log a new thing,
+it always goes on the end, right?
+Never do you insert a line
+if you just think of application logging,
+like if you're a Java developer,
+you use Log4j or one of
+the other 600 logging APIs
+that have wrapped that and other things.
+You don't put a message in
+the middle of a log file.
+That's not a thing. You put it on the end.
+That's how you use a log,
+and, second, logs can only be read
+by maybe seeking to an
+arbitrary offset in the log,
+and then scanning sequential log entries.
+By default, these are not indexed things,
+and certainly Kafka
+topics are not indexed.
+We can seek to an offset and
+then scan forward from there.
+Third, the events in a log are immutable.
+Once something has happened,
+it is exceedingly difficult
+to make it unhappen.
+In fact, I might even go so
+far as to say impossible.
+You speak words in the
+heat of an argument maybe,
+and later on you wish
+you could unspeak them.
+You just can't do it.
+The event has been produced,
+and there's nothing you can do.
+So events are immutable.
+Certainly events in Kafka
+topics are immutable,
+and the very simple semantics of a log
+make it pretty easy for
+Kafka to deliver high levels
+of sustained throughput
+in and out of topics.
+When you look at that kind
+of single-node performance,
+occasionally you'll come
+across some crazy metrics
+like some hundreds of
+thousands of messages
+being produced and
+consumed on a single server
+that was implemented on a Raspberry Pi
+with a gigabyte of memory.
+I exaggerate, but you know
+how those benchmarks normally work.
+Kafka is capable of clocking
+some pretty impressive
+single-node performance numbers,
+and system-wide single-node performance
+is usually not the point in a
+distributed system like Kafka,
+but because logs are simple,
+Kafka is able to get a lot out
+of a little performance-wise,
+and that's always good news.
+This also makes it easier to reason
+about the replication of topics,
+which we'll talk more about later,
+meaning the fact that
+events are immutable.
+That just makes it easier
+to think about making copies
+of things and putting
+them in different places.
+All kinds of simplifying
+assumptions happen
+as a result of immutability.
+Logs are also fundamentally
+durable things, right?
+A queue you think of as being
+somehow a little ephemeral.
+You put things in it,
+and somebody's gonna get those things out,
+and then they're gonna be gone,
+and traditional enterprise
+messaging systems,
+they have things called topics and queues
+which store messages
+temporarily to buffer them
+between a source and a destination,
+but Kafka topics are logs,
+and I belabor this point,
+really, 'cause it matters.
+There's nothing inherently temporary
+about the data in a log.
+Now, a Kafka topic can be configured
+for the messages in it to expire.
+After they've reached a certain age,
+they'll like fall off
+the edge of the world,
+and you can also configure that by size,
+once the topic has reached a certain size,
+but age is more typical.
+Retention period is more typical.
+That can be as short as a few seconds,
+or as long as a few years,
+or even literally infinity,
+so these really are durable things,
+and that data can live forever,
+and the logs that underlie
+those Kafka topics
+under the covers, they're
+files stored on disk.
+So when you write an event to a topic,
+it's as durable as it would be
+if you had written it to a file system
+or any database that you ever trusted.
+The simplicity of the
+log as a data structure
+and the immutability of
+the contents in it are,
+in my opinion, keys to Kafka's success
+as a critical component in
+modern data infrastructure.
+They enable us to make a number
+of simplifying assumptions
+in other parts of the system
+that are just delightful,
+and lead to all kinds of
+really beautiful architectures,
+but still logs are just the beginning.

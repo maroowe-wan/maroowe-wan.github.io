@@ -1,0 +1,62 @@
+{
+  "lecture_no": 1,
+  "mode": "practical",
+  "tasks": [
+    {
+      "step": 1,
+      "title": "워밍업: ConfigMap 생성하고 내용 확인하기",
+      "goal": "두 가지 방법(명령형 / YAML 선언형)으로 ConfigMap을 만들고, 저장된 데이터를 kubectl로 읽어 본다.",
+      "prompt": "다음 두 가지 방법으로 ConfigMap을 각각 생성하라.\n\n방법 A — 명령형: LOG_LEVEL=info, APP_REGION=ap-northeast-2 두 값을 가진 app-config-cmd 를 --from-literal 로 생성한다.\n방법 B — 선언형: 동일한 두 값을 담은 YAML 매니페스트(app-config.yaml)를 작성하고 kubectl apply 로 app-config 를 생성한다.\n\n생성 후 kubectl describe 로 두 ConfigMap의 Data 섹션을 확인한다.",
+      "starter": "# 방법 A: 명령형 (아래 빈칸을 채워 실행하라)\nkubectl create configmap app-config-cmd \\\n  --from-literal=__KEY1__=__VALUE1__ \\\n  --from-literal=__KEY2__=__VALUE2__\n\n# 방법 B: 선언형 (app-config.yaml 을 완성하라)\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\ndata:\n  __KEY1__: \"__VALUE1__\"\n  __KEY2__: \"__VALUE2__\"",
+      "solution": "# 방법 A\nkubectl create configmap app-config-cmd \\\n  --from-literal=LOG_LEVEL=info \\\n  --from-literal=APP_REGION=ap-northeast-2\n\n# 방법 B: app-config.yaml\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\ndata:\n  LOG_LEVEL: \"info\"\n  APP_REGION: \"ap-northeast-2\"\n\n# 적용\nkubectl apply -f app-config.yaml\n\n# 확인\nkubectl describe configmap app-config-cmd\nkubectl describe configmap app-config",
+      "explanation": "kubectl create configmap --from-literal 은 즉시 실행할 수 있어 빠르지만 히스토리가 남지 않는다. YAML 매니페스트로 선언하면 Git으로 버전 관리가 가능하고, kubectl apply 는 이미 존재하면 패치(patch), 없으면 생성하는 선언형 방식이라 실무에서 표준으로 쓰인다. 두 방법으로 만든 ConfigMap의 Data 섹션이 동일함을 확인하는 것이 이 단계의 핵심이다.",
+      "hints": [
+        "--from-literal 플래그는 KEY=VALUE 형식으로 작성하며, 값에 공백이 있으면 따옴표로 감싼다.",
+        "YAML의 data 필드 아래 각 줄은 '키: \"값\"' 형식이다. 들여쓰기(스페이스 2칸)가 잘못되면 파싱 오류가 난다.",
+        "kubectl describe configmap <이름> 출력의 Data 섹션에서 키와 값이 모두 보여야 한다. 값이 비어 있다면 --from-literal 또는 YAML의 value를 다시 확인한다."
+      ]
+    },
+    {
+      "step": 2,
+      "title": "핵심 실습 1: envFrom으로 ConfigMap 전체를 환경변수로 주입하기",
+      "goal": "envFrom 을 사용해 ConfigMap 전체 키를 Pod 컨테이너의 환경변수로 주입하고, printenv 로 실제 값이 전달되었는지 확인한다.",
+      "prompt": "1단계에서 만든 app-config ConfigMap을 envFrom 으로 사용하는 Pod 매니페스트(envfrom-pod.yaml)를 작성하라.\n- 이미지: busybox:1.36\n- 컨테이너 명령: sh -c 'printenv | grep -E \"LOG_LEVEL|APP_REGION\"; sleep 3600'\n- envFrom 으로 app-config 를 주입한다.\n\nPod 생성 후 kubectl logs 로 출력을 확인한다.",
+      "starter": "# envfrom-pod.yaml (빈칸을 채워라)\napiVersion: v1\nkind: Pod\nmetadata:\n  name: envfrom-pod\nspec:\n  containers:\n    - name: app\n      image: busybox:1.36\n      command: [\"sh\", \"-c\", \"printenv | grep -E 'LOG_LEVEL|APP_REGION'; sleep 3600\"]\n      envFrom:\n        - ____Ref:\n            name: ____",
+      "solution": "# envfrom-pod.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: envfrom-pod\nspec:\n  containers:\n    - name: app\n      image: busybox:1.36\n      command: [\"sh\", \"-c\", \"printenv | grep -E 'LOG_LEVEL|APP_REGION'; sleep 3600\"]\n      envFrom:\n        - configMapRef:\n            name: app-config\n\n# 적용 및 확인\nkubectl apply -f envfrom-pod.yaml\nkubectl get pod envfrom-pod   # Running 상태 대기\nkubectl logs envfrom-pod",
+      "explanation": "envFrom.configMapRef 는 ConfigMap의 모든 key를 그대로 환경변수 이름으로 사용한다. LOG_LEVEL=info, APP_REGION=ap-northeast-2 두 줄이 로그에 출력되면 주입이 정상이다. envFrom 방식은 ConfigMap 키를 하나하나 나열할 필요가 없어 편리하지만, 컨테이너 이름 공간에 모든 키가 쏟아지므로 의도치 않은 변수 충돌을 주의해야 한다.",
+      "hints": [
+        "envFrom 아래 항목은 configMapRef: (ConfigMap) 또는 secretRef: (Secret) 이다. 철자가 틀리면 Pod가 Pending/Error 상태로 남는다.",
+        "kubectl logs envfrom-pod 출력이 비어 있다면 kubectl describe pod envfrom-pod 에서 Events 섹션을 확인해 configmap 'app-config' not found 같은 오류 메시지를 찾는다.",
+        "Pod 상태가 ContainerCreating 에서 멈추면 ConfigMap이 동일 네임스페이스에 있는지 kubectl get configmap 으로 확인한다."
+      ]
+    },
+    {
+      "step": 3,
+      "title": "핵심 실습 2: Secret 생성 + valueFrom으로 선택 주입하기",
+      "goal": "DB 자격증명을 Secret으로 만들고, ConfigMap과 Secret에서 특정 키만 골라 각각 다른 환경변수 이름으로 컨테이너에 주입한다. 실행 후 두 값이 모두 올바르게 전달됨을 확인한다.",
+      "prompt": "1. db-secret 이라는 Secret을 --from-literal 로 생성한다. 포함할 키: DB_USER=admin, DB_PASSWORD=s3cr3t!\n2. valueFrom 방식을 사용하는 Pod 매니페스트(valuefrom-pod.yaml)를 작성한다.\n   - 이미지: busybox:1.36\n   - 컨테이너 명령: sh -c 'echo LEVEL=$LOG_LEVEL USER=$DB_USER PW=$DB_PASSWORD; sleep 3600'\n   - LOG_LEVEL 은 app-config ConfigMap 에서, DB_USER 와 DB_PASSWORD 는 db-secret Secret 에서 가져온다.\n3. Pod 생성 후 kubectl logs 로 세 값이 모두 출력되는지 확인한다.",
+      "starter": "# 1. Secret 생성 (빈칸을 채워라)\nkubectl create secret generic db-secret \\\n  --from-literal=____=____ \\\n  --from-literal=____=____\n\n# 2. valuefrom-pod.yaml (빈칸을 채워라)\napiVersion: v1\nkind: Pod\nmetadata:\n  name: valuefrom-pod\nspec:\n  containers:\n    - name: app\n      image: busybox:1.36\n      command: [\"sh\", \"-c\", \"echo LEVEL=$LOG_LEVEL USER=$DB_USER PW=$DB_PASSWORD; sleep 3600\"]\n      env:\n        - name: LOG_LEVEL\n          valueFrom:\n            configMapKeyRef:\n              name: ____\n              key: ____\n        - name: DB_USER\n          valueFrom:\n            secretKeyRef:\n              name: ____\n              key: ____\n        - name: DB_PASSWORD\n          valueFrom:\n            ____:\n              name: ____\n              key: ____",
+      "solution": "# 1. Secret 생성\nkubectl create secret generic db-secret \\\n  --from-literal=DB_USER=admin \\\n  --from-literal=DB_PASSWORD='s3cr3t!'\n\n# 2. valuefrom-pod.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: valuefrom-pod\nspec:\n  containers:\n    - name: app\n      image: busybox:1.36\n      command: [\"sh\", \"-c\", \"echo LEVEL=$LOG_LEVEL USER=$DB_USER PW=$DB_PASSWORD; sleep 3600\"]\n      env:\n        - name: LOG_LEVEL\n          valueFrom:\n            configMapKeyRef:\n              name: app-config\n              key: LOG_LEVEL\n        - name: DB_USER\n          valueFrom:\n            secretKeyRef:\n              name: db-secret\n              key: DB_USER\n        - name: DB_PASSWORD\n          valueFrom:\n            secretKeyRef:\n              name: db-secret\n              key: DB_PASSWORD\n\n# 적용 및 확인\nkubectl apply -f valuefrom-pod.yaml\nkubectl logs valuefrom-pod\n# 기대 출력: LEVEL=info USER=admin PW=s3cr3t!",
+      "explanation": "valueFrom 방식은 ConfigMap/Secret에서 특정 키만 꺼내 컨테이너 안 변수명을 자유롭게 지정할 수 있다. ConfigMap은 configMapKeyRef, Secret은 secretKeyRef 를 사용한다. kubectl get secret db-secret -o yaml 로 저장된 값을 보면 base64로 인코딩되어 있지만, 컨테이너에 주입될 때는 쿠버네티스가 자동으로 디코딩해 평문 값을 전달한다. 따라서 애플리케이션 코드는 디코딩 없이 그대로 값을 쓸 수 있다.",
+      "hints": [
+        "configMapKeyRef 와 secretKeyRef 는 철자가 다르다. Ref 앞에 'configMapKey' 또는 'secretKey' 임을 다시 확인한다.",
+        "Secret 값에 !,#,$,& 같은 특수문자가 포함되면 쉘 인터프리테이션이 발생한다. --from-literal 사용 시 값 전체를 작은따옴표로 감싼다: --from-literal=DB_PASSWORD='s3cr3t!'",
+        "kubectl logs valuefrom-pod 출력에서 PW= 뒤가 비어 있다면 DB_PASSWORD 키 이름이 Secret에 저장된 키와 정확히 일치하는지 kubectl describe secret db-secret 으로 확인한다."
+      ]
+    },
+    {
+      "step": 4,
+      "title": "응용: ConfigMap을 볼륨으로 마운트하고 동적 갱신 확인하기",
+      "goal": "ConfigMap을 볼륨 마운트 방식으로 주입해 파일로 접근하고, ConfigMap 값을 수정한 뒤 컨테이너 내 파일이 자동으로 갱신되는 것을 확인한다. 환경변수 방식과의 차이를 체험한다.",
+      "prompt": "1. app-config ConfigMap을 볼륨으로 마운트하는 Pod 매니페스트(volume-pod.yaml)를 작성한다.\n   - 이미지: busybox:1.36\n   - 명령: sh -c 'sleep 3600'\n   - app-config 를 /etc/app/config 경로에 readOnly 로 마운트한다.\n2. Pod 생성 후 kubectl exec 로 /etc/app/config/ 디렉터리의 파일 목록과 LOG_LEVEL 파일 내용을 확인한다.\n3. kubectl patch 또는 kubectl edit 으로 app-config 의 LOG_LEVEL 을 debug 로 변경한다.\n4. 약 30~60초 후 kubectl exec 로 /etc/app/config/LOG_LEVEL 파일 내용이 debug 로 바뀌었는지 확인한다.\n5. 관찰 결과를 바탕으로 '환경변수 주입 vs 볼륨 마운트'의 갱신 차이를 한 문장으로 설명한다.",
+      "starter": "# volume-pod.yaml (빈칸을 채워라)\napiVersion: v1\nkind: Pod\nmetadata:\n  name: volume-pod\nspec:\n  containers:\n    - name: app\n      image: busybox:1.36\n      command: [\"sh\", \"-c\", \"sleep 3600\"]\n      volumeMounts:\n        - name: ____          # volumes 의 name 과 일치해야 함\n          mountPath: ____\n          readOnly: true\n  volumes:\n    - name: ____\n      configMap:\n        name: ____",
+      "solution": "# volume-pod.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: volume-pod\nspec:\n  containers:\n    - name: app\n      image: busybox:1.36\n      command: [\"sh\", \"-c\", \"sleep 3600\"]\n      volumeMounts:\n        - name: config-volume\n          mountPath: /etc/app/config\n          readOnly: true\n  volumes:\n    - name: config-volume\n      configMap:\n        name: app-config\n\n# Pod 생성\nkubectl apply -f volume-pod.yaml\nkubectl get pod volume-pod\n\n# 파일 목록 및 초기 값 확인\nkubectl exec volume-pod -- ls /etc/app/config\n# 출력 예: APP_REGION  LOG_LEVEL\nkubectl exec volume-pod -- cat /etc/app/config/LOG_LEVEL\n# 출력: info\n\n# ConfigMap 값 변경 (patch 방식)\nkubectl patch configmap app-config \\\n  --type merge \\\n  -p '{\"data\":{\"LOG_LEVEL\":\"debug\"}}'\n\n# 약 30~60초 대기 후 자동 갱신 확인\n# (쿠버네티스 kubelet 동기화 주기: 기본 60초)\nkubectl exec volume-pod -- cat /etc/app/config/LOG_LEVEL\n# 출력: debug  (갱신 완료)\n\n# [참고] 환경변수 방식의 경우 아래처럼 Pod를 재시작해야만 반영된다\n# kubectl delete pod envfrom-pod && kubectl apply -f envfrom-pod.yaml",
+      "explanation": "볼륨으로 마운트된 ConfigMap의 각 키는 mountPath 아래에 하나의 파일로 생성된다. 이 실습에서 /etc/app/config/LOG_LEVEL 과 /etc/app/config/APP_REGION 두 파일이 생기고, 각 파일의 내용이 해당 키의 값이다. ConfigMap을 kubectl patch 로 수정하면 kubelet이 다음 동기화 주기(기본 60초)에 볼륨 파일을 자동으로 갱신한다. 반면 환경변수(envFrom/valueFrom)로 주입한 값은 Pod 생성 시점에 고정되어 ConfigMap을 바꿔도 Pod를 재시작하지 않는 한 변경이 반영되지 않는다. 설정을 핫리로드해야 하는 애플리케이션(nginx 설정, 피처 플래그 등)은 볼륨 방식이 유리한 이유가 여기에 있다.",
+      "hints": [
+        "volumeMounts.name 과 volumes.name 은 반드시 동일한 문자열이어야 한다. 한쪽만 수정하면 Pod가 Error 상태가 된다.",
+        "kubectl exec <pod> -- ls /etc/app/config 출력에서 키 이름이 파일명으로 나타나는지 확인한다. 파일이 없다면 volumes.configMap.name 이 실제 ConfigMap 이름과 일치하는지 점검한다.",
+        "갱신이 즉시 일어나지 않는 것은 정상이다. kubelet 동기화 주기(기본 60초)를 기다리거나, minikube 환경이면 kubectl exec 를 반복 실행해 변경을 확인한다. 30초 이상 기다려도 바뀌지 않는다면 kubectl patch 명령이 실제로 적용되었는지 kubectl describe configmap app-config 로 재확인한다."
+      ]
+    }
+  ]
+}

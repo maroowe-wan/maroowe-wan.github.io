@@ -1,0 +1,89 @@
+Kind: captions
+Language: en
+Repetitive manual tasks in your Kubernetes cluster like database backups log rotations or batch
+Processing can be automated and put in a schedule
+Kubernetes cron jobs are the answer so to learn about Kubernetes cron jobs
+We're gonna learn about Kubernetes jobs
+Stop if you don't know what jobs are you won't understand how cron jobs work. So make sure that you stick around
+Jobs are Kubernetes resources that make any number of pods
+Making sure that each pod is given a task and that it completes that task successfully
+So unlike pods that are created by deployments. These pods don't stick around once they're done. They're gone
+Here's what an overly simple job
+Manifest would look like that under our spec. We have a section called template what we are
+Templatizing are the pods that this job is going to create
+So the second spec you're seeing there is just the same as what you would see inside of a pod manifest
+One thing that's different is that we are including a restart policy
+Which isn't always included in pod manifests a restart policy of never means that when that container is finished
+It doesn't restart because again job pods are one and done
+we're using a busybox image in our container because busybox can execute bash commands and
+We're just echoing hello from kubernetes. Let's pretend
+That's an actually useful task that needs to be executed by default
+That would be one pod that gets created that would complete that one time
+But we can also add more to this with parallelism and completions
+So what do these mean? Well completions is how many times does that job need to be completed?
+How many times do I need to have hello from kubernetes printed here? We've got three so that should happen three times
+Parallelism means many hands make light work
+How many pods are we willing to create and run concurrently to make sure that that gets completed three times total?
+So what does it take to convert a job to a cron job? Well before
+After under the spec for the cron job section there are two fields the job template
+Which where everything that we set in our job example earlier can be set inside of that section?
+Because all the cron job is is just a resource that makes jobs
+There's also this section here called schedule if you're not familiar with how cron expressions work
+Then here's one of my favorite websites crontab guru which shows you how with these five digits
+You can represent how often you would like something to occur
+Whether it is per minute with the first value whether it is at a specific hour of the day
+Like 12 o'clock noon a specific day of the month
+So the first of the month a specific month out of the year
+So let's say March 3rd, or maybe you would like to say I would like this to happen every
+Friday at noon
+In perpetuity and getting back to our manifest here if I ungroup job template
+You can see it's exactly the same spec as before
+including completions parallelism and
+The section that describes the pods being made by the job now
+Let's deploy a cron job inside of a real Kubernetes cluster and right away
+You can see that the cron job got created and that it's got a schedule of making jobs every minute
+What we should see is that down at the bottom of my screen
+We'll see that output change when one of those jobs gets created
+now remember we had set that we should have a
+Parallelism and completion for our job
+We said we wanted this done three times and that we were willing to let up to two pods run in parallel
+Did you see how two pods showed up there ran?
+Completed then a third pod showed up ran completed. That's parallelism and completions at work
+And after about another minute, we should see another job show up
+Which will bring up a whole other set of pods and this is what we can expect to continue running in
+Perpetuity until this cron job is stopped
+So we let that run and as you can see another job has been created and another three sets of pods
+Have completed as well
+You can stop cron jobs by deleting them
+But if you just want to pause them because you don't want them to go away
+There's a couple of different ways you could do this
+You could edit the manifest and under spec you could change the value of suspend to true
+Or you can do what I'm doing here is use a cube control patch
+And what this is going to do is that it's going to set that value of
+suspend from false to true and
+As a result we should not see any more jobs get created until we undo that change
+Now when you delete objects that create objects in Kubernetes that can have a
+Cascading effect for instance if you delete a deployment that deployment is going to delete all the replica sets and the pods that deployment made
+But when we delete a cron job watch what happens
+It cleans up after itself it deletes all those jobs
+It deletes all those pods which means that it also deletes all of the logs that may have been associated with them
+Now if you wanted to keep those logs
+You would need some sort of third-party logging tool in order to make that happen
+And that could be the content of a different video now
+Let's take a look at something just a little bit more advanced that you need to know is that by default
+Kubernetes will let multiple jobs created by the same cron job run in parallel
+So if this cron job is making jobs every minute
+But that job is creating commands that definitely take more than one minute to run
+Then you could have a problem if those are tasks that cannot be run
+Concurrently so the line I've added right here, which its default setting is allow
+Which is what it'll be if you don't set this as anything at all is that if multiple jobs want to be created
+Then that's allowed
+However, you can also set it up so that it forbids if a job is still running
+Then the next one just straight up won't be created or you can set it to
+replace
+Which is kill the old job because we need to replace it with the new one
+All right, so we cover it a lot today
+But if you're just getting started with Kubernetes or if you plan on taking one of the Kubernetes certification exams
+You're going the need to practice this stuff
+Got other topics you want us to talk about let us know down inside of the comments and don't forget to like and subscribe
+See you next time

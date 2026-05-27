@@ -1,0 +1,492 @@
+Kind: captions
+Language: en
+you may have noticed that we spin up all
+kinds of containers on my channel they
+range from containers for media
+consumption containers for creating
+content containers for monitoring
+containers for logging and metrics
+containers for home automation
+containers for custom code and even
+containers for gaming and while all
+these containers are really awesome it
+gives us a ton of utility i realized
+that i might have skipped over a very
+important and essential part of
+containers and that's creating our own
+container you might be asking what is a
+container a container's a standard unit
+of software that packages up code and
+all of its dependencies so that
+applications run quickly and reliably
+from one environment to another that
+helps prevent the works on my machine
+symptoms you sometimes hear in software
+development but it's even more than just
+working a docker container image is a
+lightweight standalone executable
+package of software that includes
+everything needed to run an application
+code runtime system tools libraries and
+settings think of it like software that
+has batteries included and so once you
+bundle all of that up it's called an
+image and these images become containers
+when they run and this image can be
+lifted and shifted to windows mac or
+linux and it will run the same
+regardless of infrastructure and that's
+what makes images so powerful not only
+during development but also during
+runtime so that aside i mentioned we
+want to build our own docker images
+we're going to create an image that's a
+little more useful than the typical
+hello world tutorials you see out there
+for docker it's going to be a tiny web
+server to serve out a web page through
+nginx we're going to make sure we can
+build it run it and test it on our own
+machine and then we'll touch briefly on
+how we can automate this making it
+repeatable on other machines and we're
+going to do all of this in a couple of
+minutes and after that we'll have a
+custom docker image that we can spin up
+and self-host in our own environment so
+it all starts out with a dockerfile now
+at first glance this isn't anything
+special if you look at it it's just a
+file named dockerfile but that's really
+all it takes to start your first docker
+image in the first line we're going to
+type from from specifies what base image
+we'll be using to build our own image
+almost every single image for docker is
+based on another image and most of them
+are linux you can specify an image like
+ubuntu and this will give you a good
+starting point with all the dependencies
+from ubuntu to build your image but if
+we're building a web server we don't
+want to base it off of ubuntu we want to
+base it off something much much smaller
+and as i mentioned we want to do that
+off of nginx so if we set nginx now our
+base image is from nginx and this is
+actually coming from docker hub and in
+docker hub you can see many different
+tags for this image we have version tags
+we have unversion tags and then we have
+some that include some additional
+dependencies like perl or we have some
+that are based off an entirely different
+base image altogether like alpine and we
+can pin this to any of the tags we just
+saw so if we want to get the latest
+1.10.1 this will give us the latest
+nginx image but this image although
+small is a little bit bigger than the
+alpine one i think the base nginx image
+is around 50 megabytes but we wanted
+this to be tiny so we're actually going
+to choose the alpine version and this is
+super tiny it's like 19 megabytes and if
+you're not familiar with alpine linux
+it's a super tiny linux distribution i
+think it's only like five megabytes so
+super tiny and a lot of image
+maintainers base their images off of
+alpine because it's so darn small so
+we're gonna go with alpine next up are
+environment variables and they use the
+keyword env you can see we get some
+intellisense here and you can see it's
+just a key value pair so if we wanted to
+set an environment variable of foo
+equals bar we could or bar equals bats
+we could do that too now we're not going
+to use any environment variables if we
+do need them we'll pass them in when we
+create our container rather than specify
+them here but if you're inheriting from
+an image that requires some variables to
+be passed in you could do it here too
+but we don't need them for this so the
+next command we're going to use and you
+see often is the copy command and you
+can see the copy command takes two
+parameters it takes a source and a
+destination now what are we going to
+copy and where are we going to copy it
+to so the copy command can actually copy
+files from the host machine so this
+machine that we're on
+into our actual image so for us that
+means copying in our website or some
+static pages for this to serve up so we
+haven't created those yet so let's
+create them real quick so first let's
+create a source folder and in this
+source folder let's create a new folder
+called html and in here let's create an
+index.html in this index.html let's copy
+some html so this is a real simple web
+page html tags body tag h1 tag saying
+hello h1 tag again saying it works on my
+machine and then a p or paragraph sing
+and it works on every machine then we
+close out the body then we close out
+html let's format this this there we go
+and then let's also add a couple of
+images a wave
+and a whale so let's include these in
+our web page
+so img
+source
+equals wave close out copy this guy
+instead of wave
+do whale
+okay so now we should have a simple web
+page but let's test it really quick okay
+just did a file open on the index.html
+with the browser and it works it's not
+winning any awards but it does work
+please don't judge my web dev skills
+based on this page i promise i can do a
+little bit better than this and who
+knows by the time you see this i might
+update it and style it a little bit
+better oh which is a good reminder if
+you're looking for the documentation you
+can find it in the description below
+there should be a link in there to my
+documentation site which also includes a
+link to all the source files for this
+repo and more so as i was saying maybe
+i'll style that a little bit more before
+you see this anyways so now that we have
+our web page we can go back to the
+docker file because we were talking
+about the copy command little side quest
+there creating a web page but the copy
+command takes a source and a destination
+so the source is all of src
+source.html and the destination where is
+the destination so the destination is
+going to be slash user slash share slash
+nginx slash html now how did i know that
+well i've used enginex a few times
+before but this is where nginx keeps its
+default site that it's going to serve
+out notice i'm mentioning nginx so this
+is copying it inside of this image where
+nginx lives in a location that's going
+to serve out these files automatically
+and a quick and easy way to do that is
+to copy it to here okay so far inherent
+from the base image engine x that's
+based on alpine we're gonna copy in our
+web page our source files and next
+we're gonna expose some ports now we
+don't really need to do this but let me
+show you how this works now we can
+actually expose a port of 80. and we can
+specify whether it's tcp
+or udp and if you don't specify at all
+it's tcp but really we don't need to do
+this at all because when someone uses
+this image and they create a container
+from it they can specify any port they
+want so really this is documentation
+telling the person who uses this which
+port they should use nginx with the
+default configuration is set to use port
+80. so this is documentation really and
+really we can just comment it out next
+we'll need to define a command use for
+the entry point and the keyword we use
+for that is cmd you can see we're
+getting some hints here so we should
+specify an executable the executable is
+nginx but we also want to pass some
+arguments to it now i know we need to
+pass a g and turn daemon off but we
+don't pass it in like this
+we actually need to pass an array of
+parameters so this looks kind of funny
+but we would do it like this so this is
+saying when this container starts up run
+nginx dash g and daemon off and if we
+wanted to run nginx in debug mode we
+would run nginx dash debug
+with the same parameters but we don't
+want to run it in debug mode this is the
+same command that the nginx image passes
+in when it starts up by default so you
+can leave this specified
+or we can remove it and let's clean up
+some of our contents so now we have a
+really really simple image but how do we
+build it how do we spin it up it's
+really simple but first you need to make
+sure you have docker installed and you
+can check by running docker info if you
+see this come back with some information
+and not an error means you have it
+installed so to build our container we
+need to make sure we're in the folder
+where our docker file is and if i cat it
+out you can see the contents from nginx
+copy some files we should be able to
+just run docker
+build
+dot so this is saying docker engine run
+build and basically look for a docker
+file in the relative path which is here
+the current path so if we run this
+command we see it's starting to build we
+see it loading the nginx image so it's
+pulling the nginx image down extracting
+building and it looks like it's built so
+to check this image that was just built
+we should be able to run docker images
+and see our image here we can see we
+have an image id which is the one we
+just built and it doesn't have a tag if
+we wanted to build one with the tag we
+would run docker build dash t
+name your image hello dash internet and
+then a path to the docker file which is
+this current directory
+so we've run this again it'll build the
+container really quick and if we run
+docker images again we can now see our
+tagged image so the name is hello
+internet the tag is latest image id and
+about a minute ago so great we have an
+image but we don't have a container yet
+so how do we create a container remember
+i said an image becomes a container when
+we actually execute it so we execute it
+by running docker run dash d or daemon
+dash p to expose some ports and then the
+ports we want to expose this is why i
+said when we're building our image it
+really doesn't matter if you expose
+those ports within the actual image
+because we're going to expose them here
+in our container and then last we
+actually need our image id which is
+right here so this is saying daca run as
+a daemon expose port 80 on the inside
+to the port of 80 on the outside and use
+this image id so if we run that we get
+this long id back and our container
+should be running but how do we know if
+it's running well we should be able to
+run a docker ps and see it running here
+and we do so we're seeing this container
+that has a name of brave carver and it's
+running created 11 seconds ago and it's
+been up for 10 seconds and you can see
+on my machine or all ips 480 is mapped
+to 80 tcp this is a good sign so we
+should be able to go to localhost 8080
+and see our webpage
+and here it is
+that is awesome so we have a docker
+container running that was based on the
+image we created which was based off of
+nginx we created some html and some
+images and put it inside of that
+container image now we've run it on port
+8080 and we see it serving our files so
+this now will work on any machine that
+supports docker or container d as long
+as it's running a container engine we
+could run this on windows mac or linux
+and it'll execute and run just the same
+so that's awesome but how do we actually
+stop it now
+you can see it's still running and it's
+going to run indefinitely so to stop it
+we just run docker stop and then the
+image name or id finds brave carver and
+say stop
+and that just stopped the container so
+if we run docker ps
+we don't see it anymore but it's
+actually there stopped we didn't remove
+it so if we run docker ps dash a we can
+see this container is here and it's
+exited and it was stopped two minutes
+ago so we want to run this again we
+don't need to create another image we
+can just run docker start
+and this image name brave carver
+start it back up if we were on docker ps
+we see it's running
+and if we refresh again it's running
+again so let's actually stop this let's
+actually remove this container so this
+docker rm and the container name
+that removes the container but if we
+look we still see we have the image
+there so if we run docker images that's
+still there to remove an image we just
+run docker rmi
+and then the image name or id
+and now that deleted the image off of
+our machine another thing worth
+mentioning is a docker ignore file a
+docker ignore file is a simple file that
+tells docker to ignore files when it
+builds your container image
+similar to a git ignore file so if we
+create a new file and call it dot docker
+ignore
+we get an icon meaning we created the
+right thing and then we can specify
+files to ignore now in ignore files you
+usually see some of the usual suspects
+artifacts of builds or errors or things
+while you're debugging that you actually
+don't want to put inside of your
+container but as you can see we don't
+have any of these files here so it
+really doesn't help us but let's say for
+instance in here we had a password
+dot text file and in here we had some
+secret password
+if we have this password file in here i
+know this is a contrived example but
+bear with me if we have this password
+file inside of here and we run the
+docker build the docker build is
+actually going to copy everything from
+html which includes this password text
+and put it inside of our image so that
+means that file will live inside of the
+image and anyone who spins this
+container up can actually see that file
+let's do that really quick
+so let's build that image again really
+quick and then let's run that image and
+turn it into a container we see it's
+running now let's exact into this
+container and take a look around so exec
+is a special command that you can do to
+actually execute inside of a container
+while it's running so you can inspect
+things debug things or run things or
+really do whatever you want but we're
+going to exec into this container and
+see our password file in there so we're
+going to run a docker exec
+it and then the id of the image that's
+running right here and then slash bin
+slash sh
+so what this is saying is docker exact
+in interactive mode into this container
+that's running and when you get there
+execute slash bin slash sh now sometimes
+you'll see people executing bash when
+the execution but alpine doesn't have
+bash so we have to execute this slash
+bin sh and this pretty much works
+on most containers and so if we execute
+into here now we see a terminal so we're
+actually inside of this container
+so where did we put our files if we look
+in our docker file we said it's in slash
+user slash share slash nginx slash html
+cd slash user slash share slash nginx
+slash html and if we list out we can see
+our password dot text here if we count
+it out we could see our secret password
+here so like i said not ideal and not
+optimal to include additional files
+within your image so let's exit out of
+here let's stop this container let's
+actually remove this container and let's
+rebuild this with a docker ignore file
+with the password text file inside of
+there and so let's add that password
+text to our docker ignore file you might
+think we just add password.txt here and
+we're covered we're actually not because
+docker ignore files are relative to the
+file that you want to ignore so since
+this password.txt file is inside a
+source html it won't get ignored so we
+can fix that by simply
+adding starstar
+so this is the glob pattern basically
+saying ignorepassword.txt
+anywhere in the path as you add files to
+it so that's a little trick i just
+picked up now let's build this container
+using this docker ignore file with the
+ignore for this password.txt file so
+docker build dot then we get our id here
+then we want to run this image with this
+id turning it into a container now we
+have the container id then we want to
+exact into that container id again and
+then we want to change directory to
+where all of our files are and if we do
+an ls we see that we don't have a
+password.txt file so i know this again
+is a contrived example and you would
+never include a password you never know
+inside of your image but it's really
+just an example of how to use a docker
+ignore file because they're really
+powerful and they should be used
+otherwise you can add a ton of bloat to
+your container without knowing it and we
+want to keep these container images
+really small and just because we built
+this image on top of nginx it doesn't
+have to be nginx
+it could be python it could be go it can
+be node or it could even be net or it
+could even be something full featured
+like plex really there's no limit to
+where you start so i hope that gives you
+an idea of just how easy and how
+powerful creating your own custom docker
+images can be we started out with
+nothing created a docker file leaned
+into a base image created a web page
+built our own custom docker container
+from that and then created a container
+running on our very own machine
+serving up a super not so fancy web page
+we built ourselves and if you're
+interested in how to build these
+container images during ci i'll add some
+examples to my repo that's in my
+documentation and in the future we'll be
+covering how to push these images to our
+very own self-hosted container registry
+so be sure you're subscribed to see how
+that turns out so what do you think
+about building your own docker images
+was it as hard as you thought it was
+going to be let me know in the comments
+section below and remember if you found
+anything in this video helpful
+don't forget to like and subscribe
+thanks for watching yeah it's it's a
+it's a ton of fun
+well until it's not anymore traffic is
+it's kind of tough because it's a
+different paradigm uh and it's a lot of
+yaml and it's a lot of it's a series of
+tubes that you gotta all connect and
+then when they connect you have
+tls and things work great when they
+don't there's a lot of hunting and
+packing so

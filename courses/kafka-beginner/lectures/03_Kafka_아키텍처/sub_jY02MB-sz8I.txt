@@ -1,0 +1,992 @@
+Kind: captions
+Language: en
+Hi, I'm Tim Berglund with Confluent.
+In this episode of the
+Fundamentals of Apache Kafka,
+we're gonna dive a little bit
+deeper into how Kafka works.
+(light instrumental music)
+When we're done, you
+should be able to think
+a little bit more deeply
+about the actual code
+in a producer and a
+consumer, and how those work.
+You should know a little something
+about exactly once semantics.
+You could talk about the
+way high availability
+and durability are accomplished
+in a Kafka cluster.
+And you can talk at a high level
+about how you might
+secure a Kafka cluster.
+Here is a minimal producer in Java.
+Now, you notice this
+is just a public static void main method,
+so very, very simple
+standalone application.
+There are kinda four sections
+there that are boxed off.
+Let me talk about those.
+The first one is configuration.
+You make a Properties object,
+and you give it some configuration.
+Minimally, you have to tell it
+kinda like where the cluster is.
+That's that bootstrap.server list there,
+that's just a list of one address.
+That's a broker or a
+list of a small number
+of brokers in the cluster,
+so the client has some
+idea where to connect to
+and get cluster metadata from.
+You also have to tell the client
+the type of the key and the value.
+In this case, they're both strings.
+But it has to know how to
+take your language types,
+whatever those objects are
+in your language of choice,
+and serialize them into the bytes
+that it's gonna send across
+the wire to the Kafka cluster,
+and that's what those serializer
+configurations are there.
+Next, you create the producer itself.
+In the case of the Java library,
+that's a class called KafkaProducer.
+And you'll note, by the
+time we're done here,
+there are only two classes in the API
+that you absolutely need to touch.
+KafkaProducer is one of those.
+You pass the config to
+it, and it starts up,
+and boy, there's lots of
+stuff happening in there:
+connection pooling and buffering,
+and all kinds of machinery
+that ideally you'll never need to touch.
+It's just in that producer for you.
+Next, we have some shutdown behavior.
+Now, again, this particular
+application, when it shuts down,
+the whole JVM is gonna get torn down,
+so it's kinda hard to have
+concerns about resource leaks,
+but this is just good hygiene.
+Make sure when we're shutting
+down, close down the producer.
+Finally, we actually send the data,
+and you see the key and the
+value that we're creating there.
+They're called key and
+value, followed by a number.
+Yes, folks, we do write these ourselves.
+The other class that you care about
+besides KafkaProducer is ProducerRecord,
+and you see that there.
+It's also a generic class,
+just like KafkaProducer is.
+You have to give it the types
+of the key and the value,
+which in this case are both strings.
+And to create a ProducerRecord,
+you pass it the key and the value
+and the topic you wanna write to.
+So, that's kind of the
+primitive of producing.
+It's key value and topic.
+Go to the cluster with that send method.
+We'll dig in a little bit later.
+What really happens when you call send?
+You're probably thinking,
+"Okay, it's off to the
+cluster and we're done."
+There's a little bit more
+to the story than that.
+But in a simple producer like this,
+you really can just call send
+and things will get sent.
+Now, let's look at a consumer
+but go for a different language
+just to mix things up a little bit.
+This is C#, and again, we've
+got a standalone program,
+so this is just gonna run and
+consume and then shut down.
+But let's look at the five parts
+that we've got broken down here.
+First, again, at the top is configuration
+that looks a lot like
+producer configuration.
+You have to tell the client
+where the cluster is,
+and, you know, there's no types here.
+We'll get to serializers
+or actually deserializers
+in just a minute,
+but a little bit more
+consumer configuration
+in that configuration map.
+Next up in the C# driver, we
+set up some event handlers.
+So, rather than getting messages back
+and iterating over them
+in an imperative way,
+we say, "Well, when a message happens,
+that OnMessage event, take this action."
+You see that genius
+consumer we've got there.
+We're logging it to standard
+out, which actually a joke,
+but your first consumer that you write,
+you're probably gonna do that same thing.
+That's super easy to do,
+you know it's gonna work,
+it's comforting you get feedback,
+so this is actually a
+great way to get started.
+There's also an OnError
+and an OnConsumeError
+handler setup there for
+various error conditions,
+but that's the way the C# driver works.
+You set up those event handlers
+so that later on, when we
+get to actually consuming,
+those will just run by themselves.
+But before we get there,
+we have to call Subscribe,
+and this is a key part
+of pretty much any
+consumer language binding.
+You have to tell the
+consumer what topic or topics
+you want to be listening to,
+and here we just provide one.
+You can provide a collection of them.
+You can provide a regular expression
+that will cause you to
+subscribe to all matching topics
+if you just want to watch the world burn.
+That's up to you. You can do that.
+But the point here about consumers
+is that you can subscribe
+to one or many topics.
+If you've got lots of topics
+that have the same format
+of message in them,
+you may want to consume them all at once.
+That is perfectly valid.
+Finally, at the bottom here,
+you have a while true loop.
+That's an infinite loop.
+It's gonna run forever.
+We're gonna pool, and that's
+all that happens there.
+We say, "Hey, consumer, go check
+to see if there are messages."
+And if there are, what's gonna happen?
+Well, our event handlers
+are gonna run up above.
+So we'll be logging those
+messages to standard out
+and when the OnMessage handler runs.
+So, that never stops.
+This is typical for a consumer.
+This is how event-streaming software,
+event-driven software works.
+When you're reading, you read forever.
+There's never a last
+event. You're never done.
+You just process each one and
+then wait for the next one.
+That's very, very typical.
+Can be little disquieting
+if you're used to,
+say, web programming
+with a Spring Framework.
+You're normally annotating methods,
+and those methods get called,
+and they run to completion
+and they're done,
+and that's sort of comforting.
+You feel like that's
+the right thing to do.
+But in consumers, you
+generally do just loop forever
+and always keep consuming messages.
+Okay, let's leave the world
+of the producer and the consumer,
+and look inside a cluster.
+Now, here is a Kafka
+cluster with four brokers,
+and I wanna talk about
+partition leadership here.
+So, four brokers, we're
+looking at one topic.
+Now, probably this cluster
+has other topics, right?
+Probably not just a one-topic cluster,
+but we're not looking at any of those.
+We're just looking at this topic called,
+somewhat prosaically, Topic 1.
+To make the diagram look nice,
+we've made Topic 1 have four partitions,
+which is the same number
+as the number of brokers
+because, man, that's beautiful.
+I point that out so that you know
+there is no required relationship
+between those two things, okay?
+I could have a topic with 200
+partitions and four brokers.
+I could have a topic with one partition
+and four brokers, or 10
+brokers, or anything.
+There's just no correlation
+between those numbers at all.
+The slide looks nice in this way.
+It's easy to kinda see what's going on,
+but I don't want you to think
+that those numbers are in any way tied.
+Okay, look at the top there.
+That's partition1 of Topic 1.
+This topic has four partitions.
+partition1 has a total of three replicas.
+It has one on Broker 1,
+one on Broker 2, one on Broker 3.
+And you probably see that the shading
+of partition1 on Broker
+1 is a little darker.
+It's a darker color than two or three.
+That's because partition1 on
+Broker 1 is the lead partition.
+Broker 1 has the leader
+for that partition.
+Broker 2 and Broker 3 are followers,
+and they behave differently.
+So if you're a leader,
+that means you're telling
+producers and consumers
+that when someone wants to
+write to this partition,
+the producer should actually write to you,
+should send you the
+message, and you'll take it
+and you'll stick it in your partition log
+because you're the leader.
+Those writes happen to you.
+And when you're reading,
+when you're consuming,
+that consuming is gonna
+come from you as well.
+Now, in versions of Apache
+Kafka after, I wanna say 2.5,
+it is actually possible
+to read from followers
+and not just the leader,
+and there are some very
+important scenarios,
+usually in like multi-data center
+or multi-availability
+zone cloud deployments
+where that enables some
+kinda cool functionality.
+But for the first order approximation
+for you just wrapping your
+mind around fundamentals,
+you can for now think
+when a producer produces,
+it produces to the leader.
+When it consumes, it
+consumes to the leader.
+That leader is very important.
+And those followers are just trying
+to keep up with that leader.
+When new messages arrive at the leader,
+the followers will see them
+and write them to their own logs.
+So you see, each partition
+has its own leader on a separate broker.
+That's really cool.
+What happens when a broker
+dies, like Broker 4 goes away?
+Well, one of the followers of partition4,
+in this case Broker 2, will
+be elected as the new leader.
+That's the thing the
+cluster does automatically.
+You don't have to think about that.
+When a broker dies,
+you might see a timeout
+in a produce or consume,
+that's always possible,
+but that failover is gonna happen.
+We'll have the new leader
+elected right away,
+and writing and reading can continue
+with no loss of data.
+That's how leader election works in Kafka.
+Now, when events happen,
+they can't really unhappen.
+You can't change the way they
+happen. Events are immutable.
+So the things you write
+into a Kafka topic,
+those events, those messages,
+they're immutable, they stay there.
+You don't get to edit them.
+But you might not want
+to keep them forever.
+By default, they're retained for one week.
+That's out of the box,
+download Apache Kafka,
+install it, create a topic,
+it's gonna have a retention
+period of seven days.
+That is completely configurable
+globally in the cluster
+or per topic, okay?
+It can be a very short period of time.
+I recently ran a test with a topic
+that had a retention period of 15 minutes.
+That actually seemed like a good idea.
+You can set it to infinity.
+You can never delete data
+so that it stays in the topic forever
+if you've got the space for that.
+This is not really a technical constraint.
+It's more of a resource constraint
+and sometimes a regulatory one.
+This will be a business decision
+where the legal department might tell you
+that you have to retain
+this for three years,
+or you must not retain
+this for longer than seven,
+or, I don't know, it seems
+like 30 days is kind of a lot.
+That's the same where
+the business weighs in,
+and it's, of course, an
+engineering decision too.
+If you're trading off cost
+versus various kinds of functionality,
+you might realize by
+longer retention periods.
+I should mention if all of
+this talk of immutable data
+and things never going away
+until some long period of time,
+if that scares you from
+a compliance perspective
+with things like GDPR, please don't worry.
+Those are beyond our scope here,
+but, of course, there are tools
+and techniques for handling that.
+People who have to comply with GDPR
+keep customer data in Kafka.
+That's absolutely a thing that happens.
+Again, beyond our scope,
+but I just don't want
+you to worry about it.
+Also, a brief note.
+Remember, we talked about
+those segments before,
+how each partition is
+composed of segments?
+Well, that's how data is actually expired.
+When the newest record
+in a segment is older
+than the retention period,
+then we can kick that segment out.
+We can delete that segment.
+So those whole segments
+stand or fall on their own.
+They get expired and fall
+off the edge of the world
+as they age past their retention period.
+Let's zoom into a producer
+and see what's going on inside there.
+I mean you create a
+ProducerRecord and you call send,
+and you think everything
+is fine and it's done,
+and honestly, probably everything is fine,
+but you might wanna know
+a little bit more about what's going on.
+When you call send, that message
+goes through serialization.
+So you've had to configure
+those serializers.
+You've had to tell the producer library
+what the type of the
+key and the value are.
+And then that class is gonna
+know how to take that object
+and turn it into the bytes
+that it passes onto the partitioner.
+That partitioner is gonna
+see if there's a key.
+And if that key is not null,
+then it'll hash it and
+use that to determine
+what partition in the topic
+that will be written to.
+Of course, there could
+be a custom partitioner
+that's implementing some other logic.
+That partitioner will know that.
+That will be the custom partitioner then
+that will do that other thing.
+But generally, we're just hashing the key,
+and that sends it onto a partition.
+That partition is really
+like a little buffer
+where those messages get
+buffered up for a little bit
+before they get sent across the network.
+And the trade-off
+between how much batching
+we do in the consumer is
+how much buffering we do,
+how often we flush that buffer.
+That is the classical trade-off
+between throughput and latency.
+That always exists in
+network interfaces like this.
+There's nothing particularly
+Kafka-specific about it,
+but it's all tunable.
+That's all stuff that you
+can look into in detail
+when you're tuning your producers.
+The producer is also potentially waiting
+for acknowledgement
+when it sends a message.
+This is a configurable thing.
+And so it's a thing that you
+set a configuration parameter,
+and the producer library
+just does it for you,
+but there are really three settings.
+One is no Acks at all.
+That is, send it and don't
+wait for it to get written.
+The network transfer
+across that TCP socket
+has been successful,
+but you don't know what
+happened inside the broker.
+Did it get written to
+disk? Is the disk full?
+Is the disk on fire? We don't know.
+Anything could be
+happening in that broker.
+All I know is I sent it,
+I'm not gonna wait for
+an Ack, I'm moving on.
+So, this will cause
+data loss occasionally.
+Some messages will get lost,
+but you'll have very low
+latency on the produce side.
+You could also wait for just a leader
+to acknowledge the message.
+That's that middle case there.
+So, the producer sends
+the message to the leader,
+which it always does,
+and wait for that reader
+to write it to the disk,
+and then send an acknowledgment.
+When it gets that acknowledgment,
+says, "Okay, this has been
+written to a disk in the world.
+I feel pretty okay about
+this, I'm gonna move on."
+Your other option is to wait
+for all acknowledgments.
+That means all replicas that are up.
+In this case, you see
+there are three of them.
+There's one leader and two followers.
+Those two followers have gotten around
+to asking for that new message,
+and they've written it to their own disk,
+and they've told the leader,
+"Hey, I have replicated
+this and it's on disk.
+Everything is fine."
+And that leader is waiting
+for all of its in-sync
+replicas to respond.
+It says, "Okay, I've got them.
+This is now on three disks in the world.
+I'll tell the producer
+everything is fine."
+So, more latency there,
+but also a lot more safety.
+You're not gonna lose data that way.
+Those delivery guarantees
+correspond in name,
+although not comprehensively,
+to the basic at most, at
+least, exactly once paradigm.
+So, look at the skittles
+coming into the gears there,
+the skittles on the left,
+those little circles
+with the numbers in them,
+and I hope they don't get
+ground up in the gears
+'cause, you know, skittles taste good.
+It would be better to eat them.
+But as those events get processed
+by those gears in the middle there,
+there are three ways the
+processing can take place.
+They could be processed at most once.
+That means that some
+of them might get lost,
+will never duplicate them, but
+some of them might get lost.
+If it's very important
+not to do something twice,
+and it's okay to miss some things,
+then you want at most once processing.
+At least once means we're gonna make sure
+everything gets through.
+In the process of making
+sure everything gets through,
+we might accidentally double up sometimes,
+and there are valid reasons
+for why that happens.
+And so sometimes we're
+gonna see duplicates
+like you see here.
+You see 12234566.
+So it's at least once. You're
+saying duplication is okay.
+So the read process for
+those messages is idempotent.
+That means that reading
+and processing one time
+and reading and process
+many times are the same.
+So the second, third,
+fourth time that you process
+a duplicate, you're not hurting anything.
+It's an idempotent process.
+Think of it like turning
+on a light switch, right?
+You enter a room and
+you walk in, you can't,
+it's dark, and you're
+kinda groping at the wall,
+and you move your hand up the wall,
+and you bump the switch up.
+The light is on now, right?
+What if you do that operation again
+and you bump the switch up again?
+Well, the light's still on. It's fine.
+That operation is idempotent,
+of flicking that light switch on.
+And so that would be a good candidate
+for at least once processing.
+Now, exactly once processing means
+that you're not gonna miss messages
+and you're not gonna process duplicates.
+Let's talk about that a little bit.
+Now, Kafka has provided this
+since about the spring of 2017.
+That's Kafka 0.11, so
+it's been a while now.
+Now, you may bump into people.
+Maybe you're one of these people yourself
+who think that this is impossible
+in distributive messaging.
+There's this robust
+computer science result
+called the atomic broadcast problem
+that proves that exactly
+once is impossible.
+Well, no.
+And what the atomic broadcast result says
+is that exactly once delivery
+in a distributive messaging
+system is actually impossible.
+And so messages may get
+delivered more than once,
+and there's nothing you can do about that
+except drop back to at most once, right?
+So if you're not at most once,
+if you don't wanna miss messages,
+you might send a message twice.
+What this transaction API does,
+and by the way, at the API level,
+this is an enhancement to the
+producer and the consumer.
+It looks exactly like a
+database transaction API.
+You begin a transaction,
+you do your writes,
+you commit the transaction
+at the produce side.
+Same side at the read side.
+You begin, do your read commits.
+So it fundamentally is
+a transactional API,
+and what it does for you
+is give you a guarantee
+that you'll only process
+every message one time.
+Yes, some of those messages may
+be delivered more than once,
+but there's this switch in the producer
+that causes it to produce idempotently,
+so we're able to detect those duplicates
+and some other things with another topic
+that helps keep a transaction log.
+The details are fascinating
+and, frankly, it's
+pretty available online.
+If you wanna google, you'll find talks
+from some of the engineers
+who wrote this stuff
+that talk about how it
+works, but this is a way
+that you can get exactly
+once processing semantics
+from a distributed
+stream processing system.
+And doing this yourself with the producer
+and the consumer is not too hard.
+Again, it's not too crazy
+of a thing to get that done.
+But it gets even easier when
+you start looking at tools
+like ksqlDB and Kafka Streams,
+then it's just a configuration
+parameter that you switch on.
+Let's dive into consumer
+groups in a little more detail.
+We have here, again,
+the canonical Kafka architecture diagram
+emphasizing some other components.
+They're these two producers.
+Each producer is producing
+to its own topic,
+and each of those topics
+has three partitions.
+There's one consumer group
+with two instances of the same consumer.
+We're gonna call those
+instance A and instance B.
+So that's the same image,
+very same program, just deployed twice.
+Now, that consumer is
+consuming both topics, X and Y.
+It's consuming all the
+messages from both topics.
+Now, let's look at how the
+partitions are assigned.
+And this partition assignment,
+by the way, is done cooperatively
+between the consumer
+group and the cluster.
+They just do this automatically.
+You never think about it.
+You don't have to take any
+action to make this happen.
+So, Partition 0 and 1 of Topic
+X, those go to Consumer a.
+Partition 2
+of Topic X
+goes to Consumer b.
+It's gonna do its best
+to allocate these fairly for each topic.
+And since there are three
+partitions and two topics,
+somebody is gonna have
+more than somebody else.
+That's just kinda how it works,
+and unfortunately for poor consumer a,
+that's exactly how Topic
+Y works out as well.
+Partition 0 and 1 get allocated
+to consumer instance a.
+Partition 2 gets allocated
+to consumer instance b.
+Now, what happens when the
+composition of the group changes?
+To make this a little
+easier, let's simplify things
+and go to just one topic
+with four partitions.
+Initially at the top
+here, we've got a state
+where the consumer
+group has two instances,
+and so each instance gets two partitions.
+You get partition 0 and 2
+on instance a,
+and 1 and 3 on instance b.
+If we add an instance, so
+we've scaled that consumer out,
+elastically, just at runtime,
+we just added an instance,
+the cluster says,
+"Oh my, I have to reassign
+partitions here," and it does.
+And we see only consumer
+instance a gets two partitions.
+Instance b and c get one partition each.
+That happens automatically.
+You don't have to do anything.
+If one of those instances fails,
+well, the partitions that
+it's responsible for,
+which in this case are zero and three,
+those get reallocated
+to the other instances.
+So at the bottom, we have
+a fair scenario again.
+Now, that might actually
+be trouble, right?
+That there's only two instances.
+That failure might be very bad.
+And it may be that we're
+not able to keep up now.
+The messages are coming too quickly,
+and
+the computational expense
+of each consume operation is too high,
+and we'd better get another instance
+deployed as quickly as possible.
+But Kafka does that reassignment for us,
+and we don't have to do it ourselves.
+Now, one thing the consumer API doesn't do
+is it doesn't migrate state.
+So, we're not looking at the code
+and what's happening inside consumers.
+But typically most interesting
+consumers are stateful,
+so you're gonna remember something
+about messages that have come before.
+Maybe you're grouping on
+a Window and, you know,
+over the last five minutes,
+grouping up a bunch of values
+and running some reducing
+function over them
+like an average or something.
+Well, that's all stateful.
+You have to remember things,
+and that state that had been
+in instance a when it died,
+it didn't go anywhere, right?
+Unless we were doing
+something with that state,
+the consumer API didn't
+help us migrate it.
+So, this is saying that Kafka
+Streams in ksqlDB do for us.
+They do all that, frankly,
+fairly thorny state management
+all internal to the API or
+internal to the ksqlDB server,
+which is a great thing.
+We'll cover those more later.
+I just wanna point out
+that state is a thing
+that you'll have to think about here
+if you're counting on elasticity
+and fault tolerance in the consumer API.
+Let's dive in now to compacted topics.
+This is a thing. It's
+configured at the topic level.
+That topic on the top, let's
+just kinda look at that,
+it's got offsets, zero,
+one, two, three, four,
+those individual offsets, right?
+And keys and values.
+Now, if you just let your
+eyes go along the value,
+you have v1, v2, v3, v4,
+five, six, seven, eight, nine.
+Those are all unique up to 17, right?
+Unique values. But there's only four keys.
+k1, two, three,
+one, two, three,
+three, three, one, four,
+two, three, four, four, two three.
+There's four keys that are unique.
+Now, if this is event data,
+I always like to talk about
+my smart thermostat network,
+phoning home every minute,
+reporting temperature and humidity data
+and metadata about the
+household power supply
+and whatever else it wants to
+talk about in those values,
+those keys could be the
+unique IDs of those devices.
+So I've got a smart
+thermostat in my hallway,
+and that has a unique ID, and
+every time it phones home,
+that event gets stored
+with that key in the log.
+I might wanna keep all
+those events, right?
+That might be useful to me
+to keep that whole history,
+so I'd want that regular kind of log.
+If on the other hand,
+I wanted to log changes
+to my user profile,
+I log in to my smart thermostat network,
+and I'm gonna change my middle name
+and my profile picture and my zip code,
+well, if I'm storing that
+kinda thing in a log,
+and k1, k2, k3, k4, those are
+not device IDs but user IDs,
+well, I may not care about previous dates
+of my user profile.
+I just want the current state,
+and that's why I use a compacted topic.
+So a compacted topic
+does what it sounds like.
+It takes all those keys
+and just takes the most
+recent version of each one.
+So if we turn to that top
+log into a compacted topic,
+then you'd see k1 would have v10.
+It wouldn't have v5, wouldn't
+have v2, wouldn't have v1.
+It was previous values of k1.
+k3 would have v17.
+It wouldn't be nine, it wouldn't be eight,
+it wouldn't be four,
+just the most recent one.
+So that's a very important thing
+that you can do with the topic.
+If the topic is storing
+really entity data,
+and you're really only interested
+in the most recent state
+of that data and not previous values,
+you can save lots of storage
+by making that topic a compacted topic.
+How do you troubleshoot a Kafka cluster?
+Well, a great question.
+The classical answer is,
+of course, log files.
+This is a distributed system.
+Each node is gonna have a
+few of its own log files.
+You can look through those.
+You can set up centralized logging
+and get that all in one place if you want.
+Of course, all those tools are available
+the way they normally are.
+There's also Confluent Control Center,
+which is a commercial offering,
+a part of Confluent platform,
+that gives you at-a-glance
+insight into what's going on
+into the cluster and really
+is kinda the purpose built
+Kafka cluster Confluent
+platform optimized monitoring
+and management tool to give you insight
+into what's going on in your cluster
+and how you could best keep it healthy.
+Now, let's talk about security,
+starting with encryption.
+Now, Kafka will encrypt
+any data in transit.
+So that's client to broker,
+broker to broker, broker to ZooKeeper.
+Those are basically your connections,
+and we can encrypt all of those with SSL.
+You manage in keys in whatever
+way you like to manage keys.
+That is all fairly doable,
+and there are great examples
+on how to get that done.
+Also supports authentication
+and authorization.
+So, in order to establish
+hopefully an encrypted
+connection from a client,
+you have to present a
+principal name and a password,
+and then that principal
+name has to be authorized
+to do the thing that you're trying to do.
+And the cluster itself manages
+those Access Control Lists
+to map principals to capabilities.
+There is not encryption in data at Rest.
+So data stored in partitions,
+in those log segments of partitions,
+out of the box, that's not a thing,
+and so people do one or two things.
+One is they deploy full
+disk encryption systems
+so that everything on
+the disk is encrypted.
+And the other solution
+is to do that at the application level.
+Typically, what will happen
+there is that you'll write
+a wrapper around the producer
+and the consumer libraries
+that does that encryption and
+handles the key management,
+and all of that stuff.
+You're gonna have
+various enterprise stands
+for how you wanna do that,
+so that will get done at the client level.
+So before the day it
+even gets to the wire,
+before it can possibly get to a topic,
+or a partition, or a segment,
+it will already be encrypted.
+That should give you a
+little bit of a better idea
+of how Kafka works in detail.
+We drilled down into brokers
+and looked at how replication
+works and leader election,
+taking a look at what's
+going on inside producers,
+how consumer groups works,
+really important things there,
+and giving you a rough idea
+on how Kafka thinks about security.
+If you're interested
+in some further reading
+on any of these topics,
+here are some links
+you're welcome to pursue.
+It's always good to dig into this stuff
+in more detail as you're interested.
+All of this, though, will prepare you
+to understand the parts of the ecosystem
+as we expand outside of broker
+and producer and consumer,
+what's in Kafka as a
+platform beyond those things.
+We'll look at those next.

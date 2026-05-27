@@ -1,0 +1,255 @@
+Kind: captions
+Language: en
+Apache Kafka combines three key features that you&nbsp;
+can use to build your applications. First of all,&nbsp;&nbsp;
+you can publish or write data to Apache Kafka,&nbsp;
+and of course, you can subscribe to and read&nbsp;&nbsp;
+that data. Second, you can store those events or&nbsp;
+sometimes called messages in Kafka as long as you&nbsp;&nbsp;
+want; due to replication and other features,&nbsp;
+it's almost as reliable as any other database.&nbsp;&nbsp;
+And finally, you can process those events as soon&nbsp;
+as they arrive or at a later time. And all this&nbsp;&nbsp;
+functionality is provided in a distributed,&nbsp;
+highly scalable, elastic, fault-tolerant,&nbsp;&nbsp;
+and secure way. In this video, we’ll cover&nbsp;
+all the components that help to achieve that.
+When you read or write data to Kafka, you do so&nbsp;
+in the form of events. An event has a key, value,&nbsp;&nbsp;
+timestamp, and optional metadata headers. Here's&nbsp;
+an example: the key can be "John", the value can&nbsp;&nbsp;
+be "Added iPhone 15 Pro Max to the cart", and the&nbsp;
+timestamp when the message was published to Kafka.
+Messages including keys and&nbsp;
+values can have any format;&nbsp;&nbsp;
+the most common are string, JSON,&nbsp;
+protobuf, and Avro. For example,&nbsp;&nbsp;
+we may include the name and the event&nbsp;
+itself in the JSON-encoded message.
+Now, messages or records stored as serialized&nbsp;
+bytes. Producers serialize the message to a&nbsp;&nbsp;
+byte array before publishing to Kafka. So, on&nbsp;
+the topic, it's always just serialized data.&nbsp;&nbsp;
+And the consumers responsible&nbsp;
+for deserializing the message.
+Now, to make your data pipeline a&nbsp;
+bit more efficient, instead of JSON,&nbsp;&nbsp;
+you can use protobuf messages, which is a&nbsp;
+common practice. This will significantly&nbsp;&nbsp;
+reduce the size of the message and decrease the&nbsp;
+latency for publishing and reading that data.
+Now, let's talk a bit about best practices&nbsp;
+for choosing the key for the message. If&nbsp;&nbsp;
+the ordering of messages matters to you,&nbsp;
+then the key is important. Let's say you&nbsp;&nbsp;
+have a Kafka topic where you want to send&nbsp;
+order statuses. If you receive several&nbsp;&nbsp;
+status updates about the same order – such&nbsp;
+as "prepared", "shipped", and “delivered”.&nbsp;&nbsp;
+You want to make sure that the application&nbsp;
+consumes these statuses in the correct order.
+Now, Kafka only guarantees to preserve the&nbsp;
+order within a single partition. One way&nbsp;&nbsp;
+to achieve this is to use the same key for all&nbsp;
+those messages and the default partitioner. So,&nbsp;&nbsp;
+in our example, using the order ID as&nbsp;
+the message key makes perfect sense.
+However, this solution puts some&nbsp;
+constraints on the design of your&nbsp;&nbsp;
+Kafka solution and may potentially&nbsp;
+be a bottleneck when you decide to&nbsp;&nbsp;
+scale. We'll talk about this a bit&nbsp;
+later when we get to parallelism.
+Now if you don’t need to read messages in order&nbsp;
+Null keys are the easiest of option. With null&nbsp;&nbsp;
+keys, the default partitioner will automatically&nbsp;
+load balance the messages across all available&nbsp;&nbsp;
+partitions. This means you won't have to&nbsp;
+worry about resizing your partitions, ever.
+Before you can publish any message to Kafka,&nbsp;
+you need to create a Kafka Topic. Think of&nbsp;&nbsp;
+it as a database table, where each message&nbsp;
+represents a record. Or, you can think of&nbsp;&nbsp;
+it as a folder on the file system, with each&nbsp;
+message representing a file in that folder.
+Topics are always multi-producer&nbsp;
+and multi-consumer. This means&nbsp;&nbsp;
+that many different producers can&nbsp;
+simultaneously write to the same topic,&nbsp;&nbsp;
+and the same applies to consumers. You can have 0,&nbsp;&nbsp;
+1, or many consumers reading from that topic, and&nbsp;
+different consumers may have different offsets.
+Also, unlike traditional messaging systems,&nbsp;
+messages are not deleted after consumption.&nbsp;&nbsp;
+Instead, you can define how long Kafka&nbsp;
+should retain your messages. For example,&nbsp;&nbsp;
+you can configure different topics to&nbsp;
+keep messages for different amounts of&nbsp;&nbsp;
+time. One topic may keep messages for 1&nbsp;
+minute, while another may retain messages&nbsp;&nbsp;
+for a week. After that period, those&nbsp;
+messages automatically deleted by Kafka.
+Keep in mind that Kafka's performance is&nbsp;
+effectively constant with respect to data size,&nbsp;&nbsp;
+so storing data for a long time is perfectly fine.
+Also, it's important to note that you can scale&nbsp;&nbsp;
+topics horizontally well beyond&nbsp;
+a single Kafka broker by simply&nbsp;&nbsp;
+increasing the number of partitions in&nbsp;
+that topic and increasing parallelism.
+Now, why is Kafka so fast? Well, the&nbsp;
+foundation is built around partitioning.&nbsp;&nbsp;
+A Kafka topic is a higher-level abstraction&nbsp;
+that consists of partitions. A partition&nbsp;&nbsp;
+itself is a discrete log file written to&nbsp;
+the local Kafka broker. A topic can be&nbsp;&nbsp;
+spread across multiple Kafka brokers, but&nbsp;
+a partition always belongs to one broker.
+For example, you can scale your topic&nbsp;
+to, let's say, 9 partitions across 3&nbsp;&nbsp;
+Kafka brokers. In this way, you're not&nbsp;
+limited to one specific broker's I/O. So,&nbsp;&nbsp;
+if you need to handle millions of messages&nbsp;
+per second, it's not a big deal for Kafka.&nbsp;&nbsp;
+Just scale the number of partitions&nbsp;
+and increase the number of consumers.
+In many cases, you want to scale your application&nbsp;
+to the same number of partitions. For instance,&nbsp;&nbsp;
+if you have 9 partitions, you can set the replica&nbsp;
+count for your application to 9 as well. Beyond&nbsp;&nbsp;
+that point, your replicas would read from the&nbsp;
+same partitions, which could be a bottleneck. So,&nbsp;&nbsp;
+in that case, you would need to scale the&nbsp;
+partitions first and then the application.
+Also, when a new message is written&nbsp;
+to a topic, Kafka adds it to one of&nbsp;&nbsp;
+the topic's partitions. Messages with&nbsp;
+the same key (for example, customer&nbsp;&nbsp;
+ID) are published to the same partition.
+Kafka ensures that any reader of a given&nbsp;&nbsp;
+partition always consumes messages&nbsp;
+in the order they were published.
+Another important feature of Kafka is that&nbsp;
+it can replicate your partitions across&nbsp;&nbsp;
+different brokers. The best practice for&nbsp;
+production is to set replication to 3. So,&nbsp;&nbsp;
+you would have a producer that directly&nbsp;
+writes to a specific broker partition,&nbsp;&nbsp;
+and then the Kafka cluster automatically&nbsp;
+replicates that data across 2 different&nbsp;&nbsp;
+brokers. We call the original&nbsp;
+partition a 'partition leader’.
+Keep in mind that both the producer and consumer&nbsp;
+write to and consume from the partition leader.&nbsp;&nbsp;
+Now, if that broker fails, the Kafka controller&nbsp;
+reassigns the leader for that partition to a&nbsp;&nbsp;
+different broker and redirects producers&nbsp;
+and consumers to use a different broker.
+So, if you have 9 partitions&nbsp;
+with a replication factor of 3,&nbsp;&nbsp;
+you'll get 27 partitions spread across&nbsp;
+different brokers. That's why Kafka is&nbsp;&nbsp;
+fault-tolerant. Also, high availability&nbsp;
+means that immediately after a failure,&nbsp;&nbsp;
+you'll be able to continue writing&nbsp;
+and reading data without interruption.
+Now let’s talk about Producers. Producers are&nbsp;&nbsp;
+the client applications that publish (write)&nbsp;
+events to Kafka.&nbsp;Sometimes called “publishers”&nbsp;&nbsp;
+or “writers.” Producers distribute data&nbsp;
+to topics by selecting the appropriate&nbsp;&nbsp;
+partition within the topic.&nbsp;They allocate&nbsp;
+messages sequentially to the topic partition.
+Typically, the producer distributes messages&nbsp;
+across all partitions of a topic.&nbsp;But the&nbsp;&nbsp;
+producer may direct messages to a particular&nbsp;
+partition in certain instances – for example, to&nbsp;&nbsp;
+keep related events together in the same partition&nbsp;
+and in the exact order in which they were sent.&nbsp;
+The producer can also use a customized partitioner&nbsp;&nbsp;
+to map messages to partitions based&nbsp;
+on specific business logic.&nbsp;However,&nbsp;&nbsp;
+the producer should take care to distribute&nbsp;
+keys roughly evenly across partitions to avoid&nbsp;&nbsp;
+sending too much traffic to one particular&nbsp;
+broker, which could effect performance.
+Consumers are applications that&nbsp;
+subscribe to topics and process&nbsp;&nbsp;
+published messages.&nbsp; Sometimes called&nbsp;
+“subscribers” or “readers.” Consumers&nbsp;&nbsp;
+read the messages in the order&nbsp;
+in which they were generated.&nbsp;
+A consumer uses offset to track which&nbsp;
+messages it has already consumed. &nbsp;A&nbsp;&nbsp;
+consumer stores the offset of the last&nbsp;
+consumed message for each partition so&nbsp;&nbsp;
+that it can stop and restart&nbsp;
+without losing its place.&nbsp;&nbsp;
+Consumers interact with a topic&nbsp;
+as a group (although a group can&nbsp;&nbsp;
+consist of only one consumer).&nbsp;This enables&nbsp;
+scalable processing.&nbsp;The group ensures that&nbsp;&nbsp;
+one member only consumes each partition; if a&nbsp;
+single consumer fails, the group’s remaining&nbsp;&nbsp;
+members reorganize the consumed partitions&nbsp;
+to compensate for the absent member.&nbsp;
+Let's take a look at what a Kafka cluster looks&nbsp;
+like. Kafka is a distributed system consisting of&nbsp;&nbsp;
+multiple servers. Traditionally, Kafka relied&nbsp;
+on Zookeeper to elect a Kafka controller,&nbsp;&nbsp;
+maintain cluster membership, manage topic&nbsp;
+configurations, and perform some other functions.
+ZooKeeper is also a distributed&nbsp;
+system, and in production environments,&nbsp;&nbsp;
+you would also be required to deploy and&nbsp;
+maintain a 3 or 5 node cluster. This adds&nbsp;&nbsp;
+additional complexity and increases&nbsp;
+the maintenance for the Kafka cluster.
+Recently, Kafka received an update that allowed it&nbsp;
+to run the cluster without Zookeeper at all. It's&nbsp;&nbsp;
+called KRaft mode, and it's production-ready as of&nbsp;
+version 3.3 of Kafka. This update not only removed&nbsp;&nbsp;
+Zookeeper but also increased the efficiency&nbsp;
+and reduced the latency of Kafka in general.
+If you are new to Kafka and don't have any&nbsp;
+legacy applications that require Zookeeper,&nbsp;&nbsp;
+I would highly suggest using&nbsp;
+this deployment option.
+A broker is a single Kafka server. Kafka&nbsp;
+brokers receive messages from producers,&nbsp;&nbsp;
+assign them offsets, and commit the messages&nbsp;
+to disk storage. Now, an offset is a unique&nbsp;&nbsp;
+integer value that Kafka increments and&nbsp;
+adds to each message as it’s published.
+Offsets are unique for each partition and are&nbsp;
+critical for maintaining data consistency in&nbsp;&nbsp;
+the event of a failure or outage. For example,&nbsp;
+if the consumer fails and when it’s restarted,&nbsp;&nbsp;
+it will return to the last-consumed message.&nbsp;
+At least, that’s the default behavior.
+Since Kafka writes every single message to&nbsp;
+the local disk, to increase performance,&nbsp;&nbsp;
+make sure that you attach fast&nbsp;
+SSD disks to Kafka brokers.
+Now, every Kafka cluster has a single active Kafka&nbsp;&nbsp;
+controller. It is responsible for&nbsp;
+managing partitions and replicas&nbsp;&nbsp;
+and performing some administrative&nbsp;
+tasks, such as reassigning partitions.
+For example, if one Kafka broker&nbsp;
+goes down with the partition leader,&nbsp;&nbsp;
+the active controller will reassign&nbsp;
+this function to another broker that&nbsp;&nbsp;
+already has all the replicated data to&nbsp;
+act as a partition leader and serve data.
+The Controller service runs on every broker&nbsp;
+in a Kafka cluster, but only one broker can&nbsp;&nbsp;
+be active (elected) at any point in time. It&nbsp;
+used to be managed and elected by ZooKeeper,&nbsp;&nbsp;
+but in the new versions, it’s elected&nbsp;
+internally using the Raft protocol.
+I have other tutorials on my channel about Kafka,&nbsp;&nbsp;
+Kubernetes, and other components that&nbsp;
+we use to build modern architecture.
+Thank you for watching, and&nbsp;
+I'll see you in the next video.

@@ -1,0 +1,170 @@
+## 영상 1: Kubernetes RBAC Explained (https://www.youtube.com/watch?v=iE9Qb8dHqWI)
+
+Let's say you want to deploy a pod to Kubernetes. You could use kubectl and apply the YAML file. When you type 'kubectl apply', a few things happen. First of all, kubectl will read your local Kubernetes config. Then it will reach out to the Kubernetes API server and discover APIs. This simply means it will check the available APIs and how they can be used. Then kubectl will perform client-side validation to check for any obvious errors and typos in your YAML file. And finally, it will convert your pod to a JSON object and send a request with that payload to the kube-apiserver.
+
+When the kube-apiserver receives a request, it does not store it immediately in the etcd database. First, it has to verify that your request is legitimate. That is to say, it has to authenticate your request. Once the request is authenticated, it needs to check if you have permission to create those resources in the request. Just because you have access to the cluster, it doesn't mean you can create or read all the resources.
+
+The authorization is usually done with Role-Based Access Control (RBAC). It allows you to assign granular permissions and restrict what a user or an app can do. RBAC roles are frequently aligned with the physical structure of your teams, apps, and departments. You could create roles such as Developer, Manager, and maybe Admin.
+
+Now, in more practical terms, the API server follows these steps: When it receives the request, it authenticates the user. If the validation fails, it will reject the request and return a 401 Unauthorized error. Otherwise, it moves to the next step. When the user is authenticated, it checks if they have access to the resource. If they don't, it will reject the request and return a 403 Forbidden error. Otherwise, it will continue executing the request.
+
+The RBAC model is designed to grant access to resources based on the roles of individual users within the organization. To better understand how it works, let's take a step back and pretend that you had to design an authorization system from scratch.
+
+So how could you ensure that a user has write access to a particular resource? One of the simplest solutions could be to create a list with three columns: User, Permission, and Resource. In this example, John has read and write access to app1 but has no access to app2. Robert and Jennifer have only read access to app2 and have no access to app1. This approach works fine with a small number of users and resources, but can be hard to scale up.
+
+Let's say that Robert and Jennifer are in the same team and they are granted read access to app1. In that case, you would need to add entries to your table. But it's not obvious that Robert and Jennifer have the same access because they are part of the same team.
+
+In a typical authorization system, you have users who access resources. One way you can assign permissions is directly to a user and define what resources they can consume. These permissions map directly to the resources. Notice how they are user-specific. If you decide to have a second user with the same permissions, you will have to duplicate the entry.
+
+To solve the previous problem, you could add a 'Team' column to your table, but a better way is to break down the relationships. First, you could define a generic container for permissions: a role. Then, instead of assigning permissions directly to users, you could assign those permissions to the roles. And finally, you could link roles to users.
+
+Instead of having a single table, now you have two. In the first table, permissions are mapped to roles. In the second table, roles are linked to identities. Let's say you want Robert to be an admin for app1. You can add the role to the user. At this point, you should understand how decoupling users from permissions with roles can improve security administration in large companies with many users and permissions.
+
+When using RBAC, you have users, resources, and roles. The permissions are not assigned directly to a user. Instead, they are included in the role. The users are linked to a role with a binding. Since roles are generic, when a new user needs access to the same resources, you can use an existing role and link it with a new binding.
+
+Kubernetes also uses the RBAC model to protect resources inside the cluster. It utilizes the same three concepts explained earlier: identities, roles, and bindings, but calls them by slightly different names.
+
+Let's go over an example that needs to grant access to pods, services, and other resources. First, we have a service account, which is the identity of who is accessing the resource. Next, we have a role that includes permissions to access the resources. And finally, we have a RoleBinding that links the identity, which is a service account, to the permissions defined in the Role.
+
+After you submit these definitions to the cluster, the application using that service account will be allowed to issue requests to the following endpoints. If you have never created RBAC objects yourself but only relied on the provided roles with the applications, it can be a bit confusing. You may be wondering what resources exactly you are granting access to, what a service account is, and why the Role contains a list of Kubernetes objects.
+
+To better understand how these work, let's set aside the Kubernetes RBAC model and try to rebuild it from scratch. We will focus on three elements: identifying and assigning identities, granting permissions, and finally linking identities to permissions.
+
+Let's say someone on your team wants to log in to the Kubernetes dashboard. In this case, you should have an entity for an "account" of a "user," with each having a unique name or ID, such as an email address.
+
+Now, how should you store the User in the cluster, considering Kubernetes does not have objects that represent regular user accounts? So, users cannot simply be added through an API call. Instead, any actor representing a valid certificate signed by the cluster's certificate authority is considered authenticated. In this case, Kubernetes assigns the username from the common name field in the "subject" of the certificate. And a temporary User object is created and passed to the authorization RBAC module.
+
+Just keep in mind that the User is used for humans or any external applications to the cluster. If you need to create an identity that will be used inside Kubernetes, you should use a service account. It is very similar to the regular user, except that it is managed by Kubernetes itself.
+
+A service account is usually assigned to pods to grant permissions. For example, you may have Prometheus deployed inside the cluster that needs to discover its targets, or perhaps an Nginx ingress controller that must have permissions to list all the backend endpoints for a service. For those apps, you can define a service account.
+
+Since service accounts are managed within the cluster, you can create them as any other Kubernetes resource via a YAML file. You can also define a group of users or service accounts. This is convenient if you want to reference all service accounts in a specific namespace.
+
+At this point, you have a mechanism to identify who has access to resources. It could be a human, an application, or a group of them. But what resources are they accessing in the cluster?
+
+In Kubernetes, we are interested in controlling access to resources such as Pods, Services, Endpoints, etc. These resources are usually stored in the database (etcd) and accessed via built-in APIs. Now, the best way to limit access to these resources is to control how those API endpoints are requested. For that, you would need two things. First, the API endpoint of the resource itself. Then, the type of permission granted to access the resource, for example, read-only, read-write, etc. So, for the permissions, you will use a verb such as get, list, create, patch, delete, etc.
+
+Now let's say you want to get, list, and watch pods, logs, and services in Kubernetes. You could combine those resources and permissions in a list. You could simplify the definition and make it more concise if you notice a few things. First, the base URL /api/v1/namespaces/ is common to all. Well, maybe we could drop it. Then, you could assume that all resources are in the current namespace and drop the namespace path as well. This looks better. The list is more human-friendly, and you can immediately identify what's going on.
+
+But there's more. Besides APIs for built-in objects such as pods, endpoints, and services, Kubernetes also supports API extensions. For example, when we deploy the Prometheus operator to our cluster, it also creates custom resources. These objects are also stored in the cluster, and you can query them using kubectl.
+
+Additionally, custom resources can be accessed via the Kubernetes API. If you want to map those into a YAML file, you could write the following by dropping the base URL and namespace. Well, it's nice and short, but how does Kubernetes know that those resources are custom? So, how can it differentiate between built-in APIs and custom APIs? Unfortunately, dropping the base URL from the API endpoint wasn't such a good idea. You could restore it with a slight change. You could define it at the top and use it later to expand the URL for the resources.
+
+Now, what about resources such as Pods that don't have a namespaced API? For that, Kubernetes provides an empty API group, which refers to the built-in objects. So the previous definition should be expanded accordingly.
+
+You have two cases when Kubernetes reads the API group from the YAML file. If it's empty, Kubernetes expands it to /api/v1/ and the resource. Otherwise, it uses a different pattern. So all your built-in resources will be expanded to the corresponding endpoints, and custom APIs will use a slightly different pattern.
+
+Now that you know how to map resources and permissions, it's finally time to combine them together with multiple resources. In Kubernetes, a collection of resources and verbs is called a Rule, and you can group rules into a list. Each rule contains the "apiGroups," "resources," and "verbs" that you just learned. A collection of rules has a specific name in Kubernetes, and it is called a Role.
+
+So far, we've modeled Identities with Users, Service Accounts, and Groups, as well as Permissions to resources with Roles. The only missing part is how to link them together.
+
+Now, to grant permissions defined in the Role to a User, Service Account, or a Group, we use RoleBinding. This definition has two important fields. First is "roleRef" that references the "viewer" Role. Next is "subjects". It links to the Service Account.
+
+As soon as you submit this RoleBinding to the cluster, the application or user using the Service Account will have access to the resources listed in the Role. But if you remove the binding, the app or user will lose access to those resources, while the Role itself will stay ready to be used by other bindings.
+
+Take a look at the "subjects" field again. It is a list that contains "kind", "name", and "namespace". The "kind" property is used to differentiate between Users, Service Accounts, and Groups. But what about the namespace?
+
+In general, it's often helpful to break the Kubernetes cluster up into namespaces and limit access to namespaced resources to specific accounts. This is helpful when you share the same Kubernetes cluster between multiple teams.
+
+In most cases, Roles and RoleBindings are created in a specific namespace and grant access only within that particular namespace. However, there are some edge cases when you can mix ClusterRoles with RoleBindings, granting access to a different namespace.
+
+Before we move to the next topic, let's have a look at a few examples of how the "subjects" field is used. In this case, when the namespace field is not specified, this targets all service accounts in all namespaces. You can also have multiple Groups, Users, or Service Accounts as subjects.
+
+Let's go over a quick exercise. Let's say you have staging and production namespaces in your Kubernetes cluster. And you want to grant the QA team only read access to the staging namespace. For example, they should be allowed to get, list pods and services, as well as to get logs from those pods.
+
+Now, because we use Minikube to simplify this exercise, we'll create a service account instead of a user, but the logic is exactly the same. First of all, we need to create a service account for the QA team, which will be located in the staging namespace. Then let's create a role which would allow QA to get pods, services, and retrieve logs from those pods. And finally, we need to bind the QA service account to the QA role. And we also have a couple of pods, one located in the staging namespace and the other one in the production namespace.
+
+One way to pretend to be a QA team member is to impersonate that service account. So, we can use the following command to check if QA can get pods in the staging namespace. Yes, we can. Now, what about the production namespace? Nope, we don't have permissions to access prod.
+
+You can also try to get logs from the pod in the staging namespace. Yep, we can access it.
+
+When we discussed resources, you learned that endpoints have a certain structure. But what about resources that don't have a namespace, such as Persistent Volumes and Nodes? Namespaced resources can only be created within a namespace, and the name of that namespace is included in the HTTP path. If the resource is global, like in the case of a Node, the namespace name is not present in the HTTP path.
+
+Now, can you add those to a Role? Well, yes, you can. After all, we did not discuss any namespace limitation when we were talking about Roles and RoleBindings. Here is an example.
+
+If you try to submit that definition and link it to a Service Account, you might realize it doesn't actually work. Persistent Volumes and Nodes are cluster-scoped resources. However, Roles can only grant access to resources scoped to a namespace. If you'd like to use a Role that applies to the entire cluster, you can use a ClusterRole and the corresponding ClusterRoleBinding.
+
+To make our previous example work, you only need to change Role to ClusterRole. Everything else stays the same. You can also use ClusterRoles to grant permissions to all resources — for example, to all Pods in the cluster instead of just in one specific namespace such as staging. This functionality isn't restricted to cluster-scoped resources like persistent volumes.
+
+Kubernetes actually ships with a few Roles and ClusterRoles by default. You can use grep and use 'system' as a filter to get roles that are directly managed by the control plane. Also, all of the default ClusterRoles and ClusterRoleBindings are labeled accordingly. You can also list the ClusterRoles. You can also inspect the details of each Role and ClusterRole with a specific command.
+
+At this point, you know the basic building blocks of Kubernetes RBAC: How to create identities with Users, Service Accounts, and groups. How to assign permissions to resources in a namespace with a Role. How to assign permissions to cluster resources with a ClusterRole. And how to link Roles and ClusterRoles to subjects.
+
+There's only one missing topic left to explore: a few unusual edge cases of RBAC.
+
+At a high level, Roles and RoleBindings are placed inside and grant access to a specific namespace, while ClusterRoles and ClusterRoleBindings do not belong to a namespace and grant access across to the entire cluster. However, it is possible to mix these two types of resources.
+
+For example, what happens when a RoleBinding links an account to a ClusterRole? Let's explore this next with some hands-on practice. Let's start by creating a local cluster with Minikube.
+
+To start, let's create four namespaces. And finally, create a Service Account in the dev namespace. You can also submit the service account using the apply command. At this point, your cluster should look like this.
+
+Let's start with creating a Role and a RoleBinding to grant the Service Account access to the dev namespace. We have the role, which is placed inside the dev namespace, as well as a rolebinding for that service account. After you apply these, your cluster should look like this: all resources—Service Account, Role, and RoleBinding—are in the dev namespace. The Role grants access to all resources, and the RoleBinding links the Service Account and the Role.
+
+Well, how do you test that the Service Account has access to the resources? You can combine two features of kubectl. You can use user impersonation and verify API access.
+
+To issue a request as the service account and check if you can list Pods in the namespace, you can issue a specific command. "auth can-i" is necessary to query the authorization model (RBAC). "get pods" is the verb and resource. The namespace flag specifies where you want to issue the command. And the "--as=" flag is used to impersonate the Service Account from the specified namespace.
+
+Note how the "--as=" flag needs some extra hints to identify the Service Account. The entire string follows a specific pattern. With this Role+ServiceAccount+RoleBindings combination, you can access all resources in the dev namespace.
+
+Alright, let's move on to a more complex example. Let's create a new Role and RoleBinding in the staging namespace. Notice how the RoleBinding links the role from the staging namespace and the service account from the dev namespace. Let's go ahead and apply. At this point, your cluster should look like this.
+
+Now, let's test if the Service Account located in the dev namespace has access to the resources in the staging namespace. This works. We just granted access to resources outside the namespace where the service account was created. It's worth noting that the roleRef property in the RoleBinding does not have a namespace field. The implication is that a RoleBinding can only reference a Role in the same namespace.
+
+Now let's take a look at ClusterRoles. As you remember, they do not belong to any namespace. This means that a ClusterRole does not scope permissions to a single namespace. However, when a ClusterRole is linked to a Service Account via a RoleBinding, the ClusterRole permissions only apply to the namespace in which the RoleBinding was created.
+
+Let's look at the following example. Create a RoleBinding in the qa namespace and link the Service Account to the ClusterRole cluster-admin. The cluster-admin is one of those built-in ClusterRoles in Kubernetes, created when you provision a cluster. Let's submit this.
+
+Now your cluster looks like this. Let's test if the Service Account located in the dev namespace has access to the resources in the qa namespace. However, it does not have access to other namespaces.
+
+In this scenario, when you use RoleBindings to link a Service Account to a ClusterRole, the ClusterRole behaves as if it were a regular Role. It grants permissions only to the current namespace where the RoleBinding is located.
+
+In this last scenario, we'll create a ClusterRoleBinding to link the ClusterRole to the Service Account. Note that we also don't have a "roleRef" field here. This implies that a ClusterRoleBinding cannot identify a Role to link to because Roles belong in namespaces, and ClusterRoleBindings, along with the ClusterRoles they reference, are not namespaced.
+
+And now your cluster looks like this. Even though neither the ClusterRole nor the ClusterRoleBinding defined any namespaces, the dev Service Account now has access to everything.
+
+From these examples, you can observe some behaviors and limitations of RBAC resources: Roles and RoleBindings must exist in the same namespace. RoleBindings can exist in separate namespaces to Service Accounts. RoleBindings can link ClusterRoles, but they only grant access to the namespace of the RoleBinding. ClusterRoleBindings link accounts to ClusterRoles and grant access across all resources. ClusterRoleBindings cannot reference Roles.
+
+Perhaps the most interesting implication here is that a ClusterRole can define common permissions expressed in a single namespace when referenced by a RoleBinding. This removes the need to have duplicated roles in many namespaces.
+
+The typical rules section of a Role or ClusterRole can look like a verbose list. However, the above configurations can be rewritten using a more concise format. It significantly reduces the number of lines and is much more concise and easier to read.
+
+
+## 영상 2: What are Service Accounts? (https://www.youtube.com/watch?v=xXk1YlkKW_k)
+
+Whether you're a gigantic enterprise or a small team at a startup or even a lone developer if you're using Google Cloud, there's one thing you all have in common: your project will use and depend on service accounts.
+
+Everyone uses them but what are they? What do they do? Where do they come from and why should you care? These are all important questions that we have got to know the answers to.
+
+So service accounts, what exactly are they? To answer that let's take a look at something you might already be familiar with: a user account. This account represents a lead engineer on your team. She accesses the account with the email address and password associated with it, and access to it is shared with no one else. It has some IAM rules associated with it that grant permission to do some things like manage Kubernetes clusters, create compute instances and configure monitoring on the project.
+
+For as long as someone works on the team she can do whatever the IAM policy allows. And if she leaves the team well her account would be disabled so that it couldn't be used anymore. That's a user account.
+
+A service account on the other hand is an identity that a compute instance or an application can use to run API requests on your behalf. There are a few major differences between a user account and a service account.
+
+Like a user account, a service account has an assigned email but instead of a password it can only be authenticated using a private/public RSA key pair and it can't be logged in via a browser.
+
+Service accounts typically represent virtual machines and applications. And while user accounts should never be shared, permission can be granted to users to impersonate service accounts, allowing multiple users to access everything that a service account can access.
+
+Service accounts are granted IAM roles to perform certain actions and access certain resources in your project just like a user account although they're usually executing automated actions and might have multiple processes dependent on them. That means you'll need to be extra careful when you edit their access or if you want to disable or delete them.
+
+So there are two types of service accounts. Well first there are Google-managed service accounts. You might see these sometimes referred to as service agents. These are service accounts that Google automatically creates and manages for some Google Cloud services.
+
+For example right off the bat your project is likely to have a Google APIs service agent. This is a service account that runs internal Google processes on your behalf. There could be more Google-managed service accounts that exist in your project but you'll only see them in your IAM policy or audit logs when you enable an API or a service that needs it.
+
+With Google-managed service accounts you technically can change and revoke their roles but that's generally not a great idea because it could cause some services to stop working correctly.
+
+The second type of service account that we have is a user-managed service account. This is a service account that you explicitly create using Identity and Access Management. You choose a name and the roles associated with it yourself.
+
+In addition to any that you create, user-managed service accounts include default service accounts. These are user-managed service accounts that are created when you use some Google Cloud services that are meant to help you to get started.
+
+Currently a default service account is created for App Engine and any service that uses App Engine and for Compute Engine and any service that uses Compute Engine. The format for those default service accounts is typically "project-number-compute@developer.gserviceaccount.com" for Compute Engine and "project-id@appspot.gserviceaccount.com" for App Engine.
+
+Default service accounts are generally granted the editor role on your project. For production workloads this might be a bit much. So it's recommended that you create your own service accounts for these services and apply more restricted roles to them.
+
+So how can we see these service accounts in our Google Cloud project? If you want to see all of the user-managed service accounts that currently exist on your project you can use the Google Cloud console under IAM or through a CLI using the gcloud command.
+
+The command "gcloud iam service-accounts list" will nicely list your user-managed service accounts, display names, emails and whether they're disabled.
+
+If you want to see all of your service accounts including Google-managed ones, the command "gcloud projects get-iam-policy" followed by your project ID is your best bet. This will spit out your project's IAM policy, the roles currently assigned to the accounts on your project. This is going to include user accounts, user-managed service accounts and Google-managed service accounts as long as they have roles assigned to them.
+
+We have only begun to scratch the surface of service accounts here. There are still some other things worth considering when we talk about service accounts. In this series we're going to learn more about creating them, getting rid of them, effectively managing them, properly securing them and using them for development.

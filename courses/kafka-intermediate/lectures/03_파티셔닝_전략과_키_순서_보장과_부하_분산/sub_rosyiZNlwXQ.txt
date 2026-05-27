@@ -1,0 +1,183 @@
+Kind: captions
+Language: en
+hello my name is Elena and in this video
+we'll look at how partitioning actually
+works in Apache Kafka
+starting with the default partitioner
+there are three ways to determine into
+which partition the records should be
+written here on the left I have a
+producer and on the right I have
+partitions distributed over different
+brokers
+When selecting a partition the first
+thing the partitioner will check is if
+you explicitly specified the partition
+number where the data should be written
+usually you don't want to do this but in
+case you have to you can I I call it
+micromanagement and for trusted
+discourage this usage however good to
+know that we have this option and this
+becomes quite a valuable option for some
+age cases that you want to solve when
+Distributing the data
+next you didn't provide That explicit
+number the practitioner will check for
+the key if the key is present the
+producer will take the hash of that key
+do the model on the available number of
+partitions and then use this number to
+decide where to write that records where
+the record fits into which partition it
+should put it
+the idea is that we want the same key to
+always correspond to the same partition
+this allows us to guarantee that all
+messages with the same key will be
+stored in the same log in the same
+partition and the Order of those
+preserved
+because in the distributed world the
+distributed systems we write data here
+and over here and over there and then
+somehow we connect the process it but if
+you write those records into different
+machines located in different places
+later it's quite tricky to say what was
+the order which message came first which
+message came second and so on
+unless we write the data the order of
+which is important into the same
+partition into the same log file
+then we can really say what message was
+first what was second and what was third
+uh looking at this um
+a formula
+spoiler alert for the future section
+think what happens if we decide to add
+more partitions to the topic later in
+time and in this formula we change this
+value
+and this will affect the partition
+number which we will have for our key
+and this is exactly why adding more
+partitions my node be as it easy as it
+seems at first if you're using keys
+not impossible but let's say you want to
+think twice
+but for now let's move to the third case
+but if you neither specify the partition
+number explicitly which normally you
+shouldn't do and neither you use the key
+this is where we ask Kafka to distribute
+the messages across the partitions in
+the most effective and efficient way
+performance and all those things
+and in the old days the default
+partitioner was around Robin
+which was iterating across all the
+partitions and spreading the records one
+by one to achieve the best balance of
+data
+however it is important to understand
+here that fraud throwing partitioner
+doesn't really send the records
+immediately so it's not like it will
+have a new records and send it there no
+no no it will actually
+send batches of Records because sent in
+record one by one will be such an
+overkill for the system
+so it will first buffer the messages per
+partition and then it will put the first
+message here second there and so on and
+go one by one one by one and then we'll
+send those patches to the cluster
+and this results ideally in a nice and
+even data distribution however this
+approach has one ish it's not really
+that optimal I hear in our very
+primitive example we are sending three
+batches with two elements each instead
+we could have sent one page with six
+elements smarter which sizing means less
+Network traffic and less lot on the
+all the positive things to improve the
+performance
+and this is exactly why we have a new
+sticky partitioning approach and from
+Kafka
+2.4 okay that's not that new it already
+exists for a while but still that spot
+came after the brand drop-in approach so
+from Kafka to
+put.4 the default partitioner is sticky
+partitioner and it will select a
+partition
+then it will con continue assigning the
+records to a page which it will keep
+locally
+till one of two conditions happen either
+the maximum size maximum time that we
+are located for that operation elapsed
+or the patch reached its maximum size
+and when this happens the producer will
+send the page to the selected partition
+create a new page for the next partition
+and the idea is that over time the
+records will be still spread evenly
+across partitions so the balance of the
+cluster won't be affected
+as an advantage of this approach
+comparing to Robin Robin round robin
+approach became a significant reduction
+in latency around 50 percent according
+to the benchmarks and 5 15 reduction in
+CPU utilization which is impressive uh
+but as with everything else those
+benefits come with some new stuff to pay
+attention to for example New Corner
+cases where this even distribution of
+data turned out to be not that even
+um we will discuss it shortly in one of
+the next videos but coming back to the
+settings you can use with a sticky
+partitioning you can influence two
+properties linger Ms and Page size by
+setting them you determine the time
+window for the patch and the size of the
+page the default for Linker Ms is zero
+and most probably you want to put it a
+bit higher to better
+to allow better throughput and allow
+batches to accumulate more data before
+sending them to the cluster same for the
+batch size you probably want to assign
+the size according to the needs of your
+system
+so to summarize remember that there are
+three ways the default partitioner
+determines how to distribute the data
+first looking for exact partition number
+if you don't have it using the hash of
+the key and if that is not present then
+using sticky partitioning if you don't
+like either of those options you're
+picky but that is fine too because you
+can create your own custom partitioner
+and Implement custom logic this is very
+handy when for instance you can't use
+the key for partitioning but want to
+rely on another record property or you
+want to combine several properties of
+your records to decide where to reach a
+partition record should be written
+uh now that we talked about the options
+we have we need some motivation to
+select a good strategy and this is a
+topic for the next video leave any
+questions or comments you have in the
+comment section below and if you enjoyed
+this video please like it and subscribe
+to the channel

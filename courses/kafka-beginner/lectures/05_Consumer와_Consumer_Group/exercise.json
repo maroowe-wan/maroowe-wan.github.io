@@ -1,0 +1,39 @@
+{
+  "lecture_no": 5,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "--from-beginning 옵션으로 'orders' 토픽의 처음부터 모든 메시지를 읽는 consumer를 실행하라. 메시지를 확인한 뒤 Ctrl+C로 종료하고, 다음에는 --from-beginning 없이 같은 명령을 실행해 새 메시지만 기다리는 상태로 둬라.",
+      "starter": "# 1단계: 처음부터 모든 메시지 읽기\nkafka-console-consumer.sh \\\n  --topic ______ \\\n  --bootstrap-server ______ \\\n  ______\n\n# Ctrl+C로 종료 후\n\n# 2단계: 새 메시지만 기다리기 (--from-beginning 없이)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092",
+      "solution": "# 1단계: 처음부터 모든 메시지 읽기\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --from-beginning\n\n# Ctrl+C로 종료 후\n\n# 2단계: 새 메시지만 기다리기 (--from-beginning 없이)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092",
+      "explanation": "--from-beginning을 붙이면 earliest 오프셋부터, 즉 토픽에 저장된 가장 오래된 메시지부터 읽습니다. 이 옵션을 빼면 latest 기준으로 동작해 명령 실행 이후 새로 들어오는 메시지만 받습니다. Kafka는 메시지를 읽어도 삭제하지 않으므로 --from-beginning으로 언제든 처음부터 다시 읽을 수 있습니다.",
+      "hints": [
+        "--from-beginning 옵션을 추가하면 가장 오래된 오프셋부터 읽기 시작합니다.",
+        "4강에서 발행한 메시지들이 토픽에 저장되어 있으므로 기존 메시지가 모두 출력됩니다.",
+        "--from-beginning 없이 실행하면 커서가 멈춘 상태로 새 메시지를 기다립니다. 이 상태에서 producer로 새 메시지를 보내면 즉시 출력됩니다."
+      ]
+    },
+    {
+      "prompt": "group.id를 'order-processors'로 지정한 consumer를 실행하라. 한 번 실행해 메시지를 소비한 뒤 Ctrl+C로 종료하고, 같은 그룹 이름으로 다시 실행했을 때 이미 읽은 메시지가 다시 출력되지 않는지 확인하라. 또한, kafka-consumer-groups.sh 명령으로 그룹의 오프셋 커밋 상태를 확인하라.",
+      "starter": "# 1단계: 그룹 지정 consumer 실행\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group ______ \\\n  --from-beginning\n\n# Ctrl+C로 종료 후 같은 명령을 다시 실행\n# (--from-beginning은 그룹에 커밋된 오프셋이 없을 때만 효과가 있음)\n\n# 2단계: 그룹 오프셋 상태 확인\nkafka-consumer-groups.sh \\\n  --bootstrap-server localhost:9092 \\\n  --group ______ \\\n  --describe",
+      "solution": "# 1단계: 그룹 지정 consumer 실행\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors \\\n  --from-beginning\n\n# Ctrl+C로 종료 후 같은 명령을 다시 실행 → 이미 읽은 메시지는 출력되지 않음\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors\n\n# 2단계: 그룹 오프셋 상태 확인\nkafka-consumer-groups.sh \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors \\\n  --describe",
+      "explanation": "--group 옵션으로 group.id를 지정하면 소비한 오프셋이 Kafka 내부 토픽(__consumer_offsets)에 커밋됩니다. 같은 그룹으로 다시 실행하면 마지막 커밋 오프셋 다음부터 읽기 때문에 이미 처리한 메시지는 중복 출력되지 않습니다. --describe 결과에서 CURRENT-OFFSET(현재 읽은 위치)과 LOG-END-OFFSET(파티션 끝 오프셋), LAG(남은 메시지 수)를 확인할 수 있습니다.",
+      "hints": [
+        "--group order-processors를 추가하면 오프셋이 해당 그룹 이름으로 커밋됩니다.",
+        "첫 번째 실행 후 Ctrl+C로 종료하고 다시 실행하면, 이미 커밋한 오프셋 이후부터 읽으므로 기존 메시지가 출력되지 않습니다.",
+        "kafka-consumer-groups.sh --describe 결과에서 LAG가 0이면 그룹이 모든 메시지를 소비한 상태입니다."
+      ]
+    },
+    {
+      "prompt": "터미널 두 개를 나란히 열어 같은 그룹(order-processors)으로 consumer를 두 개 실행하고, 세 번째 터미널에서 producer로 파티션 3개짜리 orders 토픽에 메시지 6건을 빠르게 발행하라. 두 consumer에 메시지가 나뉘어 도착하는 병렬 소비를 확인하고, 발행한 메시지 총 6건이 두 consumer에 합산되는지 확인하라.",
+      "starter": "# 터미널 1: consumer A (그룹 order-processors)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group ______\n\n# 터미널 2: consumer B (같은 그룹)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group ______\n\n# 터미널 3: producer로 메시지 6건 발행\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092\n# 프롬프트에서 입력:\n# msg-1, msg-2, msg-3, msg-4, msg-5, msg-6 (각각 Enter)",
+      "solution": "# 터미널 1: consumer A\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors\n\n# 터미널 2: consumer B (같은 그룹)\nkafka-console-consumer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092 \\\n  --group order-processors\n\n# 터미널 3: producer로 메시지 6건 발행\nkafka-console-producer.sh \\\n  --topic orders \\\n  --bootstrap-server localhost:9092\n> msg-1\n> msg-2\n> msg-3\n> msg-4\n> msg-5\n> msg-6\n# Ctrl+C로 종료\n\n# 결과: 두 consumer에 총 6건이 나뉘어 도착 (예: A에 2~3건, B에 3~4건)\n# 두 터미널의 출력을 합산하면 6건이 되어야 한다",
+      "explanation": "같은 group.id를 가진 컨슈머들은 파티션을 자동으로 나눠 갖습니다. orders 토픽은 파티션 3개이므로 2대의 consumer가 파티션을 나눠(예: A→파티션0,1, B→파티션2) 처리합니다. 메시지는 두 consumer에 나뉘어 도착하지만 그룹 전체로 보면 6건이 모두 소비됩니다. 이것이 Consumer Group의 병렬 소비입니다. 단, 동일 파티션의 메시지는 한 consumer에만 배정되므로 같은 메시지가 두 곳 모두에 출력되지는 않습니다.",
+      "hints": [
+        "두 터미널 모두 --group order-processors를 동일하게 지정합니다. group.id가 같으면 같은 그룹으로 묶입니다.",
+        "파티션이 3개이므로 consumer 2대가 각각 다른 파티션을 맡습니다. producer가 메시지를 파티션에 분산하면 각 consumer가 자기 파티션 메시지만 받습니다.",
+        "두 consumer의 출력 메시지 수를 더하면 발행한 6건과 일치해야 합니다. 한 메시지가 두 consumer 모두에 출력된다면 group.id가 서로 다른 것입니다."
+      ]
+    }
+  ]
+}

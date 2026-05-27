@@ -1,0 +1,150 @@
+Kind: captions
+Language: en
+In the previous video, we discussed why&nbsp;
+companies decide to use Apache Kafka.&nbsp;
+In this video, we're going to focus on how data is&nbsp;
+actually transferred. Specifically, we'll look at&nbsp;&nbsp;
+Kafka topics. So, Kafka topics are specific&nbsp;
+streams of data within your Kafka cluster.
+So, a Kafka cluster can have as many topics&nbsp;
+as you want, and especially with the new&nbsp;&nbsp;
+Kafka mode that completely removes&nbsp;
+ZooKeeper from Kafka's architecture,&nbsp;&nbsp;
+it can handle millions of topics and partitions.
+It could have names like "logs," "purchases,"&nbsp;
+"tweets," "trucks_gps," and so on.&nbsp;
+So, a topic in Kafka is a stream of data.
+If you want to compare it with databases, a&nbsp;
+Kafka topic is like a table in the database&nbsp;&nbsp;
+but without all the constraints. There is no data&nbsp;
+verification, and you can send any data you want.
+And the way to identify a topic in a Kafka cluster&nbsp;&nbsp;
+is by its name. That's why I have&nbsp;
+'logs', 'purchases', and so on.
+So, these Kafka topics support any&nbsp;
+kind of message formats. For example,&nbsp;&nbsp;
+you can send JSON, Avro, text, binary, or&nbsp;
+any other format you want. The sequence&nbsp;&nbsp;
+of the messages in a topic is called&nbsp;
+a data stream. And this is why Kafka&nbsp;&nbsp;
+is called a data streaming platform,&nbsp;
+because you work with data streams.
+You cannot query topics. So, while&nbsp;
+topics are similar to a database table,&nbsp;&nbsp;
+you cannot query them. Instead,&nbsp;
+you add data to a Kafka topic.
+For that, we are going to use Kafka Producers. To&nbsp;
+read data from a topic, we’ll use Kafka Consumers.&nbsp;
+So, the Kafka topic itself is divided into&nbsp;
+partitions. Each partision can be located on&nbsp;&nbsp;
+different broker which enables to horizontally&nbsp;
+scale kafka. Also each topic can be made up of&nbsp;&nbsp;
+hundreds of partisions. More partisions you have&nbsp;
+more paralelism and high troughput you can achive.
+But in this example, I have a Kafka&nbsp;
+topic that consists of three partitions,&nbsp;&nbsp;
+which are labeled as partition zero, one, and two.
+Now, the messages sent to the Kafka topic&nbsp;
+are going to be written to these partitions,&nbsp;&nbsp;
+and the messages within each partition&nbsp;
+are going to be ordered, 0, 1, 2, etc.
+It's important to understand that only messages&nbsp;
+within a specific partition follow the same&nbsp;&nbsp;
+order. That's why it's not an easy task&nbsp;
+to maintain this order at the topic level,&nbsp;&nbsp;
+and not many messaging systems even&nbsp;
+try to support it, but Kafka can.
+So, the first message goes into partition&nbsp;
+zero and will have the ID zero, one,&nbsp;&nbsp;
+and then two, and all the way up to six.
+As I continue to write messages into&nbsp;
+partition 0, this ID will keep increasing.
+So, the same scenario applies&nbsp;
+when I write data into partition&nbsp;&nbsp;
+one of my Kafka topic. The ID will&nbsp;
+continue to increase, and so forth.
+So, the messages being written into&nbsp;&nbsp;
+these partitions are assigned an ID&nbsp;
+that increments from zero upwards.
+This ID is referred to as&nbsp;
+a Kafka partition offset.&nbsp;
+So as we can see, each&nbsp;
+partition has different offsets.&nbsp;
+Now, Kafka topics are also immutable.
+That means that once the data is&nbsp;&nbsp;
+written into a partition,
+it cannot be changed.
+We can't delete or update data in Kafka. All we&nbsp;
+can do is keep adding more data to the partition.
+Let’s take a look at a real-world&nbsp;
+example. Let’s say a company has a&nbsp;&nbsp;
+fleet of trucks. Each truck has a GPS module and&nbsp;
+it reports its location to Apache Kafka. Then,&nbsp;&nbsp;
+each truck will send a message to Kafka&nbsp;
+every 30 seconds, for example, and each&nbsp;&nbsp;
+message will contain some information&nbsp;
+such as the truck's ID and position.
+So, we have a bunch of trucks that&nbsp;
+are going to act as data producers.&nbsp;&nbsp;
+They will send data into a Apache&nbsp;
+Kafka, specifically to ‘trucks_gps'&nbsp;&nbsp;
+topic. This topic will contain the&nbsp;
+location details of all the trucks.
+Just for this example, we decided to create&nbsp;
+12 partitions, which is an arbitrary number.&nbsp;&nbsp;
+We'll talk more about how you can decide the&nbsp;
+number of partitions you need at a later point.
+Let's discuss the potential use cases for&nbsp;
+Kafka in this scenario, specifically what&nbsp;&nbsp;
+can be done with the location data. From&nbsp;
+a management point of view, you'd want a&nbsp;&nbsp;
+dashboard that shows a map and the locations of&nbsp;
+each truck. And if you run a delivery business,&nbsp;&nbsp;
+like Amazon, you might want to notify your&nbsp;
+customers when the delivery truck is nearby.
+In the real world, there would be many&nbsp;
+more services that would want access&nbsp;&nbsp;
+to this data and could use it for different&nbsp;
+purposes. That's why Kafka is very beneficial&nbsp;&nbsp;
+for companies. It eliminates the need to&nbsp;
+connect each service directly with a truck.
+Let's take note of some important things about&nbsp;
+topics, partitions, and offsets. Once data is&nbsp;&nbsp;
+written to a partition, it cannot be changed&nbsp;
+- this is referred to as 'immutability'. It's&nbsp;&nbsp;
+crucial to understand this. Data in Kafka is only&nbsp;
+kept for a limited time, the default is one week,&nbsp;&nbsp;
+but this can be configured. That means&nbsp;
+after a week, your data will disappear.
+Offsets only have meaning for a&nbsp;
+specific partition. As you can see,&nbsp;&nbsp;
+offsets are repeated across partitions. So,&nbsp;
+offset 4 in partition 1 represents a message,&nbsp;&nbsp;
+but it isn't the same data as offset 2&nbsp;
+in partition 0. Offsets won't be reused,&nbsp;&nbsp;
+even if previous messages have been deleted.&nbsp;
+They keep increasing incrementally as you&nbsp;&nbsp;
+send messages into your Kafka topic.
+That also means the order of messages is&nbsp;&nbsp;
+guaranteed only within a partition but not across&nbsp;
+partitions. This is very important to understand.
+Messages within each partition&nbsp;
+have increasing offsets, which&nbsp;&nbsp;
+means they're in order. We read them in the&nbsp;
+order of the offsets. But across partitions,&nbsp;&nbsp;
+we have no control. We'll see later&nbsp;
+how we can achieve it if we need it.
+Data sent to a Kafka topic is assigned&nbsp;
+to a random partition, for example,&nbsp;&nbsp;
+zero, one, or two in this example,&nbsp;
+unless you provide a key. Later,&nbsp;&nbsp;
+I’ll also show you what happens when we use&nbsp;
+a key. In a Kafka topic, you can have as many&nbsp;&nbsp;
+partitions as you want. Sometimes there are&nbsp;
+three, sometimes 10, or sometimes 100. We'll&nbsp;&nbsp;
+discuss how to determine the right number&nbsp;
+of partitions for our topic later as well.&nbsp;
+That's all for this video, more to come about&nbsp;
+Kafka and other frequently used systems in&nbsp;&nbsp;
+companies. Thank you for watching&nbsp;
+and I'll see you in the next video.
