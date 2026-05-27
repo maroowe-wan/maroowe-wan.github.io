@@ -1,0 +1,2052 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI/CD Pipeline in Practice — Automated Deployment to AWS EC2 with GitLab and Jenkins</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/devops-pipeline-ec2/index.html'>한국어</a></div>
+  <h1>CI/CD Pipeline in Practice — Automated Deployment to AWS EC2 with GitLab and Jenkins</h1>
+  <div class="sub">Developers setting up a CI/CD pipeline for the first time (comfortable with Git and the terminal; want to automate deployments to a server like EC2) · 8 lectures</div>
+  <ul><li><a href='#lec1'>01. The Big Picture — What a CI/CD Pipeline Is and What We&#x27;ll Build</a></li>
+<li><a href='#lec2'>02. Packaging Your App as a Container — Writing a Dockerfile and Running It Locally</a></li>
+<li><a href='#lec3'>03. Setting Up GitLab and Triggering Jenkins on Push (Webhooks)</a></li>
+<li><a href='#lec4'>04. Installing Jenkins and Your First Pipeline (Jenkinsfile)</a></li>
+<li><a href='#lec5'>05. The CI Stages — Build, Test, and Create the Image</a></li>
+<li><a href='#lec6'>06. Pushing the Image to a Registry (AWS ECR)</a></li>
+<li><a href='#lec7'>07. Automated Deployment to EC2 — SSH + docker compose</a></li>
+<li><a href='#lec8'>08. Health Checks, Rollback, and Managing Secrets</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. The Big Picture — What a CI/CD Pipeline Is and What We&#x27;ll Build </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the real-world pain of manual deployment — human error, lack of reproducibility, and the cost of repeating the same steps over and over.</li>
+<li>Picture how GitLab, Jenkins, a container image registry, and an EC2 server connect into a single automated flow.</li>
+<li>Know exactly what finished pipeline you will have built by the end of this course.</li>
+</ul>
+<h3>Body</h3>
+<h4>A day in the life of manual deployment</h4>
+<p>Let&#x27;s start with a story you may already recognize. Your team has finished a new feature, and now someone has to ship it. You merge your branch into <code class='ic'>main</code> and immediately hit merge conflicts because two other engineers pushed first. You fix those by hand. A test job runs and surfaces a handful of failures that only appeared once everyone&#x27;s code was mixed together, so you scramble to patch them before the sprint ends. Finally, the moment arrives: someone &quot;senior enough&quot; SSHes into the server, stops the running containers, edits a Docker Compose file, and restarts everything — hopefully in the right order, hopefully without a typo.</p>
+<p>Every step in that story depends on a human being available, awake, and careful. That is exactly why teams avoid deploying on a Friday evening: if something breaks at 9 p.m. and nobody is watching, customers are stuck until morning. Manual deployment is slow, stressful, and — most importantly — <strong>not reproducible</strong>. Do it ten times and you will get ten slightly different results.</p>
+<blockquote class='callout'>
+<p>The single most expensive ingredient in a manual deployment is the human in the loop. CI/CD is the discipline of removing that human from the repetitive, error-prone steps so they can focus on the decisions that actually require judgment.</p>
+</blockquote>
+<h4>What CI and CD actually mean</h4>
+<p><strong>CI — Continuous Integration.</strong> Instead of waiting until release day to merge everyone&#x27;s work and discover the conflicts all at once, developers integrate small changes frequently — often several times a day — and an automated system builds and tests each change right away. Problems show up early, in isolation, and are cheap to fix.</p>
+<p><strong>CD — Continuous Delivery / Deployment.</strong> Once code passes the automated checks, it is automatically packaged and moved toward release. <em>Continuous Delivery</em> means every change is always in a deployable, tested state; the final push to production may still be a one-click manual approval. <em>Continuous Deployment</em> goes one step further and ships every passing change all the way to production automatically.</p>
+<p>Put together, <strong>a CI/CD pipeline is an automated assembly line for your code</strong>: a push triggers a series of stages — source, build, test, package, deploy — and each stage hands off to the next only if it succeeds.</p>
+<h4>The four stages every pipeline shares</h4>
+<p>Almost every pipeline, regardless of tooling, follows the same shape:</p>
+<p>1. <strong>Source</strong> — a code change is pushed to a repository (GitLab, in our case). This is the trigger.</p>
+<p>2. <strong>Build</strong> — the code is compiled or assembled together with its dependencies into a deployable artifact. For us, that artifact is a Docker image.</p>
+<p>3. <strong>Test</strong> — automated tests run against the build. If they fail, the pipeline stops and the team is notified. Bad code never reaches users.</p>
+<p>4. <strong>Deploy</strong> — the validated artifact is released to a running environment — here, an AWS EC2 server.</p>
+<p>The payoff is dramatic. One team featured in the source material cut their build-test-publish cycle from two hours down to eight minutes once they automated it. The reason companies like Netflix or Amazon can deploy dozens or even thousands of times a day is precisely this kind of pipeline.</p>
+<h4>The pipeline you will build in this course</h4>
+<p>This course is hands-on. You will assemble a complete pipeline that takes <em>your own</em> source code from a <code class='ic'>git push</code> all the way to a live container on EC2, with no manual terminal steps in between. The end-to-end flow looks like this:</p>
+<p>1. You push code to a <strong>GitLab</strong> repository.</p>
+<p>2. A <strong>webhook</strong> notifies <strong>Jenkins</strong> that something changed.</p>
+<p>3. Jenkins checks out the code and runs the <strong>build and test</strong> stages — if tests fail, everything stops here.</p>
+<p>4. On success, Jenkins builds a <strong>Docker image</strong> of your app.</p>
+<p>5. Jenkins authenticates to <strong>AWS ECR</strong> (a private image registry) and pushes the tagged image.</p>
+<p>6. Jenkins connects to your <strong>EC2</strong> server over <strong>SSH</strong> and uses <strong>docker compose</strong> to pull the new image and replace the running container.</p>
+<p>7. A <strong>health check</strong> confirms the new version is alive; if it isn&#x27;t, the pipeline <strong>rolls back</strong> to the previous image. Secrets and environment variables stay out of your code and are injected safely.</p>
+<p>The diagram below shows how those four tools connect into one automated path from your <code class='ic'>git push</code> to a live container.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph SRC[&quot;Source&quot;]
+        direction LR
+        Dev[&quot;Developer&quot;] --&gt;|git push| GitLab[&quot;GitLab Repository&quot;]
+    end
+    subgraph CI[&quot;CI - Continuous Integration&quot;]
+        direction LR
+        Jenkins[&quot;Jenkins&quot;] --&gt; Checkout[&quot;Checkout&quot;] --&gt; BuildTest[&quot;Build and Test&quot;] --&gt; BuildImage[&quot;Build Docker Image&quot;]
+    end
+    subgraph CD[&quot;CD - Continuous Delivery&quot;]
+        direction LR
+        ECR[&quot;AWS ECR Registry&quot;] --&gt;|pull image| EC2[&quot;EC2 Server&quot;] --&gt; HealthCheck{&quot;Health Check OK?&quot;}
+    end
+    GitLab --&gt;|webhook| Jenkins
+    BuildImage --&gt;|push image| ECR
+    HealthCheck --&gt;|yes| Live[&quot;New version is live&quot;]
+    HealthCheck --&gt;|no| Rollback[&quot;Roll back to previous image&quot;]</div><figcaption>The end-to-end CI/CD pipeline you will build</figcaption></figure>
+<p>We deliberately use a simple, language-agnostic web app as the example. The Dockerfile, the Jenkinsfile, and the deployment logic are the real lessons — and every one of them can be swapped out for your own application.</p>
+<h4>Why invest the effort</h4>
+<p>Setting all this up is a one-time investment, typically measured in a few days once you&#x27;ve done it before. In return you get: no human errors from forgotten steps, no &quot;code freeze&quot; while you wait for one senior engineer, faster and more frequent releases, and the calm confidence that comes from knowing every change was tested the same way, every time. That trade — a few days now for years of saved hours and reduced risk — is the entire reason CI/CD sits at the heart of modern DevOps.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Manual deployment is slow, stressful, and not reproducible because it depends on a careful human performing the same steps every time.</li>
+<li><strong>CI</strong> integrates and tests small changes frequently to catch problems early; <strong>CD</strong> automatically delivers (and optionally deploys) the tested result.</li>
+<li>Nearly every pipeline follows four stages: source → build → test → deploy, where each stage only proceeds if the previous one passes.</li>
+<li>By the end of this course you&#x27;ll have a pipeline where a single <code class='ic'>git push</code> to GitLab triggers Jenkins to build, test, push an image to AWS ECR, and deploy it to EC2 — with health checks, rollback, and safe secret handling.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q1. A developer says, &#x27;Continuous Deployment means every change must be manually approved before going to production.&#x27; Which part of this statement is incorrect, and why?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>The statement is fully correct — manual approval is always required in CD.</li><li class='opt' onclick='pick(this,0,1)'>Continuous Deployment automatically ships every passing change all the way to production; Continuous Delivery is the variant that keeps a manual approval gate before production.</li><li class='opt' onclick='pick(this,0,2)'>Continuous Deployment means deploying only once a week with manual checks.</li><li class='opt' onclick='pick(this,0,3)'>Both Continuous Delivery and Continuous Deployment require a manual approval step before production.</li></ul>
+              <div class='exp'><p>Option B is correct. Continuous Delivery keeps every change in a deployable state but may retain a final manual approval gate. Continuous Deployment removes that gate entirely and ships every change that passes automated checks directly to production. The other options confuse the two terms or invent a weekly deployment cadence that is not part of either definition.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q2. Which of the following best explains why ordering pipeline stages as Source → Build → Test → Deploy protects a production environment?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>It ensures that all developers merge their code at the same time, avoiding conflicts.</li><li class='opt' onclick='pick(this,1,1)'>Each stage acts as a gate: a failure stops the pipeline before the artifact progresses, so untested or broken code can never reach the deploy stage.</li><li class='opt' onclick='pick(this,1,2)'>Running stages in sequence is faster than running them in parallel.</li><li class='opt' onclick='pick(this,1,3)'>The Deploy stage cannot start until the Source stage has been running for at least five minutes.</li></ul>
+              <div class='exp'><p>Option B captures the core principle of the four-stage pipeline described in the lecture. Because each stage only passes control to the next if it succeeds, a build failure prevents testing, and a test failure prevents image creation and deployment. This &#x27;fail fast&#x27; pattern is what keeps bad code from reaching users. Options A, C, and D describe unrelated or fabricated mechanics.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q3. In the course pipeline, which component receives the webhook notification from GitLab and then executes the build, test, and deploy stages?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>AWS EC2</li><li class='opt' onclick='pick(this,2,1)'>AWS ECR</li><li class='opt' onclick='pick(this,2,2)'>Jenkins</li><li class='opt' onclick='pick(this,2,3)'>Docker Compose</li></ul>
+              <div class='exp'><p>Jenkins is the automation server in this pipeline. When a developer pushes code, GitLab sends an HTTP POST (the webhook) to Jenkins, which then checks out the code, runs tests, builds a Docker image, pushes it to ECR, and deploys to EC2. EC2 is the deployment target, ECR is the image registry, and Docker Compose is the container orchestration tool on EC2 — none of them react directly to the GitLab push event.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q4. A team is still deploying manually on a weekly basis, and they experience a failed deployment at 9 p.m. on a Friday. Which characteristic of manual deployment does this scenario illustrate?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>Manual deployment is fast but lacks traceability.</li><li class='opt' onclick='pick(this,3,1)'>Manual deployment is reproducible but depends on a senior engineer being available.</li><li class='opt' onclick='pick(this,3,2)'>Manual deployment is slow, stressful, and depends on a human being available — making off-hours failures hard to recover from.</li><li class='opt' onclick='pick(this,3,3)'>Manual deployment is safe because a senior engineer reviews every step.</li></ul>
+              <div class='exp'><p>The lecture explicitly describes this scenario: if something breaks at 9 p.m. and nobody is watching, customers are stuck until morning. This illustrates that manual deployment requires a human to be available, awake, and careful — and when they are not, recovery is delayed. Option A is wrong because manual deployment is not fast. Option B is wrong because reproducibility is exactly what manual deployment lacks. Option D romanticises manual review as safety, which the lecture contradicts.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q5. After completing this course, what happens between the moment a developer runs &#x27;git push&#x27; and the moment the new version is live on EC2?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>The developer must SSH into EC2 and manually run docker compose up.</li><li class='opt' onclick='pick(this,4,1)'>A GitLab CI job builds and deploys the image without involving Jenkins.</li><li class='opt' onclick='pick(this,4,2)'>Jenkins checks out the code, builds and tests it, builds a Docker image, pushes it to ECR, SSHes into EC2, swaps the container, and confirms with a health check — all automatically.</li><li class='opt' onclick='pick(this,4,3)'>The new image is emailed to an operations team who deploy it during business hours.</li></ul>
+              <div class='exp'><p>Option C accurately describes the automated end-to-end flow presented in the lecture&#x27;s pipeline overview: GitLab webhook → Jenkins → checkout → build/test → Docker image → ECR push → EC2 SSH → docker compose → health check / rollback. Option A describes the manual process the pipeline replaces. Option B is wrong because Jenkins, not a GitLab CI job, orchestrates the pipeline. Option D is fictional.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=AknbizcLq4w' target='_blank'>CI/CD Explained: The DevOps Skill That Makes You 10x More Valuable</a></li><li><a href='https://www.youtube.com/watch?v=M4CXOocovZ4' target='_blank'>CI/CD Explained | How DevOps Use Pipelines for Automation</a></li><li><a href='https://www.youtube.com/watch?v=G1u4WBdlWgU' target='_blank'>What is CICD Pipeline? CICD process explained with Hands On Project</a></li></ul></div>
+        </article>
+<article id='lec2' class='lecture'>
+          <h2>02. Packaging Your App as a Container — Writing a Dockerfile and Running It Locally </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand why a container image is the unit we ship through the whole pipeline.</li>
+<li>Learn the standard Dockerfile pattern for turning any web app into an image.</li>
+<li>Verify your image works locally with <code class='ic'>docker build</code> and <code class='ic'>docker run</code> before automating anything.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why ship containers at all</h4>
+<p>You&#x27;ve probably said — or heard — &quot;but it works on my machine.&quot; That sentence is the exact problem containers were invented to solve. Your app depends on a specific runtime version, certain libraries, and a particular configuration. Move it to a teammate&#x27;s laptop or a server with slightly different versions, and it breaks.</p>
+<p>A <strong>container</strong> packages your code together with everything it needs to run — runtime, system tools, libraries, settings — into one standalone unit. Because that unit carries its own environment, it runs identically on your laptop, a colleague&#x27;s machine, and an EC2 server. There are three terms worth nailing down right away:</p>
+<ul>
+<li><strong>Dockerfile</strong> — a text file containing the instructions to build an image. Think of it as a recipe.</li>
+<li><strong>Image</strong> — an immutable, built snapshot produced from the Dockerfile. Think of it as the meal, frozen and ready.</li>
+<li><strong>Container</strong> — a running instance of an image. Think of it as the meal being served. One image can spawn many containers.</li>
+</ul>
+<p>The relationship flows in one direction: a Dockerfile <em>builds</em> an image, and an image <em>runs</em> as a container, as the diagram below makes clear.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    Dockerfile[&quot;Dockerfile (recipe)&quot;] --&gt;|docker build| Image[&quot;Image (immutable snapshot)&quot;]
+    Image --&gt;|docker run| C1[&quot;Container 1&quot;]
+    Image --&gt;|docker run| C2[&quot;Container 2&quot;]
+    Image --&gt;|docker run| C3[&quot;Container N&quot;]</div><figcaption>From Dockerfile to running container</figcaption></figure>
+<blockquote class='callout'>
+<p>In this pipeline, the image is the single artifact that travels from your laptop, through Jenkins, into ECR, and onto EC2. Everything we automate later is really just &quot;build this image, store it, and run it somewhere.&quot; Getting the Dockerfile right is the foundation.</p>
+</blockquote>
+<h4>The standard Dockerfile pattern</h4>
+<p>Almost every Dockerfile for a web app follows the same skeleton. Here is the pattern using a small Node.js app as the example — but the <em>shape</em> applies to any language. Create a file named exactly <code class='ic'>Dockerfile</code> (no extension) in the root of your project:</p>
+<pre><code>
+# 1. Start from an official base image that already has your runtime
+FROM node:20-alpine
+
+# 2. Set the working directory inside the image
+WORKDIR /app
+
+# 3. Copy dependency manifest FIRST, then install — this layer gets cached
+COPY package.json package-lock.json ./
+RUN npm install
+
+# 4. Now copy the rest of the source code
+COPY . .
+
+# 5. Document the port the app listens on
+EXPOSE 8080
+
+# 6. Define the command that runs when a container starts
+CMD [&quot;node&quot;, &quot;index.js&quot;]
+</code></pre>
+<p>A few of these lines deserve explanation, because they encode real best practices:</p>
+<ul>
+<li><strong><code class='ic'>FROM</code></strong> picks a base image. Prefer an official, slim image — <code class='ic'>node:20-alpine</code> is based on Alpine Linux (a tiny ~5 MB distribution), which keeps your final image small and fast to push and pull. A bloated base image costs you on every deploy.</li>
+<li><strong>Each instruction is a cached layer.</strong> Docker rebuilds only the layers that changed. This is <em>why</em> we copy <code class='ic'>package.json</code> and run <code class='ic'>npm install</code> <strong>before</strong> copying the source code. Your dependencies change rarely, but your source changes constantly — so installing dependencies in an earlier layer means Docker can reuse the cached install on most builds. Get this order wrong and every code change forces a full reinstall.</li>
+<li><strong><code class='ic'>CMD</code> uses the array (exec) form</strong> — <code class='ic'>[&quot;node&quot;, &quot;index.js&quot;]</code> rather than a plain string. The exec form runs your process directly instead of wrapping it in a shell, which makes signal handling and shutdown behave correctly.</li>
+</ul>
+<h4>Don&#x27;t copy junk: the .dockerignore file</h4>
+<p>When you write <code class='ic'>COPY . .</code>, Docker copies <em>everything</em> in the folder — including your local <code class='ic'>node_modules</code>, build artifacts, and, dangerously, any stray secret files. Create a <code class='ic'>.dockerignore</code> file (it works just like <code class='ic'>.gitignore</code>) to exclude them:</p>
+<pre><code>
+node_modules
+.git
+*.env
+</code></pre>
+<p>This keeps your image small, your builds fast, and your secrets out of a layer that anyone who pulls the image could inspect.</p>
+<h4>Build it and run it locally</h4>
+<p>Now turn the recipe into an image. The <code class='ic'>-t</code> flag tags it with a memorable name:</p>
+<pre><code>
+docker build -t myapp:local .
+</code></pre>
+<p>The trailing <code class='ic'>.</code> tells Docker to look for the Dockerfile in the current directory. Watch the output: Docker steps through each instruction, pulling the base image, installing dependencies, and copying your code, then prints the built image ID. Confirm it exists:</p>
+<pre><code>
+docker images
+</code></pre>
+<p>Now run it. A common beginner trap is to start the container and then wonder why <code class='ic'>localhost</code> shows nothing:</p>
+<pre><code>
+docker run -p 5000:8080 myapp:local
+</code></pre>
+<p>The <code class='ic'>-p 5000:8080</code> flag is the key. By default a container&#x27;s ports are <em>not</em> reachable from your machine. This flag <strong>maps</strong> port <code class='ic'>5000</code> on your host to port <code class='ic'>8080</code> inside the container (the port we <code class='ic'>EXPOSE</code>d). Open <code class='ic'>http://localhost:5000</code> and you should see your app. The mapping reads <code class='ic'>host:container</code>.</p>
+<p>To run it in the background, add <code class='ic'>-d</code> (detached). Inspect what&#x27;s running with <code class='ic'>docker ps</code>, read logs with <code class='ic'>docker logs &lt;container&gt;</code>, and stop it with <code class='ic'>docker stop &lt;container&gt;</code>.</p>
+<h4>This is your starting point</h4>
+<p>You now have a reproducible, portable image of your app and you&#x27;ve proven it runs. That image is exactly what the rest of the pipeline will build, store, and deploy automatically. In the lectures ahead, every step you just did by hand — build, tag, run — becomes a stage that Jenkins executes for you on every push.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A container packages your app with its entire environment, eliminating &quot;works on my machine&quot; and giving you one artifact that runs the same everywhere.</li>
+<li>Remember the chain: a <strong>Dockerfile</strong> builds an <strong>image</strong>, and an <strong>image</strong> runs as a <strong>container</strong>.</li>
+<li>Order your Dockerfile to exploit layer caching — copy and install dependencies <em>before</em> copying source code — and use a slim base image plus <code class='ic'>.dockerignore</code> to stay small and safe.</li>
+<li>Validate locally with <code class='ic'>docker build -t name .</code> and <code class='ic'>docker run -p host:container name</code>; remember that port mapping is required to reach the app, and the format is <code class='ic'>host:container</code>.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Explain in your own words the relationship between a Dockerfile, an image, and a container — then verify you have Docker available by running &#x27;docker --version&#x27; and &#x27;docker images&#x27; in your terminal.</p></div>
+              <pre class='starter'><code># No code needed. Open a terminal on your development machine.
+# Commands to run:
+# docker --version
+# docker images</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker --version&#x27; gives &#x27;command not found&#x27;, Docker is not installed or not on your PATH. Install Docker Desktop (macOS/Windows) or the Docker Engine package for your Linux distribution.</li><li>If &#x27;docker images&#x27; hangs or returns &#x27;Cannot connect to the Docker daemon&#x27;, the Docker daemon is not running — start Docker Desktop or run &#x27;sudo systemctl start docker&#x27; on Linux.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>A Dockerfile is the recipe (a text file with instructions). Running &#x27;docker build&#x27; on it produces an image — an immutable, self-contained snapshot of the app and its environment. A container is a running instance of that image; the same image can produce many independent containers simultaneously.
+
+Expected terminal output:
+$ docker --version
+Docker version 24.x.x, build ...
+
+$ docker images
+REPOSITORY   TAG   IMAGE ID   CREATED   SIZE
+(empty or existing images listed)</code></pre>
+                <div class='exp2'><p>This warm-up anchors the three core terms before you build anything. Docker must be installed and the daemon running for every later step to work. &#x27;docker images&#x27; confirms the daemon is responsive and shows any previously built images — a clean slate is fine.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Create a minimal Node.js web app with a correct Dockerfile, build the image, and run it locally so that &#x27;http://localhost:5000&#x27; returns a response.</p>
+<p>Requirements:</p>
+<p>1. Create &#x27;index.js&#x27; — a Node.js HTTP server that responds with &#x27;Hello from container!&#x27; on port 8080.</p>
+<p>2. Create &#x27;package.json&#x27; with a &#x27;start&#x27; script.</p>
+<p>3. Write a Dockerfile that: uses &#x27;node:20-alpine&#x27;, sets WORKDIR to /app, copies and installs dependencies BEFORE copying source code (layer caching), exposes port 8080, and uses CMD in exec form.</p>
+<p>4. Create a &#x27;.dockerignore&#x27; that excludes &#x27;node_modules&#x27;, &#x27;.git&#x27;, and &#x27;*.env&#x27;.</p>
+<p>5. Build the image with &#x27;docker build -t myapp:local .&#x27; and run it with &#x27;docker run -p 5000:8080 myapp:local&#x27;.</p>
+<p>6. Open http://localhost:5000 and confirm the response.</p></div>
+              <pre class='starter'><code># Directory structure to create:
+# myapp/
+#   index.js
+#   package.json
+#   Dockerfile
+#   .dockerignore
+
+# index.js skeleton:
+const http = require(&#x27;http&#x27;);
+const server = http.createServer((req, res) =&gt; {
+  res.writeHead(200);
+  res.end(&#x27;Hello from container!&#x27;);
+});
+server.listen(/* fill in port */, () =&gt; console.log(&#x27;Listening...&#x27;));
+
+# package.json skeleton:
+{
+  &quot;name&quot;: &quot;myapp&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;scripts&quot;: { &quot;start&quot;: &quot;node index.js&quot; }
+}
+
+# Dockerfile skeleton:
+FROM ___
+WORKDIR ___
+COPY ___ ___
+RUN ___
+COPY . .
+EXPOSE ___
+CMD [&quot;___&quot;, &quot;___&quot;]</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker build&#x27; fails with &#x27;COPY failed: file not found&#x27;, make sure &#x27;package.json&#x27; exists in the same directory as the Dockerfile and you are running &#x27;docker build&#x27; from that directory (the trailing &#x27;.&#x27; matters).</li><li>If &#x27;http://localhost:5000&#x27; shows &#x27;connection refused&#x27;, the container may have exited. Run &#x27;docker ps -a&#x27; to check its status, then &#x27;docker logs &lt;container-id&gt;&#x27; to read the error. A common cause is the wrong port in index.js (e.g., 3000 instead of 8080).</li><li>If you forgot to add &#x27;.dockerignore&#x27;, run &#x27;docker image prune&#x27; to remove the oversized image, add the file, and rebuild.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># index.js
+const http = require(&#x27;http&#x27;);
+const server = http.createServer((req, res) =&gt; {
+  res.writeHead(200);
+  res.end(&#x27;Hello from container!&#x27;);
+});
+server.listen(8080, () =&gt; console.log(&#x27;Listening on port 8080&#x27;));
+
+# package.json
+{
+  &quot;name&quot;: &quot;myapp&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;scripts&quot;: { &quot;start&quot;: &quot;node index.js&quot; }
+}
+
+# Dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+EXPOSE 8080
+CMD [&quot;node&quot;, &quot;index.js&quot;]
+
+# .dockerignore
+node_modules
+.git
+*.env
+
+# Build and run:
+docker build -t myapp:local .
+docker run -p 5000:8080 myapp:local
+# Then open http://localhost:5000 — should return &#x27;Hello from container!&#x27;</code></pre>
+                <div class='exp2'><p>Copying &#x27;package.json&#x27; and running &#x27;npm install&#x27; BEFORE &#x27;COPY . .&#x27; is essential for layer caching: since dependencies rarely change, Docker can reuse the cached install layer on future builds where only source code changed. Using &#x27;node:20-alpine&#x27; instead of &#x27;node:20&#x27; keeps the image under 150 MB vs ~1 GB. The port mapping &#x27;-p 5000:8080&#x27; connects host port 5000 to container port 8080 (the EXPOSE&#x27;d port); without this flag the container&#x27;s network is isolated and localhost shows nothing.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice (continued): Use &#x27;docker ps&#x27;, &#x27;docker logs&#x27;, and &#x27;docker stop&#x27; to manage the running container. Then demonstrate layer caching by rebuilding the image after changing only the response text in index.js and observing which layers Docker reuses.</p></div>
+              <pre class='starter'><code># Assume &#x27;docker run -p 5000:8080 myapp:local&#x27; is already running from the previous task.
+# Step 1: find the container ID / name
+docker ps
+# Step 2: read its logs
+docker logs &lt;container-name-or-id&gt;
+# Step 3: stop it
+docker stop &lt;container-name-or-id&gt;
+# Step 4: change the response text in index.js, then rebuild
+docker build -t myapp:local .
+# Observe &#x27;CACHED&#x27; lines in the build output</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker ps&#x27; returns an empty list, the container may have exited. Use &#x27;docker ps -a&#x27; (all containers, including stopped ones) to find it.</li><li>If the rebuild does NOT show &#x27;CACHED&#x27; for the npm install step, check that your Dockerfile copies only &#x27;package.json&#x27; before &#x27;RUN npm install&#x27; — if you wrote &#x27;COPY . .&#x27; before the install, the source change invalidates that layer.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># After running &#x27;docker ps&#x27; you see something like:
+# CONTAINER ID   IMAGE         COMMAND           STATUS          PORTS
+# a1b2c3d4e5f6   myapp:local   &quot;node index.js&quot;   Up 2 minutes   0.0.0.0:5000-&gt;8080/tcp
+
+# docker logs a1b2c3d4e5f6  →  &#x27;Listening on port 8080&#x27;
+
+# docker stop a1b2c3d4e5f6  →  container exits
+
+# Edit index.js: change &#x27;Hello from container!&#x27; to &#x27;Hello, CI/CD!&#x27;
+# Then: docker build -t myapp:local .
+# Expected build output will show:
+#  =&gt; CACHED [2/5] WORKDIR /app
+#  =&gt; CACHED [3/5] COPY package.json ./
+#  =&gt; CACHED [4/5] RUN npm install       &lt;-- cached, not re-run
+#  =&gt; [5/5] COPY . .                     &lt;-- invalidated by source change
+# The npm install layer is reused — rebuild is fast.</code></pre>
+                <div class='exp2'><p>Docker rebuilds only the layers that changed and everything after them. Because the source change only touches the &#x27;COPY . .&#x27; layer (step 5), all earlier layers — including the expensive &#x27;npm install&#x27; — are served from cache. This is why the dependency copy/install must come before the full &#x27;COPY . .&#x27; in the Dockerfile. Reversing that order would invalidate the install cache on every source change, making builds unnecessarily slow.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: A colleague&#x27;s Dockerfile has three problems that will cause slow builds, large images, or incorrect behavior. Identify each problem and write the corrected Dockerfile.</p>
+<p>Problematic Dockerfile:</p>
+<pre><code>
+FROM node:20
+WORKDIR /app
+COPY . .
+RUN npm install
+EXPOSE 8080
+CMD node index.js
+</code></pre></div>
+              <pre class='starter'><code># Review the Dockerfile above and answer:
+# 1. Which base image choice creates unnecessarily large images?
+# 2. Which ordering of COPY and RUN breaks layer caching?
+# 3. What is wrong with the CMD instruction&#x27;s syntax?
+# Then write the corrected Dockerfile.</code></pre>
+              <details><summary>Hint</summary><ul><li>To check image size: after building both &#x27;FROM node:20&#x27; and &#x27;FROM node:20-alpine&#x27; versions, run &#x27;docker images&#x27; and compare the SIZE column.</li><li>To observe the caching difference: build the broken version, change index.js, rebuild — watch how many layers are labelled &#x27;CACHED&#x27;. Then try the corrected version and compare.</li><li>The CMD shell vs exec form is easy to spot: exec form uses a JSON array with square brackets and quoted strings. Shell form is a plain string without brackets.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Problem 1: &#x27;FROM node:20&#x27; uses the full Debian-based image (~1 GB).
+#   Fix: &#x27;FROM node:20-alpine&#x27; (~150 MB)
+
+# Problem 2: &#x27;COPY . .&#x27; comes BEFORE &#x27;RUN npm install&#x27;.
+#   Every source-code change invalidates the COPY layer and forces a fresh npm install.
+#   Fix: copy only package.json first, install, then copy source.
+
+# Problem 3: &#x27;CMD node index.js&#x27; uses shell form (wraps in /bin/sh -c).
+#   This means Docker sends signals to the shell, not the Node process — shutdown is unreliable.
+#   Fix: &#x27;CMD [&quot;node&quot;, &quot;index.js&quot;]&#x27; (exec form)
+
+# Corrected Dockerfile:
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+EXPOSE 8080
+CMD [&quot;node&quot;, &quot;index.js&quot;]</code></pre>
+                <div class='exp2'><p>These three problems represent the most common Dockerfile mistakes in practice. The base image choice directly affects image push/pull time on every CI build. Layer cache ordering is the single most impactful performance decision in a Dockerfile — done wrong, every code change costs a full dependency reinstall. The CMD exec-form vs shell-form distinction matters for signal forwarding: a process that does not receive SIGTERM from Docker will be killed with SIGKILL after a grace period, causing abrupt shutdowns and potential data loss.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=gAkwW2tuIqE' target='_blank'>Learn Docker in 7 Easy Steps - Full Beginner&#x27;s Tutorial</a></li><li><a href='https://www.youtube.com/watch?v=LQjaJINkQXY' target='_blank'>What is Dockerfile | How to create and build Dockerfile | Dockerfile Basic Commands</a></li><li><a href='https://www.youtube.com/watch?v=SnSH8Ht3MIc' target='_blank'>Build YOUR OWN Dockerfile, Image, and Container - Docker Tutorial</a></li></ul></div>
+        </article>
+<article id='lec3' class='lecture'>
+          <h2>03. Setting Up GitLab and Triggering Jenkins on Push (Webhooks) </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the basic flow of creating a GitLab repository, pushing code, and a simple branch strategy.</li>
+<li>Know how a GitLab webhook delivers a <code class='ic'>push</code> event to Jenkins and what makes it secure.</li>
+<li>Connect GitLab to Jenkins so that pushing code automatically triggers the pipeline.</li>
+</ul>
+<h3>Body</h3>
+<h4>The repository is the trigger</h4>
+<p>In the previous lecture you built an image by hand. The whole point of a pipeline is that you stop running commands manually — instead, <em>pushing code</em> sets everything in motion. That means we need two things: a place to push code (GitLab) and a mechanism that tells Jenkins &quot;something changed, start working&quot; (a webhook). This lecture wires those two together.</p>
+<h4>A quick GitLab and branch refresher</h4>
+<p>Create a project in GitLab, then push your code — the same Dockerfile-equipped app from the last lecture — to it:</p>
+<pre><code>
+git init
+git remote add origin https://gitlab.com/&lt;your-namespace&gt;/&lt;your-project&gt;.git
+git add .
+git commit -m &quot;Initial commit with Dockerfile&quot;
+git push -u origin main
+</code></pre>
+<p>A small but real <strong>branch strategy</strong> keeps the pipeline sane. The convention is to do day-to-day work on a <code class='ic'>dev</code> (or feature) branch, and treat <code class='ic'>main</code> as the branch that always represents what should be deployed. You can configure the pipeline to react to pushes on whichever branch you choose. For learning, triggering on every push to <code class='ic'>dev</code> lets you experiment freely without touching the deployable branch.</p>
+<h4>What a webhook actually is</h4>
+<p>A <strong>webhook</strong> is GitLab&#x27;s way of saying &quot;call me back when something happens.&quot; Instead of Jenkins constantly polling GitLab asking &quot;anything new yet?&quot;, GitLab proactively sends an HTTP request to a URL you give it the instant an event — like a <code class='ic'>push</code> — occurs. It&#x27;s the difference between repeatedly checking your mailbox and having the postal service ring your doorbell.</p>
+<p>The sequence below traces a single <code class='ic'>push</code> from your machine all the way to a started Jenkins build, and shows where the secret token proves the request is authentic.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant Dev as Developer
+    participant GitLab as GitLab
+    participant Jenkins as Jenkins
+    Dev-&gt;&gt;GitLab: git push (push event)
+    GitLab-&gt;&gt;Jenkins: HTTP POST to webhook URL + secret token
+    Jenkins-&gt;&gt;Jenkins: Verify secret token matches
+    Jenkins--&gt;&gt;GitLab: 200 OK
+    Jenkins-&gt;&gt;Jenkins: Start build &quot;Started by GitLab push&quot;</div><figcaption>How a GitLab webhook triggers a Jenkins build</figcaption></figure>
+<p>GitLab actually offers two ways to connect to Jenkins, and it helps to know both:</p>
+<ul>
+<li><strong>The Jenkins integration</strong> — the officially recommended path. It uses a GitLab plugin in Jenkins plus a saved connection, and it can also report build status <em>back</em> into the GitLab UI.</li>
+<li><strong>A plain webhook</strong> — a more direct, lower-level approach where GitLab simply POSTs to a Jenkins URL secured by a token.</li>
+</ul>
+<p>We&#x27;ll set up the connection using the integration, then show the raw webhook so you understand what&#x27;s happening underneath.</p>
+<h4>Step 1 — A personal access token in GitLab</h4>
+<p>Jenkins needs permission to talk to GitLab&#x27;s API. In the current GitLab UI, click your avatar (top-left) → <strong>Preferences</strong> (older versions label this <strong>Edit profile</strong>), then choose <strong>Access Tokens</strong> from the left-hand menu. Click <strong>Add new token</strong>, give it a name and an expiry, and — this is the critical part — set the scope to <strong>api</strong>. Copy the token immediately: GitLab shows it exactly once and you can never retrieve it again. If you lose it, you create a new one.</p>
+<h4>Step 2 — Install the GitLab plugin in Jenkins</h4>
+<p>In Jenkins, go to <strong>Manage Jenkins → Plugins → Available</strong>, search for <strong>GitLab</strong>, and install it (the <strong>GitLab API Plugin</strong> comes along as a companion). This plugin is what lets GitLab trigger builds and lets Jenkins display results back in GitLab.</p>
+<h4>Step 3 — Create the GitLab connection in Jenkins</h4>
+<p>Go to <strong>Manage Jenkins → System</strong> and scroll to the new <strong>GitLab</strong> section. Fill in:</p>
+<ul>
+<li><strong>Connection name</strong> — any label you like (e.g. <code class='ic'>gitlab-saas</code>).</li>
+<li><strong>GitLab host URL</strong> — <code class='ic'>https://gitlab.com</code> for GitLab SaaS, or your self-hosted server&#x27;s URL.</li>
+<li><strong>Credentials</strong> — click <strong>Add</strong>, choose the kind <strong>GitLab API token</strong>, and paste the token from Step 1.</li>
+</ul>
+<p>Save, then click <strong>Test Connection</strong>. A success message confirms Jenkins can reach GitLab.</p>
+<h4>Step 4 — Make the Jenkins job listen for pushes</h4>
+<p>In your Jenkins pipeline job&#x27;s configuration, find <strong>Build Triggers</strong> and enable <strong>&quot;Build when a change is pushed to GitLab.&quot;</strong> Select the events you care about — typically <strong>Push Events</strong> and <strong>Merge Request Events</strong>. This tells Jenkins which incoming notifications should actually start a build.</p>
+<h4>Step 5 — Create the webhook in GitLab</h4>
+<p>Now go to your GitLab project → <strong>Settings → Webhooks</strong>. You need two pieces of information that Jenkins displays in that same Build Triggers section:</p>
+<ul>
+<li><strong>URL</strong> — the endpoint Jenkins exposes for this job (Jenkins shows you the exact URL).</li>
+<li><strong>Secret token</strong> — click <strong>Generate</strong> in Jenkins to create one, then paste it into the GitLab webhook&#x27;s secret token field.</li>
+</ul>
+<p>The secret token matters: it&#x27;s how Jenkins verifies that an incoming request genuinely came from your GitLab project and not from some stranger who guessed the URL. Choose <strong>Push events</strong>, pick the branches, and add the hook. GitLab gives you a <strong>Test → Push events</strong> button to fire a sample event and confirm the wiring.</p>
+<blockquote class='callout'>
+<p>The whole connection is just two facts that must match on both ends: a <strong>URL</strong> that points GitLab at the right Jenkins job, and a <strong>shared secret token</strong> that proves the request is authentic. Get those two aligned and the trigger works.</p>
+</blockquote>
+<h4>Step 6 — Prove it end to end</h4>
+<p>Make a trivial change — edit the README on your <code class='ic'>dev</code> branch — and commit:</p>
+<pre><code>
+git checkout dev
+echo &quot;trigger test&quot; &gt;&gt; README.md
+git commit -am &quot;Test webhook&quot;
+git push
+</code></pre>
+<p>Watch Jenkins. Within a second or two a new build appears, and the console output shows it was <strong>&quot;Started by GitLab push&quot;</strong> by your user. You now have a hands-off trigger: from here on, code pushes — not commands — drive the pipeline. The structure is now in place; the next lecture defines what Jenkins actually <em>does</em> when that trigger fires.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Pushing code to GitLab — not running commands — is what now starts your pipeline, so connecting GitLab to Jenkins is the foundation of automation.</li>
+<li>A webhook lets GitLab push a notification to Jenkins the instant an event occurs, rather than Jenkins polling for changes.</li>
+<li>The connection rests on two matching facts: a <strong>URL</strong> pointing at the Jenkins job and a <strong>shared secret token</strong> that authenticates the request.</li>
+<li>Configure the Jenkins job to &quot;Build when a change is pushed to GitLab,&quot; create the matching webhook in GitLab, and verify with a test push that shows &quot;Started by GitLab push.&quot;</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Create a GitLab project and push the Dockerfile-equipped app from Lecture 2 to it. Confirm the code appears in the GitLab web UI on the &#x27;main&#x27; branch.</p></div>
+              <pre class='starter'><code># Run these commands from inside your app directory (the one with Dockerfile)
+git init
+git remote add origin https://gitlab.com/&lt;your-namespace&gt;/&lt;your-project&gt;.git
+git add .
+git commit -m &quot;Initial commit with Dockerfile&quot;
+git push -u origin main</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;git push&#x27; is rejected with &#x27;remote: The project you were looking for could not be found&#x27;, double-check the remote URL matches your GitLab namespace and project name exactly.</li><li>If GitLab asks for a username/password and you have 2FA enabled, you must use a Personal Access Token as the password — a regular password will not work over HTTPS with 2FA.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Complete sequence:
+git init
+git remote add origin https://gitlab.com/yourname/myapp.git
+git add .
+git commit -m &quot;Initial commit with Dockerfile&quot;
+git push -u origin main
+
+# Verification: open https://gitlab.com/yourname/myapp in a browser.
+# You should see Dockerfile, index.js, package.json, .dockerignore listed on the main branch.
+
+# Also create a dev branch for experimentation:
+git checkout -b dev
+git push -u origin dev</code></pre>
+                <div class='exp2'><p>The GitLab repository is the starting point of every automated pipeline run. The &#x27;main&#x27; branch will later be the deployable branch; &#x27;dev&#x27; (or feature branches) is where day-to-day work happens. Having both branches set up now means you can configure the pipeline to trigger only on &#x27;dev&#x27; pushes during learning without risking the deployable branch.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Connect GitLab to Jenkins so that pushing code automatically triggers a pipeline build.</p>
+<p>Complete all five steps:</p>
+<p>1. Create a GitLab Personal Access Token with &#x27;api&#x27; scope.</p>
+<p>2. Install the GitLab plugin in Jenkins.</p>
+<p>3. Create a GitLab connection in Jenkins (Manage Jenkins → System → GitLab section) and test the connection.</p>
+<p>4. In your Jenkins Pipeline job&#x27;s Build Triggers, enable &#x27;Build when a change is pushed to GitLab&#x27; and select Push Events.</p>
+<p>5. Create a webhook in your GitLab project (Settings → Webhooks) using the URL and secret token displayed in the Jenkins Build Triggers section.</p>
+<p>Verify by using GitLab&#x27;s &#x27;Test → Push events&#x27; button and confirming a build appears in Jenkins.</p></div>
+              <pre class='starter'><code># This task is configuration-based. Use the following checklist to track progress:
+# [ ] GitLab Personal Access Token created (scope: api)
+# [ ] GitLab plugin installed in Jenkins
+# [ ] GitLab connection created in Jenkins and &#x27;Test Connection&#x27; returns success
+# [ ] Jenkins Pipeline job has &#x27;Build when pushed to GitLab&#x27; enabled
+# [ ] Webhook URL and secret token copied from Jenkins into GitLab
+# [ ] GitLab &#x27;Test &gt; Push events&#x27; triggered
+# [ ] Jenkins shows a new build in the job history</code></pre>
+              <details><summary>Hint</summary><ul><li>If the GitLab &#x27;Test → Push events&#x27; returns a non-200 HTTP code or times out, verify that your Jenkins host is reachable from the internet (GitLab SaaS must be able to POST to it). If Jenkins is running locally, you need a tunneling tool like ngrok to expose it: &#x27;ngrok http 8080&#x27; gives you a public URL to use as the webhook URL.</li><li>If Jenkins shows &#x27;Test Connection&#x27; failure, confirm the GitLab host URL has no trailing slash and the credential kind is &#x27;GitLab API token&#x27; (not &#x27;Username with password&#x27;).</li><li>If no build appears after the test event, open the webhook in GitLab (Settings → Webhooks → Edit) and scroll to &#x27;Recent deliveries&#x27; to see the response Jenkins sent — a 403 means the secret token does not match.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 — GitLab Personal Access Token
+# Avatar (top-left) → Preferences → Access Tokens → Add new token
+# Name: jenkins-integration  Expiry: 90 days  Scope: api
+# Copy the token immediately — it is shown only once.
+
+# Step 2 — Jenkins GitLab plugin
+# Manage Jenkins → Plugins → Available → search &#x27;GitLab&#x27; → Install
+# (GitLab API Plugin installs automatically as a dependency)
+
+# Step 3 — GitLab connection in Jenkins
+# Manage Jenkins → System → scroll to &#x27;GitLab&#x27; section
+# Connection name: gitlab-saas
+# GitLab host URL: https://gitlab.com
+# Credentials: Add → Kind: GitLab API token → paste token from Step 1
+# Click &#x27;Test Connection&#x27; → should show &#x27;Credentials verified&#x27;
+
+# Step 4 — Jenkins job Build Trigger
+# Open your Pipeline job → Configure → Build Triggers
+# Check: &#x27;Build when a change is pushed to GitLab&#x27;
+# Events: Push Events ✓
+# Note the webhook URL shown (e.g. https://&lt;jenkins-host&gt;/project/&lt;job-name&gt;)
+# Click &#x27;Generate&#x27; next to Secret Token — copy the generated token
+
+# Step 5 — GitLab webhook
+# GitLab project → Settings → Webhooks → Add new webhook
+# URL: paste the Jenkins webhook URL from Step 4
+# Secret token: paste the generated secret from Step 4
+# Trigger: Push events ✓  → Add webhook
+# Click &#x27;Test&#x27; → &#x27;Push events&#x27; → expect HTTP 200 response
+# Switch to Jenkins — a new build appears in the job&#x27;s build history</code></pre>
+                <div class='exp2'><p>The connection rests on two matching facts: the URL that tells GitLab exactly where to send the HTTP POST, and the shared secret token that lets Jenkins verify the request is genuine. When Jenkins receives a push event, it checks the token in the request header; if it matches, the build starts. This is why the token must be copied accurately from Jenkins to GitLab — a mismatch returns a 403 and no build fires. The GitLab plugin additionally allows Jenkins to post build status back to GitLab merge requests, closing the feedback loop.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Applied challenge: Prove the end-to-end webhook trigger works with a real code push. Make a small change on the &#x27;dev&#x27; branch, push it, and confirm Jenkins starts the build automatically — showing &#x27;Started by GitLab push&#x27; in the console output.</p></div>
+              <pre class='starter'><code># On the dev branch:
+git checkout dev
+# Make a trivial change:
+echo &quot;webhook trigger test&quot; &gt;&gt; README.md
+git add README.md
+git commit -m &quot;Test webhook trigger&quot;
+git push
+# Then open Jenkins and watch the job&#x27;s build history.</code></pre>
+              <details><summary>Hint</summary><ul><li>If no build appears after the push, go back to GitLab → Settings → Webhooks → Recent deliveries to see whether the POST was attempted and what Jenkins responded.</li><li>If you pushed to &#x27;main&#x27; instead of &#x27;dev&#x27;, check which branch the Build Trigger is configured to react to — it must match the branch you pushed to.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>git checkout dev
+echo &quot;webhook trigger test&quot; &gt;&gt; README.md
+git add README.md
+git commit -m &quot;Test webhook trigger&quot;
+git push
+
+# Expected Jenkins behavior within 1-2 seconds of the push:
+# 1. A new build (#N) appears in the job&#x27;s build history.
+# 2. Click the build → Console Output.
+#    The first lines should include:
+#    &#x27;Started by GitLab push by &lt;your-username&gt;&#x27;
+# 3. The build may fail if the Jenkinsfile does not yet exist in the repo —
+#    that is expected at this stage. What matters is that the trigger worked.</code></pre>
+                <div class='exp2'><p>Seeing &#x27;Started by GitLab push&#x27; in the console output is the definitive proof that the webhook connection is working end-to-end: GitLab detected the push event, delivered the HTTP POST to Jenkins, Jenkins verified the secret token, and started a build. A build failure at this point (because there is no Jenkinsfile yet) is perfectly fine — the trigger mechanism is what this lecture is about. The pipeline content comes in the next lecture.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=_8YjWDmLvAE' target='_blank'>Trigger Jenkins Jobs From GitLab</a></li><li><a href='https://www.youtube.com/watch?v=SObrdM1ev3M' target='_blank'>GitLab Webhook Integration with Jenkins CI/CD | Step-by-Step DevOps Guide</a></li><li><a href='https://www.youtube.com/watch?v=3ELE4nwKjow' target='_blank'>Create Jenkins Pipeline using Jenkinsfile in Gitlab</a></li></ul></div>
+        </article>
+<article id='lec4' class='lecture'>
+          <h2>04. Installing Jenkins and Your First Pipeline (Jenkinsfile) </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Get Jenkins running and create a pipeline job.</li>
+<li>Understand Pipeline as Code (the Jenkinsfile) and its <code class='ic'>stage</code>/<code class='ic'>step</code> structure.</li>
+<li>Write a <code class='ic'>checkout</code> stage that pulls your source from GitLab.</li>
+</ul>
+<h3>Body</h3>
+<h4>From trigger to action</h4>
+<p>In the last lecture you made GitLab <em>notify</em> Jenkins on every push. But right now Jenkins receives that notification and does nothing useful. This lecture gives Jenkins its instructions — and we&#x27;ll write those instructions as code, in a file that lives right alongside your application.</p>
+<h4>Getting Jenkins running</h4>
+<p>The fastest way to a working Jenkins, and the one that fits this container-centric course, is to run Jenkins itself as a Docker container:</p>
+<pre><code>
+docker run -d --name jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  jenkins/jenkins:lts
+</code></pre>
+<p>A few notes on what this does. <code class='ic'>-p 8080:8080</code> exposes the <strong>web UI</strong> on <code class='ic'>localhost:8080</code> — this is the port you open in a browser. <code class='ic'>-p 50000:50000</code> exposes the <strong>agent (JNLP) port</strong>, which inbound build agents use to connect back to the Jenkins controller; map it now so you don&#x27;t have to recreate the container later when you add agents. Note the two mappings are different ports — don&#x27;t point the agent port at <code class='ic'>8080</code>, or your agents and your browser would collide on the same port. The volume mount <code class='ic'>-v jenkins_home:/var/jenkins_home</code> persists Jenkins&#x27; configuration and jobs so they survive a container restart — without it, you&#x27;d lose everything when the container stops. On first launch, Jenkins prints an initial admin password to its logs (<code class='ic'>docker logs jenkins</code>); use it to unlock the UI, install the suggested plugins, and create your admin account.</p>
+<blockquote class='callout'>
+<p>Running Jenkins in a container keeps your host clean and makes the setup reproducible — the same philosophy we applied to the app itself. Just remember the persistent volume, or your carefully configured jobs vanish on restart.</p>
+</blockquote>
+<h4>Freestyle jobs vs. pipelines — and why pipelines win</h4>
+<p>Jenkins offers several job types. A <strong>Freestyle</strong> job is configured entirely by clicking through web forms — fine for a one-off task, but the configuration lives only inside the Jenkins server. A <strong>Pipeline</strong> job, by contrast, is defined in code.</p>
+<p>Why does that matter? Because <strong>Pipeline as Code</strong> gives you three things a freestyle job can&#x27;t:</p>
+<ul>
+<li><strong>Version control</strong> — your build process lives in the repo, so every change is tracked, reviewable, and revertible just like application code.</li>
+<li><strong>Survivability</strong> — if your Jenkins server is wiped, your pipelines aren&#x27;t, because they&#x27;re stored in Git.</li>
+<li><strong>Power</strong> — pipelines support conditionals, loops, and parallel execution.</li>
+</ul>
+<p>That code lives in a file called a <strong>Jenkinsfile</strong>, committed to the root of your repository.</p>
+<h4>Anatomy of a Jenkinsfile</h4>
+<p>Jenkins supports two pipeline syntaxes: <strong>scripted</strong> (older, more flexible) and <strong>declarative</strong> (newer, easier to read). We&#x27;ll use declarative throughout this course. Its structure is a simple nesting:</p>
+<ul>
+<li><strong><code class='ic'>pipeline</code></strong> — the outermost block that wraps everything.</li>
+<li><strong><code class='ic'>agent</code></strong> — <em>where</em> the pipeline runs. <code class='ic'>agent any</code> means &quot;any available Jenkins worker.&quot;</li>
+<li><strong><code class='ic'>stages</code></strong> — a container holding the ordered list of stages.</li>
+<li><strong><code class='ic'>stage</code></strong> — a named, logical phase of the build (e.g. &quot;Checkout&quot;, &quot;Build&quot;, &quot;Test&quot;). The stage names become the columns you see in the Jenkins stage view.</li>
+<li><strong><code class='ic'>steps</code></strong> — the individual commands that run inside a stage.</li>
+</ul>
+<p>The flow is strictly top to bottom: <code class='ic'>pipeline</code> contains <code class='ic'>stages</code>, <code class='ic'>stages</code> contains each <code class='ic'>stage</code>, and each <code class='ic'>stage</code> contains <code class='ic'>steps</code>. Here is the smallest pipeline that does something real:</p>
+<pre><code>
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Hello&#x27;) {
+            steps {
+                echo &#x27;Pipeline is alive!&#x27;
+            }
+        }
+    }
+}
+</code></pre>
+<p>Create a new <strong>Pipeline</strong> job in Jenkins (<strong>New Item → Pipeline</strong>), paste this into the inline script box, and click <strong>Build Now</strong>. You&#x27;ll see a green &quot;Hello&quot; box in the stage view. If it fails, the <strong>Console Output</strong> link tells you exactly which line broke — get comfortable reading it, because it&#x27;s where you&#x27;ll diagnose every future problem.</p>
+<h4>Pulling the Jenkinsfile from GitLab instead of pasting it</h4>
+<p>Pasting a script inline defeats the purpose of Pipeline as Code. The real setup is <strong>&quot;Pipeline script from SCM.&quot;</strong> In the job configuration, under <strong>Pipeline</strong>, choose <strong>Pipeline script from SCM</strong>, select <strong>Git</strong>, enter your GitLab repository URL and credentials, set the branch, and set <strong>Script Path</strong> to <code class='ic'>Jenkinsfile</code>. Now Jenkins reads the pipeline definition straight from your repo on every run — which means editing your build process is just another commit.</p>
+<h4>Writing the checkout stage</h4>
+<p>The very first thing a real pipeline must do is get the latest code. That&#x27;s the <strong>checkout</strong> stage. When the Jenkinsfile is loaded &quot;from SCM,&quot; Jenkins can grab the source with a single built-in step — you don&#x27;t even need to specify the URL again, because Jenkins already knows where it loaded the Jenkinsfile from:</p>
+<pre><code>
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                checkout scm
+            }
+        }
+    }
+}
+</code></pre>
+<p><code class='ic'>checkout scm</code> clones the exact commit that triggered this build. If you ever need to check out a different repo explicitly, you can spell it out:</p>
+<pre><code>
+git branch: &#x27;main&#x27;,
+    url: &#x27;https://gitlab.com/&lt;namespace&gt;/&lt;project&gt;.git&#x27;,
+    credentialsId: &#x27;gitlab-creds&#x27;
+</code></pre>
+<p>Commit this Jenkinsfile, push it, and watch the webhook from the previous lecture trigger a build that now actually fetches your code. You&#x27;ve closed the loop: a push triggers Jenkins, and Jenkins pulls the code as the opening move of a pipeline defined entirely in your repository. Everything from here is just adding more stages.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Running Jenkins as a Docker container with a persistent volume gives you a clean, reproducible setup; map <code class='ic'>8080:8080</code> for the web UI and <code class='ic'>50000:50000</code> for the agent (JNLP) port.</li>
+<li>Prefer <strong>Pipeline as Code (Jenkinsfile)</strong> over freestyle jobs because it&#x27;s version-controlled, survives a server wipe, and supports real logic.</li>
+<li>A declarative pipeline nests <code class='ic'>pipeline → agent → stages → stage → steps</code>, and stage names appear in the Jenkins stage view.</li>
+<li>Use <strong>&quot;Pipeline script from SCM&quot;</strong> so Jenkins reads the Jenkinsfile from your repo, and make <code class='ic'>checkout scm</code> your first stage to fetch the triggering commit.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Start Jenkins as a Docker container with a persistent volume. Retrieve the initial admin password from the container logs, complete the setup wizard, and confirm the Jenkins web UI is accessible at http://localhost:8080.</p></div>
+              <pre class='starter'><code># Run Jenkins as a container:
+docker run -d --name jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  jenkins/jenkins:lts
+
+# Wait ~30 seconds, then retrieve the initial admin password:
+docker logs jenkins 2&gt;&amp;1 | grep -A 3 &#x27;initial admin password&#x27;</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker logs jenkins&#x27; shows no password line after 60 seconds, the container may have exited. Run &#x27;docker ps -a&#x27; to check the status and &#x27;docker logs jenkins&#x27; to read any startup errors.</li><li>If port 8080 is already in use on your machine, change the host-side mapping: &#x27;-p 9090:8080&#x27;. Then access Jenkins at http://localhost:9090 instead.</li><li>If you lose access to the container later, you can always recover the admin password with: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Start the container:
+docker run -d --name jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins_home:/var/jenkins_home \
+  jenkins/jenkins:lts
+
+# Retrieve initial admin password (two equivalent methods):
+docker logs jenkins 2&gt;&amp;1 | grep -A 5 &#x27;Please use the following password&#x27;
+# OR:
+docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+
+# Expected output: a 32-character hex string, e.g.:
+# a3f7b2c1d4e5f6a7b8c9d0e1f2a3b4c5
+
+# Open http://localhost:8080, paste the password, choose &#x27;Install suggested plugins&#x27;,
+# create an admin account, and complete the wizard.
+# Verification: the Jenkins dashboard loads and shows &#x27;Welcome to Jenkins!&#x27;</code></pre>
+                <div class='exp2'><p>The two port mappings serve different purposes: 8080 is for the browser UI, and 50000 is the JNLP port that inbound build agents use to connect to the controller. The named volume &#x27;jenkins_home&#x27; persists all configuration, jobs, and credentials; without it, every container restart loses everything. Running Jenkins in a container mirrors the philosophy applied to the app itself — reproducible, clean, and portable.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Write a minimal declarative Jenkinsfile with a single &#x27;Hello&#x27; stage, create a Pipeline job in Jenkins that uses an inline script, run the build, and verify the stage turns green in the Jenkins stage view.</p></div>
+              <pre class='starter'><code>// Jenkinsfile content (paste into Jenkins inline script box):
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;___&#x27;) {
+            steps {
+                echo &#x27;___&#x27;
+            }
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If the build fails with &#x27;No such DSL method echo&#x27;, the suggested plugins were not installed during setup. Go to Manage Jenkins → Plugins → Installed and verify the Pipeline plugin is present.</li><li>If you see &#x27;Started&#x27; but no stage boxes appear in the UI, your browser may need to reload. The Stage View requires the Pipeline Stage View plugin — check it is installed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Complete Jenkinsfile:
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Hello&#x27;) {
+            steps {
+                echo &#x27;Pipeline is alive!&#x27;
+            }
+        }
+    }
+}
+
+// Jenkins setup steps:
+// 1. New Item → enter a name (e.g. &#x27;myapp-pipeline&#x27;) → select &#x27;Pipeline&#x27; → OK
+// 2. Scroll to &#x27;Pipeline&#x27; section → Definition: &#x27;Pipeline script&#x27;
+// 3. Paste the Jenkinsfile above into the script box → Save
+// 4. Click &#x27;Build Now&#x27;
+// 5. Click the build number → Stage View shows a green &#x27;Hello&#x27; box
+// 6. Click &#x27;Console Output&#x27; and confirm the line: &#x27;Pipeline is alive!&#x27;</code></pre>
+                <div class='exp2'><p>The declarative pipeline syntax nests pipeline → agent → stages → stage → steps. Every stage name you provide becomes a column in the Stage View, giving a visual progress bar of the build. &#x27;agent any&#x27; means Jenkins will run this on whichever executor is available. Even this trivial pipeline demonstrates the essential pattern: if the &#x27;echo&#x27; step returned a non-zero code, the stage would turn red and the pipeline would stop.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice: Commit the Jenkinsfile to your GitLab repository and reconfigure the Jenkins job to read the pipeline definition from SCM (&#x27;Pipeline script from SCM&#x27;). Add a &#x27;Checkout&#x27; stage that uses &#x27;checkout scm&#x27;. Push a change and verify that Jenkins loads the Jenkinsfile from the repo and runs the Checkout stage successfully.</p></div>
+              <pre class='starter'><code>// Jenkinsfile to commit to the ROOT of your GitLab repository:
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                // Use the built-in step that checks out
+                // the commit that triggered this build:
+                ___
+            }
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If Jenkins cannot clone the repo (authentication error), add a &#x27;Username with password&#x27; credential in Manage Jenkins → Credentials using your GitLab username and a Personal Access Token as the password.</li><li>If Jenkins reads an old Jenkinsfile, make sure you pushed the commit to the branch Jenkins is configured to watch (the Branch Specifier in the SCM configuration).</li><li>If the Jenkinsfile is in a subdirectory rather than the repo root, update the &#x27;Script Path&#x27; field in the Pipeline configuration to the relative path, e.g. &#x27;ci/Jenkinsfile&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Jenkinsfile (commit to repo root as &#x27;Jenkinsfile&#x27;, no extension):
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                checkout scm
+            }
+        }
+    }
+}
+
+// Steps to apply &#x27;Pipeline script from SCM&#x27;:
+// 1. In Jenkins: open the pipeline job → Configure
+// 2. Pipeline section → Definition: &#x27;Pipeline script from SCM&#x27;
+// 3. SCM: Git
+//    Repository URL: https://gitlab.com/&lt;your-namespace&gt;/&lt;your-project&gt;.git
+//    Credentials: select or add the GitLab credentials
+//    Branch: */dev (or */main)
+//    Script Path: Jenkinsfile
+// 4. Save
+//
+// Commit and push Jenkinsfile:
+// git add Jenkinsfile
+// git commit -m &quot;Add Jenkinsfile with Checkout stage&quot;
+// git push
+//
+// Jenkins receives the webhook (from Lecture 3), reads Jenkinsfile from GitLab,
+// and runs the Checkout stage. Console Output should show:
+// &#x27;Checking out Revision &lt;SHA&gt; (refs/remotes/origin/dev)&#x27;
+// Stage View: one green &#x27;Checkout&#x27; box.</code></pre>
+                <div class='exp2'><p>&#x27;checkout scm&#x27; is a shorthand step that clones the exact commit that triggered the build, using the same repository and credentials already configured in the job. It avoids repeating the repository URL inside the Jenkinsfile, which would create a maintenance burden. By reading the Jenkinsfile from SCM, the build process becomes part of your source history: every change to the pipeline is versioned, reviewable, and revertable, just like application code. This is the &#x27;Pipeline as Code&#x27; philosophy.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: Extend the Jenkinsfile with a second stage called &#x27;Verify Workspace&#x27;. In this stage, use an &#x27;sh&#x27; step to list the files checked out by the Checkout stage (run &#x27;ls -la&#x27;) and print the current Git commit SHA (&#x27;git rev-parse --short HEAD&#x27;). Push the updated Jenkinsfile and confirm both stages appear green and the output is visible in the console.</p></div>
+              <pre class='starter'><code>pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                checkout scm
+            }
+        }
+        stage(&#x27;Verify Workspace&#x27;) {
+            steps {
+                // sh command to list files:
+                sh &#x27;___&#x27;
+                // sh command to print the short commit SHA:
+                sh &#x27;___&#x27;
+            }
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;sh&#x27; gives &#x27;sh: command not found&#x27;, your Jenkins agent may be running on a Windows executor. Use &#x27;bat&#x27; instead of &#x27;sh&#x27; for Windows (bat &#x27;dir&#x27; and bat &#x27;git rev-parse --short HEAD&#x27;).</li><li>If &#x27;git rev-parse --short HEAD&#x27; returns an error, confirm that &#x27;checkout scm&#x27; ran first — the git command requires a cloned repository in the workspace.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                checkout scm
+            }
+        }
+        stage(&#x27;Verify Workspace&#x27;) {
+            steps {
+                sh &#x27;ls -la&#x27;
+                sh &#x27;git rev-parse --short HEAD&#x27;
+            }
+        }
+    }
+}
+
+// Push and trigger:
+// git add Jenkinsfile
+// git commit -m &quot;Add Verify Workspace stage&quot;
+// git push
+
+// Expected Console Output:
+// [Checkout] Checking out Revision abc1234 ...
+// [Verify Workspace] $ ls -la
+// total 32
+// drwxr-xr-x ... Dockerfile index.js package.json ...
+// [Verify Workspace] $ git rev-parse --short HEAD
+// abc1234
+
+// Stage View shows two green boxes: &#x27;Checkout&#x27; and &#x27;Verify Workspace&#x27;.</code></pre>
+                <div class='exp2'><p>This challenge solidifies two key mechanics. First, it confirms that &#x27;checkout scm&#x27; actually wrote files to the workspace — &#x27;ls -la&#x27; makes the checkout tangible. Second, capturing the commit SHA with &#x27;git rev-parse --short HEAD&#x27; previews the tagging strategy used in Lecture 6: this SHA is what you&#x27;ll use to tag the Docker image, creating a traceable link between running containers and source code. Every new stage added to the Jenkinsfile appears as a new column in the Stage View — the pipeline&#x27;s visual progress board.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=ACG_jYCpYXg' target='_blank'>Jenkins Pipeline Tutorial | Jenkins Tutorial | Part 8</a></li><li><a href='https://www.youtube.com/watch?v=IhGtoHY5Wws' target='_blank'>How to create First Freestyle Project/JOB in Jenkins | EP 08 | Start Career in DevOps | CI Tools</a></li><li><a href='https://www.youtube.com/watch?v=wBvoerbHWEU' target='_blank'>Create Your First Pipeline in Jenkins | EP 12 | Declarative Pipeline | Beginners | DevOps Training</a></li></ul></div>
+        </article>
+<article id='lec5' class='lecture'>
+          <h2>05. The CI Stages — Build, Test, and Create the Image </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Add <code class='ic'>build</code> and <code class='ic'>test</code> stages to your Jenkinsfile so the pipeline stops the moment something fails.</li>
+<li>Build a Docker image only after the tests have passed.</li>
+<li>Understand how CI acts as an automatic quality gate that keeps bad code from moving forward.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why this stage is the heart of CI</h4>
+<p>So far your pipeline triggers on a push and checks out the code. Useful, but it doesn&#x27;t yet <em>protect</em> you from anything. The Continuous Integration stages are where the real value appears: they automatically verify every change so that broken code is caught in seconds, by a machine, instead of in production, by your customers.</p>
+<p>The principle to keep in front of you is <strong>fail fast</strong>. If the build won&#x27;t compile, don&#x27;t bother testing. If a test fails, don&#x27;t bother building an image. Each stage is a gate, and a closed gate stops the entire pipeline cold and notifies the team. In a declarative Jenkinsfile this behavior is the default: if any step in a stage returns a non-zero exit code, the build is marked failed and the remaining stages never run.</p>
+<p>The flowchart below shows the fail-fast gating: each stage only proceeds on success, and any failure halts the pipeline before an image is ever built.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Checkout[&quot;Checkout&quot;] --&gt; Build[&quot;Build&quot;]
+    Build --&gt;|success| Test[&quot;Test&quot;]
+    Build --&gt;|non-zero exit| Fail[&quot;Stop and notify team&quot;]
+    Test --&gt;|pass| Image[&quot;Build Image&quot;]
+    Test --&gt;|fail| Fail
+    Image --&gt; Done[&quot;Image ready for registry&quot;]</div><figcaption>Fail-fast gating across the CI stages</figcaption></figure>
+<blockquote class='callout'>
+<p>A failing test that turns your pipeline red is not a problem — it&#x27;s the pipeline doing its single most important job. The goal of CI is to make failures cheap, fast, and impossible to ignore.</p>
+</blockquote>
+<h4>Adding the build stage</h4>
+<p>The build stage assembles your code together with its dependencies. What &quot;build&quot; means depends on your language — for a compiled language it might be <code class='ic'>mvn clean package</code>; for an interpreted one it might be installing dependencies. The shape is the same: run a command, and let a non-zero exit code fail the stage.</p>
+<pre><code>
+stage(&#x27;Build&#x27;) {
+    steps {
+        sh &#x27;npm ci&#x27;
+        sh &#x27;npm run build&#x27;
+    }
+}
+</code></pre>
+<p>The <code class='ic'>sh</code> step runs a shell command on the agent (use <code class='ic'>bat</code> instead on Windows agents). If <code class='ic'>npm ci</code> or <code class='ic'>npm run build</code> fails, the pipeline stops here — there&#x27;s no point testing code that didn&#x27;t even assemble.</p>
+<h4>Adding the test stage</h4>
+<p>Next comes the gate that actually catches bugs. Run your automated tests as a stage; if any test fails, the stage fails, and everything downstream is cancelled:</p>
+<pre><code>
+stage(&#x27;Test&#x27;) {
+    steps {
+        sh &#x27;npm test&#x27;
+    }
+}
+</code></pre>
+<p>This is the moment the source material illustrated so well: a developer changed a greeting from &quot;hello world&quot; to &quot;hello CI/CD world,&quot; but a test still asserted the old value. The test failed, the pipeline went red, and the bad change was caught automatically — exactly as intended. That fast feedback loop is the entire point. Tests can be unit tests (individual functions), integration tests (components working together), or format/lint checks, and you can publish their results so the Jenkins UI shows which passed and which failed for every build.</p>
+<p>A useful refinement: collect test reports even when the run fails, so you can always see what broke. The <code class='ic'>post</code> block runs after a stage regardless of outcome:</p>
+<pre><code>
+stage(&#x27;Test&#x27;) {
+    steps {
+        sh &#x27;npm test&#x27;
+    }
+    post {
+        always {
+            junit &#x27;reports/**/*.xml&#x27;
+        }
+    }
+}
+</code></pre>
+<h4>Building the image — but only after tests pass</h4>
+<p>Because the stages run in order and a failure halts the pipeline, simply placing the image build <em>after</em> the test stage guarantees it only runs on green tests. This is the bridge to the rest of the course: the artifact this stage produces is the Docker image we&#x27;ll push and deploy in the next lectures.</p>
+<pre><code>
+stage(&#x27;Build Image&#x27;) {
+    steps {
+        sh &#x27;docker build -t myapp:${BUILD_NUMBER} .&#x27;
+    }
+}
+</code></pre>
+<p>Two practitioner habits are worth adopting here. First, <strong>never tag your image <code class='ic'>latest</code> in a pipeline.</strong> A floating <code class='ic'>latest</code> tag makes it impossible to know which exact build is running where, and rollbacks become guesswork. Tag with something unique and traceable — above we use <code class='ic'>${BUILD_NUMBER}</code>, a built-in Jenkins variable; in the next lecture we&#x27;ll switch to the Git commit SHA for an even tighter link between code and image. Second, the Jenkins agent needs access to a Docker daemon to run <code class='ic'>docker build</code>; the common setup is to give the Jenkins container access to the host&#x27;s Docker socket so it can build images on the host.</p>
+<h4>The full picture so far</h4>
+<p>Putting the new stages together, your Jenkinsfile now reads as a clear, ordered quality gate:</p>
+<pre><code>
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;)    { steps { checkout scm } }
+        stage(&#x27;Build&#x27;)       { steps { sh &#x27;npm ci&#x27;; sh &#x27;npm run build&#x27; } }
+        stage(&#x27;Test&#x27;)        { steps { sh &#x27;npm test&#x27; } }
+        stage(&#x27;Build Image&#x27;) { steps { sh &#x27;docker build -t myapp:${BUILD_NUMBER} .&#x27; } }
+    }
+}
+</code></pre>
+<p>Read top to bottom, this is Continuous Integration in its essence: every push is automatically checked out, built, tested, and — only if all of that succeeds — turned into a deployable image. No human had to remember to run the tests, and no untested code can produce an image. That image is now ready to be stored in a registry, which is exactly where the next lecture takes us.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>CI stages turn your pipeline into an automatic quality gate; the core principle is <strong>fail fast</strong> — a failed stage halts the pipeline and notifies the team.</li>
+<li>In a declarative pipeline, a non-zero exit code fails the stage by default, so ordering Build → Test → Build Image guarantees the image is only created from green, tested code.</li>
+<li>Run your real automated tests in the test stage and consider publishing reports (e.g. with <code class='ic'>junit</code>) so results are visible for every build.</li>
+<li>Tag images with a unique, traceable value like the build number or commit SHA — never a floating <code class='ic'>latest</code> — so you always know exactly what&#x27;s running and can roll back cleanly.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Add a &#x27;Build&#x27; stage to the Jenkinsfile that runs &#x27;npm ci&#x27; on a Node.js app. Intentionally break it by removing &#x27;package.json&#x27; temporarily, push, and observe Jenkins mark the build as FAILED and halt before reaching any subsequent stage. Then restore the file and verify the stage turns green.</p></div>
+              <pre class='starter'><code>// Current Jenkinsfile (from Lecture 4):
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) { steps { checkout scm } }
+        // Add a Build stage below:
+        stage(&#x27;___&#x27;) {
+            steps {
+                sh &#x27;___&#x27;
+            }
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;npm ci&#x27; gives &#x27;npm: command not found&#x27;, the Jenkins agent does not have Node.js installed. Either install Node.js on the agent or use a Docker-based agent: replace &#x27;agent any&#x27; with &#x27;agent { docker { image &quot;node:20-alpine&quot; } }&#x27; to run the stage inside a Node container.</li><li>If you deleted package.json and the push does not trigger a build, check that the GitLab webhook is still active (Settings → Webhooks) and the branch matches.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Step 1: Add the Build stage
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;) { steps { checkout scm } }
+        stage(&#x27;Build&#x27;) {
+            steps {
+                sh &#x27;npm ci&#x27;
+            }
+        }
+    }
+}
+
+// Step 2: Break it deliberately
+// Rename package.json to _package.json (or delete it) and push.
+// Jenkins receives the webhook, runs &#x27;npm ci&#x27;, which exits non-zero
+// because package.json is missing. Stage View shows a red &#x27;Build&#x27; box.
+// Console Output ends with &#x27;npm error enoent&#x27; and &#x27;Build FAILURE&#x27;.
+// No stages after Build run — this is the fail-fast gate working.
+
+// Step 3: Restore
+// Rename _package.json back to package.json, push again.
+// Both &#x27;Checkout&#x27; and &#x27;Build&#x27; boxes turn green.</code></pre>
+                <div class='exp2'><p>A non-zero exit code from any &#x27;sh&#x27; step immediately fails the containing stage and stops the entire pipeline — no further stages run. This is the &#x27;fail fast&#x27; principle in action: there is no value in testing or packaging code that cannot even install its dependencies. By deliberately triggering the failure here, you confirm that the gate is real before relying on it in production.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Add a &#x27;Test&#x27; stage to the Jenkinsfile after the Build stage. Write a simple failing test in your app (a test that asserts a wrong expected value), push, and confirm Jenkins marks the test stage red and stops the pipeline before the &#x27;Build Image&#x27; stage. Then fix the test, push again, and confirm all three stages go green.</p></div>
+              <pre class='starter'><code>// Add a test script to package.json:
+// &quot;scripts&quot;: { &quot;test&quot;: &quot;node test.js&quot; }
+
+// Create test.js with a simple assertion:
+const assert = require(&#x27;assert&#x27;);
+function greet(name) { return &#x27;Hello, &#x27; + name + &#x27;!&#x27;; }
+// Write one passing and one intentionally failing assertion below:
+assert.strictEqual(greet(&#x27;World&#x27;), &#x27;Hello, World!&#x27;);   // passes
+assert.strictEqual(greet(&#x27;World&#x27;), &#x27;___&#x27;);             // make this fail
+console.log(&#x27;All tests passed.&#x27;);
+
+// Jenkinsfile Test stage to add:
+stage(&#x27;Test&#x27;) {
+    steps {
+        sh &#x27;___&#x27;
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;npm test&#x27; exits 0 even with a failing assertion, check that &#x27;node test.js&#x27; actually propagates the AssertionError exit code. Node exits with code 1 on an unhandled AssertionError by default — if you wrapped it in a try/catch and didn&#x27;t re-throw, the exit code stays 0.</li><li>If you want to see Jenkins display test results graphically, replace the raw &#x27;node test.js&#x27; runner with a framework like Mocha that produces JUnit XML reports, then add &#x27;post { always { junit &quot;reports/*.xml&quot; } }&#x27; to the Test stage.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// test.js — failing version:
+const assert = require(&#x27;assert&#x27;);
+function greet(name) { return &#x27;Hello, &#x27; + name + &#x27;!&#x27;; }
+assert.strictEqual(greet(&#x27;World&#x27;), &#x27;Hello, World!&#x27;);
+assert.strictEqual(greet(&#x27;World&#x27;), &#x27;Hello, CI/CD!&#x27;)  // fails: actual is &#x27;Hello, World!&#x27;
+console.log(&#x27;All tests passed.&#x27;);
+
+// package.json scripts section:
+&quot;scripts&quot;: {
+  &quot;start&quot;: &quot;node index.js&quot;,
+  &quot;test&quot;: &quot;node test.js&quot;
+}
+
+// Jenkinsfile with Test stage:
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;)    { steps { checkout scm } }
+        stage(&#x27;Build&#x27;)       { steps { sh &#x27;npm ci&#x27; } }
+        stage(&#x27;Test&#x27;)        { steps { sh &#x27;npm test&#x27; } }
+        stage(&#x27;Build Image&#x27;) { steps { sh &#x27;echo Image build placeholder&#x27; } }
+    }
+}
+
+// Push with failing test: Stage View shows Build=green, Test=RED, Build Image=skipped.
+// Console Output shows AssertionError and &#x27;Build FAILURE&#x27;.
+
+// Fix: change the second assertion to the correct expected value:
+assert.strictEqual(greet(&#x27;World&#x27;), &#x27;Hello, World!&#x27;);
+// Push again: all four stages turn green.</code></pre>
+                <div class='exp2'><p>The Test stage demonstrates the CI quality gate in practice. The pipeline stops at the first failing stage; &#x27;Build Image&#x27; never runs when tests fail, which means a broken image can never reach the registry. This is the exact scenario described in the lecture: a developer changed a greeting string but forgot to update the assertion — the pipeline caught it immediately. The fix is in the test (or the code), not in weakening the pipeline.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice: Add the &#x27;Build Image&#x27; stage to the Jenkinsfile. Tag the image with the Jenkins BUILD_NUMBER environment variable. Run the full pipeline (Checkout → Build → Test → Build Image) and confirm the image appears in &#x27;docker images&#x27; on the Jenkins host, tagged with the build number.</p></div>
+              <pre class='starter'><code>// Add to the Jenkinsfile after the Test stage:
+stage(&#x27;Build Image&#x27;) {
+    steps {
+        sh &#x27;docker build -t myapp:___ .&#x27;
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker build&#x27; fails with &#x27;permission denied while trying to connect to Docker daemon socket&#x27;, the Jenkins process cannot reach the Docker socket. Recreate the Jenkins container with the &#x27;-v /var/run/docker.sock:/var/run/docker.sock&#x27; flag and install Docker CLI inside it.</li><li>If the image builds but &#x27;docker images&#x27; shows it on your local machine and not on the Jenkins agent, you are running Jenkins locally — in that case the image is on the same machine. If using a remote agent, connect to that agent to verify.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>stage(&#x27;Build Image&#x27;) {
+    steps {
+        sh &#x27;docker build -t myapp:${BUILD_NUMBER} .&#x27;
+    }
+}
+
+// Note: Jenkins must have access to the Docker daemon to run &#x27;docker build&#x27;.
+// If Jenkins is running in a Docker container, grant it access to the host socket:
+// docker run -d --name jenkins \
+//   -p 8080:8080 -p 50000:50000 \
+//   -v jenkins_home:/var/jenkins_home \
+//   -v /var/run/docker.sock:/var/run/docker.sock \
+//   jenkins/jenkins:lts
+// Then install Docker CLI inside the Jenkins container:
+// docker exec -u root jenkins apt-get update
+// docker exec -u root jenkins apt-get install -y docker.io
+
+// After pushing and running the pipeline:
+// docker images | grep myapp
+// Expected output:
+// myapp   5   a1b2c3d4e5f6   2 minutes ago   145MB
+// (where 5 is the BUILD_NUMBER for that run)</code></pre>
+                <div class='exp2'><p>BUILD_NUMBER is a built-in Jenkins environment variable that increments automatically with each build. Tagging with it instead of &#x27;latest&#x27; gives each image a unique, ordered identifier, so you can always tell which build produced which image. In the next lecture you&#x27;ll switch to the Git commit SHA for an even stronger traceability guarantee. Mounting &#x27;/var/run/docker.sock&#x27; into the Jenkins container lets the Jenkins process invoke the host&#x27;s Docker daemon — a common and convenient setup for CI pipelines that need to build images.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: A colleague&#x27;s Jenkinsfile has a critical ordering mistake. Analyse the pipeline below, explain why it is broken, and rewrite it correctly.</p>
+<p>Problematic Jenkinsfile:</p>
+<pre><code>
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;)    { steps { checkout scm } }
+        stage(&#x27;Build Image&#x27;) { steps { sh &#x27;docker build -t myapp:latest .&#x27; } }
+        stage(&#x27;Test&#x27;)        { steps { sh &#x27;npm test&#x27; } }
+        stage(&#x27;Build&#x27;)       { steps { sh &#x27;npm ci&#x27; } }
+    }
+}
+</code></pre></div>
+              <pre class='starter'><code>// Answer the following before writing the corrected version:
+// 1. In what order do these stages run, and what goes wrong?
+// 2. What does the &#x27;latest&#x27; tag make impossible to do later?
+// 3. Write the corrected Jenkinsfile with the right stage order and a better image tag.</code></pre>
+              <details><summary>Hint</summary><ul><li>To visualise the problem: draw the stage order as a flow. Ask &#x27;if Test fails, what has already been produced?&#x27; In the broken version, the answer is &#x27;a Docker image&#x27; — and that is the problem.</li><li>To see the &#x27;latest&#x27; tag risk in action: push two commits in rapid succession and watch both builds try to tag &#x27;myapp:latest&#x27; — the second overwrites the first.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Problems:
+// 1. Stage order: Checkout → Build Image → Test → Build
+//    &#x27;docker build&#x27; runs BEFORE &#x27;npm ci&#x27; and BEFORE &#x27;npm test&#x27;.
+//    Result: the image is built from uninstalled, untested code.
+//    If tests fail, the pipeline stops at &#x27;Test&#x27; — but a bad image
+//    was already created from the &#x27;Build Image&#x27; stage. The test gate
+//    does nothing to protect the image.
+//
+// 2. The &#x27;latest&#x27; tag is mutable. If two builds run simultaneously
+//    or in quick succession, each overwrites the &#x27;latest&#x27; tag.
+//    Rollback becomes impossible: you cannot identify which build
+//    a running container came from.
+//
+// Corrected Jenkinsfile:
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;)    { steps { checkout scm } }
+        stage(&#x27;Build&#x27;)       { steps { sh &#x27;npm ci&#x27; } }
+        stage(&#x27;Test&#x27;)        { steps { sh &#x27;npm test&#x27; } }
+        stage(&#x27;Build Image&#x27;) { steps { sh &#x27;docker build -t myapp:${BUILD_NUMBER} .&#x27; } }
+    }
+}
+// Now: the image is only built if both npm ci AND npm test succeed.
+// Tag uses BUILD_NUMBER (unique per build) so each image is distinguishable.</code></pre>
+                <div class='exp2'><p>Stage ordering in a CI pipeline is not cosmetic — it is the definition of what the quality gate protects. Building an image before running tests defeats the entire purpose of CI: it means untested, potentially broken code can produce a registry artifact. The &#x27;fail fast&#x27; guarantee only holds if the dangerous outputs (images) come after the gating checks (tests). The &#x27;latest&#x27; tag problem is equally practical: without a unique, immutable tag, rollback requires guesswork, and in a multi-build environment two concurrent builds can corrupt each other&#x27;s tags.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=ESQC5tH5Aow' target='_blank'>How to run Selenium TestNG tests in Jenkins | Maven Integration Plugin | Jenkins TestNG Example</a></li><li><a href='https://www.youtube.com/watch?v=wBvoerbHWEU' target='_blank'>Create Your First Pipeline in Jenkins | EP 12 | Declarative Pipeline | Beginners | DevOps Training</a></li></ul></div>
+        </article>
+<article id='lec6' class='lecture'>
+          <h2>06. Pushing the Image to a Registry (AWS ECR) </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the role of a container registry (ECR) and why you store built images there.</li>
+<li>Authenticate to ECR from Jenkins and push an image.</li>
+<li>Adopt an image tagging strategy based on the commit SHA.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why an image needs a home</h4>
+<p>In the last lecture Jenkins built a Docker image — but that image only exists on the Jenkins agent that built it. Your EC2 server can&#x27;t reach inside Jenkins and grab it. We need a shared, central place to <em>store</em> images that both Jenkins (which pushes) and EC2 (which pulls) can access. That place is a <strong>container registry</strong>.</p>
+<p><strong>Amazon ECR (Elastic Container Registry)</strong> is AWS&#x27;s private Docker registry. It plays the same role as Docker Hub but lives inside your AWS account, with access controlled by AWS permissions — a natural fit since we&#x27;re deploying to EC2 anyway. The flow is simple to picture: Jenkins <strong>pushes</strong> the built image <em>up</em> to ECR, and later EC2 <strong>pulls</strong> that same image <em>down</em> to run it. ECR is the hand-off point between the CI half of the pipeline (build and test) and the CD half (deploy).</p>
+<p>The sequence below shows that hand-off: Jenkins authenticates, tags, and pushes the image up to ECR, and later EC2 pulls the very same image down — the two halves never talk directly.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant Jenkins as Jenkins
+    participant ECR as AWS ECR
+    participant EC2 as EC2 Server
+    Jenkins-&gt;&gt;ECR: docker login (ecr get-login-password)
+    Jenkins-&gt;&gt;Jenkins: docker tag myapp with commit SHA
+    Jenkins-&gt;&gt;ECR: docker push myapp:commit-sha
+    Note over ECR: Image stored, immutable, by tag
+    EC2-&gt;&gt;ECR: docker login (IAM role)
+    EC2-&gt;&gt;ECR: docker pull myapp:commit-sha
+    ECR--&gt;&gt;EC2: image layers</div><figcaption>Image hand-off through ECR - Jenkins pushes, EC2 pulls</figcaption></figure>
+<blockquote class='callout'>
+<p>A registry decouples <em>building</em> an image from <em>running</em> it. Jenkins doesn&#x27;t need to know anything about your servers, and your servers don&#x27;t need build tools — they just pull a finished, immutable image by its tag. That separation is what lets the same image travel cleanly from build to staging to production.</p>
+</blockquote>
+<h4>Step 1 — Create an ECR repository</h4>
+<p>In the AWS console, open <strong>ECR</strong> and create a repository — give it the name of your app, for example <code class='ic'>myapp</code>. ECR hands you a repository URI in this shape:</p>
+<pre><code>
+&lt;aws_account_id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/myapp
+</code></pre>
+<p>That full URI <em>is</em> part of your image tag. Docker decides where to push an image purely from its tag, so to push to ECR you tag the image with that URI.</p>
+<h4>Step 2 — Authenticate Jenkins to ECR</h4>
+<p>You can&#x27;t push to a private registry without proving who you are. ECR authentication is a two-part dance: you use AWS credentials to obtain a short-lived Docker login password, then feed that password to Docker.</p>
+<p>First, store your AWS credentials in Jenkins (never hard-code them). Use the <strong>AWS Credentials</strong> kind in Jenkins&#x27; credential store, or provide an access key ID and secret. Then in the pipeline, retrieve a login token and pipe it into <code class='ic'>docker login</code>:</p>
+<pre><code>
+aws ecr get-login-password --region &lt;region&gt; \
+  | docker login --username AWS --password-stdin \
+    &lt;aws_account_id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com
+</code></pre>
+<p><code class='ic'>aws ecr get-login-password</code> returns a temporary password; piping it into <code class='ic'>docker login</code> with <code class='ic'>--password-stdin</code> authenticates Docker to your ECR registry without ever printing the password into the build log. The username is always the literal string <code class='ic'>AWS</code> for ECR.</p>
+<blockquote class='callout'>
+<p>In production, the cleaner approach is to attach an <strong>IAM role</strong> to the Jenkins instance so it has ECR permissions automatically, with no long-lived keys to store or rotate. Static access keys work for learning, but rotate them and scope their permissions tightly.</p>
+</blockquote>
+<h4>Step 3 — A tagging strategy that earns its keep</h4>
+<p>Here&#x27;s where we make good on a promise from the previous lecture. A tag like <code class='ic'>latest</code> tells you nothing about <em>which code</em> an image contains. The professional standard is to tag images with the <strong>Git commit SHA</strong> — the unique fingerprint of the exact commit that produced them. That gives you a permanent, traceable link: given any running container, you can find the precise line of code it was built from, and vice versa.</p>
+<p>In a Jenkinsfile you can capture the short SHA and use it as the tag:</p>
+<pre><code>
+stage(&#x27;Push to ECR&#x27;) {
+    steps {
+        script {
+            def registry = &quot;&lt;aws_account_id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com&quot;
+            def commit = sh(script: &#x27;git rev-parse --short HEAD&#x27;, returnStdout: true).trim()
+            sh &quot;&quot;&quot;
+                aws ecr get-login-password --region &lt;region&gt; \
+                  | docker login --username AWS --password-stdin ${registry}
+                docker tag myapp:${BUILD_NUMBER} ${registry}/myapp:${commit}
+                docker push ${registry}/myapp:${commit}
+            &quot;&quot;&quot;
+        }
+    }
+}
+</code></pre>
+<p>A common refinement is to push <em>two</em> tags from the same image: the immutable <code class='ic'>${commit}</code> tag for traceability and rollback, plus a moving tag like the branch name (<code class='ic'>main</code>) so deployment scripts have a stable &quot;newest on this branch&quot; pointer. The commit tag is the source of truth; the branch tag is a convenience.</p>
+<h4>Step 4 — Confirm the push</h4>
+<p>After the pipeline runs, open the ECR console and look at your repository. You&#x27;ll see the image listed with its commit-SHA tag and a &quot;pushed&quot; timestamp. That&#x27;s your proof: the artifact built and tested moments ago now lives in a durable, private registry, ready for any server with permission to pull it.</p>
+<h4>Where this leaves the pipeline</h4>
+<p>Your pipeline now does everything <em>except</em> run the new version on a server. A push to GitLab triggers Jenkins to check out, build, test, build an image, and store that image in ECR — tagged so you&#x27;ll always know exactly what it contains. The only remaining gap is getting that image onto EC2 and running it, which is precisely what the next lecture completes.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A container registry like <strong>ECR</strong> is the shared storage that lets Jenkins push images and EC2 pull them, cleanly separating <em>building</em> from <em>running</em>.</li>
+<li>ECR authentication is a two-step flow: use AWS credentials to get a temporary token via <code class='ic'>aws ecr get-login-password</code>, then <code class='ic'>docker login</code> with it — and prefer an IAM role over static keys in production.</li>
+<li>Docker routes a push purely by the image tag, so tag your image with the full ECR repository URI to push there.</li>
+<li>Tag images with the <strong>Git commit SHA</strong> for a permanent, traceable link between running containers and source code; optionally add a moving branch tag for convenience.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Create an ECR repository in your AWS account via the AWS console or AWS CLI. Retrieve the repository URI and verify the format matches &#x27;&lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/&lt;repo-name&gt;&#x27;.</p></div>
+              <pre class='starter'><code># Option A — AWS Console:
+# 1. Open the ECR service in the AWS console
+# 2. Create repository → name it &#x27;myapp&#x27; → Create
+# 3. Copy the repository URI shown
+
+# Option B — AWS CLI:
+aws ecr create-repository \
+  --repository-name myapp \
+  --region &lt;your-region&gt;
+# The output includes &#x27;repositoryUri&#x27; — copy it.</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;aws ecr create-repository&#x27; returns &#x27;Unable to locate credentials&#x27;, your AWS CLI is not configured. Run &#x27;aws configure&#x27; and provide your access key ID, secret access key, and default region.</li><li>If you see &#x27;RepositoryAlreadyExistsException&#x27;, the repository was already created — run &#x27;aws ecr describe-repositories&#x27; to find and copy the existing URI.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># AWS CLI example (region: us-east-1, account: 123456789012):
+aws ecr create-repository \
+  --repository-name myapp \
+  --region us-east-1
+
+# Expected JSON output (relevant excerpt):
+# {
+#   &quot;repository&quot;: {
+#     &quot;repositoryName&quot;: &quot;myapp&quot;,
+#     &quot;repositoryUri&quot;: &quot;123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;,
+#     ...
+#   }
+# }
+
+# Verify format:
+# &lt;account-id&gt;   : 12-digit AWS account number
+# &lt;region&gt;       : e.g. us-east-1, ap-northeast-2
+# &lt;repo-name&gt;    : myapp
+
+# List repositories to confirm creation:
+aws ecr describe-repositories --region us-east-1</code></pre>
+                <div class='exp2'><p>ECR repository URIs carry the full routing information for Docker: when you &#x27;docker push&#x27; to a URI that begins with an AWS account ID and region, the Docker client knows to authenticate to that specific ECR endpoint. This is why the tag on your image must include the full URI, not just the image name — Docker uses the tag as the address.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Authenticate the Docker client on the Jenkins agent to ECR, then manually push a locally built image to the ECR repository. Verify the image appears in the ECR console with the correct tag.</p></div>
+              <pre class='starter'><code># Replace placeholders with your values:
+REGION=&lt;your-region&gt;
+ACCOUNT=&lt;your-account-id&gt;
+REGISTRY=${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com
+
+# Step 1: Authenticate Docker to ECR
+aws ecr get-login-password --region ${REGION} \
+  | docker login --username AWS --password-stdin ${REGISTRY}
+
+# Step 2: Tag the image already built in Lecture 5
+docker tag myapp:1 ${REGISTRY}/myapp:&lt;tag&gt;
+
+# Step 3: Push
+docker push ${REGISTRY}/myapp:&lt;tag&gt;</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker login&#x27; fails with &#x27;no basic auth credentials&#x27;, the &#x27;aws ecr get-login-password&#x27; step may have failed silently (e.g. wrong region or missing IAM permissions). Run &#x27;aws ecr get-login-password --region &lt;region&gt;&#x27; alone first and confirm it outputs a token string.</li><li>If the push fails with &#x27;denied: User ... is not authorized to perform: ecr:InitiateLayerUpload&#x27;, your IAM user/role needs the &#x27;AmazonEC2ContainerRegistryPowerUser&#x27; policy (or at minimum ecr:GetAuthorizationToken, ecr:BatchCheckLayerAvailability, ecr:PutImage, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload).</li><li>If you get &#x27;no space left on device&#x27; during the push, the Jenkins agent&#x27;s disk is full — run &#x27;docker system prune&#x27; to remove unused images and layers.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>REGION=us-east-1
+ACCOUNT=123456789012
+REGISTRY=${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com
+
+# Step 1: Authenticate
+aws ecr get-login-password --region ${REGION} \
+  | docker login --username AWS --password-stdin ${REGISTRY}
+# Expected output: &#x27;Login Succeeded&#x27;
+
+# Step 2: Get the commit SHA to use as tag
+COMMIT=$(git rev-parse --short HEAD)
+# e.g. COMMIT=abc1234
+
+# Step 3: Tag the local image
+docker tag myapp:1 ${REGISTRY}/myapp:${COMMIT}
+
+# Step 4: Push
+docker push ${REGISTRY}/myapp:${COMMIT}
+# Output: lists digest and shows pushed layers
+
+# Verification:
+# Open AWS console → ECR → myapp repository
+# You see the image listed with tag &#x27;abc1234&#x27; and a pushed timestamp.
+# OR via CLI:
+aws ecr describe-images \
+  --repository-name myapp \
+  --region ${REGION}</code></pre>
+                <div class='exp2'><p>ECR authentication is a temporary token flow: &#x27;aws ecr get-login-password&#x27; contacts the AWS API using your IAM credentials and returns a short-lived (12-hour) password. Piping it into &#x27;docker login --password-stdin&#x27; authenticates Docker without ever printing the password in the terminal or build log. The username is always the literal string &#x27;AWS&#x27; for any ECR registry. Using the commit SHA as the tag creates a permanent, bidirectional link: given the running image tag, you can find the exact commit; given the commit, you know which image it produced.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice: Add a &#x27;Push to ECR&#x27; stage to the Jenkinsfile. The stage should: retrieve the Git commit SHA, authenticate to ECR, retag the image built in the previous &#x27;Build Image&#x27; stage with the commit SHA, push it to ECR, and optionally push a second tag matching the branch name as a convenience pointer.</p></div>
+              <pre class='starter'><code>// Add after the &#x27;Build Image&#x27; stage in your Jenkinsfile:
+stage(&#x27;Push to ECR&#x27;) {
+    steps {
+        script {
+            def registry = &quot;&lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com&quot;
+            def commit = sh(script: &#x27;___&#x27;, returnStdout: true).trim()
+            sh &quot;&quot;&quot;
+                aws ecr get-login-password --region ___ \\
+                  | docker login --username AWS --password-stdin ${registry}
+                docker tag myapp:${env.BUILD_NUMBER} ${registry}/myapp:${commit}
+                docker push ${registry}/myapp:${commit}
+            &quot;&quot;&quot;
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;git rev-parse --short HEAD&#x27; returns &#x27;HEAD&#x27; instead of a SHA inside the pipeline, the checkout step may have used a detached HEAD. Replace with &#x27;env.GIT_COMMIT?.take(7)&#x27; which Jenkins populates from the triggering commit.</li><li>If the push succeeds for the commit tag but fails for the branch tag with &#x27;image already exists&#x27;, that is fine — the branch tag may already point to the same image layers; Docker will update the tag without re-uploading layers.</li><li>The &#x27;withCredentials&#x27; wrapper masks secrets in the build log. Never pass AWS keys via environment variables set directly in the Jenkinsfile — they would appear in the pipeline configuration UI.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>stage(&#x27;Push to ECR&#x27;) {
+    steps {
+        script {
+            def region   = &#x27;us-east-1&#x27;
+            def registry = &#x27;123456789012.dkr.ecr.us-east-1.amazonaws.com&#x27;
+            def commit   = sh(script: &#x27;git rev-parse --short HEAD&#x27;, returnStdout: true).trim()
+            def branch   = env.GIT_BRANCH?.tokenize(&#x27;/&#x27;)?.last() ?: &#x27;unknown&#x27;
+
+            sh &quot;&quot;&quot;
+                aws ecr get-login-password --region ${region} \\
+                  | docker login --username AWS --password-stdin ${registry}
+
+                # Immutable tag — commit SHA
+                docker tag myapp:${env.BUILD_NUMBER} ${registry}/myapp:${commit}
+                docker push ${registry}/myapp:${commit}
+
+                # Convenience tag — branch name (optional)
+                docker tag myapp:${env.BUILD_NUMBER} ${registry}/myapp:${branch}
+                docker push ${registry}/myapp:${branch}
+            &quot;&quot;&quot;
+        }
+    }
+}
+
+// Store AWS credentials in Jenkins:
+// Manage Jenkins → Credentials → Global → Add Credentials
+// Kind: AWS Credentials  ID: aws-ecr-creds
+// Then wrap the stage with:
+// withCredentials([[\$class: &#x27;AmazonWebServicesCredentialsBinding&#x27;,
+//                   credentialsId: &#x27;aws-ecr-creds&#x27;]]) { ... }
+// Or attach an IAM role to the Jenkins host (preferred in production).</code></pre>
+                <div class='exp2'><p>The &#x27;script&#x27; block inside a declarative Jenkinsfile allows Groovy scripting. &#x27;sh(script: ..., returnStdout: true).trim()&#x27; captures the standard output of a shell command and removes trailing whitespace, giving you the commit SHA as a Groovy string variable. The dual-tag strategy (commit SHA + branch name) satisfies two needs: the commit SHA tag is immutable and gives you a precise rollback target; the branch tag is a mutable pointer to the latest image on that branch, useful for deployment scripts that always want &#x27;the newest on main&#x27;.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: You receive a bug report: &#x27;A container running in production with tag latest crashed, and we cannot identify which code version it came from.&#x27; Explain in writing (in your exercise notes or a comment block in the Jenkinsfile) why the &#x27;latest&#x27; tag caused this situation, and demonstrate the correct approach by showing what the &#x27;docker images&#x27; and ECR repository would look like after three builds using the commit-SHA tagging strategy instead.</p></div>
+              <pre class='starter'><code>// Part 1 — Written explanation (add as a comment block):
+// Explain:
+// a) Why &#x27;latest&#x27; makes it impossible to identify the code version
+// b) Why rollback is unreliable with &#x27;latest&#x27;
+// c) How commit-SHA tagging solves both problems
+
+// Part 2 — Show the expected &#x27;docker images&#x27; output after three builds
+// using commit SHA tags (simulate with example SHAs):
+// Build 1: commit a1b2c3d
+// Build 2: commit e4f5a6b
+// Build 3: commit 7c8d9e0</code></pre>
+              <details><summary>Hint</summary><ul><li>To check what code a running container was built from (with SHA tags): run &#x27;docker inspect &lt;container-name&gt;&#x27; and look at the &#x27;Image&#x27; field. The SHA in the tag maps directly to a git commit you can inspect with &#x27;git log &lt;sha&gt;&#x27;.</li><li>ECR allows you to enable &#x27;image tag immutability&#x27; on a repository, which prevents overwriting an existing tag. Enable this in production to enforce the tagging discipline at the registry level.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Part 1 — Explanation:
+//
+// a) &#x27;latest&#x27; is a mutable tag — any new build overwrites it.
+//    When the container crashes, running &#x27;docker inspect &lt;container&gt;&#x27;
+//    shows &#x27;Image: myapp:latest&#x27;, which tells you nothing about WHEN
+//    the image was built or WHAT commit it contains.
+//    With commit-SHA tags, &#x27;docker inspect&#x27; shows &#x27;myapp:e4f5a6b&#x27;,
+//    and &#x27;git show e4f5a6b&#x27; shows exactly which lines of code are running.
+//
+// b) Rolling back with &#x27;latest&#x27; means guessing. You would need to
+//    find an older image — but if previous builds also pushed &#x27;latest&#x27;,
+//    those images are gone from the tag. The only recovery is
+//    rebuilding, which takes time and reintroduces the same broken code.
+//    With commit-SHA tags, every past image sits in ECR under its own
+//    immutable tag; rollback is &#x27;docker pull myapp:a1b2c3d&#x27; — instant.
+//
+// c) Commit-SHA tagging creates a permanent, bidirectional index:
+//    code commit ↔ image tag. Given any running container, you can
+//    find the exact source. Given any commit, you can find the image
+//    and any server running it.
+
+// Part 2 — Expected state after three builds:
+
+// docker images on Jenkins agent:
+// REPOSITORY   TAG       IMAGE ID       CREATED
+// myapp        a1b2c3d   img1abc...     3 hours ago
+// myapp        e4f5a6b   img2def...     2 hours ago
+// myapp        7c8d9e0   img3ghi...     1 hour ago
+
+// ECR repository (3 images, each with its own immutable tag):
+// Tag         Pushed
+// a1b2c3d     3 hours ago
+// e4f5a6b     2 hours ago
+// 7c8d9e0     1 hour ago
+//
+// To roll back to Build 1:
+// docker pull 123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp:a1b2c3d
+// docker run ... myapp:a1b2c3d
+// No rebuild required. The image already exists in ECR.</code></pre>
+                <div class='exp2'><p>This challenge enforces the tagging discipline introduced in the lecture. The inability to identify a running image&#x27;s source code is a real, recurring production problem when &#x27;latest&#x27; is used in pipelines. Commit-SHA tags transform the image registry into an audit trail: every deployment is traceable, every rollback is immediate (no rebuild needed), and no version is ever silently overwritten. The immutability guarantee also means a security scan of &#x27;myapp:a1b2c3d&#x27; applies to that exact image forever — &#x27;latest&#x27; can be rescanned against a different image each time.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=lOdrdV0eDrs' target='_blank'>Build Docker Image Using Jenkins Pipeline &amp; Push to AWS ECR | Learn DevOps Tools Ep2</a></li><li><a href='https://www.youtube.com/watch?v=D8ym8RP1yvo' target='_blank'>How to Create Docker image &amp; push Image into Amazon ECR | How to setup Docker Registry in Amazon ECR</a></li><li><a href='https://www.youtube.com/watch?v=jg9sUceyGaQ' target='_blank'>Gitlab CI: Build &amp; push Docker image to AWS ECR (Elastic Container Registry)</a></li></ul></div>
+        </article>
+<article id='lec7' class='lecture'>
+          <h2>07. Automated Deployment to EC2 — SSH + docker compose </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Connect from Jenkins to EC2 securely over SSH.</li>
+<li>Write a deploy stage that pulls the newest image and swaps the running container with docker compose.</li>
+<li>Complete the pipeline so a single push reaches all the way to a live EC2 deployment.</li>
+</ul>
+<h3>Body</h3>
+<h4>The last mile</h4>
+<p>Everything is in place except the final hand-off: your image sits in ECR, and now it needs to <em>run</em> on your EC2 server. This lecture builds the deploy stage that reaches across the network, into the server, and replaces the old version with the new one — automatically, on every successful build. This is the moment the whole pipeline becomes real: one <code class='ic'>git push</code>, and minutes later the new version is live.</p>
+<h4>Preparing the EC2 server</h4>
+<p>Your EC2 instance needs three things ready before Jenkins can deploy to it:</p>
+<p>1. <strong>Docker and the Compose plugin installed</strong> — so it can pull images and run containers.</p>
+<p>2. <strong>Permission to pull from ECR</strong> — the clean way is to attach an <strong>IAM role</strong> to the EC2 instance granting ECR read access, so the server can authenticate to ECR without any stored keys.</p>
+<p>3. <strong>A <code class='ic'>docker-compose.yml</code> file</strong> that describes how to run your app — which image, which ports, which environment.</p>
+<p>A minimal compose file on the server looks like this:</p>
+<pre><code>
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - &quot;80:8080&quot;
+    restart: always
+</code></pre>
+<p>Notice the image is a variable, <code class='ic'>${IMAGE}</code>. Jenkins will supply the exact ECR image tag at deploy time, so the same compose file always runs whatever version the pipeline just built.</p>
+<h4>Connecting from Jenkins to EC2 over SSH</h4>
+<p>Jenkins reaches EC2 the same way you would: over <strong>SSH</strong> (Secure Shell), using the instance&#x27;s private key. The professional practice is to store that private key in Jenkins&#x27; credential store as an <strong>SSH credential</strong> — never paste it into the Jenkinsfile, and never commit it to Git.</p>
+<p>There&#x27;s a second piece of trust most tutorials gloss over: SSH also verifies the <em>server&#x27;s</em> identity. The first time a client connects, SSH records the server&#x27;s <strong>host key</strong> in a file called <code class='ic'>known_hosts</code>. On every later connection it checks that the server still presents the same key. That check is what stops a <strong>man-in-the-middle (MITM)</strong> attack — an attacker who intercepts your connection and impersonates your server. So before the first automated deploy, register the EC2 host key with Jenkins&#x27; SSH agent (the Linux user it runs as):</p>
+<pre><code>
+# Run once on the Jenkins host, then verify the fingerprint out of band
+# (e.g. against the EC2 console) before trusting it
+ssh-keyscan -H &lt;EC2_HOST&gt; &gt;&gt; ~/.ssh/known_hosts
+</code></pre>
+<blockquote class='callout'>
+<p>Verifying the host key isn&#x27;t optional polish — it&#x27;s the only thing standing between your deploy and an attacker silently impersonating your server. Register the key once in <code class='ic'>known_hosts</code> and SSH will refuse to connect if it ever changes.</p>
+</blockquote>
+<p>The <strong>SSH Agent plugin</strong> lets a pipeline borrow a stored key for the duration of a block. With the host key already in <code class='ic'>known_hosts</code>, the deploy block connects securely with full verification — no flags needed to weaken it:</p>
+<pre><code>
+stage(&#x27;Deploy to EC2&#x27;) {
+    steps {
+        sshagent([&#x27;ec2-ssh-key&#x27;]) {
+            sh &quot;&quot;&quot;
+                ssh ec2-user@&lt;EC2_HOST&gt; &#x27;
+                    aws ecr get-login-password --region &lt;region&gt; \
+                      | docker login --username AWS --password-stdin &lt;registry&gt;
+                    export IMAGE=&lt;registry&gt;/myapp:${commit}
+                    docker compose -f /home/ec2-user/docker-compose.yml pull
+                    docker compose -f /home/ec2-user/docker-compose.yml up -d
+                &#x27;
+            &quot;&quot;&quot;
+        }
+    }
+}
+</code></pre>
+<blockquote class='callout'>
+<p>You&#x27;ll see <code class='ic'>-o StrictHostKeyChecking=no</code> in many tutorials. It disables host-key verification, which makes the <em>very</em> first connection &quot;just work&quot; — but it also throws away your protection against MITM attacks, because SSH will now connect to <em>any</em> server answering at that address. Don&#x27;t make it your default. Prefer pre-populating <code class='ic'>known_hosts</code>; only relax this in a throwaway lab, and understand exactly what you&#x27;re giving up.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>Treat the SSH private key like the password to your server, because that&#x27;s exactly what it is. Store it in Jenkins credentials, scope it to this job, and never let it touch your repository or the build log. A leaked deploy key is a leaked server.</p>
+</blockquote>
+<h4>What the deploy stage actually does</h4>
+<p>Walk through the commands that run <em>inside</em> the SSH session, because together they are the deployment:</p>
+<p>1. <strong>Log in to ECR</strong> — the EC2 server authenticates so it can pull your private image (thanks to its IAM role, no keys are needed beyond the temporary login token).</p>
+<p>2. <strong>Set the <code class='ic'>IMAGE</code> variable</strong> — to the exact commit-tagged image the pipeline built, so the compose file knows precisely what to run.</p>
+<p>3. <strong><code class='ic'>docker compose pull</code></strong> — downloads the new image from ECR.</p>
+<p>4. <strong><code class='ic'>docker compose up -d</code></strong> — this is the swap. Compose compares the running container against the desired state; because the image changed, it gracefully stops the old container and starts a new one from the new image. The <code class='ic'>-d</code> runs it detached, in the background.</p>
+<p>The sequence below shows those four commands running inside the SSH session that Jenkins opens to EC2.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant Jenkins as Jenkins
+    participant EC2 as EC2 Server
+    participant ECR as AWS ECR
+    Jenkins-&gt;&gt;EC2: ssh (verify host key, borrow key via SSH Agent)
+    EC2-&gt;&gt;ECR: docker login (IAM role token)
+    EC2-&gt;&gt;EC2: export IMAGE=registry/myapp:commit
+    EC2-&gt;&gt;ECR: docker compose pull
+    ECR--&gt;&gt;EC2: new image
+    EC2-&gt;&gt;EC2: docker compose up -d (swap old to new container)
+    EC2--&gt;&gt;Jenkins: deploy result</div><figcaption>Deploy stage - commands Jenkins runs over SSH on EC2</figcaption></figure>
+<p>The beauty of <code class='ic'>docker compose up -d</code> is that it&#x27;s <strong>declarative</strong>: you describe the desired end state, and Compose figures out what to change. You don&#x27;t manually stop, remove, and re-run containers in the right order — Compose does the reconciliation for you.</p>
+<h4>The completed pipeline</h4>
+<p>Add this deploy stage after the push stage, and your Jenkinsfile now spans the entire journey:</p>
+<pre><code>
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;)      { steps { checkout scm } }
+        stage(&#x27;Build &amp; Test&#x27;)  { steps { sh &#x27;npm ci&#x27;; sh &#x27;npm test&#x27; } }
+        stage(&#x27;Build Image&#x27;)   { /* docker build, tagged with commit SHA */ }
+        stage(&#x27;Push to ECR&#x27;)   { /* login + docker push */ }
+        stage(&#x27;Deploy to EC2&#x27;) { /* sshagent → compose pull + up -d */ }
+    }
+}
+</code></pre>
+<p>Now do the thing this whole course has been building toward: make a change to your app, commit it, and push to GitLab. Watch the webhook fire, Jenkins march through every stage, and — without you touching a terminal — your EC2 server pull the new image and serve it. Open the server&#x27;s URL and your change is live.</p>
+<p>You&#x27;ve built a complete CI/CD pipeline. There&#x27;s one more layer of robustness to add, though: right now, if the new version is broken, you&#x27;ll deploy it anyway. The final lecture adds the safety net — health checks, rollback, and proper secret handling — that makes this pipeline production-worthy.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>The deploy stage uses <strong>SSH</strong> to run commands on EC2; store the private key as a Jenkins SSH credential (e.g. via the SSH Agent plugin) and never put it in your repo.</li>
+<li>Verify the server too: register the EC2 host key in <code class='ic'>known_hosts</code> (e.g. with <code class='ic'>ssh-keyscan</code>) so SSH can detect a man-in-the-middle. Avoid <code class='ic'>StrictHostKeyChecking=no</code> as a default — it disables that protection.</li>
+<li>Prepare EC2 with Docker, an <strong>IAM role</strong> for ECR pull access, and a <code class='ic'>docker-compose.yml</code> whose image is a variable the pipeline fills in.</li>
+<li>The swap is just two commands inside the SSH session — <code class='ic'>docker compose pull</code> then <code class='ic'>docker compose up -d</code> — and Compose declaratively replaces the old container with the new one.</li>
+<li>With this stage added, a single <code class='ic'>git push</code> now flows all the way to a live EC2 deployment with no manual steps.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Prepare the EC2 server for automated deployment. Connect to your EC2 instance via SSH and complete three setup tasks: (1) install Docker and the Compose plugin, (2) attach an IAM role with ECR read access to the instance, and (3) create the docker-compose.yml file that uses an IMAGE environment variable.</p></div>
+              <pre class='starter'><code># Connect to EC2:
+ssh -i &lt;your-key.pem&gt; ec2-user@&lt;EC2_PUBLIC_IP&gt;
+
+# Task 1: Install Docker
+# (Amazon Linux 2023 commands)
+sudo dnf update -y
+sudo dnf install -y docker
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker ec2-user
+
+# Install Compose plugin:
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -SL \
+  https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+# Verify:
+docker compose version
+
+# Task 2: IAM role — done in the AWS console (not in the SSH session)
+# EC2 → Instances → select instance → Actions → Security → Modify IAM role
+# Assign a role that includes the AmazonEC2ContainerRegistryReadOnly policy.
+
+# Task 3: Create docker-compose.yml (fill in the image variable placeholder):
+cat &gt; ~/docker-compose.yml &lt;&lt; &#x27;EOF&#x27;
+services:
+  web:
+    image: ___
+    ports:
+      - &quot;80:8080&quot;
+    restart: always
+EOF</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker compose version&#x27; shows &#x27;command not found&#x27; after installation, log out and log back in (the group membership change for &#x27;docker&#x27; requires a new session), or run &#x27;newgrp docker&#x27;.</li><li>If &#x27;aws ecr describe-repositories&#x27; returns &#x27;Unable to locate credentials&#x27; even after attaching the IAM role, wait 30 seconds for the instance metadata service to propagate the role, then try again.</li><li>If your EC2 instance runs Ubuntu instead of Amazon Linux, replace &#x27;dnf&#x27; with &#x27;apt-get&#x27; and use &#x27;sudo apt-get install -y docker.io&#x27; for the Docker package.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Full docker-compose.yml:
+cat &gt; /home/ec2-user/docker-compose.yml &lt;&lt; &#x27;EOF&#x27;
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - &quot;80:8080&quot;
+    restart: always
+EOF
+
+# Verify it was written:
+cat /home/ec2-user/docker-compose.yml
+
+# Expected output:
+# services:
+#   web:
+#     image: ${IMAGE}
+#     ports:
+#       - &quot;80:8080&quot;
+#     restart: always
+
+# Verify Docker Compose version (should be v2.x):
+docker compose version
+# Expected: Docker Compose version v2.27.0
+
+# Verify IAM role can reach ECR (after attaching the role):
+aws ecr describe-repositories --region &lt;region&gt;
+# Should return a JSON list without &#x27;Unable to locate credentials&#x27;.</code></pre>
+                <div class='exp2'><p>The three preparations are interdependent: Docker is required to run containers, the IAM role allows the server to pull images from ECR without storing long-lived keys, and the docker-compose.yml with &#x27;${IMAGE}&#x27; gives Jenkins a single stable file to update at deploy time by simply setting the IMAGE environment variable. Using &#x27;${IMAGE}&#x27; instead of a hardcoded tag means the compose file never needs to be modified by the pipeline — Jenkins just exports IMAGE before running compose.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Store the EC2 SSH private key as a Jenkins credential (kind: SSH Username with private key) and register the EC2 host key in Jenkins&#x27; known_hosts file. Then verify the connection by running a test SSH command from the Jenkins agent to the EC2 instance.</p></div>
+              <pre class='starter'><code># Step 1 — Store the EC2 SSH key in Jenkins:
+# Manage Jenkins → Credentials → Global → Add Credentials
+# Kind: SSH Username with private key
+# ID: ec2-ssh-key
+# Username: ec2-user
+# Private Key: Enter directly → paste the contents of &lt;your-key.pem&gt;
+
+# Step 2 — Register the EC2 host key in Jenkins&#x27; known_hosts:
+# Run this INSIDE the Jenkins container (or on the Jenkins host machine):
+docker exec -u jenkins jenkins ssh-keyscan -H &lt;EC2_PUBLIC_IP&gt;
+# Copy the output line and append it to known_hosts:
+docker exec -u jenkins jenkins \
+  bash -c &#x27;mkdir -p ~/.ssh &amp;&amp; ssh-keyscan -H &lt;EC2_PUBLIC_IP&gt; &gt;&gt; ~/.ssh/known_hosts&#x27;
+
+# Step 3 — Verify with a test pipeline stage:
+# (Create a temporary pipeline job in Jenkins with this inline script)
+stage(&#x27;Test SSH&#x27;) {
+    steps {
+        sshagent([&#x27;ec2-ssh-key&#x27;]) {
+            sh &#x27;ssh ec2-user@&lt;EC2_PUBLIC_IP&gt; &quot;echo SSH connection successful &amp;&amp; uname -n&quot;&#x27;
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;sshagent&#x27; step is not found, install the SSH Agent plugin via Manage Jenkins → Plugins.</li><li>If the SSH connection fails with &#x27;Host key verification failed&#x27;, the known_hosts file is not populated or the IP changed. Rerun the ssh-keyscan command inside the Jenkins container and verify the output was appended (cat ~/.ssh/known_hosts).</li><li>If you see &#x27;ECDSA host key for &lt;IP&gt; has changed&#x27;, the EC2 instance was stopped and restarted (AWS may assign a new host key on start). Remove the old entry: &#x27;ssh-keygen -R &lt;EC2_IP&gt;&#x27; inside the Jenkins container, then re-run ssh-keyscan.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Test pipeline job (inline script):
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Test SSH&#x27;) {
+            steps {
+                sshagent([&#x27;ec2-ssh-key&#x27;]) {
+                    sh &#x27;ssh ec2-user@&lt;EC2_PUBLIC_IP&gt; &quot;echo SSH connection successful &amp;&amp; uname -n&quot;&#x27;
+                }
+            }
+        }
+    }
+}
+
+// Expected Console Output:
+// [Test SSH] $ ssh ec2-user@&lt;EC2_PUBLIC_IP&gt; &#x27;echo SSH connection successful &amp;&amp; uname -n&#x27;
+// SSH connection successful
+// ip-10-0-x-x.us-east-1.compute.internal
+
+// If &#x27;sshagent&#x27; step is not available, install the &#x27;SSH Agent Plugin&#x27;:
+// Manage Jenkins → Plugins → Available → search &#x27;SSH Agent&#x27; → Install</code></pre>
+                <div class='exp2'><p>Storing the key as a Jenkins credential (not in the Jenkinsfile or a file in the repo) means it is encrypted by Jenkins and never appears in build logs or source control. The known_hosts registration is the security step that most tutorials skip: without it, Jenkins would either refuse to connect (if StrictHostKeyChecking is on) or silently accept any server at that address (if it is off). Registering the fingerprint manually means Jenkins can verify the server&#x27;s identity on every automated connection — the defense against man-in-the-middle attacks.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice: Add the &#x27;Deploy to EC2&#x27; stage to the Jenkinsfile. The stage should SSH into EC2 and run the four deployment commands: ECR login, export IMAGE, docker compose pull, docker compose up -d. Push a code change and verify the new version is live at the EC2 server&#x27;s public IP on port 80.</p></div>
+              <pre class='starter'><code>// Add after &#x27;Push to ECR&#x27; in your Jenkinsfile:
+stage(&#x27;Deploy to EC2&#x27;) {
+    steps {
+        sshagent([&#x27;ec2-ssh-key&#x27;]) {
+            sh &quot;&quot;&quot;
+                ssh ec2-user@&lt;EC2_HOST&gt; &#x27;
+                    aws ecr get-login-password --region ___ \\
+                      | docker login --username AWS --password-stdin ___
+                    export IMAGE=___/myapp:${commit}
+                    docker compose -f /home/ec2-user/docker-compose.yml pull
+                    docker compose -f /home/ec2-user/docker-compose.yml up -d
+                &#x27;
+            &quot;&quot;&quot;
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;docker compose pull&#x27; fails with &#x27;unauthorized&#x27;, the IAM role on EC2 does not have ECR read permissions, or the &#x27;aws ecr get-login-password&#x27; command failed. SSH into EC2 manually and run both commands to debug.</li><li>If &#x27;docker compose up -d&#x27; succeeds but port 80 does not respond, check that the EC2 security group allows inbound TCP on port 80 from 0.0.0.0/0.</li><li>If the SSH command inside Jenkins fails with &#x27;Pseudo-terminal will not be allocated because stdin is not a terminal&#x27;, you may need to add &#x27;-tt&#x27; to the ssh flags: &#x27;ssh -tt ec2-user@...&#x27; — though most commands work fine without a PTY.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Full Jenkinsfile with Deploy stage:
+pipeline {
+    agent any
+    stages {
+        stage(&#x27;Checkout&#x27;)    { steps { checkout scm } }
+        stage(&#x27;Build&#x27;)       { steps { sh &#x27;npm ci&#x27; } }
+        stage(&#x27;Test&#x27;)        { steps { sh &#x27;npm test&#x27; } }
+        stage(&#x27;Build Image&#x27;) { steps { sh &#x27;docker build -t myapp:${BUILD_NUMBER} .&#x27; } }
+        stage(&#x27;Push to ECR&#x27;) {
+            steps {
+                script {
+                    def region   = &#x27;us-east-1&#x27;
+                    def registry = &#x27;123456789012.dkr.ecr.us-east-1.amazonaws.com&#x27;
+                    def commit   = sh(script: &#x27;git rev-parse --short HEAD&#x27;, returnStdout: true).trim()
+                    sh &quot;&quot;&quot;
+                        aws ecr get-login-password --region ${region} \\
+                          | docker login --username AWS --password-stdin ${registry}
+                        docker tag myapp:${env.BUILD_NUMBER} ${registry}/myapp:${commit}
+                        docker push ${registry}/myapp:${commit}
+                    &quot;&quot;&quot;
+                }
+            }
+        }
+        stage(&#x27;Deploy to EC2&#x27;) {
+            steps {
+                script {
+                    def region   = &#x27;us-east-1&#x27;
+                    def registry = &#x27;123456789012.dkr.ecr.us-east-1.amazonaws.com&#x27;
+                    def commit   = sh(script: &#x27;git rev-parse --short HEAD&#x27;, returnStdout: true).trim()
+                    sshagent([&#x27;ec2-ssh-key&#x27;]) {
+                        sh &quot;&quot;&quot;
+                            ssh ec2-user@&lt;EC2_PUBLIC_IP&gt; &#x27;
+                                aws ecr get-login-password --region ${region} \\
+                                  | docker login --username AWS --password-stdin ${registry}
+                                export IMAGE=${registry}/myapp:${commit}
+                                docker compose -f /home/ec2-user/docker-compose.yml pull
+                                docker compose -f /home/ec2-user/docker-compose.yml up -d
+                            &#x27;
+                        &quot;&quot;&quot;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Verification:
+// 1. Push a code change (e.g. change the response text in index.js)
+// 2. Watch all five stages in Jenkins turn green
+// 3. Open http://&lt;EC2_PUBLIC_IP&gt;:80 in a browser
+//    — the new response text should appear
+// 4. On EC2, confirm the running container: docker ps</code></pre>
+                <div class='exp2'><p>The deploy stage runs four commands inside a single SSH session. ECR login gives the EC2 server permission to pull the private image. Setting IMAGE as an environment variable feeds the docker-compose.yml variable substitution. &#x27;docker compose pull&#x27; downloads the new image layers from ECR. &#x27;docker compose up -d&#x27; is declarative: Compose compares the running state (old image) to the desired state (new IMAGE value) and replaces only what changed — it stops the old container and starts a new one from the new image without you specifying the sequence. The &#x27;-d&#x27; flag detaches, returning control to the SSH session immediately after Compose starts the replacement.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: Make a meaningful code change (for example, update the HTTP response to include the current Git commit SHA), push it to GitLab, and trace the full pipeline end-to-end. Document the exact image tag that was deployed and confirm you can identify the corresponding commit with &#x27;git show &lt;tag&gt;&#x27;.</p></div>
+              <pre class='starter'><code>// Step 1: Update index.js to include the commit SHA in the response.
+// Since the SHA is only known at build time, you can pass it as a build argument:
+
+// Dockerfile addition:
+// ARG COMMIT_SHA=unknown
+// ENV COMMIT_SHA=${COMMIT_SHA}
+
+// index.js update:
+const sha = process.env.COMMIT_SHA || &#x27;unknown&#x27;;
+res.end(`Hello from container! Build: ${sha}`);
+
+// Jenkinsfile &#x27;Build Image&#x27; stage update:
+sh &#x27;docker build --build-arg COMMIT_SHA=$(git rev-parse --short HEAD) -t myapp:${BUILD_NUMBER} .&#x27;</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;process.env.COMMIT_SHA&#x27; is &#x27;undefined&#x27; in the running container, verify that the &#x27;--build-arg&#x27; was passed to &#x27;docker build&#x27; and that the Dockerfile has both ARG and ENV lines for COMMIT_SHA — ARG alone does not persist into runtime.</li><li>If the browser still shows the old response after deployment, the browser may be caching. Try a hard refresh (Ctrl+Shift+R) or test with &#x27;curl http://&lt;EC2_IP&gt;/&#x27; from the command line.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Updated Dockerfile (add before CMD):
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+ARG COMMIT_SHA=unknown
+ENV COMMIT_SHA=${COMMIT_SHA}
+EXPOSE 8080
+CMD [&quot;node&quot;, &quot;index.js&quot;]
+
+// Updated index.js:
+const http = require(&#x27;http&#x27;);
+const server = http.createServer((req, res) =&gt; {
+  const sha = process.env.COMMIT_SHA || &#x27;unknown&#x27;;
+  res.writeHead(200);
+  res.end(`Hello from container! Build: ${sha}`);
+});
+server.listen(8080, () =&gt; console.log(&#x27;Listening on port 8080&#x27;));
+
+// Updated &#x27;Build Image&#x27; step in Jenkinsfile:
+sh &#x27;docker build --build-arg COMMIT_SHA=$(git rev-parse --short HEAD) -t myapp:${BUILD_NUMBER} .&#x27;
+
+// After pushing and the pipeline completes:
+// 1. Note the commit SHA shown in Jenkins console (e.g. &#x27;abc1234&#x27;)
+// 2. Open http://&lt;EC2_PUBLIC_IP&gt;/ in a browser:
+//    Response: &#x27;Hello from container! Build: abc1234&#x27;
+// 3. Confirm the link:
+//    git show abc1234
+//    Shows the commit with the index.js change — the SHA is exact.
+// 4. Confirm the ECR tag:
+//    aws ecr describe-images --repository-name myapp \
+//      --query &#x27;imageDetails[].imageTags&#x27;
+//    Should include &#x27;abc1234&#x27;</code></pre>
+                <div class='exp2'><p>This challenge closes the traceability loop in practice: the running container&#x27;s HTTP response displays the commit SHA, the ECR tag uses the same SHA, and &#x27;git show &lt;SHA&gt;&#x27; maps it back to the exact source code. This is the value of the commit-SHA tagging strategy made tangible — any user hitting the endpoint can see which code version is serving them, and any operator can immediately locate the source and the build. In production, this SHA is typically logged or exposed via a &#x27;/version&#x27; endpoint rather than the main response, but the mechanism is identical.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=nQdyiK7-VlQ' target='_blank'>Easily Deploy Full Stack Node.js Apps on AWS EC2 | Step-by-Step Tutorial</a></li></ul></div>
+        </article>
+<article id='lec8' class='lecture'>
+          <h2>08. Health Checks, Rollback, and Managing Secrets </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Use a health check to confirm a deploy succeeded, and roll back to the previous image if it didn&#x27;t.</li>
+<li>Keep secrets and environment variables out of your code and inject them safely.</li>
+<li>Review the finished pipeline and understand how to adapt it to your own application.</li>
+</ul>
+<h3>Body</h3>
+<h4>The gap our pipeline still has</h4>
+<p>The pipeline from the last lecture works — but it&#x27;s optimistic. It pulls the new image, swaps the container, and assumes everything is fine. If the new version crashes on startup or fails to respond, you&#x27;ve just replaced a working app with a broken one and nobody noticed. No amount of testing eliminates that last 1% chance of a bad deploy. This lecture adds the safety net that turns a working pipeline into a trustworthy one.</p>
+<h4>Step 1 — Health checks: don&#x27;t trust, verify</h4>
+<p>A <strong>health check</strong> is a small test that asks the freshly deployed app, &quot;are you actually alive and serving?&quot; The naive version is to <code class='ic'>sleep</code> for a few seconds and then probe — but a fixed sleep is a <strong>race condition</strong>: too short and you probe before the app is ready (a false failure); too long and you waste time on every deploy. The robust idea is to <strong>poll</strong> the endpoint with retries until it answers or you run out of attempts — succeed the instant the app is ready, and only fail after a real, bounded timeout.</p>
+<p>You <em>could</em> hand-write that polling loop in bash, but Docker Compose already does it for you. Define a container-level <code class='ic'>healthcheck</code> on the service, and Compose will run that probe on its own schedule and track each container&#x27;s health status:</p>
+<pre><code>
+services:
+  web:
+    image: ${IMAGE}
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;curl&quot;, &quot;-f&quot;, &quot;http://localhost:8080/health&quot;]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+</code></pre>
+<p>Once the <code class='ic'>healthcheck</code> is defined, start the deploy with <code class='ic'>docker compose up -d --wait</code>. The <code class='ic'>--wait</code> flag blocks until every service reports <strong>healthy</strong>, then exits <code class='ic'>0</code>; if any service never becomes healthy within its retry budget, it exits <strong>non-zero</strong>. That single command <em>is</em> your health check: it does the polling, the bounded timeout, and the pass/fail decision in one step — so the pipeline just trusts its exit code.</p>
+<blockquote class='callout'>
+<p><code class='ic'>--wait</code> only works if the service has a <code class='ic'>healthcheck</code> defined — otherwise Compose only waits for the container to <em>start</em>, not to become <em>healthy</em>. Define the healthcheck, run <code class='ic'>docker compose up -d --wait</code>, and let its exit code decide success or failure. Never trust a fixed <code class='ic'>sleep</code>, which races the app&#x27;s startup time.</p>
+</blockquote>
+<h4>Step 2 — Rollback: a known-good escape hatch</h4>
+<p>What happens when the health check fails — that is, when <code class='ic'>docker compose up -d --wait</code> exits non-zero? You roll back — redeploy the <strong>previous</strong> working image. This is exactly why we tagged images with the commit SHA back in lecture 6: every past version still sits in ECR under its own immutable tag, so &quot;the previous version&quot; is always one <code class='ic'>docker compose up</code> away.</p>
+<p>The catch is that the pipeline has to <em>remember</em> which tag was the last known-good one. A <code class='ic'>failure</code> block can&#x27;t magically know it — so the trick is: <strong>on a successful, verified deploy, write the deployed tag to a file on the server; on failure, read that file back and redeploy it.</strong> That file is the durable record of &quot;what was working before this attempt.&quot;</p>
+<p>The flowchart below shows the decision. The deploy command and the health check are one step now: <code class='ic'>docker compose up -d --wait</code> either exits <code class='ic'>0</code> (healthy — promote the new version and record its tag) or non-zero (unhealthy — read the saved tag and redeploy it).</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Deploy[&quot;docker compose up -d --wait\n(deploy + poll healthcheck in one step)&quot;] --&gt;|exit 0 (healthy)| Keep[&quot;Keep new version live + record tag to last_good&quot;]
+    Deploy --&gt;|exit non-zero (unhealthy)| Rollback[&quot;Read last_good tag, redeploy that image&quot;]
+    Rollback --&gt; Restored[&quot;Last known-good version restored&quot;]</div><figcaption>Deploy-and-verify in one step, with automatic rollback on a non-zero exit code</figcaption></figure>
+<p>Here is the working logic. <code class='ic'>docker compose up -d --wait</code> is both the deploy and the verification: if it returns successfully the script continues and records the new tag; if it fails, the shell command fails, the stage fails, and the <code class='ic'>post { failure }</code> block reads the saved tag and redeploys it:</p>
+<pre><code>
+stage(&#x27;Deploy &amp; Verify&#x27;) {
+    environment { COMMIT = &quot;${env.GIT_COMMIT}&quot; }   // the new image tag
+    steps {
+        sshagent([&#x27;ec2-ssh-key&#x27;]) {
+            sh &#x27;&#x27;&#x27;
+                ssh ec2-user@&lt;EC2_HOST&gt; &quot;
+                    export IMAGE=&lt;registry&gt;/myapp:${COMMIT}
+                    # --wait blocks until the healthcheck passes and exits
+                    # non-zero if it doesn&#x27;t, so this single line is the verify step.
+                    # If it fails, ssh returns non-zero, the stage fails, and
+                    # the post { failure } block below handles the rollback.
+                    docker compose up -d --wait
+                    # Reached only when the deploy is verified healthy:
+                    echo ${COMMIT} &gt; /home/ec2-user/last_good_tag
+                &quot;
+            &#x27;&#x27;&#x27;
+        }
+    }
+    post {
+        failure {
+            sshagent([&#x27;ec2-ssh-key&#x27;]) {
+                sh &#x27;&#x27;&#x27;
+                    ssh ec2-user@&lt;EC2_HOST&gt; &quot;
+                        PREV=\\$(cat /home/ec2-user/last_good_tag 2&gt;/dev/null)
+                        if [ -n \\&quot;\\$PREV\\&quot; ]; then
+                            export IMAGE=&lt;registry&gt;/myapp:\\$PREV
+                            docker compose up -d --wait
+                        else
+                            echo &#x27;No known-good tag recorded yet; cannot auto-roll back&#x27; &gt;&amp;2
+                            exit 1
+                        fi
+                    &quot;
+                &#x27;&#x27;&#x27;
+            }
+        }
+    }
+}
+</code></pre>
+<p>The mechanism is self-correcting: because the tag is written <strong>only after</strong> a deploy is verified healthy, <code class='ic'>last_good_tag</code> always names a version that genuinely worked. A failed deploy never overwrites it, so the rollback always targets a real, last-known-good image. (If you&#x27;d rather not keep a file on the server, the same idea works by querying the currently running image with <code class='ic'>docker inspect</code> before the swap, or by storing the tag as a Jenkins build artifact.)</p>
+<p>For truly zero-downtime swaps, teams go further with strategies like <strong>blue-green deployment</strong> (run two identical environments and flip traffic from the old &quot;blue&quot; to the new &quot;green,&quot; switching back instantly if needed) or <strong>canary deployment</strong> (route a small slice of traffic to the new version first and watch before going to 100%). Those are the next level up; for a single EC2 host, a fast health-check-plus-rollback already removes most of the risk, and <code class='ic'>docker compose up -d</code>&#x27;s rolling replacement keeps the window of unavailability tiny.</p>
+<h4>Step 3 — Keep secrets out of your code</h4>
+<p>Your app needs sensitive values: database passwords, API keys, the ECR registry address. The cardinal rule is <strong>never commit a secret to your repository.</strong> Anything in Git is permanent and visible to everyone with access — including in the history, long after you &quot;delete&quot; it.</p>
+<p>Instead, separate secrets from code and inject them at runtime:</p>
+<ul>
+<li><strong>In Jenkins</strong> — store credentials in the built-in credential store and pull them in with <code class='ic'>withCredentials</code>, which masks them in the build log:</li>
+</ul>
+<pre><code>
+  withCredentials([string(credentialsId: &#x27;db-password&#x27;, variable: &#x27;DB_PASS&#x27;)]) {
+      sh &#x27;deploy-using $DB_PASS&#x27;
+  }
+</code></pre>
+<ul>
+<li><strong>At the container level</strong> — pass values in as environment variables via Compose, sourced from a <code class='ic'>.env</code> file that lives on the server and is <em>git-ignored</em>, never committed:</li>
+</ul>
+<pre><code>
+  services:
+    web:
+      image: ${IMAGE}
+      env_file: /home/ec2-user/app.env
+</code></pre>
+<p>The same secret should never appear in two places. Jenkins holds the secrets it needs to <em>deploy</em>; the server holds the secrets the app needs to <em>run</em>. Mark secrets as protected and masked wherever the tool allows, so they don&#x27;t leak into logs.</p>
+<h4>The finished pipeline, end to end</h4>
+<p>Step back and look at what you&#x27;ve assembled across these eight lectures. The complete flow is:</p>
+<p>1. You push code to <strong>GitLab</strong>.</p>
+<p>2. A <strong>webhook</strong> triggers <strong>Jenkins</strong>.</p>
+<p>3. Jenkins <strong>checks out</strong> the code, then <strong>builds and tests</strong> it — failing fast if anything is wrong.</p>
+<p>4. On green tests, Jenkins <strong>builds a Docker image</strong> tagged with the commit SHA.</p>
+<p>5. Jenkins authenticates to <strong>AWS ECR</strong> and <strong>pushes</strong> the image.</p>
+<p>6. Jenkins <strong>SSHes into EC2</strong>, pulls the image, and swaps the container with <strong>docker compose</strong>.</p>
+<p>7. A <strong>health check</strong> confirms success; if it fails, the pipeline <strong>rolls back</strong> to the previous image. Secrets stay out of the code and are injected safely.</p>
+<h4>Making it yours</h4>
+<p>The example app was deliberately generic, but nothing about this pipeline is. To adapt it to your own project: replace the Dockerfile&#x27;s base image and start command with your language&#x27;s, swap in your real test command, point the ECR repository and EC2 host at your own infrastructure, and list your app&#x27;s actual secrets in the credential store and <code class='ic'>.env</code> file. The Dockerfile, the Jenkinsfile, and the deploy logic are the transferable skills — the rest is just configuration. You now have a repeatable blueprint for shipping any application from a <code class='ic'>git push</code> to a live, verified, recoverable deployment.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A deploy isn&#x27;t finished until a <strong>health check</strong> proves the new container is actually serving. Define a container <code class='ic'>healthcheck</code> and run <code class='ic'>docker compose up -d --wait</code>, which polls the probe for you and exits non-zero if the app never becomes healthy — never a fixed <code class='ic'>sleep</code>, which races startup.</li>
+<li><strong>Rollback</strong> works because every image is tagged with its commit SHA and kept in ECR — record the tag in a server-side file <em>only after</em> a verified deploy, then have a <code class='ic'>post { failure { ... } }</code> block read that file and redeploy the last known-good tag.</li>
+<li><strong>Never commit secrets</strong>; inject them at runtime via Jenkins credentials (<code class='ic'>withCredentials</code>) for deploy-time secrets and a git-ignored <code class='ic'>.env</code> for runtime secrets, keeping each secret in exactly one place.</li>
+<li>The finished pipeline carries any app from a <code class='ic'>git push</code> through build, test, image push to ECR, and a verified, recoverable EC2 deploy — and the Dockerfile, Jenkinsfile, and deploy logic transfer directly to your own projects.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Add a Docker Compose healthcheck to the docker-compose.yml on the EC2 server, then run &#x27;docker compose up -d --wait&#x27; manually and observe the output — confirming that &#x27;--wait&#x27; blocks until the healthcheck reports healthy.</p></div>
+              <pre class='starter'><code># SSH into your EC2 instance and update docker-compose.yml:
+cat &gt; /home/ec2-user/docker-compose.yml &lt;&lt; &#x27;EOF&#x27;
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - &quot;80:8080&quot;
+    restart: always
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;curl&quot;, &quot;-f&quot;, &quot;http://localhost:8080/health&quot;]
+      interval: ___s
+      timeout: ___s
+      retries: ___
+EOF
+
+# Then deploy manually to test the --wait flag:
+export IMAGE=&lt;your-ecr-registry&gt;/myapp:&lt;last-commit-sha&gt;
+docker compose -f /home/ec2-user/docker-compose.yml up -d --wait</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;curl&#x27; is not available inside the container (alpine image), use &#x27;wget -q --spider http://localhost:8080/health&#x27; or &#x27;node -e &quot;require(http).get(url, r =&gt; process.exit(r.statusCode===200?0:1))&quot;&#x27; as the healthcheck test command.</li><li>If &#x27;docker compose up -d --wait&#x27; exits immediately with an error about &#x27;--wait&#x27;, your Compose version may be older than v2.1. Check &#x27;docker compose version&#x27; — you need v2.1+.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># docker-compose.yml with healthcheck:
+cat &gt; /home/ec2-user/docker-compose.yml &lt;&lt; &#x27;EOF&#x27;
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - &quot;80:8080&quot;
+    restart: always
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;curl&quot;, &quot;-f&quot;, &quot;http://localhost:8080/health&quot;]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+EOF
+
+# Note: your app needs a /health endpoint for the healthcheck to work.
+# Add this to index.js:
+# if (req.url === &#x27;/health&#x27;) { res.writeHead(200); res.end(&#x27;OK&#x27;); return; }
+
+# Run with --wait:
+export IMAGE=123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp:abc1234
+docker compose -f /home/ec2-user/docker-compose.yml up -d --wait
+
+# Expected output:
+# [+] Running 1/1
+#  ✔ Container ec2-user-web-1  Healthy
+# (Returns only after the healthcheck passes, exits 0)
+
+# If the /health endpoint does not exist:
+# The command waits up to (interval * retries) = 30 seconds, then exits non-zero:
+# Error response from daemon: ... health check failed</code></pre>
+                <div class='exp2'><p>&#x27;--wait&#x27; turns &#x27;docker compose up -d&#x27; from a fire-and-forget command into a verified deployment: it polls the healthcheck probe at the configured interval, up to retries times, and only exits 0 if the container transitions to &#x27;healthy&#x27; within that budget. A fixed &#x27;sleep 10&#x27; cannot do this — it races the app&#x27;s startup time and gives no useful exit code. The healthcheck test command (&#x27;curl -f http://localhost:8080/health&#x27;) must succeed (exit 0) for the container to be considered healthy; &#x27;-f&#x27; makes curl exit non-zero on HTTP errors.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice: Update the &#x27;Deploy to EC2&#x27; stage in your Jenkinsfile to implement the health-check-plus-rollback pattern. The stage should: deploy with &#x27;--wait&#x27;, write the tag to &#x27;last_good_tag&#x27; on success, and roll back to the saved tag in a &#x27;post { failure { ... } }&#x27; block if &#x27;--wait&#x27; exits non-zero.</p></div>
+              <pre class='starter'><code>// Replace the existing &#x27;Deploy to EC2&#x27; stage:
+stage(&#x27;Deploy &amp; Verify&#x27;) {
+    steps {
+        script {
+            def registry = &#x27;&lt;registry&gt;&#x27;
+            def commit   = sh(script: &#x27;git rev-parse --short HEAD&#x27;, returnStdout: true).trim()
+            sshagent([&#x27;ec2-ssh-key&#x27;]) {
+                sh &quot;&quot;&quot;
+                    ssh ec2-user@&lt;EC2_HOST&gt; &#x27;
+                        export IMAGE=${registry}/myapp:${commit}
+                        docker compose -f /home/ec2-user/docker-compose.yml pull
+                        docker compose -f /home/ec2-user/docker-compose.yml up -d ___
+                        echo ___ &gt; /home/ec2-user/last_good_tag
+                    &#x27;
+                &quot;&quot;&quot;
+            }
+        }
+    }
+    post {
+        failure {
+            // rollback block
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If the &#x27;post { failure { ... } }&#x27; block does not run when the deploy fails, verify that the &#x27;docker compose up -d --wait&#x27; failure propagates an exit code through the SSH call. Add &#x27;set -e&#x27; at the start of the remote shell script to ensure any command failure exits the script.</li><li>If &#x27;last_good_tag&#x27; is empty on first run (no previous successful deploy), the rollback correctly prints the &#x27;No known-good tag found&#x27; message and exits 1 — that is intentional behaviour, not a bug.</li><li>To deliberately trigger a rollback for testing: push a broken image (e.g. a Dockerfile that sets CMD to &#x27;exit 1&#x27;) and watch &#x27;--wait&#x27; time out, the stage turn red, and the post block deploy the previous tag.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>stage(&#x27;Deploy &amp; Verify&#x27;) {
+    steps {
+        script {
+            def region   = &#x27;us-east-1&#x27;
+            def registry = &#x27;123456789012.dkr.ecr.us-east-1.amazonaws.com&#x27;
+            def commit   = sh(script: &#x27;git rev-parse --short HEAD&#x27;, returnStdout: true).trim()
+            sshagent([&#x27;ec2-ssh-key&#x27;]) {
+                sh &quot;&quot;&quot;
+                    ssh ec2-user@&lt;EC2_PUBLIC_IP&gt; &#x27;
+                        aws ecr get-login-password --region ${region} \\
+                          | docker login --username AWS --password-stdin ${registry}
+                        export IMAGE=${registry}/myapp:${commit}
+                        docker compose -f /home/ec2-user/docker-compose.yml pull
+                        docker compose -f /home/ec2-user/docker-compose.yml up -d --wait
+                        echo ${commit} &gt; /home/ec2-user/last_good_tag
+                    &#x27;
+                &quot;&quot;&quot;
+            }
+        }
+    }
+    post {
+        failure {
+            script {
+                def region   = &#x27;us-east-1&#x27;
+                def registry = &#x27;123456789012.dkr.ecr.us-east-1.amazonaws.com&#x27;
+                sshagent([&#x27;ec2-ssh-key&#x27;]) {
+                    sh &quot;&quot;&quot;
+                        ssh ec2-user@&lt;EC2_PUBLIC_IP&gt; &#x27;
+                            PREV=\\$(cat /home/ec2-user/last_good_tag 2&gt;/dev/null)
+                            if [ -n &quot;\\$PREV&quot; ]; then
+                                export IMAGE=${registry}/myapp:\\$PREV
+                                docker compose -f /home/ec2-user/docker-compose.yml up -d --wait
+                                echo &quot;Rolled back to \\$PREV&quot;
+                            else
+                                echo &quot;No known-good tag found; cannot auto-roll back&quot; &gt;&amp;2
+                                exit 1
+                            fi
+                        &#x27;
+                    &quot;&quot;&quot;
+                }
+            }
+        }
+    }
+}</code></pre>
+                <div class='exp2'><p>The self-correction mechanism works because of two design choices: (1) &#x27;echo ${commit} &gt; last_good_tag&#x27; runs only AFTER &#x27;--wait&#x27; exits 0, so the file always contains a verified, healthy tag — a failed deploy never overwrites it; (2) &#x27;post { failure { ... } }&#x27; runs only when the stage fails, giving the rollback block access to the last verified tag. This creates a safety net without any external state management: the EC2 server itself stores the rollback reference in a plain text file. The backslash escaping (&#x27;\\$PREV&#x27;) is required because the outer Groovy string interpolation must be prevented from consuming the shell variable before the SSH session sees it.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice: Implement safe secret management for the pipeline. Store a mock database password as a Jenkins credential and a runtime application secret in a &#x27;.env&#x27; file on the EC2 server. Verify the Jenkins build log does NOT show the secret value, and confirm the running container can access the runtime secret as an environment variable.</p></div>
+              <pre class='starter'><code>// Part 1 — Jenkins credential (deploy-time secret):
+// Manage Jenkins → Credentials → Global → Add Credentials
+// Kind: Secret text  ID: db-password  Secret: s3cr3tP@ssw0rd
+
+// Part 2 — Use it in the Jenkinsfile with withCredentials:
+withCredentials([string(credentialsId: &#x27;___&#x27;, variable: &#x27;___&#x27;)]) {
+    sh &#x27;echo &quot;Would connect to DB with password: $DB_PASS&quot;&#x27;
+    // In a real scenario: sh &#x27;deploy-script --db-password $DB_PASS&#x27;
+}
+
+// Part 3 — Runtime secret on EC2 server (not in the Jenkinsfile or repo):
+// SSH into EC2 and create the .env file:
+cat &gt; /home/ec2-user/app.env &lt;&lt; &#x27;EOF&#x27;
+DB_PASSWORD=___
+API_KEY=___
+EOF
+
+// Part 4 — Reference it in docker-compose.yml:
+services:
+  web:
+    image: ${IMAGE}
+    env_file: /home/ec2-user/app.env
+    ...</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;withCredentials&#x27; still shows the secret in the log, check that the variable name in the &#x27;sh&#x27; command matches the &#x27;variable&#x27; field exactly — case-sensitive.</li><li>If the container cannot see environment variables from the .env file, verify that &#x27;env_file&#x27; in docker-compose.yml points to the absolute path (not a relative path from where you run docker compose).</li><li>Never use &#x27;docker run -e DB_PASSWORD=&lt;value&gt;&#x27; with a literal secret in the pipeline command — it would appear in &#x27;docker inspect&#x27; output and the build log. The &#x27;env_file&#x27; approach keeps the value only in the file, not in any command string.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Part 1 &amp; 2 — Jenkins Credential usage in Jenkinsfile:
+stage(&#x27;Example Secret Usage&#x27;) {
+    steps {
+        withCredentials([string(credentialsId: &#x27;db-password&#x27;, variable: &#x27;DB_PASS&#x27;)]) {
+            sh &#x27;echo &quot;DB_PASS is set: ${#DB_PASS} chars&quot;&#x27;  // prints length, not value
+            // Jenkins automatically masks DB_PASS — any accidental echo shows &#x27;****&#x27;
+        }
+    }
+}
+
+// Console Output:
+// [Example Secret Usage] $ echo &quot;DB_PASS is set: 14 chars&quot;
+// DB_PASS is set: 14 chars
+// (Value &#x27;s3cr3tP@ssw0rd&#x27; NEVER appears in the log)
+
+// Part 3 — Create /home/ec2-user/app.env on EC2 (via SSH, not via pipeline):
+ssh ec2-user@&lt;EC2_IP&gt;
+cat &gt; /home/ec2-user/app.env &lt;&lt; &#x27;EOF&#x27;
+DB_PASSWORD=s3cr3tP@ssw0rd
+API_KEY=my-api-key-12345
+EOF
+chmod 600 /home/ec2-user/app.env   # restrict file permissions
+
+// Part 4 — Updated docker-compose.yml on EC2:
+cat &gt; /home/ec2-user/docker-compose.yml &lt;&lt; &#x27;EOF&#x27;
+services:
+  web:
+    image: ${IMAGE}
+    ports:
+      - &quot;80:8080&quot;
+    restart: always
+    env_file: /home/ec2-user/app.env
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;curl&quot;, &quot;-f&quot;, &quot;http://localhost:8080/health&quot;]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+EOF
+
+// Verify the running container sees the secret:
+docker exec &lt;container-name&gt; printenv DB_PASSWORD
+// Output: s3cr3tP@ssw0rd
+// (This runs ON the EC2 server — the secret is only visible there)</code></pre>
+                <div class='exp2'><p>The two-tier secret model separates concerns cleanly: Jenkins credentials store secrets the pipeline needs at deploy time (for example, to authenticate to an API during deployment); the &#x27;.env&#x27; file on EC2 stores secrets the running application needs at runtime (database passwords, API keys). Jenkins&#x27; &#x27;withCredentials&#x27; wrapper masks the secret in logs by scanning all output and replacing the value with &#x27;<em>*</em>*&#x27;. The &#x27;.env&#x27; file never enters Git (it is in &#x27;.gitignore&#x27; on the server) and never passes through Jenkins — it exists only on the server that actually runs the app. &#x27;chmod 600&#x27; restricts the file so only the ec2-user can read it.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: Deliberately trigger the rollback mechanism. Introduce a bug that will cause the healthcheck to fail (for example, make the /health endpoint return HTTP 500 or make the app crash on startup), push it, and confirm Jenkins: (1) runs &#x27;--wait&#x27; and times out, (2) marks the Deploy stage red, (3) executes the rollback post block, and (4) leaves the last known-good version running on EC2.</p></div>
+              <pre class='starter'><code>// Step 1: Introduce a breaking change in index.js.
+// Example: make the /health endpoint always return 500:
+if (req.url === &#x27;/health&#x27;) {
+  res.writeHead(500);
+  res.end(&#x27;Intentional failure&#x27;);
+  return;
+}
+
+// Step 2: Push the broken change.
+// Watch Jenkins build, observe the Deploy stage behaviour.
+
+// Step 3: After the build completes (as FAILED), check EC2:
+ssh ec2-user@&lt;EC2_IP&gt;
+docker ps                                       # what image is running?
+cat /home/ec2-user/last_good_tag               # what is the saved good tag?
+curl http://localhost:80/                      # is the service still up?</code></pre>
+              <details><summary>Hint</summary><ul><li>If the Deploy stage turns green even with the broken healthcheck, confirm that &#x27;docker-compose.yml&#x27; has the &#x27;healthcheck&#x27; section — without it, &#x27;--wait&#x27; only waits for the container to *start*, not to become *healthy*, so it exits 0 regardless.</li><li>If the rollback block also fails (because &#x27;last_good_tag&#x27; does not exist on first run), that is expected behaviour — push a successful build first to create the file, then introduce the break.</li><li>If you want to shorten the wait during testing, temporarily set &#x27;retries: 1&#x27; in the healthcheck to fail after 10 seconds instead of 30.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Step 1 — Broken index.js (health endpoint returns 500):
+const http = require(&#x27;http&#x27;);
+const server = http.createServer((req, res) =&gt; {
+  if (req.url === &#x27;/health&#x27;) {
+    res.writeHead(500);
+    res.end(&#x27;Intentional failure&#x27;);
+    return;
+  }
+  res.writeHead(200);
+  res.end(&#x27;Hello from container!&#x27;);
+});
+server.listen(8080, () =&gt; console.log(&#x27;Listening on port 8080&#x27;));
+
+// Step 2 — Push:
+git add index.js
+git commit -m &quot;Break health endpoint for rollback test&quot;
+git push
+
+// Expected Jenkins behaviour:
+// Checkout, Build, Test — all green (test does not test /health)
+// Build Image, Push to ECR — green (image is built and pushed)
+// Deploy &amp; Verify:
+//   &#x27;docker compose up -d --wait&#x27; starts the broken container
+//   Healthcheck runs: curl -f http://localhost:8080/health → exits 1 (HTTP 500)
+//   After retries (3 x 10s = 30s), Compose exits non-zero
+//   SSH returns non-zero → Jenkins stage fails → turns RED
+//   post { failure { ... } } block runs:
+//     reads last_good_tag (the SHA of the last working build)
+//     runs: export IMAGE=registry/myapp:&lt;previous-sha&gt;
+//     docker compose up -d --wait (with the old, working image)
+//     Old image passes healthcheck → exits 0 → rollback complete
+
+// Step 3 — Verify on EC2:
+// docker ps → shows the OLD container running the previous-SHA image
+// cat /home/ec2-user/last_good_tag → shows the previous SHA (unchanged by failed deploy)
+// curl http://localhost:80/ → returns &#x27;Hello from container!&#x27; (service still up)
+// curl http://localhost:80/health → returns &#x27;OK&#x27; (old image&#x27;s healthy endpoint)
+
+// Clean up: revert the break and push to restore normal pipeline operation.</code></pre>
+                <div class='exp2'><p>This challenge is the definitive end-to-end test of the safety net. Three outcomes confirm everything is working correctly: (1) the Deploy stage turns red — proving &#x27;--wait&#x27; is doing real verification, not just waiting an arbitrary time; (2) last_good_tag is unchanged — proving the file is only written on verified success; (3) the service is still serving the previous version — proving automatic rollback worked without human intervention. Restoring a broken service automatically, even when the pipeline itself is the one that detected the problem, is the production-readiness feature that justifies all the setup effort.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=z7nLsJvEyMY' target='_blank'>GitLab CI/CD Pipeline Tutorial for Beginners</a></li><li><a href='https://www.youtube.com/watch?v=oWrwi1NiViw' target='_blank'>Updating Docker Swarm Configs and Secrets Without Downtime</a></li><li><a href='https://www.youtube.com/watch?v=J9JbzsufemE' target='_blank'>Learn How Companies Deploy Code to Production Environment [In 5 Mins!]</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

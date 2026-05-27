@@ -1,0 +1,2188 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CI/CD Pipeline in Practice — Automating AWS EKS Deployments with GitLab + Jenkins</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/devops-pipeline-eks/index.html'>한국어</a></div>
+  <h1>CI/CD Pipeline in Practice — Automating AWS EKS Deployments with GitLab + Jenkins</h1>
+  <div class="sub">Developers who want to deploy to Kubernetes (EKS). Docker basics required; light prior exposure to Kubernetes is sufficient — deep internals knowledge is not needed and can be supplemented with dedicated Kubernetes courses. · 8 lectures</div>
+  <ul><li><a href='#lec1'>01. &quot;EKS Deployment Pipelines — From Push to Kubernetes&quot;</a></li>
+<li><a href='#lec2'>02. &quot;Containerizing Your App and Preparing Amazon ECR&quot;</a></li>
+<li><a href='#lec3'>03. &quot;Building the GitLab + Jenkins Pipeline&quot;</a></li>
+<li><a href='#lec4'>04. &quot;Writing Kubernetes Deployment Manifests&quot;</a></li>
+<li><a href='#lec5'>05. &quot;Accessing the EKS Cluster and Configuring kubectl&quot;</a></li>
+<li><a href='#lec6'>06. &quot;Automated Deployment to EKS from Jenkins&quot;</a></li>
+<li><a href='#lec7'>07. &quot;Rolling Updates, Rollbacks, and Health Checks&quot;</a></li>
+<li><a href='#lec8'>08. &quot;Managing Manifests and Secrets, and Wrapping Up&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;EKS Deployment Pipelines — From Push to Kubernetes&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Explain what Amazon EKS is and what &quot;declarative, manifest-based deployment&quot; means.</li>
+<li>Understand why a CI/CD pipeline ends with <code class='ic'>kubectl</code>/manifests being applied to a cluster.</li>
+<li>See how GitLab, Jenkins, Amazon ECR, and EKS fit together into one end-to-end flow.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why this course exists</h4>
+<p>If you are a developer, your real goal is simple: you push code, and a little while later the new version is running in production — safely, with no downtime, and with an easy way to undo a bad release. Everything in this course is in service of that one sentence.</p>
+<p>We are deliberately <em>not</em> trying to make you a Kubernetes internals expert. Instead, we treat Kubernetes (specifically AWS&#x27;s managed flavor, EKS) as the <strong>destination</strong> that your automated pipeline delivers to. The interesting work is the road between your <code class='ic'>git push</code> and a healthy Pod serving traffic, and that road is built from four tools: <strong>GitLab</strong> (where your source and your container images live), <strong>Jenkins</strong> (the engine that builds and deploys), <strong>Amazon ECR</strong> (the registry that stores your images), and <strong>Amazon EKS</strong> (the Kubernetes cluster that runs them).</p>
+<h4>What is Kubernetes, briefly</h4>
+<p>Kubernetes (often abbreviated <strong>k8s</strong> — the &quot;8&quot; stands for the eight letters between &quot;k&quot; and &quot;s&quot;) is an open-source <strong>container orchestration platform</strong>. In plain terms, it takes your containerized application and handles the boring-but-critical parts of running it: starting the right number of copies, restarting copies that crash, spreading them across machines, and replacing old versions with new ones gradually.</p>
+<p>A Kubernetes cluster has two halves:</p>
+<ul>
+<li>The <strong>control plane</strong> is the brain. It holds the desired state of everything and makes decisions. Its key pieces are the <strong>API server</strong> (the front door you talk to), <strong>etcd</strong> (a key-value database that stores cluster state), the <strong>scheduler</strong> (decides which machine runs each Pod), and the <strong>controller manager</strong> (the loop that keeps reality matching what you asked for, including rolling updates and rollbacks).</li>
+<li>The <strong>worker nodes</strong> are the muscle — the actual machines that run your containers. Each node runs a <strong>kubelet</strong> (talks to the control plane), a <strong>container runtime</strong> (pulls images and runs containers), and <strong>kube-proxy</strong> (routes network traffic to the right Pods).</li>
+</ul>
+<p>The smallest thing you deploy is a <strong>Pod</strong> — a wrapper around one or more containers that share networking and storage. You rarely create Pods by hand; higher-level objects manage them for you, which leads us to the most important idea in this whole course.</p>
+<h4>The big idea: declarative deployment</h4>
+<p>Traditional deployment is <strong>imperative</strong> — you list the <em>steps</em>: &quot;SSH to the server, stop the old process, copy the new build, start it again.&quot; If a step fails halfway, you are left in a broken in-between state.</p>
+<p>Kubernetes is <strong>declarative</strong> instead. You write down the <em>desired end state</em> in a text file (a <strong>manifest</strong>, usually YAML) — &quot;I want 3 copies of this image running, reachable on port 80&quot; — and hand it to the cluster. The control plane&#x27;s job is to continuously make reality match that description. If a Pod dies, it is recreated. If you change the image version in the file and re-apply it, Kubernetes figures out how to get from the current state to the new one.</p>
+<blockquote class='callout'>
+<p>This is the single mental shift that makes the whole pipeline click: your deployment is <strong>a file that describes what you want</strong>, not a script that lists what to do. Version that file in Git, and your infrastructure becomes reviewable, repeatable, and revertible.</p>
+</blockquote>
+<p>Because the desired state is just text, your pipeline&#x27;s final job is wonderfully simple: take a manifest, point it at the cluster, and run <code class='ic'>kubectl apply -f</code>. That is why &quot;the end of the pipeline is applying manifests&quot; — there is nothing more to it.</p>
+<h4>Why EKS instead of running Kubernetes yourself</h4>
+<p>Kubernetes is powerful but genuinely hard to operate. Setting up and babysitting a production-grade control plane (the API server, etcd, failover across data centers) takes deep expertise. <strong>Amazon EKS (Elastic Kubernetes Service)</strong> is AWS&#x27;s <em>managed</em> Kubernetes: AWS runs and maintains the control plane for you across multiple availability zones, and you bring the worker nodes and the workloads. Google&#x27;s GKE and Azure&#x27;s AKS are the equivalents on other clouds.</p>
+<p>For a team that wants Kubernetes&#x27; benefits — self-healing, horizontal scaling, automatic rollbacks, portability — without owning the hardest part, a managed service like EKS is the pragmatic choice. (For a tiny side project, plain Kubernetes is often overkill; that is a real trade-off, not a marketing point.)</p>
+<h4>How the four tools connect</h4>
+<p>Here is the end-to-end flow this course builds, one lecture at a time. The structure is as follows:</p>
+<p>1. <strong>You push code to GitLab.</strong> GitLab hosts your application source — and, conveniently, can also host your container registry, though in AWS we will push images to ECR.</p>
+<p>2. <strong>GitLab triggers Jenkins</strong> via a webhook. A webhook is just an HTTP call GitLab makes to Jenkins saying &quot;something changed, start working.&quot;</p>
+<p>3. <strong>Jenkins builds a container image</strong> from your <code class='ic'>Dockerfile</code>, tags it (we will tag by commit SHA, never just <code class='ic'>latest</code>), and <strong>pushes it to Amazon ECR</strong>, AWS&#x27;s private Docker registry.</p>
+<p>4. <strong>Jenkins updates the Kubernetes manifest</strong> to point at the new image tag and runs <code class='ic'>kubectl apply</code> (or <code class='ic'>kubectl set image</code>) against the <strong>EKS cluster</strong>.</p>
+<p>5. <strong>EKS performs a rolling update</strong>: it brings up new Pods with the new image, waits until they report healthy, and only then retires the old ones — so users never see downtime. If something is wrong, one command rolls it back.</p>
+<p>The diagram below traces that same flow end to end, and shows how the image tag threads through it.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    Dev[Developer]
+    GL[GitLab]
+    JK[Jenkins]
+    ECR[Amazon ECR]
+    EKS[Amazon EKS cluster]
+
+    Dev --&gt;|git push| GL
+    GL --&gt;|webhook| JK
+    JK --&gt;|build and push image| ECR
+    JK --&gt;|kubectl apply manifest| EKS
+    ECR --&gt;|pull image| EKS
+    EKS --&gt;|rolling update| EKS</div><figcaption>End-to-end EKS deployment pipeline</figcaption></figure>
+<p>That image tag is the thread that ties it all together: it is <em>produced</em> in the build stage, <em>stored</em> in ECR, and <em>consumed</em> by the manifest at deploy time. Keep your eye on it as we go.</p>
+<h4>What &quot;good&quot; looks like</h4>
+<p>A few principles we will reinforce throughout, that experienced operators take for granted:</p>
+<ul>
+<li><strong>Tag images by commit, not <code class='ic'>latest</code>.</strong> A tag like <code class='ic'>v1.4.2</code> or the Git commit SHA tells you <em>exactly</em> what is running. <code class='ic'>latest</code> is a moving target that makes rollbacks and debugging miserable.</li>
+<li><strong>Authenticate machines, not humans.</strong> Jenkins should reach AWS and EKS using an IAM role (covered in Lecture 5), not someone&#x27;s personal credentials pasted into a job.</li>
+<li><strong>Let health checks gate your rollout.</strong> Kubernetes will only shift traffic to a new version once it reports ready — but only if you <em>configure</em> readiness checks. We cover this in Lecture 7.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li>The pipeline&#x27;s purpose is to turn <code class='ic'>git push</code> into a safe, repeatable deployment on Kubernetes; everything else is detail.</li>
+<li>Kubernetes is declarative: you describe the desired end state in a manifest, and the control plane makes reality match it. The pipeline&#x27;s final act is <code class='ic'>kubectl apply</code>.</li>
+<li>EKS is AWS-managed Kubernetes — AWS runs the control plane, you run the workloads.</li>
+<li>The flow is: push to GitLab → webhook triggers Jenkins → Jenkins builds and pushes an image to ECR → Jenkins applies an updated manifest to EKS → EKS rolls out the new version.</li>
+<li>The image tag (ideally a commit SHA) is the value that connects build, registry, and deploy.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q1. In a Kubernetes deployment, the cluster control plane continuously compares the current state of the cluster to a desired state stored in a manifest. What is this design principle called, and why does it matter for pipelines?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>Imperative deployment — the pipeline scripts every step so there is no ambiguity about what runs.</li><li class='opt' onclick='pick(this,0,1)'>Declarative deployment — the manifest describes the desired end state, so the pipeline only needs to apply a file; the cluster does the rest.</li><li class='opt' onclick='pick(this,0,2)'>Event-driven deployment — the cluster reacts to webhook events from GitLab to schedule container restarts.</li><li class='opt' onclick='pick(this,0,3)'>Stateful deployment — each environment stores its own copy of the application state in etcd.</li></ul>
+              <div class='exp'><p>Kubernetes is declarative: you write what you want (a manifest), not how to get there (a script). The control plane reconciles reality with that desired state continuously. For pipelines this is powerful — the final step is just &#x27;kubectl apply -f&#x27;, and the cluster handles rolling updates, retries, and health checks. Option A describes imperative deployment, which is what traditional shell scripts do. Option C confuses the GitLab webhook (which triggers Jenkins, not the cluster) with Kubernetes event handling. Option D mixes up stateful applications with the cluster control-plane&#x27;s etcd storage.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q2. Which of the following best describes what Amazon EKS provides compared to self-managed Kubernetes?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>EKS replaces the need for container images and ECR by building images directly from source code.</li><li class='opt' onclick='pick(this,1,1)'>EKS manages the worker nodes automatically, so you do not need to provision EC2 instances for your application.</li><li class='opt' onclick='pick(this,1,2)'>EKS manages the control plane (API server, etcd, scheduler) across multiple availability zones; you still bring worker nodes and workloads.</li><li class='opt' onclick='pick(this,1,3)'>EKS is a container registry that stores images and pulls them into a built-in Kubernetes cluster on demand.</li></ul>
+              <div class='exp'><p>EKS is a managed Kubernetes service: AWS operates and maintains the control plane (API server, etcd, scheduler, controller manager) across availability zones. You are responsible for worker nodes (often via EC2 or managed node groups) and for the applications running on them. Option A is false — EKS runs containers but you still need a Dockerfile and a registry like ECR. Option B overstates EKS&#x27;s scope; managing worker nodes is the customer&#x27;s responsibility (though Fargate can abstract individual nodes). Option D conflates EKS with ECR; they are separate services.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q3. A developer pushes a commit to the main branch in GitLab. Arrange the following pipeline events in the correct order:</p>
+<p>  (i) Jenkins builds a Docker image and tags it with the commit SHA</p>
+<p>  (ii) EKS performs a rolling update of running Pods</p>
+<p>  (iii) Jenkins receives an HTTP POST webhook from GitLab</p>
+<p>  (iv) The new image is pushed to Amazon ECR</p>
+<p>  (v) Jenkins applies an updated manifest to EKS</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>(i) → (iii) → (iv) → (v) → (ii)</li><li class='opt' onclick='pick(this,2,1)'>(iii) → (i) → (iv) → (v) → (ii)</li><li class='opt' onclick='pick(this,2,2)'>(iii) → (iv) → (i) → (ii) → (v)</li><li class='opt' onclick='pick(this,2,3)'>(i) → (iv) → (iii) → (ii) → (v)</li></ul>
+              <div class='exp'><p>The correct sequence is: GitLab detects the push and sends a webhook (iii) to Jenkins; Jenkins checks out the code and builds the image tagged with the commit SHA (i); the image is pushed to ECR (iv); Jenkins applies the updated manifest to EKS (v); EKS then executes a rolling update (ii). Options A and D place image building before the webhook is even received, which is impossible. Option C has the image pushed to ECR before it is built, which is also impossible.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q4. Your team currently tags every production image as &#x27;latest&#x27; and pushes it to ECR. A colleague argues this makes rollbacks &#x27;guesswork&#x27;. Which statement most accurately explains why they are correct?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>The &#x27;latest&#x27; tag is rejected by ECR&#x27;s tag immutability feature, causing push failures.</li><li class='opt' onclick='pick(this,3,1)'>Because &#x27;latest&#x27; is overwritten by every new build, you cannot determine which code version a running Pod is executing, making targeted rollbacks unreliable.</li><li class='opt' onclick='pick(this,3,2)'>Kubernetes does not support the &#x27;latest&#x27; tag in Deployment manifests and will refuse to schedule Pods.</li><li class='opt' onclick='pick(this,3,3)'>The &#x27;latest&#x27; tag bypasses the GitLab webhook, so Jenkins never receives a trigger for those builds.</li></ul>
+              <div class='exp'><p>The &#x27;latest&#x27; tag is a mutable label: every new build overwrites it, so a Pod running &#x27;latest&#x27; could be any code version. If something breaks, you cannot tell which commit introduced the problem or reliably redeploy the previous good state — you would need to guess which build to re-push. Commit-SHA tags (e.g., a1b9f3c) are immutable: the tag always identifies exactly one build, making rollbacks a matter of re-applying the manifest with the known-good tag. Option A is wrong — tag immutability is an optional ECR setting you enable deliberately, not a default rejection. Option C is false — Kubernetes accepts &#x27;latest&#x27; but has its own pull-policy issues with it. Option D has no basis in how webhooks work.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q5. A Kubernetes cluster has a control plane and worker nodes. Which component is responsible for detecting that a crashed Pod should be restarted, and on which part of the cluster does it run?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>kube-proxy on the worker node monitors Pod health and restarts crashed containers.</li><li class='opt' onclick='pick(this,4,1)'>The controller manager on the control plane compares desired state to actual state and initiates Pod recreation.</li><li class='opt' onclick='pick(this,4,2)'>The kubelet on each worker node makes cluster-wide scheduling decisions and restarts Pods across nodes.</li><li class='opt' onclick='pick(this,4,3)'>etcd on the control plane listens for container exit codes and triggers the scheduler to place a new Pod.</li></ul>
+              <div class='exp'><p>The controller manager runs on the control plane and runs reconciliation loops — it continuously compares the desired state (e.g., 3 replicas) to the actual state, and if a Pod is missing it creates a new one. The kubelet (option C) does communicate Pod status to the control plane and can restart containers within its node, but cluster-level reconciliation (e.g., creating a replacement Pod on a different node) is the controller manager&#x27;s job. kube-proxy (option A) handles network traffic routing, not Pod lifecycle. etcd (option D) is a key-value store for cluster state; it does not execute logic or trigger restarts.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=TlHvYWVUZyc' target='_blank'>Kubernetes Explained in 6 Minutes | k8s Architecture</a></li><li><a href='https://www.youtube.com/watch?v=KOE_6QYQqA4' target='_blank'>Build Secure AWS EKS CI/CD Pipeline with ArgoCD &amp; GitHub Actions (GitOps 2026)</a></li><li><a href='https://www.youtube.com/watch?v=aRXg75S5DWA' target='_blank'>Create AWS VPC using Terraform: AWS EKS Kubernetes Tutorial - Part 1</a></li></ul></div>
+        </article>
+<article id='lec2' class='lecture'>
+          <h2>02. &quot;Containerizing Your App and Preparing Amazon ECR&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Package a web application of any language into a container image using a <code class='ic'>Dockerfile</code>.</li>
+<li>Create an Amazon ECR repository to store those images.</li>
+<li>Understand that the image is the <em>input</em> to every Kubernetes deployment.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why we start here</h4>
+<p>Kubernetes does not run your source code. It runs <strong>container images</strong>. So before any pipeline, manifest, or cluster matters, you need a repeatable way to turn your app into an image and a reliable place to keep it. That is this lecture: a <code class='ic'>Dockerfile</code> to build the image, and an <strong>Amazon ECR</strong> repository to store it. Once an image with a known tag sits in ECR, the rest of the course is about getting EKS to run it.</p>
+<p>A nice property of containers is that they are <strong>language-agnostic</strong>. Whether your app is Node.js, Go, Python, or Java, the recipe is the same: describe the build in a <code class='ic'>Dockerfile</code>, run <code class='ic'>docker build</code>, then <code class='ic'>docker push</code>. The pipeline does not care what language you wrote — it only cares that a <code class='ic'>Dockerfile</code> exists.</p>
+<h4>Anatomy of a Dockerfile</h4>
+<p>A <code class='ic'>Dockerfile</code> is a plain-text recipe. Each line is an instruction that produces a layer of the image. Here is a minimal example for a Node.js web app:</p>
+<pre><code>
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD [&quot;node&quot;, &quot;server.js&quot;]
+</code></pre>
+<p>Reading it line by line:</p>
+<ul>
+<li><code class='ic'>FROM node:18-alpine</code> — start from an official base image that already has Node installed. <code class='ic'>alpine</code> is a tiny Linux distribution that keeps the image small.</li>
+<li><code class='ic'>WORKDIR /app</code> — set the working directory inside the image.</li>
+<li><code class='ic'>COPY package<em>.json ./</code> then <code class='ic'>RUN npm install</code> — copy </em>just* the dependency manifests first and install. Doing this before copying the rest of the code means Docker can cache the dependency layer and skip re-installing when only your source changes. This ordering is a small habit that saves a lot of build time.</li>
+<li><code class='ic'>COPY . .</code> — copy the application source.</li>
+<li><code class='ic'>EXPOSE 3000</code> — document that the app listens on port 3000.</li>
+<li><code class='ic'>CMD [...]</code> — the command that runs when the container starts.</li>
+</ul>
+<blockquote class='callout'>
+<p>A practical upgrade you will see in real projects is a <strong>multi-stage build</strong>: one stage compiles the app (with all the build tools), and a second, slim stage copies only the finished binary into a minimal image such as Google&#x27;s &quot;distroless&quot; base. The result contains your app and nothing else — no shell, no package manager — which is smaller and has a smaller attack surface.</p>
+</blockquote>
+<p>Build and test it locally:</p>
+<pre><code>
+docker build -t my-app:dev .
+docker run -p 3000:3000 my-app:dev
+</code></pre>
+<h4>Creating an ECR repository</h4>
+<p><strong>Amazon ECR (Elastic Container Registry)</strong> is AWS&#x27;s private Docker registry. Think of it as your team&#x27;s secure shelf for images — like Docker Hub, but inside your AWS account with IAM-controlled access.</p>
+<p>Create a repository from the AWS Console (search for &quot;ECR&quot; → <em>Create repository</em>), or from the CLI:</p>
+<pre><code>
+aws ecr create-repository \
+  --repository-name my-app \
+  --region us-east-1
+</code></pre>
+<p>A repository is essentially one named bucket that holds many versions (tags) of the <em>same</em> application. You typically have one ECR repository per service.</p>
+<h4>Pushing an image to ECR</h4>
+<p>ECR repositories are private, so Docker has to authenticate before it can push. The ECR console even shows you the exact commands under <em>View push commands</em>. The flow has four steps: log in, build, tag, push.</p>
+<pre><code>
+# 1. Authenticate Docker to your ECR registry (the login token is short-lived)
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin \
+    &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com
+
+# 2. Build the image
+docker build -t my-app .
+
+# 3. Tag it with the full ECR address and a meaningful tag
+docker tag my-app:latest \
+  &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)
+
+# 4. Push
+docker push \
+  &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)
+</code></pre>
+<p>The full image name has a strict shape: <code class='ic'>&lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/&lt;repo-name&gt;:&lt;tag&gt;</code>. The part before the last <code class='ic'>/</code> is the <strong>registry</strong> (your account, in your region); after it is the <strong>repository name</strong>; after the <code class='ic'>:</code> is the <strong>tag</strong>.</p>
+<h4>Tag by commit, not <code class='ic'>latest</code></h4>
+<p>Notice we used <code class='ic'>$(git rev-parse --short HEAD)</code> — the Git commit SHA — as the tag instead of <code class='ic'>latest</code>. This is one of the most important habits in the whole course.</p>
+<p><code class='ic'>latest</code> is a label that moves. If two builds both push <code class='ic'>latest</code>, the second silently overwrites the first, and now &quot;latest&quot; means something different than it did a minute ago. When you look at a running cluster and it says it is running <code class='ic'>latest</code>, you have no idea <em>which</em> code that actually is — and rolling back becomes guesswork.</p>
+<p>A commit-based tag (or a semantic version like <code class='ic'>v1.4.2</code>) is <strong>immutable and traceable</strong>: the tag <code class='ic'>a1b9f3c</code> always points to exactly that code, forever. You can look at any Pod, read its image tag, and know precisely what is deployed. This is what makes Lecture 7&#x27;s rollbacks reliable.</p>
+<h4>How this connects to Kubernetes</h4>
+<p>When you later write a Deployment manifest (Lecture 4), the most important field is the image reference:</p>
+<pre><code>
+        image: &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+</code></pre>
+<p>That is the whole point of this lecture. The image you build and push here becomes the <strong>input</strong> to your deployment. The pipeline&#x27;s job, in essence, is to keep producing new images and updating that one line so EKS pulls and runs the new version.</p>
+<p>One more thing worth knowing: in production, you usually give your <em>cluster</em> (its nodes or a service identity) permission to pull from ECR, so EKS can fetch images on its own — and AWS also offers features like cross-region replication and pull-through caching to keep image pulls fast and reliable as you scale. We will wire up the <em>push</em> side in the pipeline (Lecture 3) and the <em>pull/deploy</em> side starting in Lecture 5.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Kubernetes runs images, not source — so containerizing your app is step zero.</li>
+<li>A <code class='ic'>Dockerfile</code> is a layered recipe; order your steps so dependency installation is cached, and prefer multi-stage builds for small, secure images.</li>
+<li>ECR is your private AWS registry. The push flow is: <code class='ic'>get-login-password</code> → <code class='ic'>docker login</code> → <code class='ic'>build</code> → <code class='ic'>tag</code> (with full ECR address) → <code class='ic'>push</code>.</li>
+<li>Tag images by commit SHA or version, never just <code class='ic'>latest</code>, so every running Pod is traceable and rollbacks are reliable.</li>
+<li>The pushed image — referenced by its full ECR address and tag — is the input that your Kubernetes Deployment will consume.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Write a Dockerfile for a minimal Node.js web application that demonstrates correct layer caching order. The app listens on port 3000 and starts with &#x27;node server.js&#x27;. Use the &#x27;node:18-alpine&#x27; base image. Explain in a comment why you copy &#x27;package*.json&#x27; before copying the rest of the source.</p></div>
+              <pre class='starter'><code># Create a file named Dockerfile in your project root.
+# The project directory contains: server.js  package.json  package-lock.json
+
+# Your Dockerfile here:
+</code></pre>
+              <details><summary>Hint</summary><ul><li>The key is order: Docker invalidates all layers after the first changed layer. Think about which files change most often (source code) vs. least often (package.json).</li><li>EXPOSE does not actually publish the port; it documents intent. The real port mapping happens at &#x27;docker run -p&#x27;.</li><li>CMD uses JSON array form (exec form) to avoid shell processing: CMD [&quot;node&quot;, &quot;server.js&quot;] rather than CMD node server.js.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>FROM node:18-alpine
+WORKDIR /app
+# Copy dependency manifests first so Docker can cache the install layer.
+# If only server.js changes, this layer is reused and npm install is skipped.
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD [&quot;node&quot;, &quot;server.js&quot;]</code></pre>
+                <div class='exp2'><p>Docker builds images layer by layer and caches each layer. When you re-build, layers whose inputs have not changed are served from cache. By copying &#x27;package*.json&#x27; and running &#x27;npm install&#x27; before copying the application source, the expensive install step is only re-executed when the dependency list changes. A change to &#x27;server.js&#x27; alone only invalidates the final &#x27;COPY . .&#x27; layer and beyond, so builds are much faster. Reversing the order — &#x27;COPY . .&#x27; first — would invalidate the install cache on every source change, even when no dependency changed.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Create an ECR repository and authenticate Docker to it. Using the AWS CLI: (1) create a private ECR repository named &#x27;my-app&#x27; in the &#x27;us-east-1&#x27; region, (2) authenticate your local Docker daemon to that registry. Replace &#x27;&lt;account-id&gt;&#x27; with your actual 12-digit AWS account ID throughout.</p></div>
+              <pre class='starter'><code># Step 1: create the ECR repository
+aws ecr create-repository \
+  --repository-name ________ \
+  --region ________
+
+# Step 2: authenticate Docker
+aws ecr get-login-password --region ________ \
+  | docker login --username AWS --password-stdin \
+    ________.dkr.ecr.________.amazonaws.com</code></pre>
+              <details><summary>Hint</summary><ul><li>If you get an &#x27;UnauthorizedException&#x27;, check that your AWS CLI is configured with credentials that have &#x27;ecr:GetAuthorizationToken&#x27; and &#x27;ecr:CreateRepository&#x27; permissions.</li><li>The 12-digit account ID is visible in the top-right corner of the AWS Console, or via: aws sts get-caller-identity --query Account --output text</li><li>You can verify the repository was created with: aws ecr describe-repositories --region us-east-1</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: create the ECR repository
+aws ecr create-repository \
+  --repository-name my-app \
+  --region us-east-1
+
+# Step 2: authenticate Docker
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin \
+    &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com</code></pre>
+                <div class='exp2'><p>&#x27;aws ecr get-login-password&#x27; requests a short-lived authorization token from AWS and writes it to stdout. The pipe passes it directly to &#x27;docker login&#x27; using &#x27;--password-stdin&#x27;, so the secret never appears in your shell history. The registry URL format is always &#x27;&lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com&#x27; — this identifies your account&#x27;s ECR endpoint in that region. The login token expires after 12 hours, so production pipelines re-authenticate at the start of each build.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Build, tag with the current Git commit SHA, and push the image to ECR. Assume your ECR repository URL is &#x27;&lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app&#x27;. Write the four commands for: build → tag with commit SHA → push → verify the tag exists in ECR.</p></div>
+              <pre class='starter'><code># Build
+docker build -t my-app .
+
+# Tag with the short commit SHA (fill in the git command)
+docker tag my-app:latest \
+  &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app:________
+
+# Push
+docker push \
+  ________
+
+# Verify the image tag exists in ECR
+aws ecr describe-images \
+  --repository-name my-app \
+  --region us-east-1</code></pre>
+              <details><summary>Hint</summary><ul><li>You can also capture the SHA in a variable for readability: IMAGE_TAG=$(git rev-parse --short HEAD) then use $IMAGE_TAG in the tag and push commands.</li><li>If &#x27;docker push&#x27; returns &#x27;no basic auth credentials&#x27;, you need to re-run the &#x27;aws ecr get-login-password&#x27; pipe from the previous task — the 12-hour token may have expired.</li><li>The full ECR image name format is: &lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/&lt;repo-name&gt;:&lt;tag&gt; — every part is required.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Build
+docker build -t my-app .
+
+# Tag with the short commit SHA
+docker tag my-app:latest \
+  &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)
+
+# Push
+docker push \
+  &lt;account-id&gt;.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)
+
+# Verify the image tag exists in ECR
+aws ecr describe-images \
+  --repository-name my-app \
+  --region us-east-1</code></pre>
+                <div class='exp2'><p>&#x27;git rev-parse --short HEAD&#x27; outputs the short (7-character) SHA of the current commit, e.g. &#x27;a1b9f3c&#x27;. Using this as the image tag creates an immutable, traceable artifact: the tag tells you exactly which commit produced this image. The &#x27;docker tag&#x27; command creates an alias — it does not copy the image; it simply adds another name pointing to the same layers. &#x27;docker push&#x27; then uploads the layers to ECR under that full registry/repository:tag address. The &#x27;describe-images&#x27; call confirms the tag appears in ECR and is ready to be referenced in a Kubernetes Deployment manifest.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Convert the single-stage Dockerfile from the warm-up into a multi-stage build that produces a smaller final image. Stage 1 (named &#x27;builder&#x27;) installs all dependencies including devDependencies. Stage 2 (final image) starts from &#x27;node:18-alpine&#x27;, copies only the production node_modules and the application source from stage 1, and sets the same CMD. Explain why the final image is smaller.</p></div>
+              <pre class='starter'><code># Multi-stage Dockerfile
+# Stage 1: build stage
+FROM node:18-alpine AS builder
+WORKDIR /app
+# ... install all deps including devDependencies
+
+# Stage 2: production image
+FROM ________
+WORKDIR /app
+# Copy only what the running app needs from the builder stage
+# COPY --from=builder ...
+
+EXPOSE 3000
+CMD [&quot;node&quot;, &quot;server.js&quot;]</code></pre>
+              <details><summary>Hint</summary><ul><li>npm install with no flags installs both &#x27;dependencies&#x27; and &#x27;devDependencies&#x27;. To install only production deps in stage 2 you could alternatively run &#x27;npm install --omit=dev&#x27; in the second stage instead of copying node_modules.</li><li>You can copy entire directories: COPY --from=builder /app/dist ./dist — useful for compiled TypeScript or React builds.</li><li>After building, compare image sizes: docker images my-app — compare the multi-stage result to the size of the original single-stage image.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Stage 1: install all dependencies (including dev)
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+
+# Stage 2: production image — only runtime artifacts
+FROM node:18-alpine
+WORKDIR /app
+# Copy only production node_modules and application code from builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/server.js ./server.js
+# If you have additional source files/directories, copy them too:
+# COPY --from=builder /app/src ./src
+EXPOSE 3000
+CMD [&quot;node&quot;, &quot;server.js&quot;]</code></pre>
+                <div class='exp2'><p>In a single-stage build, every tool used during the build (compilers, test runners, devDependencies) ends up baked into the final image. Multi-stage builds fix this: only the artifacts that are explicitly COPY --from= transferred into the final stage are included. The final image contains no build toolchain, no devDependencies, and no intermediate build files — just the minimal runtime. In practice this typically cuts image size by 30–70%, reducing both pull time and the attack surface (fewer packages = fewer potential vulnerabilities). The &#x27;--from=builder&#x27; syntax names which stage to copy from.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=lOdrdV0eDrs' target='_blank'>Build Docker Image Using Jenkins Pipeline &amp; Push to AWS ECR | Learn DevOps Tools Ep2</a></li><li><a href='https://www.youtube.com/watch?v=Hv5UcBYseus' target='_blank'>Build a Docker Image and Publish It to AWS ECR using Github Actions</a></li><li><a href='https://www.youtube.com/watch?v=OihC0CS43AI' target='_blank'>Kubernetes registry caching with ECR</a></li></ul></div>
+        </article>
+<article id='lec3' class='lecture'>
+          <h2>03. &quot;Building the GitLab + Jenkins Pipeline&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Trigger a Jenkins pipeline automatically from a GitLab webhook.</li>
+<li>Write a <code class='ic'>Jenkinsfile</code> with checkout, build, test, and image-push stages.</li>
+<li>End up with a skeleton where a push to GitLab automatically produces a container image in ECR.</li>
+</ul>
+<h3>Body</h3>
+<h4>The goal of this lecture</h4>
+<p>So far you can build an image and push it to ECR <em>by hand</em>. That is fine once; it is miserable every day. In this lecture we automate it: a developer pushes to GitLab, and within seconds Jenkins wakes up, builds the image, runs tests, and pushes the result to ECR — no human in the loop. By the end you have the <strong>CI skeleton</strong> (continuous integration), and the only thing missing is the deploy-to-EKS step, which we add in Lecture 6.</p>
+<p>The two roles to keep straight:</p>
+<ul>
+<li><strong>GitLab</strong> is the <em>source host</em>. It stores your repository and fires an event when code changes.</li>
+<li><strong>Jenkins</strong> is the <em>engine</em>. It listens for that event and runs the actual work, defined as code in a <code class='ic'>Jenkinsfile</code>.</li>
+</ul>
+<h4>Wiring GitLab to Jenkins with a webhook</h4>
+<p>A <strong>webhook</strong> is just an HTTP request that GitLab sends to a URL of your choosing whenever something happens — for example, a push to the <code class='ic'>main</code> branch. We point that URL at Jenkins so a push <em>triggers</em> a build automatically. The flow is as follows: GitLab detects a push, sends a webhook to Jenkins, and Jenkins starts the pipeline.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant Dev as Developer
+    participant GL as GitLab
+    participant JK as Jenkins
+    participant ECR as Amazon ECR
+    Dev-&gt;&gt;GL: git push to main
+    GL-&gt;&gt;JK: webhook (HTTP POST) &quot;push event&quot;
+    activate JK
+    JK-&gt;&gt;GL: checkout the pushed commit
+    JK-&gt;&gt;JK: run tests, then docker build
+    JK-&gt;&gt;ECR: docker push commit-tagged image
+    deactivate JK
+    JK--&gt;&gt;GL: report build status</div><figcaption>GitLab push triggers a Jenkins build via webhook</figcaption></figure>
+<p>There are two sides to configure:</p>
+<p><strong>On Jenkins</strong>, create a Pipeline job and enable the GitLab webhook trigger so the job will accept incoming webhook calls. (Install the GitLab plugin if it is not already present.) Jenkins will accept webhook posts at a path like <code class='ic'>http://&lt;jenkins-host&gt;/project/&lt;job-name&gt;</code> (or <code class='ic'>/gitlab-webhook/</code>, depending on your plugin).</p>
+<p><strong>On GitLab</strong>, go to your project&#x27;s <em>Settings → Webhooks</em>, paste the Jenkins URL, and select the events you care about — typically <strong>Push events</strong> and <strong>Merge request events</strong>. Save, and use GitLab&#x27;s &quot;Test&quot; button to fire a sample event and confirm Jenkins responds.</p>
+<blockquote class='callout'>
+<p>Before relying on the webhook, click <strong>Build Now</strong> in Jenkins once to confirm the job runs at all. Debugging &quot;did the pipeline work?&quot; and &quot;did the webhook fire?&quot; at the same time is twice the pain. Get a manual build green first, then prove the trigger.</p>
+</blockquote>
+<p>A quick reality check on networking: GitLab must be able to <em>reach</em> your Jenkins URL. If Jenkins lives on a cloud VM, its security group/firewall has to allow inbound traffic on the Jenkins port (8080 by default), or the webhook delivery will fail with a connection error.</p>
+<h4>The Jenkinsfile: your pipeline as code</h4>
+<p>Rather than clicking through Jenkins&#x27; UI to define build steps, you write them in a <strong><code class='ic'>Jenkinsfile</code></strong> that lives in your repository alongside the code. This is &quot;pipeline as code&quot; — the build process is versioned, reviewable, and travels with the project. A declarative <code class='ic'>Jenkinsfile</code> is organized into <strong>stages</strong>, each a logical phase of the build.</p>
+<p>Here is a skeleton for our CI pipeline:</p>
+<pre><code>
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = &#x27;us-east-1&#x27;
+        ACCOUNT_ID = &#x27;111122223333&#x27;
+        ECR_REPO   = &#x27;my-app&#x27;
+        REGISTRY   = &quot;${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com&quot;
+        IMAGE_TAG  = &quot;${env.GIT_COMMIT.take(7)}&quot;   // short commit SHA, not &#x27;latest&#x27;
+    }
+
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                checkout scm   // pull the code GitLab just pushed
+            }
+        }
+
+        stage(&#x27;Test&#x27;) {
+            steps {
+                sh &#x27;npm install &amp;&amp; npm test&#x27;   // fail fast if tests break
+            }
+        }
+
+        stage(&#x27;Build Image&#x27;) {
+            steps {
+                sh &quot;docker build -t ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG} .&quot;
+            }
+        }
+
+        stage(&#x27;Push to ECR&#x27;) {
+            steps {
+                sh &quot;&quot;&quot;
+                  aws ecr get-login-password --region ${AWS_REGION} \
+                    | docker login --username AWS --password-stdin ${REGISTRY}
+                  docker push ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                &quot;&quot;&quot;
+            }
+        }
+    }
+}
+</code></pre>
+<p>Walking through the stages:</p>
+<ul>
+<li><strong>Checkout</strong> pulls the exact commit that triggered the build. Jenkins exposes that commit&#x27;s SHA as <code class='ic'>GIT_COMMIT</code>, which we shorten and reuse as our image tag — closing the loop with Lecture 2&#x27;s &quot;tag by commit&quot; rule.</li>
+<li><strong>Test</strong> runs your test suite. Put it <em>before</em> the build so a failing test stops the pipeline early, before you waste time building and pushing an image you would never deploy. (Many teams also slot a static-analysis or code-quality scan in here.)</li>
+<li><strong>Build Image</strong> runs <code class='ic'>docker build</code>, tagging with the full ECR address and the commit SHA.</li>
+<li><strong>Push to ECR</strong> authenticates to ECR (the same <code class='ic'>get-login-password</code> dance from Lecture 2) and pushes.</li>
+</ul>
+<h4>Where do the AWS credentials come from?</h4>
+<p>The push stage needs permission to talk to ECR. <strong>Do not</strong> paste an access key and secret directly into the <code class='ic'>Jenkinsfile</code> — that is a secret leaking into your repository. Instead:</p>
+<ul>
+<li>If Jenkins runs on an EC2 instance, attach an <strong>IAM role</strong> to that instance granting ECR push/pull permissions. The AWS CLI picks the role up automatically, with no static keys anywhere.</li>
+<li>Otherwise, store the credentials in <strong>Jenkins Credentials</strong> and inject them into the job, so they never appear in source control.</li>
+</ul>
+<p>The IAM permissions ECR needs are modest: get an authorization token, and push/pull layers — ideally scoped to just your repository rather than every repo in the account. We will lean on this same &quot;the machine has an IAM identity&quot; idea heavily in Lecture 5, when Jenkins needs to authenticate to EKS itself.</p>
+<h4>What you have built</h4>
+<p>At this point your CI skeleton is complete: <strong>push to GitLab → webhook → Jenkins checks out, tests, builds, and pushes a commit-tagged image to ECR — fully automatically.</strong> Every commit now leaves behind a traceable, deployable artifact in your registry.</p>
+<p>What is still missing is the <em>delivery</em> half: nothing yet tells EKS to run that new image. That requires two things — manifests describing the deployment (Lecture 4) and a way for Jenkins to authenticate to and command the cluster (Lecture 5) — after which we add a final deploy stage in Lecture 6.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A GitLab webhook turns a <code class='ic'>git push</code> into an automatic Jenkins build; configure the trigger on Jenkins and the webhook URL on GitLab, then test both.</li>
+<li>A <code class='ic'>Jenkinsfile</code> defines the pipeline as versioned code, organized into stages: Checkout → Test → Build Image → Push to ECR.</li>
+<li>Reuse the triggering commit&#x27;s SHA (<code class='ic'>GIT_COMMIT</code>) as the image tag, so every artifact is traceable.</li>
+<li>Run tests before building so failures stop the pipeline early.</li>
+<li>Never hardcode AWS keys in the <code class='ic'>Jenkinsfile</code>; use an IAM role on the Jenkins host or Jenkins-managed credentials.</li>
+<li>The result is a complete CI skeleton — the deploy-to-EKS step comes in Lectures 5 and 6.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Read the Jenkinsfile skeleton from the lecture and answer these questions by annotating the code. (1) Which environment variable holds the short commit SHA used as the image tag? (2) Which stage must succeed before the &#x27;Build Image&#x27; stage runs, and why does order matter? (3) What is the full ECR image name that &#x27;docker build&#x27; produces if ACCOUNT_ID=111122223333, AWS_REGION=us-east-1, ECR_REPO=my-app, and GIT_COMMIT=a1b9f3cdef012?</p></div>
+              <pre class='starter'><code>// Jenkinsfile skeleton (from lecture)
+pipeline {
+    agent any
+    environment {
+        AWS_REGION = &#x27;us-east-1&#x27;
+        ACCOUNT_ID = &#x27;111122223333&#x27;
+        ECR_REPO   = &#x27;my-app&#x27;
+        REGISTRY   = &quot;${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com&quot;
+        IMAGE_TAG  = &quot;${env.GIT_COMMIT.take(7)}&quot;
+    }
+    stages {
+        stage(&#x27;Checkout&#x27;) { steps { checkout scm } }
+        stage(&#x27;Test&#x27;)     { steps { sh &#x27;npm install &amp;&amp; npm test&#x27; } }
+        stage(&#x27;Build Image&#x27;) {
+            steps { sh &quot;docker build -t ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG} .&quot; }
+        }
+        stage(&#x27;Push to ECR&#x27;) {
+            steps {
+                sh &quot;&quot;&quot;
+                  aws ecr get-login-password --region ${AWS_REGION} \\
+                    | docker login --username AWS --password-stdin ${REGISTRY}
+                  docker push ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                &quot;&quot;&quot;
+            }
+        }
+    }
+}
+
+// Q1: Which variable holds the short commit SHA?
+// Answer: ________
+
+// Q2: Which stage runs before &#x27;Build Image&#x27; and why?
+// Answer: ________
+
+// Q3: Full image name produced by &#x27;docker build&#x27;?
+// Answer: ________</code></pre>
+              <details><summary>Hint</summary><ul><li>Jenkins&#x27; built-in environment variables (like GIT_COMMIT, BUILD_NUMBER, BRANCH_NAME) are always available in a Jenkinsfile — no plugin needed.</li><li>In Groovy string interpolation, ${variable} expands inside double-quoted strings. Single-quoted strings are literal and do not expand.</li><li>The .take(7) Groovy method returns the first N characters of a string — equivalent to a substring from 0 to 7.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// Q1: IMAGE_TAG = &quot;${env.GIT_COMMIT.take(7)}&quot;
+//     GIT_COMMIT is Jenkins&#x27; built-in variable for the triggering commit&#x27;s full SHA;
+//     .take(7) trims it to 7 characters (e.g., &#x27;a1b9f3c&#x27;).
+
+// Q2: The &#x27;Test&#x27; stage runs before &#x27;Build Image&#x27;.
+//     If tests fail, the pipeline aborts before spending time building and pushing
+//     an image that would never be deployed — fail fast, waste nothing.
+
+// Q3: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+//     (GIT_COMMIT.take(7) on &#x27;a1b9f3cdef012&#x27; yields &#x27;a1b9f3c&#x27;)
+//     Format: &lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com/&lt;repo&gt;:&lt;tag&gt;</code></pre>
+                <div class='exp2'><p>IMAGE_TAG uses &#x27;.take(7)&#x27; on the full GIT_COMMIT SHA to produce a short but unique identifier — identical to &#x27;git rev-parse --short HEAD&#x27;. The Test stage is intentionally placed before Build Image so that a failing test aborts the pipeline before the expensive docker build and network push. This &#x27;fail fast&#x27; principle is fundamental in CI: cheap checks come first. The full image name concatenates REGISTRY (which itself is built from ACCOUNT_ID + AWS_REGION) with the repo name and the commit-SHA tag.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Configure the GitLab webhook connection. Describe the exact steps to: (1) enable the webhook trigger on the Jenkins Pipeline job, (2) register the Jenkins URL as a webhook in a GitLab project for Push events, and (3) verify the connection works without making a real push.</p></div>
+              <pre class='starter'><code># This is a configuration task — no code to run, but document the exact steps.
+
+## Step 1: Jenkins side
+# Where in the Jenkins UI do you configure webhook acceptance?
+# What plugin is required?
+# What URL does GitLab need to POST to?
+
+## Step 2: GitLab side
+# Where in GitLab do you add a webhook?
+# Which trigger events should be selected?
+
+## Step 3: Verification
+# How do you confirm the webhook fires successfully without pushing a commit?</code></pre>
+              <details><summary>Hint</summary><ul><li>If Jenkins is behind a NAT or firewall, GitLab cannot reach it. Use a public IP, a reverse proxy (nginx), or a tool like ngrok for local testing.</li><li>Before testing the webhook, click &#x27;Build Now&#x27; on the Jenkins job manually to confirm the pipeline itself runs correctly. Debug pipeline and webhook separately.</li><li>GitLab also shows a log of webhook delivery attempts (response code + body) in Settings → Webhooks — this is your first debugging tool if the trigger does not fire.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>## Step 1: Jenkins side
+# 1a. Install the &#x27;GitLab&#x27; plugin (Manage Jenkins → Plugins → Available).
+# 1b. Create (or open) a Pipeline job.
+# 1c. In the job configuration, under &#x27;Build Triggers&#x27;, check
+#     &#x27;Build when a change is pushed to GitLab&#x27;.
+# 1d. Note the webhook URL shown — typically:
+#     http://&lt;jenkins-host&gt;:8080/project/&lt;job-name&gt;
+#     (or /gitlab-webhook/ depending on plugin version)
+# 1e. Ensure the Jenkins server&#x27;s firewall/security group allows inbound
+#     traffic on port 8080 from GitLab&#x27;s IP ranges.
+
+## Step 2: GitLab side
+# 2a. Go to your project → Settings → Webhooks.
+# 2b. Paste the Jenkins URL from step 1d into the &#x27;URL&#x27; field.
+# 2c. Under &#x27;Trigger&#x27;, check &#x27;Push events&#x27; (and optionally &#x27;Merge request events&#x27;).
+# 2d. Click &#x27;Add webhook&#x27;.
+
+## Step 3: Verification
+# 3a. On the GitLab Webhooks settings page, find your new webhook entry.
+# 3b. Click the &#x27;Test&#x27; button and select &#x27;Push events&#x27;.
+# 3c. GitLab sends a sample HTTP POST to Jenkins.
+# 3d. Check the Jenkins job — a new build should appear in the build history.
+# 3e. Also check the GitLab webhook page for the response code (200 = success).</code></pre>
+                <div class='exp2'><p>The webhook integration has two sides: Jenkins must be configured to accept incoming webhook POST requests (the GitLab plugin adds this capability and exposes a trigger URL), and GitLab must be told where to send those requests. The &#x27;Test&#x27; button sends a synthetic push event so you can verify connectivity before any real commit — this is the recommended approach because it separates the &#x27;did the webhook fire?&#x27; question from the &#x27;did the build succeed?&#x27; question. If the test returns a non-200 response or times out, the most common causes are: Jenkins not reachable from GitLab&#x27;s network, the wrong URL in GitLab, or the trigger not enabled in the Jenkins job.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Write the Jenkinsfile for your own project. Adapt the lecture&#x27;s skeleton so it works for a Python Flask application (instead of Node.js). The test command is &#x27;pip install -r requirements.txt &amp;&amp; pytest&#x27;. Keep all four stages (Checkout, Test, Build Image, Push to ECR) and the environment block. Use your own values for ACCOUNT_ID, ECR_REPO, AWS_REGION, and CLUSTER (you may leave them as placeholder strings).</p></div>
+              <pre class='starter'><code>pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = &#x27;YOUR_REGION&#x27;
+        ACCOUNT_ID = &#x27;YOUR_ACCOUNT_ID&#x27;
+        ECR_REPO   = &#x27;YOUR_REPO_NAME&#x27;
+        REGISTRY   = &quot;${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com&quot;
+        IMAGE_TAG  = &quot;${env.GIT_COMMIT.take(7)}&quot;
+    }
+
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                // fill in
+            }
+        }
+
+        stage(&#x27;Test&#x27;) {
+            steps {
+                // fill in — use pytest
+            }
+        }
+
+        stage(&#x27;Build Image&#x27;) {
+            steps {
+                // fill in
+            }
+        }
+
+        stage(&#x27;Push to ECR&#x27;) {
+            steps {
+                // fill in
+            }
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If the Jenkins agent does not have Python or pytest installed, add a &#x27;pip install&#x27; step or use a Docker-based agent: agent { docker { image &#x27;python:3.11-slim&#x27; } }</li><li>The Jenkinsfile must be committed to the root of your GitLab repository so Jenkins can find it when it checks out &#x27;scm&#x27;.</li><li>You can verify the Jenkinsfile syntax in the Jenkins UI: open the Pipeline job → Pipeline Syntax → Declarative Directive Generator, or use the &#x27;Lint&#x27; endpoint: curl -X POST &lt;jenkins-url&gt;/pipeline-model-converter/validate</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = &#x27;us-east-1&#x27;
+        ACCOUNT_ID = &#x27;111122223333&#x27;
+        ECR_REPO   = &#x27;my-flask-app&#x27;
+        REGISTRY   = &quot;${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com&quot;
+        IMAGE_TAG  = &quot;${env.GIT_COMMIT.take(7)}&quot;
+    }
+
+    stages {
+        stage(&#x27;Checkout&#x27;) {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage(&#x27;Test&#x27;) {
+            steps {
+                sh &#x27;pip install -r requirements.txt &amp;&amp; pytest&#x27;
+            }
+        }
+
+        stage(&#x27;Build Image&#x27;) {
+            steps {
+                sh &quot;docker build -t ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG} .&quot;
+            }
+        }
+
+        stage(&#x27;Push to ECR&#x27;) {
+            steps {
+                sh &quot;&quot;&quot;
+                  aws ecr get-login-password --region ${AWS_REGION} \\
+                    | docker login --username AWS --password-stdin ${REGISTRY}
+                  docker push ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+                &quot;&quot;&quot;
+            }
+        }
+    }
+}</code></pre>
+                <div class='exp2'><p>The only change needed to adapt from Node.js to Python Flask is the test command in the Test stage — from &#x27;npm install &amp;&amp; npm test&#x27; to &#x27;pip install -r requirements.txt &amp;&amp; pytest&#x27;. Everything else stays identical because the pipeline&#x27;s structure is language-agnostic: Checkout pulls the source, Test validates it, Build Image creates the container artifact (Docker does not care what language runs inside), and Push to ECR uploads it. The Dockerfile in your repository handles any language-specific build steps. This reusability is the core value of a container-based pipeline.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Harden the credential handling in the Jenkinsfile. The current &#x27;Push to ECR&#x27; stage authenticates using whatever AWS identity the Jenkins agent already has (via IAM role on EC2). A colleague suggests storing an AWS access key and secret as Jenkins credentials and injecting them with &#x27;withCredentials&#x27;. Explain why the IAM-role approach is superior, then write a modified &#x27;Push to ECR&#x27; stage that correctly injects Jenkins-stored credentials as a fallback (for a Jenkins host that does NOT have an IAM role), using the &#x27;withCredentials&#x27; block and &#x27;AWS_ACCESS_KEY_ID&#x27; / &#x27;AWS_SECRET_ACCESS_KEY&#x27; binding.</p></div>
+              <pre class='starter'><code>// Explain (as a code comment) why IAM role &gt; static credentials:
+// ...
+
+// Modified &#x27;Push to ECR&#x27; stage using withCredentials (fallback approach)
+stage(&#x27;Push to ECR&#x27;) {
+    steps {
+        // Use withCredentials to inject the stored AWS key pair
+        // Credential ID in Jenkins: &#x27;aws-ecr-creds&#x27; (type: Username+Password or AWS credentials)
+        withCredentials([/* fill in */]) {
+            sh &quot;&quot;&quot;
+              aws ecr get-login-password --region ${AWS_REGION} \\
+                | docker login --username AWS --password-stdin ${REGISTRY}
+              docker push ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+            &quot;&quot;&quot;
+        }
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>Install the &#x27;AWS Credentials&#x27; plugin in Jenkins to get the AmazonWebServicesCredentialsBinding binding type.</li><li>In Jenkins, go to Manage Jenkins → Credentials → (Global) → Add Credentials, choose &#x27;AWS Credentials&#x27;, and enter the Access Key ID and Secret Access Key — then use the ID you assign here as &#x27;credentialsId&#x27;.</li><li>With an IAM role on the Jenkins EC2 instance, the &#x27;aws ecr get-login-password&#x27; command works with no extra environment variables — the AWS CLI reads the role&#x27;s STS token from the EC2 instance metadata endpoint automatically.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>// IAM role is superior because:
+// 1. No static credentials to rotate, leak, or accidentally commit to source control.
+// 2. Credentials are automatically rotated by AWS (STS short-lived tokens).
+// 3. The role can be audited and scoped precisely (e.g., only ecr:GetAuthorizationToken
+//    and ecr:BatchCheckLayerAvailability/PutImage for the specific repository).
+// 4. If the Jenkins host is compromised, the window of credential exposure is minimal
+//    because tokens expire in minutes/hours rather than persisting indefinitely.
+
+// Fallback: inject stored credentials with withCredentials
+stage(&#x27;Push to ECR&#x27;) {
+    steps {
+        withCredentials([[
+            $class: &#x27;AmazonWebServicesCredentialsBinding&#x27;,
+            credentialsId: &#x27;aws-ecr-creds&#x27;,
+            accessKeyVariable: &#x27;AWS_ACCESS_KEY_ID&#x27;,
+            secretKeyVariable: &#x27;AWS_SECRET_ACCESS_KEY&#x27;
+        ]]) {
+            sh &quot;&quot;&quot;
+              aws ecr get-login-password --region ${AWS_REGION} \\
+                | docker login --username AWS --password-stdin ${REGISTRY}
+              docker push ${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+            &quot;&quot;&quot;
+        }
+    }
+}</code></pre>
+                <div class='exp2'><p>The IAM role on the EC2 instance (or IRSA for in-cluster Jenkins) is preferred because credentials are never stored anywhere — AWS delivers short-lived STS tokens to the instance metadata service, the AWS CLI picks them up automatically, and they expire. Static access keys stored in Jenkins Credentials are still better than hardcoding them in the Jenkinsfile (they are encrypted in Jenkins&#x27; credential store and masked in build logs), but they require manual rotation and are a longer-lived secret that must be guarded. The &#x27;AmazonWebServicesCredentialsBinding&#x27; class requires the &#x27;AWS Credentials&#x27; Jenkins plugin; it injects the key pair as environment variables only for the duration of the &#x27;withCredentials&#x27; block, and Jenkins automatically masks their values in log output.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=361bfIvXMBI' target='_blank'>Jenkins CI/CD Pipeline - SonarQube, Docker, Github Webhooks on AWS | Resume Project | English</a></li><li><a href='https://www.youtube.com/watch?v=rcZoPygiI8o' target='_blank'>Deploying DevOps Live Project using Jenkins CI/CD Pipeline with GitHub integration</a></li></ul></div>
+        </article>
+<article id='lec4' class='lecture'>
+          <h2>04. &quot;Writing Kubernetes Deployment Manifests&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the core fields of Deployment and Service manifests (YAML).</li>
+<li>Identify exactly where the image tag is injected into the manifest.</li>
+<li>Write the manifests needed to deploy your own application.</li>
+</ul>
+<h3>Body</h3>
+<h4>Manifests are the contract</h4>
+<p>In Lecture 1 we said Kubernetes is declarative: you describe the desired end state in a file, and the cluster makes it real. That file is the <strong>manifest</strong>, and in this lecture you write the two you will use constantly — a <strong>Deployment</strong> and a <strong>Service</strong>. The Deployment says &quot;run N copies of this image&quot;; the Service says &quot;give those copies a stable address so traffic can reach them.&quot; Together they are the contract your pipeline applies to EKS.</p>
+<h4>Pods, and why you do not write them directly</h4>
+<p>The smallest unit Kubernetes runs is a <strong>Pod</strong> — one or more containers sharing networking and storage. You <em>can</em> define a Pod directly:</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-app
+spec:
+  containers:
+    - name: my-app
+      image: nginx
+      ports:
+        - containerPort: 80
+</code></pre>
+<p>But a bare Pod is fragile: if it dies, it stays dead, and there is no easy way to run several copies or upgrade them. So in practice you almost never create Pods directly. Instead you create a <strong>Deployment</strong>, which manages Pods for you.</p>
+<h4>The Deployment manifest</h4>
+<p>A Deployment&#x27;s job is to declare <em>how many</em> replicas of a Pod should run and <em>which</em> image they use, then keep that true — recreating failed Pods and handling upgrades. Here is a complete, annotated example:</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+spec:
+  replicas: 3                       # run 3 copies
+  selector:
+    matchLabels:
+      app: my-app                   # this Deployment manages Pods with this label
+  template:                         # the Pod blueprint
+    metadata:
+      labels:
+        app: my-app                 # Pods get this label — must match the selector
+    spec:
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          ports:
+            - containerPort: 3000
+</code></pre>
+<p>Every Kubernetes object shares four top-level fields, and they are worth naming explicitly:</p>
+<ul>
+<li><strong><code class='ic'>apiVersion</code></strong> — which API group/version this object belongs to (<code class='ic'>apps/v1</code> for Deployments).</li>
+<li><strong><code class='ic'>kind</code></strong> — the type of object (<code class='ic'>Deployment</code>).</li>
+<li><strong><code class='ic'>metadata</code></strong> — name and labels that identify it.</li>
+<li><strong><code class='ic'>spec</code></strong> — the desired state; this is where the real configuration lives.</li>
+</ul>
+<p>Inside the Deployment <code class='ic'>spec</code>, the three fields that matter most:</p>
+<ul>
+<li><strong><code class='ic'>replicas</code></strong> — how many identical Pods to run. Want to scale? Change this number and re-apply.</li>
+<li><strong><code class='ic'>selector.matchLabels</code></strong> — how the Deployment finds the Pods it owns. It looks for Pods carrying a matching label.</li>
+<li><strong><code class='ic'>template</code></strong> — the blueprint for each Pod. Its labels <strong>must</strong> match the selector (notice <code class='ic'>app: my-app</code> appears in both places), or the Deployment will not recognize its own Pods.</li>
+</ul>
+<h4>Where the image tag is injected</h4>
+<p>The single most important line for your pipeline is this one, inside the Pod template:</p>
+<pre><code>
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+</code></pre>
+<p>That <code class='ic'>:a1b9f3c</code> is the commit-SHA tag your CI pipeline produced in Lectures 2 and 3. <strong>This is the injection point</strong> — the seam where &quot;the image we built&quot; meets &quot;what the cluster runs.&quot; When you deploy a new version, what actually changes is this tag. In Lecture 6 you will see two ways to update it: rewrite the manifest and <code class='ic'>kubectl apply</code>, or change it in place with <code class='ic'>kubectl set image</code>. Either way, this is the field that moves.</p>
+<h4>The Service manifest</h4>
+<p>Pods are <strong>ephemeral</strong> — they get created, destroyed, and rescheduled, and each one gets a fresh IP address. You cannot hand clients a Pod IP, because it will not exist tomorrow. A <strong>Service</strong> solves this by giving your set of Pods one stable address and load-balancing requests across them.</p>
+<pre><code>
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+spec:
+  type: ClusterIP                   # reachable inside the cluster
+  selector:
+    app: my-app                     # send traffic to Pods with this label
+  ports:
+    - port: 80                      # the Service&#x27;s port
+      targetPort: 3000              # the container&#x27;s port
+</code></pre>
+<p>The key field is the <strong><code class='ic'>selector</code></strong>: it matches the <em>same label</em> (<code class='ic'>app: my-app</code>) that your Deployment&#x27;s Pods carry. That label is the glue — it is how the Service knows which Pods to route to, completely decoupled from individual Pod IPs. As Pods come and go during an upgrade, the Service automatically tracks the healthy ones.</p>
+<p>As the diagram shows, the shared <code class='ic'>app: my-app</code> label is what links all three objects: the Deployment stamps it on the Pods it creates, and the Service uses it to find those Pods.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    Dep[&quot;Deployment my-app&lt;br/&gt;selector: app=my-app&quot;]
+    subgraph Pods[&quot;Pods labeled app=my-app&quot;]
+        P1[Pod 1]
+        P2[Pod 2]
+        P3[Pod 3]
+    end
+    Svc[&quot;Service my-app&lt;br/&gt;selector: app=my-app&quot;]
+    Client[Client traffic]
+
+    Dep --&gt;|creates and manages| P1
+    Dep --&gt;|creates and manages| P2
+    Dep --&gt;|creates and manages| P3
+    Client --&gt;|stable address| Svc
+    Svc --&gt;|routes by label| P1
+    Svc --&gt;|routes by label| P2
+    Svc --&gt;|routes by label| P3</div><figcaption>How label selectors link Deployment, Pods, and Service</figcaption></figure>
+<p>Service <code class='ic'>type</code> controls reach:</p>
+<ul>
+<li><strong><code class='ic'>ClusterIP</code></strong> (default) — reachable only inside the cluster. Good for internal services.</li>
+<li><strong><code class='ic'>NodePort</code></strong> — opens a port on every node.</li>
+<li><strong><code class='ic'>LoadBalancer</code></strong> — on EKS, provisions an AWS load balancer with a public address, so the internet can reach your app.</li>
+</ul>
+<p>For exposing real web apps to users you will often go further and use an <strong>Ingress</strong> (HTTP routing in front of Services), but a <code class='ic'>Service</code> is the foundational piece and all you need to get traffic flowing in this course.</p>
+<h4>A note on Deployment relatives</h4>
+<p>A Deployment is the right choice for <strong>stateless</strong> apps — web servers, APIs — where any replica is interchangeable. You may hear about two siblings: a <strong>StatefulSet</strong> (for apps that need stable identities and their own persistent storage per Pod, like databases or Kafka) and a <strong>DaemonSet</strong> (runs exactly one Pod per node, for agents like log or metrics collectors). For deploying your application code, Deployment is almost always what you want; just know the others exist.</p>
+<h4>Applying your manifests</h4>
+<p>Once written, you hand the files to the cluster:</p>
+<pre><code>
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+</code></pre>
+<p><code class='ic'>kubectl apply -f</code> is declarative: run it once and it creates the objects; run it again after editing and it updates them to match the new desired state. This single command is the backbone of everything that follows — it is literally what your pipeline will call in Lecture 6.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A Deployment declares the desired number of replicas and the image to run, and keeps that true; you write Deployments, not bare Pods.</li>
+<li>Every object has <code class='ic'>apiVersion</code>, <code class='ic'>kind</code>, <code class='ic'>metadata</code>, and <code class='ic'>spec</code>; the Deployment&#x27;s key fields are <code class='ic'>replicas</code>, <code class='ic'>selector</code>, and the Pod <code class='ic'>template</code>.</li>
+<li>The <code class='ic'>image:</code> line in the Pod template — ending in your commit-SHA tag — is exactly where the pipeline injects each new version.</li>
+<li>A Service gives ephemeral Pods one stable address and load-balances across them; its <code class='ic'>selector</code> matches the Pods&#x27; label. Use <code class='ic'>LoadBalancer</code> type on EKS to expose an app publicly.</li>
+<li><code class='ic'>kubectl apply -f</code> creates or updates objects to match your manifests, and is the command your pipeline ultimately runs.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Identify the three label/selector fields that must be mutually consistent in a Deployment manifest to ensure the Deployment correctly manages its Pods. Given the partial manifest below, fill in the two blank labels so that the Deployment can find and manage the Pods it creates.</p></div>
+              <pre class='starter'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ________        # blank A — the label the Deployment looks for on its Pods
+  template:
+    metadata:
+      labels:
+        app: ________      # blank B — the label stamped on each Pod
+    spec:
+      containers:
+        - name: my-app
+          image: nginx:1.25
+          ports:
+            - containerPort: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>If selector.matchLabels and template.metadata.labels do not match, &#x27;kubectl apply&#x27; returns an error: &#x27;selector does not match template labels&#x27;.</li><li>You can use multiple labels in a selector (e.g., app: my-app AND tier: backend) for finer-grained grouping, but all must appear on the Pods.</li><li>kubectl describe deployment my-app shows the selector and controlled Pods — useful for verifying the match after applying.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app        # blank A — must match the Pod template labels
+  template:
+    metadata:
+      labels:
+        app: my-app      # blank B — must match the selector above
+    spec:
+      containers:
+        - name: my-app
+          image: nginx:1.25
+          ports:
+            - containerPort: 80</code></pre>
+                <div class='exp2'><p>A Deployment&#x27;s &#x27;selector.matchLabels&#x27; is a query: it finds all Pods that carry exactly those labels and claims them as its own. The &#x27;template.metadata.labels&#x27; is what the Deployment stamps onto every Pod it creates. For the Deployment to manage its Pods, these two must match. If they differ, the Deployment either adopts the wrong Pods or finds none of its own — Kubernetes will actually refuse to create the Deployment and return a validation error. Both blanks must therefore be &#x27;app: my-app&#x27;. The top-level &#x27;metadata.labels&#x27; on the Deployment itself is separate — it labels the Deployment object, not the Pods.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Write a complete Deployment manifest for your own application. Use the following specifications: app name &#x27;web-api&#x27;, 3 replicas, ECR image &#x27;111122223333.dkr.ecr.us-east-1.amazonaws.com/web-api:abc1234&#x27;, container port 8080. Include all four required top-level fields (apiVersion, kind, metadata, spec). Substitute your own account ID, region, repo name, and commit tag where appropriate.</p></div>
+              <pre class='starter'><code># deployment.yaml
+apiVersion: ________
+kind: ________
+metadata:
+  name: ________
+  labels:
+    app: ________
+spec:
+  replicas: ________
+  selector:
+    matchLabels:
+      app: ________
+  template:
+    metadata:
+      labels:
+        app: ________
+    spec:
+      containers:
+        - name: ________
+          image: ________
+          ports:
+            - containerPort: ________</code></pre>
+              <details><summary>Hint</summary><ul><li>apiVersion for core objects (Pod, Service, ConfigMap) is &#x27;v1&#x27;; for Deployments it is &#x27;apps/v1&#x27;. Check &#x27;kubectl api-resources&#x27; to see all supported kinds and their apiVersions.</li><li>containerPort is documentation — it does not actually publish the port. The Service manifest (next task) does the actual routing.</li><li>After writing the file, validate it without applying: kubectl apply -f deployment.yaml --dry-run=client</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+  labels:
+    app: web-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-api
+  template:
+    metadata:
+      labels:
+        app: web-api
+    spec:
+      containers:
+        - name: web-api
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/web-api:abc1234
+          ports:
+            - containerPort: 8080</code></pre>
+                <div class='exp2'><p>Every Kubernetes object shares the same four top-level fields: apiVersion (which API version to use — Deployments use &#x27;apps/v1&#x27;), kind (the object type), metadata (name and labels to identify the object), and spec (the desired state). For Deployments the critical spec fields are: replicas (how many Pod copies), selector (how to find owned Pods), and template (the Pod blueprint, which must carry labels matching the selector). The image line — ending in &#x27;:abc1234&#x27; — is the injection point where the pipeline inserts each new commit tag; only this one value changes between deployments.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Write a Service manifest that exposes the &#x27;web-api&#x27; Deployment to the public internet via an AWS load balancer. The Service should route traffic from port 80 (external) to port 8080 (container). Apply both manifests to your cluster using kubectl and confirm the Pods are running.</p></div>
+              <pre class='starter'><code># service.yaml
+apiVersion: ________
+kind: ________
+metadata:
+  name: web-api
+spec:
+  type: ________         # choose the type that provisions an AWS load balancer
+  selector:
+    app: ________        # must match the Deployment&#x27;s Pod labels
+  ports:
+    - port: ________     # external port clients connect to
+      targetPort: ________ # port on the container
+
+---
+# Commands to apply and verify:
+# kubectl apply -f ________
+# kubectl apply -f ________
+# kubectl get pods
+# kubectl get svc web-api</code></pre>
+              <details><summary>Hint</summary><ul><li>The EXTERNAL-IP column shows &#x27;&lt;pending&gt;&#x27; until the AWS load balancer is fully provisioned. Wait ~1 minute and re-run kubectl get svc.</li><li>For an internal-only service (not exposed to the internet), use &#x27;type: ClusterIP&#x27; — it is the default and gives a stable cluster-internal IP.</li><li>Confirm the Service is routing to the right Pods with: kubectl describe svc web-api — look at the &#x27;Endpoints&#x27; field, which lists Pod IP:port pairs.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-api
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-api
+  ports:
+    - port: 80
+      targetPort: 8080
+
+---
+# Apply manifests:
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# Verify Pods are running (should show 3 Running pods):
+kubectl get pods
+
+# Get the load balancer external IP/hostname:
+kubectl get svc web-api</code></pre>
+                <div class='exp2'><p>A Service with &#x27;type: LoadBalancer&#x27; on EKS causes AWS to provision an Elastic Load Balancer (ELB/NLB) automatically and assign it a public DNS hostname. The Service&#x27;s &#x27;selector&#x27; field uses the same label (&#x27;app: web-api&#x27;) that the Deployment stamps on its Pods — this is the label glue that connects Service → Pods without hard-coding Pod IPs. &#x27;port: 80&#x27; is the port clients hit on the load balancer; &#x27;targetPort: 8080&#x27; is the port traffic is forwarded to on each Pod. The &#x27;kubectl get svc web-api&#x27; output will show an EXTERNAL-IP (or hostname) once the AWS load balancer is provisioned, which may take 30–90 seconds.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Your colleague updated the Deployment to use image tag &#x27;abc5678&#x27; but mistakenly used &#x27;app: web-backend&#x27; in the Service selector, while the Deployment still labels its Pods &#x27;app: web-api&#x27;. Diagnose the problem using kubectl commands and fix both the label mismatch and the image tag. Show the corrected service.yaml and the kubectl command to update only the image tag in the running Deployment without editing the file.</p></div>
+              <pre class='starter'><code># Broken service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-api
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-backend   # &lt;-- BUG: does not match Deployment Pod labels
+  ports:
+    - port: 80
+      targetPort: 8080
+
+# Step 1: Diagnose — which kubectl command shows the Service has no endpoints?
+# kubectl ________
+
+# Step 2: Fix the Service selector in service.yaml and re-apply.
+# (Write the corrected service.yaml)
+
+# Step 3: Update only the image tag in the running Deployment to &#x27;abc5678&#x27;
+# without editing deployment.yaml.
+# kubectl ________</code></pre>
+              <details><summary>Hint</summary><ul><li>&#x27;kubectl get endpoints web-api&#x27; shows the Pod IPs currently backing the Service. If empty, the selector is the likely culprit.</li><li>kubectl get pods --show-labels outputs all Pod labels in a readable column — compare these directly to the Service selector.</li><li>After running &#x27;kubectl set image&#x27;, watch the rollout: kubectl rollout status deployment/web-api</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: Diagnose — describe the Service to see Endpoints
+kubectl describe svc web-api
+# The &#x27;Endpoints&#x27; field will show &#x27;&lt;none&gt;&#x27; if the selector finds no Pods.
+# Also helpful:
+kubectl get endpoints web-api
+# Compare to actual Pod labels:
+kubectl get pods --show-labels
+
+# Step 2: Corrected service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-api
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-api    # fixed: matches Deployment Pod label
+  ports:
+    - port: 80
+      targetPort: 8080
+
+# Re-apply the fixed Service:
+kubectl apply -f service.yaml
+
+# Step 3: Update only the image tag with kubectl set image
+# Format: kubectl set image deployment/&lt;deployment-name&gt; &lt;container-name&gt;=&lt;new-image&gt;
+kubectl set image deployment/web-api web-api=111122223333.dkr.ecr.us-east-1.amazonaws.com/web-api:abc5678</code></pre>
+                <div class='exp2'><p>When a Service selector does not match any Pod labels, &#x27;kubectl describe svc&#x27; shows &#x27;Endpoints: &lt;none&gt;&#x27; — traffic hits the load balancer but has nowhere to go, causing connection errors. The fix is to align the selector with the actual Pod labels. &#x27;kubectl get pods --show-labels&#x27; shows what labels the running Pods carry; compare these to the Service selector. For the image update, &#x27;kubectl set image deployment/&lt;name&gt; &lt;container-name&gt;=&lt;image&gt;:&lt;tag&gt;&#x27; updates the image of a named container in the Deployment in place. The container name (&#x27;web-api&#x27; after the =) must match the &#x27;name:&#x27; field under &#x27;containers:&#x27; in the Deployment spec. This triggers a rolling update immediately, but note that the deployment.yaml file on disk still has the old tag — for keeping the file and cluster in sync, prefer editing the file and running &#x27;kubectl apply -f&#x27;.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=lxc4EXZOOvE' target='_blank'>Most Common Kubernetes Deployment Strategies (Examples &amp; Code)</a></li><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=HkVYcfva9vw' target='_blank'>Kubernetes Pods Creating and Managing with YAML | How to Define Pod Specifications with YAML</a></li></ul></div>
+        </article>
+<article id='lec5' class='lecture'>
+          <h2>05. &quot;Accessing the EKS Cluster and Configuring kubectl&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Connect to an EKS cluster using kubeconfig.</li>
+<li>Understand how Jenkins authenticates to the cluster and runs commands against it.</li>
+<li>Grasp the basics of how IAM permissions connect to Kubernetes RBAC.</li>
+</ul>
+<h3>Body</h3>
+<h4>The missing link</h4>
+<p>You have a CI pipeline that pushes images (Lecture 3) and manifests that describe deployments (Lecture 4). But neither one can touch the cluster yet, because nobody has <em>authenticated</em> to EKS. This lecture closes that gap — first for you on your laptop, then for Jenkins. The key insight, which trips up almost everyone the first time, is that EKS access has <strong>two independent layers</strong>: AWS IAM decides <em>whether you can reach the cluster at all</em>, and Kubernetes RBAC decides <em>what you can do once inside</em>. You need both.</p>
+<h4>kubectl and kubeconfig</h4>
+<p><code class='ic'>kubectl</code> is the command-line tool for talking to a Kubernetes cluster. It reads its connection settings — which cluster, at which address, with which identity — from a file called the <strong>kubeconfig</strong> (by default <code class='ic'>~/.kube/config</code>). Point kubeconfig at a cluster and <code class='ic'>kubectl</code> commands go there; switch it, and they go somewhere else.</p>
+<p>For EKS, you do not hand-edit this file. AWS generates the right entry for you with one command:</p>
+<pre><code>
+aws eks update-kubeconfig --region us-east-1 --name my-cluster
+</code></pre>
+<p>This command does exactly what its name says: it <em>updates your local kubeconfig</em> with the cluster&#x27;s API endpoint and certificate, and configures it to obtain a short-lived token from AWS for authentication. After running it, verify access:</p>
+<pre><code>
+kubectl get nodes
+kubectl get pods -A
+</code></pre>
+<p>If you see your nodes listed, you are connected. If you get an &quot;Unauthorized&quot; or &quot;You must be logged in&quot; error, that is the <em>second</em> layer talking — your AWS identity reached the cluster, but Kubernetes has not granted it any permissions yet. Keep that distinction in mind; it is the whole story of this lecture.</p>
+<blockquote class='callout'>
+<p>Run <code class='ic'>aws eks update-kubeconfig</code> whenever you switch clusters, AWS profiles, or machines. It is idempotent and harmless to re-run — it just refreshes the kubeconfig entry for that cluster.</p>
+</blockquote>
+<h4>Layer one: IAM — can you reach the cluster?</h4>
+<p>When you call <code class='ic'>aws eks update-kubeconfig</code>, the resulting kubeconfig tells <code class='ic'>kubectl</code> to fetch a token from AWS using your current <strong>IAM identity</strong> (an IAM user or, better, an IAM role). EKS validates that token against AWS. So the first gate is: <em>does this IAM identity have permission to connect to this cluster, and does EKS recognize it?</em></p>
+<p>A minimal IAM policy for &quot;let this identity connect to EKS&quot; allows actions like <code class='ic'>eks:DescribeCluster</code> (so <code class='ic'>update-kubeconfig</code> can fetch the endpoint). That is enough to <em>reach</em> the cluster — but, importantly, it grants no power <em>inside</em> it.</p>
+<h4>Layer two: RBAC — what can you do inside?</h4>
+<p>Once your token is accepted, Kubernetes applies its own authorization system, <strong>RBAC (Role-Based Access Control)</strong>. RBAC has two halves:</p>
+<ul>
+<li>A <strong>Role</strong> (namespace-scoped) or <strong>ClusterRole</strong> (cluster-wide) lists <em>permissions</em> — verbs like <code class='ic'>get</code>, <code class='ic'>list</code>, <code class='ic'>watch</code>, <code class='ic'>create</code> on resources like <code class='ic'>pods</code>, <code class='ic'>deployments</code>, <code class='ic'>secrets</code>.</li>
+<li>A <strong>RoleBinding</strong> / <strong>ClusterRoleBinding</strong> <em>attaches</em> a Role to an identity (a user, group, or service account).</li>
+</ul>
+<p>For example, a read-only viewer ClusterRole bound to a <code class='ic'>my-viewer</code> group lets those identities run <code class='ic'>kubectl get pods</code> everywhere but nothing destructive; a <code class='ic'>cluster-admin</code> ClusterRole bound to a <code class='ic'>my-admin</code> group grants full control.</p>
+<h4>Connecting the two layers: who <em>is</em> this IAM identity, in Kubernetes terms?</h4>
+<p>Here is the crux. AWS knows your IAM identity; Kubernetes knows its own users and groups. Something has to <strong>map</strong> one to the other — to say &quot;the IAM role <code class='ic'>arn:aws:iam::...:role/jenkins-deploy</code> should be treated as the Kubernetes group <code class='ic'>my-admin</code>.&quot; There are two mechanisms:</p>
+<ul>
+<li><strong>EKS access entries</strong> — the modern, recommended approach. You declare the mapping through the EKS API (Console, CLI, or Terraform): this IAM principal maps to these Kubernetes groups/permissions. Clean and auditable.</li>
+<li><strong>The <code class='ic'>aws-auth</code> ConfigMap</strong> — the older approach, a ConfigMap in <code class='ic'>kube-system</code> that listed IAM-to-RBAC mappings. You will still encounter it on existing clusters, but it is now considered legacy.</li>
+</ul>
+<p>Either way, the chain is: <strong>IAM identity → (mapping) → Kubernetes group → RoleBinding → Role&#x27;s permissions.</strong> Break any link and you get that &quot;Unauthorized&quot; error. The flow is as follows: AWS authenticates the IAM token, the access entry maps it to a Kubernetes group, and RBAC then decides what verbs that group may run.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    IAM[&quot;IAM identity&lt;br/&gt;(user or role)&quot;]
+    Map[&quot;Mapping&lt;br/&gt;(EKS access entry&lt;br/&gt;or aws-auth ConfigMap)&quot;]
+    Grp[Kubernetes group]
+    Bind[RoleBinding]
+    Role[&quot;Role / ClusterRole&lt;br/&gt;(allowed verbs)&quot;]
+    Allow[kubectl command allowed]
+
+    IAM --&gt;|Layer 1: AWS authenticates token| Map
+    Map --&gt;|treated as| Grp
+    Grp --&gt; Bind
+    Bind --&gt;|attaches| Role
+    Role --&gt;|Layer 2: RBAC authorizes| Allow</div><figcaption>The EKS authentication and authorization chain</figcaption></figure>
+<p>A useful debugging tool while you sort this out is <code class='ic'>kubectl auth can-i</code>, which answers permission questions directly:</p>
+<pre><code>
+kubectl auth can-i get pods          # -&gt; yes / no
+kubectl auth can-i create deployments
+</code></pre>
+<h4>Layer three: how Jenkins authenticates (the real target)</h4>
+<p>Everything above applies to <em>you</em>. Now apply it to <em>Jenkins</em>, which is the whole reason this lecture exists. Jenkins must be able to run <code class='ic'>kubectl</code> against EKS unattended, with no human typing credentials. The principle from Lecture 3 holds: <strong>authenticate the machine via an IAM role, never static keys in a job.</strong></p>
+<p>In order of preference:</p>
+<ul>
+<li><strong>IRSA (IAM Roles for Service Accounts)</strong> — if Jenkins itself runs <em>inside</em> Kubernetes/EKS, you associate its Kubernetes service account with an IAM role. The Jenkins Pod automatically receives short-lived AWS credentials for that role. No secrets stored anywhere. (AWS&#x27;s newer &quot;EKS Pod Identity&quot; achieves the same goal with simpler setup.)</li>
+<li><strong>An instance/node IAM role</strong> — if Jenkins runs on an EC2 instance, attach an IAM role to that instance. The AWS CLI inside the build picks it up automatically.</li>
+</ul>
+<p>Whichever you use, that IAM role must then be <strong>mapped to a Kubernetes RBAC group</strong> (via an access entry) that has permission to deploy — typically the rights to <code class='ic'>get</code>/<code class='ic'>update</code>/<code class='ic'>patch</code> Deployments in your app&#x27;s namespace. Then Jenkins&#x27; deploy stage can simply run:</p>
+<pre><code>
+aws eks update-kubeconfig --region us-east-1 --name my-cluster
+kubectl apply -f deployment.yaml
+</code></pre>
+<p>…and EKS will accept it, because the IAM role is recognized (layer 1 + the mapping) and has the right RBAC permissions (layer 2).</p>
+<blockquote class='callout'>
+<p>Scope Jenkins&#x27; RBAC to the least it needs — usually permission to update Deployments in one namespace, not cluster-admin. If the pipeline is ever compromised, a tight role limits the blast radius.</p>
+</blockquote>
+<h4>Putting it together</h4>
+<p>To let Jenkins deploy to EKS you will, once, set up: (1) an IAM role for Jenkins with EKS-connect permissions, (2) an EKS access entry mapping that role to a Kubernetes group, and (3) an RBAC binding giving that group deploy permissions. After that, the pipeline authenticates with one command and issues <code class='ic'>kubectl</code> freely. Lecture 6 builds the deploy stage that relies on exactly this.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li><code class='ic'>aws eks update-kubeconfig --region &lt;r&gt; --name &lt;cluster&gt;</code> writes the cluster&#x27;s endpoint and auth into your kubeconfig; then <code class='ic'>kubectl get nodes</code> confirms access.</li>
+<li>EKS access has two layers: <strong>IAM</strong> decides if you can reach the cluster, <strong>RBAC</strong> decides what you can do inside. An &quot;Unauthorized&quot; error usually means IAM worked but RBAC has not been granted.</li>
+<li>An IAM identity must be <strong>mapped</strong> to Kubernetes groups via EKS access entries (modern) or the legacy <code class='ic'>aws-auth</code> ConfigMap; the chain is IAM → mapping → group → binding → permissions.</li>
+<li>Jenkins should authenticate via an IAM role — IRSA/Pod Identity if it runs in-cluster, or an instance role on EC2 — never static keys. That role is then mapped to an RBAC group with deploy permissions.</li>
+<li>Scope the deploy role to least privilege (update Deployments in one namespace), and use <code class='ic'>kubectl auth can-i</code> to debug permissions.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Map the two-layer EKS access model. For each of the four scenarios below, state whether the problem is an IAM (Layer 1) problem, an RBAC (Layer 2) problem, or both — and explain your reasoning in one sentence each.</p>
+<p>Scenario A: Running &#x27;aws eks update-kubeconfig&#x27; succeeds, but every &#x27;kubectl&#x27; command returns &#x27;Error from server (Forbidden): pods is forbidden&#x27;.</p>
+<p>Scenario B: Running &#x27;aws eks update-kubeconfig&#x27; fails with &#x27;ResourceNotFoundException: No cluster found&#x27;.</p>
+<p>Scenario C: &#x27;kubectl get pods&#x27; works, but &#x27;kubectl delete deployment my-app&#x27; returns &#x27;deployments.apps is forbidden&#x27;.</p>
+<p>Scenario D: Jenkins can run &#x27;kubectl get pods&#x27; in the &#x27;default&#x27; namespace but not in the &#x27;production&#x27; namespace.</p></div>
+              <pre class='starter'><code># Fill in Layer (IAM / RBAC / Both) and one-sentence reason for each scenario.
+
+# Scenario A:
+# Layer: ________
+# Reason: ________
+
+# Scenario B:
+# Layer: ________
+# Reason: ________
+
+# Scenario C:
+# Layer: ________
+# Reason: ________
+
+# Scenario D:
+# Layer: ________
+# Reason: ________</code></pre>
+              <details><summary>Hint</summary><ul><li>Use &#x27;kubectl auth can-i &lt;verb&gt; &lt;resource&gt; --namespace &lt;ns&gt;&#x27; to test a specific permission without guessing.</li><li>The error message &#x27;Error from server (Forbidden)&#x27; always means Layer 2 (RBAC). If the API server is unreachable, you get a connection error instead.</li><li>&#x27;aws eks describe-cluster --name my-cluster --region us-east-1&#x27; is a quick IAM layer test — if this CLI call succeeds, your IAM identity has enough permission to interact with the EKS control plane.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Scenario A:
+# Layer: RBAC (Layer 2)
+# Reason: update-kubeconfig succeeded (IAM authentication passed), but the IAM identity
+#         has not been granted any Kubernetes RBAC permissions — it can reach the cluster
+#         but cannot perform any actions inside it.
+
+# Scenario B:
+# Layer: IAM (Layer 1)
+# Reason: The AWS CLI could not find the cluster, meaning the IAM identity lacks
+#         eks:DescribeCluster permission or the cluster name/region is wrong —
+#         the request never reached Kubernetes at all.
+
+# Scenario C:
+# Layer: RBAC (Layer 2)
+# Reason: Read access (&#x27;get pods&#x27;) is permitted but destructive write access
+#         (&#x27;delete deployment&#x27;) is not — the RBAC Role grants &#x27;get/list/watch&#x27;
+#         but not &#x27;delete&#x27;, so this is a fine-grained RBAC permission gap.
+
+# Scenario D:
+# Layer: RBAC (Layer 2)
+# Reason: RBAC is namespace-scoped via Role/RoleBinding; the Jenkins identity has a
+#         RoleBinding granting &#x27;get pods&#x27; in &#x27;default&#x27; but no RoleBinding in
+#         &#x27;production&#x27;, so cross-namespace access is denied.</code></pre>
+                <div class='exp2'><p>The two-layer model means &#x27;Unauthorized&#x27; errors need to be attributed to the correct layer before you can fix them. IAM errors (Layer 1) prevent you from reaching the cluster at all — update-kubeconfig fails, or kubectl cannot contact the API server. RBAC errors (Layer 2) occur after successful authentication: your identity is recognized, but the permitted verbs or resources are limited. Scenario D illustrates a common production pattern: a RoleBinding is namespace-scoped, so the same RBAC Role must be bound in every namespace the identity needs access to (or use a ClusterRoleBinding for cluster-wide access).</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Connect to your EKS cluster using kubectl. Run the command to update your kubeconfig for the cluster &#x27;my-cluster&#x27; in &#x27;us-east-1&#x27;, then run two verification commands to confirm access. Replace placeholders with your actual cluster name and region.</p></div>
+              <pre class='starter'><code># Step 1: Update kubeconfig
+aws eks update-kubeconfig \
+  --region ________ \
+  --name ________
+
+# Step 2: Verify you can see cluster nodes
+kubectl ________
+
+# Step 3: Verify you can list Pods in all namespaces
+kubectl ________</code></pre>
+              <details><summary>Hint</summary><ul><li>If &#x27;kubectl get nodes&#x27; returns &#x27;Unauthorized&#x27;, your IAM identity reached the cluster (IAM layer passed) but has no RBAC permissions yet. You need an EKS access entry or aws-auth ConfigMap entry mapping your IAM identity to a Kubernetes group.</li><li>To see which cluster kubectl is currently pointing at: kubectl config current-context</li><li>If you manage multiple clusters, &#x27;aws eks update-kubeconfig&#x27; adds a new context. Switch between them with: kubectl config use-context &lt;context-name&gt;</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: Update kubeconfig
+aws eks update-kubeconfig \
+  --region us-east-1 \
+  --name my-cluster
+
+# Step 2: Verify you can see cluster nodes
+kubectl get nodes
+
+# Step 3: Verify you can list Pods in all namespaces
+kubectl get pods -A</code></pre>
+                <div class='exp2'><p>&#x27;aws eks update-kubeconfig&#x27; writes the cluster&#x27;s API endpoint, the CA certificate for TLS verification, and an authentication command into ~/.kube/config. After running it, kubectl knows where to send requests and how to authenticate using your current AWS identity (IAM user or role). &#x27;kubectl get nodes&#x27; confirms you can talk to the cluster and have at least read access to node resources. &#x27;kubectl get pods -A&#x27; (the &#x27;-A&#x27; flag means --all-namespaces) is a broader check — if this returns results you have cluster-wide pod read permission, which is a common indicator that your identity has been correctly mapped and granted permissions.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Set up the IAM-to-RBAC mapping for a Jenkins IAM role. Given that the Jenkins EC2 instance has the IAM role &#x27;arn:aws:iam::111122223333:role/jenkins-deploy-role&#x27;, write: (1) the AWS CLI command to create an EKS access entry mapping that role to the Kubernetes group &#x27;deploy-group&#x27;, and (2) a Kubernetes ClusterRoleBinding YAML that grants the &#x27;deploy-group&#x27; permission to get, list, update, and patch Deployments across all namespaces (bind to a ClusterRole named &#x27;deployment-updater&#x27;).</p></div>
+              <pre class='starter'><code># Part 1: Create EKS access entry
+# Map the Jenkins IAM role to the Kubernetes group &#x27;deploy-group&#x27;
+aws eks create-access-entry \
+  --cluster-name ________ \
+  --principal-arn ________ \
+  --kubernetes-groups ________
+
+# Part 2: ClusterRole + ClusterRoleBinding YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: deployment-updater
+rules:
+  - apiGroups: [________]
+    resources: [________]
+    verbs: [________]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: deployment-updater-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ________
+  name: ________
+subjects:
+  - kind: ________
+    name: ________
+    apiGroup: rbac.authorization.k8s.io</code></pre>
+              <details><summary>Hint</summary><ul><li>Deployments belong to the &#x27;apps&#x27; API group. Core resources (pods, services, configmaps) use an empty string apiGroup: [&quot;&quot;].</li><li>After applying the RBAC YAML, test Jenkins&#x27; permissions by impersonating the group: kubectl auth can-i update deployments --as-group=deploy-group --as=jenkins</li><li>The EKS access entry &#x27;--kubernetes-groups&#x27; flag must match exactly the &#x27;name&#x27; field in the ClusterRoleBinding&#x27;s subjects — case-sensitive.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Part 1: Create EKS access entry
+aws eks create-access-entry \
+  --cluster-name my-cluster \
+  --principal-arn arn:aws:iam::111122223333:role/jenkins-deploy-role \
+  --kubernetes-groups deploy-group
+
+# Part 2: ClusterRole + ClusterRoleBinding YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: deployment-updater
+rules:
+  - apiGroups: [&quot;apps&quot;]
+    resources: [&quot;deployments&quot;]
+    verbs: [&quot;get&quot;, &quot;list&quot;, &quot;update&quot;, &quot;patch&quot;]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: deployment-updater-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: deployment-updater
+subjects:
+  - kind: Group
+    name: deploy-group
+    apiGroup: rbac.authorization.k8s.io</code></pre>
+                <div class='exp2'><p>The EKS access entry (&#x27;aws eks create-access-entry&#x27;) is the modern replacement for the aws-auth ConfigMap. It tells EKS: when a request arrives signed by the IAM role &#x27;jenkins-deploy-role&#x27;, treat it as a member of the Kubernetes group &#x27;deploy-group&#x27;. The ClusterRole defines what that group can do: &#x27;apps&#x27; is the API group for Deployments, and the permitted verbs are the minimum needed for &#x27;kubectl apply&#x27; and &#x27;kubectl set image&#x27;. The ClusterRoleBinding attaches the role to the group. Together, the chain is: IAM role → EKS access entry → Kubernetes group &#x27;deploy-group&#x27; → ClusterRoleBinding → ClusterRole → allowed verbs on Deployments. For a namespace-scoped restriction, use Role + RoleBinding instead of ClusterRole + ClusterRoleBinding.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Debug a permission error. After setting up the access entry and RBAC binding from the previous task, Jenkins&#x27; pipeline fails with:</p>
+<p>  Error from server (Forbidden): deployments.apps &quot;my-app&quot; is forbidden:</p>
+<p>  User &quot;system:anonymous&quot; cannot update resource &quot;deployments&quot;</p>
+<p>  in API group &quot;apps&quot; in the namespace &quot;production&quot;</p>
+<p>Analyze the error message, identify the root cause, and write the corrected &#x27;aws eks update-kubeconfig&#x27; invocation and the pipeline snippet that Jenkins should run in the deploy stage to authenticate correctly before running kubectl.</p></div>
+              <pre class='starter'><code># Analyze the error:
+# Q1: What does &#x27;User: system:anonymous&#x27; tell you about what went wrong?
+# Answer: ________
+
+# Q2: What is the likely missing step in the Jenkins pipeline?
+# Answer: ________
+
+# Fix: Write the corrected deploy stage snippet that authenticates
+# before running kubectl, using the Jenkins EC2 instance IAM role automatically.
+
+stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          # authentication step
+          ________
+          # deploy
+          kubectl apply -f deployment.yaml
+        &quot;&quot;&quot;
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>The error says &#x27;namespace production&#x27; — if the ClusterRoleBinding from the previous task only covers the &#x27;default&#x27; namespace (using a RoleBinding, not a ClusterRoleBinding), Jenkins would also be denied in &#x27;production&#x27;. Check whether you used ClusterRoleBinding vs. RoleBinding.</li><li>To confirm which AWS identity Jenkins is using inside the build, add: aws sts get-caller-identity — this prints the ARN of the assumed role.</li><li>If you see &#x27;system:anonymous&#x27; even after update-kubeconfig, check that the kubeconfig file was written to the correct path. On the Jenkins agent, $HOME/.kube/config may differ from where you expect.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Q1: &#x27;User: system:anonymous&#x27; means Kubernetes received an unauthenticated request
+#     — the kubectl command ran without a valid kubeconfig or token, so the API
+#     server fell back to treating it as an anonymous user. The Jenkins agent
+#     either has no kubeconfig at all, or the kubeconfig does not provide
+#     a valid AWS authentication token.
+
+# Q2: The Jenkins pipeline is missing the &#x27;aws eks update-kubeconfig&#x27; call before
+#     running kubectl. Without it, kubectl has no cluster endpoint or credentials.
+
+# Fixed deploy stage:
+stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          aws eks update-kubeconfig --region us-east-1 --name my-cluster
+          kubectl apply -f deployment.yaml
+        &quot;&quot;&quot;
+    }
+}</code></pre>
+                <div class='exp2'><p>&#x27;system:anonymous&#x27; is the Kubernetes identity for unauthenticated requests — it appears when kubectl has no kubeconfig, an invalid one, or an expired token. The fix is to run &#x27;aws eks update-kubeconfig&#x27; at the start of the deploy stage to generate (or refresh) the kubeconfig for the Jenkins build workspace. Because the Jenkins EC2 instance has the IAM role &#x27;jenkins-deploy-role&#x27; attached, the AWS CLI automatically retrieves credentials from the instance metadata service — no static keys needed. After update-kubeconfig, kubectl&#x27;s requests are signed with a valid STS token, EKS maps it to &#x27;deploy-group&#x27; via the access entry, and the ClusterRoleBinding grants the update permission. &#x27;aws eks update-kubeconfig&#x27; is safe to re-run on every build — it is idempotent.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=6COvT1Zu9o0' target='_blank'>Add IAM User &amp; IAM Role to AWS EKS: AWS EKS Kubernetes Tutorial - Part 3</a></li><li><a href='https://www.youtube.com/watch?v=6ZALmrssgfc' target='_blank'>EASIEST EKS Cluster Setup &amp; Deployment of Two-Tier Application | Episode 6</a></li><li><a href='https://www.youtube.com/watch?v=rFtaknmZiaM' target='_blank'>Create EKS with Fargate Using AWS Console | AWS EKS Tutorial</a></li></ul></div>
+        </article>
+<article id='lec6' class='lecture'>
+          <h2>06. &quot;Automated Deployment to EKS from Jenkins&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Automate updating the manifest with the newly built image tag.</li>
+<li>Roll out to EKS using <code class='ic'>kubectl apply</code> or <code class='ic'>kubectl set image</code>.</li>
+<li>Complete a pipeline where a single push deploys all the way to EKS.</li>
+</ul>
+<h3>Body</h3>
+<h4>Closing the loop</h4>
+<p>This is the lecture where everything connects. You already have: a CI pipeline that builds a commit-tagged image and pushes it to ECR (Lecture 3), manifests that describe the deployment (Lecture 4), and Jenkins authenticated to EKS via an IAM role mapped to an RBAC group (Lecture 5). The only missing piece is a <strong>deploy stage</strong> that takes the freshly built tag and tells EKS to run it. Add that, and a single <code class='ic'>git push</code> flows all the way to a running Pod with zero manual steps — true continuous deployment.</p>
+<p>The whole challenge of this stage reduces to one question: <strong>how do we get the new image tag into the cluster&#x27;s Deployment?</strong> There are two clean ways, and you should understand both.</p>
+<h4>Approach A: rewrite the manifest, then <code class='ic'>kubectl apply</code></h4>
+<p>The image tag lives in one line of <code class='ic'>deployment.yaml</code>. The most transparent approach is to substitute the new tag into that file, then apply it. Because the build already exported <code class='ic'>IMAGE_TAG</code> (the commit SHA), the deploy stage can patch the manifest on the fly:</p>
+<pre><code>
+stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER}
+          sed -i &#x27;s|IMAGE_PLACEHOLDER|${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}|&#x27; deployment.yaml
+          kubectl apply -f deployment.yaml
+          kubectl apply -f service.yaml
+        &quot;&quot;&quot;
+    }
+}
+</code></pre>
+<p>Here <code class='ic'>deployment.yaml</code> keeps a placeholder where the image goes (<code class='ic'>image: IMAGE_PLACEHOLDER</code>), and <code class='ic'>sed</code> swaps in the real value before applying.</p>
+<p>The big advantage is that the manifest remains the <strong>single source of truth</strong>. Every field — replicas, ports, probes, resource limits — is applied together, so the cluster always matches the file in your repository. This is the approach that scales into GitOps later, and it is the one to prefer.</p>
+<h4>Approach B: <code class='ic'>kubectl set image</code></h4>
+<p>If the Deployment already exists and the <em>only</em> thing changing is the image tag, you can update that one field directly, without touching the YAML file:</p>
+<pre><code>
+kubectl set image deployment/my-app \
+  my-app=111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+</code></pre>
+<p>Read this as: in the Deployment named <code class='ic'>my-app</code>, set the container named <code class='ic'>my-app</code> to this new image. The container name on the left of <code class='ic'>=</code> must match the <code class='ic'>name:</code> of the container in your Pod template (Lecture 4).</p>
+<p>This is concise and great for quick rollouts, but it has a subtle cost: now the <em>live</em> state and your <em>file</em> state can drift. The cluster runs tag <code class='ic'>a1b9f3c</code>, but <code class='ic'>deployment.yaml</code> in Git still says <code class='ic'>IMAGE_PLACEHOLDER</code> or an old tag. For a learning pipeline <code class='ic'>set image</code> is perfectly fine; just be aware that Approach A keeps your repo honest.</p>
+<h4>Watching the rollout finish</h4>
+<p>Issuing either command <em>starts</em> a rollout, but it returns almost immediately — it does not wait for the new Pods to actually be healthy. To make the pipeline wait (and fail if the rollout stalls), add:</p>
+<pre><code>
+kubectl rollout status deployment/my-app --timeout=120s
+</code></pre>
+<p><code class='ic'>kubectl rollout status</code> blocks until the Deployment has successfully replaced its Pods, or exits non-zero if it does not finish within the timeout. This is important: without it, your pipeline reports &quot;success&quot; the instant it <em>asked</em> for a deploy, even if the new version is crash-looping. With it, a broken release turns the build red — which is exactly what you want, because Lecture 7 shows how to roll back from there.</p>
+<p>So the complete deploy stage is: authenticate → update the image → wait for the rollout to succeed.</p>
+<pre><code>
+stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER}
+          kubectl set image deployment/my-app my-app=${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+          kubectl rollout status deployment/my-app --timeout=120s
+        &quot;&quot;&quot;
+    }
+}
+</code></pre>
+<h4>How the rollout actually behaves</h4>
+<p>When you change the image, the Deployment does <strong>not</strong> kill everything and start over. By default it performs a <strong>rolling update</strong>: it starts new Pods with the new image, waits for them to become ready, and only then terminates old ones — a few at a time — so there is always a working version serving traffic. We dig into the mechanics (and the health checks that gate it) in Lecture 7. For now, the takeaway is that your one-line image change triggers a careful, gradual, no-downtime replacement.</p>
+<h4>Why the commit-SHA tag pays off here</h4>
+<p>Notice that the deploy stage feeds <code class='ic'>IMAGE_TAG</code> — the same commit SHA the build produced — straight into the cluster. This is the moment the thread we have been tracking since Lecture 2 pulls taut: the commit you pushed determines the image you built, which determines the tag in ECR, which determines exactly what EKS runs. Because the tag is unique and immutable, changing it <em>always</em> triggers a rollout (Kubernetes notices the Pod template changed), and you can look at any running Pod and trace it back to a single commit.</p>
+<blockquote class='callout'>
+<p>A common gotcha: deploying with the <code class='ic'>latest</code> tag often does <strong>nothing</strong>, because the Deployment&#x27;s spec did not change from Kubernetes&#x27; point of view, so no rollout is triggered. The unique commit-SHA tag avoids this trap entirely — yet another reason we banned <code class='ic'>latest</code> back in Lecture 2.</p>
+</blockquote>
+<h4>The complete picture</h4>
+<p>You now have an end-to-end pipeline: <strong>push to GitLab → webhook → Jenkins checks out, tests, builds, and pushes a commit-tagged image to ECR → Jenkins authenticates to EKS and updates the Deployment → EKS performs a rolling update → <code class='ic'>kubectl rollout status</code> confirms success.</strong> One push, fully automated, all the way to production.</p>
+<p>To apply this to <em>your own</em> code, the only project-specific pieces are: your <code class='ic'>Dockerfile</code>, your <code class='ic'>deployment.yaml</code> / <code class='ic'>service.yaml</code> (with your image and ports), and the environment values in the <code class='ic'>Jenkinsfile</code> (account ID, region, repo name, cluster name). The pipeline structure stays the same.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>The deploy stage&#x27;s whole job is to get the new image tag into the cluster&#x27;s Deployment, then wait for the rollout to finish.</li>
+<li>Two ways to update the image: rewrite the manifest and <code class='ic'>kubectl apply -f</code> (keeps the file as source of truth — preferred), or <code class='ic'>kubectl set image deployment/&lt;d&gt; &lt;container&gt;=&lt;image&gt;:&lt;tag&gt;</code> (concise but can drift from your repo).</li>
+<li>Always follow with <code class='ic'>kubectl rollout status --timeout=...</code> so a broken release fails the build instead of silently &quot;succeeding.&quot;</li>
+<li>Feeding the unique commit-SHA tag guarantees a rollout is triggered and keeps every Pod traceable; deploying <code class='ic'>latest</code> may do nothing at all.</li>
+<li>The finished pipeline takes a single push from GitLab all the way to a rolling deployment on EKS, with no manual steps.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Compare the two deploy approaches from the lecture. For each of the following statements, mark it as applying to Approach A (&#x27;kubectl apply -f&#x27;), Approach B (&#x27;kubectl set image&#x27;), both, or neither — and give a one-line justification.</p>
+<p>(i) The file in Git always reflects exactly what is running in the cluster.</p>
+<p>(ii) Useful when you want to change only the image tag without modifying any other manifest field.</p>
+<p>(iii) Triggers a rolling update on the cluster.</p>
+<p>(iv) The cluster state can silently drift from what is committed in Git.</p>
+<p>(v) Recommended as the long-term approach because it supports GitOps workflows.</p></div>
+              <pre class='starter'><code># Fill in: A / B / Both / Neither — and one-line justification.
+
+# (i) Git file always reflects cluster state
+# Answer: ________
+# Justification: ________
+
+# (ii) Update only image tag, no file edit needed
+# Answer: ________
+# Justification: ________
+
+# (iii) Triggers a rolling update
+# Answer: ________
+# Justification: ________
+
+# (iv) Cluster state can drift from Git
+# Answer: ________
+# Justification: ________
+
+# (v) Recommended for GitOps / long-term
+# Answer: ________
+# Justification: ________</code></pre>
+              <details><summary>Hint</summary><ul><li>A &#x27;kubectl apply&#x27; with no changes to the YAML is a no-op — Kubernetes checks the new desired state against the current state and does nothing if they match.</li><li>You can see the last-applied configuration with: kubectl get deployment my-app -o jsonpath=&#x27;{.metadata.annotations.kubectl\.kubernetes\.io/last-applied-configuration}&#x27;</li><li>In GitOps, the pipeline never runs kubectl directly — it commits the updated manifest to Git and lets a controller (Argo CD/Flux) apply it. Approach A is the necessary stepping stone to reach that model.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># (i) Git file always reflects cluster state
+# Answer: A
+# Justification: Approach A applies the manifest file, so the file is always the
+#                applied state; Approach B mutates the cluster in-place without
+#                touching the file, so the file can be stale.
+
+# (ii) Update only image tag, no file edit needed
+# Answer: B
+# Justification: &#x27;kubectl set image&#x27; targets a single container&#x27;s image field directly;
+#                Approach A requires you to first update the tag in the YAML file.
+
+# (iii) Triggers a rolling update
+# Answer: Both
+# Justification: Any change to the Deployment&#x27;s Pod template (image or otherwise)
+#                triggers a rolling update regardless of which kubectl command caused it.
+
+# (iv) Cluster state can drift from Git
+# Answer: B
+# Justification: &#x27;kubectl set image&#x27; updates the live Deployment but leaves the
+#                manifest file unchanged, creating a gap between Git and cluster reality.
+
+# (v) Recommended for GitOps / long-term
+# Answer: A
+# Justification: Applying the manifest file keeps Git as the single source of truth,
+#                which is the prerequisite for GitOps tooling (Argo CD, Flux).</code></pre>
+                <div class='exp2'><p>Both approaches trigger a rolling update because they both modify the Deployment&#x27;s Pod template spec. The real difference is about consistency: Approach A (apply -f) makes the file the authoritative state, so the cluster always matches your repository. Approach B (set image) is a quick in-cluster mutation that leaves the repository out of date. For day-to-day use in a pipeline that only updates the image tag, either works; for operational maturity and GitOps readiness, Approach A is the correct long-term choice.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Write the complete deploy stage for the Jenkinsfile. It should: (1) authenticate to EKS using &#x27;aws eks update-kubeconfig&#x27;, (2) update the image in the running Deployment using &#x27;kubectl set image&#x27;, and (3) wait for the rollout to complete with a 120-second timeout. Use the environment variables already defined in the pipeline: AWS_REGION, CLUSTER, REGISTRY, ECR_REPO, IMAGE_TAG. The Deployment is named &#x27;my-app&#x27; and the container is also named &#x27;my-app&#x27;.</p></div>
+              <pre class='starter'><code>// Add this stage to your Jenkinsfile after the &#x27;Push to ECR&#x27; stage.
+// Assume the environment block already defines:
+//   AWS_REGION, CLUSTER, REGISTRY, ECR_REPO, IMAGE_TAG
+
+stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          # Step 1: authenticate kubectl to the EKS cluster
+          ________
+
+          # Step 2: update the container image
+          kubectl set image deployment/my-app \\
+            my-app=________
+
+          # Step 3: wait for the rollout (fail if it takes longer than 120s)
+          ________
+        &quot;&quot;&quot;
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>If IMAGE_TAG is the commit SHA (e.g., &#x27;a1b9f3c&#x27;), the full image reference is: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c — match this format in REGISTRY/ECR_REPO:IMAGE_TAG.</li><li>The CLUSTER environment variable must be added to the Jenkinsfile environment block: CLUSTER = &#x27;my-cluster&#x27;</li><li>Test with a dry run first: kubectl set image deployment/my-app my-app=&lt;image&gt; --dry-run=client — this shows the change without applying it.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          # Step 1: authenticate kubectl to the EKS cluster
+          aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER}
+
+          # Step 2: update the container image
+          kubectl set image deployment/my-app \\
+            my-app=${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}
+
+          # Step 3: wait for the rollout (fail if it takes longer than 120s)
+          kubectl rollout status deployment/my-app --timeout=120s
+        &quot;&quot;&quot;
+    }
+}</code></pre>
+                <div class='exp2'><p>&#x27;aws eks update-kubeconfig&#x27; must run first — without it, kubectl has no cluster to talk to. &#x27;kubectl set image deployment/my-app my-app=&lt;image&gt;&#x27; updates the image of the container named &#x27;my-app&#x27; inside the Deployment named &#x27;my-app&#x27;. The format is: deployment/&lt;deployment-name&gt; &lt;container-name&gt;=&lt;full-image-reference&gt;. The container name must exactly match the &#x27;name:&#x27; field in the Pod template&#x27;s containers list. Finally, &#x27;kubectl rollout status --timeout=120s&#x27; blocks the pipeline until all Pods in the Deployment are healthy under the new image, or exits non-zero if the timeout is exceeded — turning a stuck rollout into a pipeline failure you can act on.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Write the alternative deploy stage using Approach A (manifest rewrite + kubectl apply). The deployment.yaml file contains &#x27;image: IMAGE_PLACEHOLDER&#x27; as a placeholder. Use &#x27;sed&#x27; to substitute the real image reference in-place, then apply both deployment.yaml and service.yaml, then wait for the rollout.</p></div>
+              <pre class='starter'><code>stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER}
+
+          # Replace the placeholder in deployment.yaml with the real image
+          sed -i ________ deployment.yaml
+
+          # Apply both manifests
+          ________
+          ________
+
+          # Wait for the rollout
+          kubectl rollout status deployment/my-app --timeout=120s
+        &quot;&quot;&quot;
+    }
+}</code></pre>
+              <details><summary>Hint</summary><ul><li>In deployment.yaml, the placeholder line should look like: image: IMAGE_PLACEHOLDER — the sed command replaces that entire token.</li><li>On macOS, &#x27;sed -i&#x27; requires an empty string argument: sed -i &#x27;&#x27; &#x27;s|...|...|&#x27; file. On Linux (and Jenkins agents running Linux) the empty string is not needed.</li><li>If the Jenkinsfile runs in a Docker agent that does not have &#x27;sed&#x27;, you can use Python: python3 -c &quot;import re,sys; open(&#x27;deployment.yaml&#x27;,&#x27;w&#x27;).write(re.sub(&#x27;IMAGE_PLACEHOLDER&#x27;,&#x27;${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}&#x27;,open(&#x27;deployment.yaml&#x27;).read()))&quot;</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>stage(&#x27;Deploy to EKS&#x27;) {
+    steps {
+        sh &quot;&quot;&quot;
+          aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER}
+
+          # Replace IMAGE_PLACEHOLDER in deployment.yaml with the real image
+          sed -i &#x27;s|IMAGE_PLACEHOLDER|${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}|&#x27; deployment.yaml
+
+          # Apply both manifests
+          kubectl apply -f deployment.yaml
+          kubectl apply -f service.yaml
+
+          # Wait for the rollout
+          kubectl rollout status deployment/my-app --timeout=120s
+        &quot;&quot;&quot;
+    }
+}</code></pre>
+                <div class='exp2'><p>&#x27;sed -i&#x27; edits the file in place. The substitution pattern &#x27;s|IMAGE_PLACEHOLDER|&lt;real-image&gt;|&#x27; uses &#x27;|&#x27; as the delimiter instead of &#x27;/&#x27; because the image URL contains forward slashes — using &#x27;/&#x27; as a delimiter would require escaping every slash in the URL, making the command unreadable. After the substitution, &#x27;deployment.yaml&#x27; contains the exact ECR image reference for this build, and &#x27;kubectl apply -f&#x27; applies the complete, current state of the manifest to the cluster. This is the approach that keeps the manifest as the single source of truth: what is in Git (after the pipeline runs) exactly matches what EKS runs.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — You deployed image tag &#x27;abc1234&#x27; and &#x27;kubectl rollout status&#x27; exited with a non-zero code (timeout). Investigate the failed rollout and recover the cluster to serve users. Write all kubectl commands needed to: (1) check the rollout status and which Pods are failing, (2) inspect the failing Pod&#x27;s events to find the root cause, and (3) roll back to the previous working version.</p></div>
+              <pre class='starter'><code># Step 1: See the rollout status and which Pods are stuck
+kubectl rollout status deployment/my-app
+kubectl get pods
+
+# Step 2: Inspect a failing Pod
+# Pick a Pod name from the output above (e.g., my-app-abc123-xyz)
+kubectl describe pod ________      # look at the Events section
+kubectl logs ________              # view container logs if the Pod started but crashed
+
+# Step 3: Roll back to the previous revision
+kubectl ________</code></pre>
+              <details><summary>Hint</summary><ul><li>&#x27;kubectl rollout history deployment/my-app&#x27; lists all revisions. Use &#x27;--to-revision=&lt;N&gt;&#x27; to roll back to a specific known-good version: kubectl rollout undo deployment/my-app --to-revision=2</li><li>ImagePullBackOff is always either: (a) the tag does not exist in ECR, (b) the cluster nodes lack pull permission to ECR, or (c) the registry URL is wrong. Check &#x27;kubectl describe pod&#x27; Events for the exact error string.</li><li>After rollback, run &#x27;kubectl get pods&#x27; and confirm all Pods return to Running state before closing the incident.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: See the rollout status and which Pods are stuck
+kubectl rollout status deployment/my-app
+# (This will print: &#x27;Waiting for deployment... 1 out of 3 new replicas have been updated&#x27;)
+kubectl get pods
+# (Look for Pods in CrashLoopBackOff, ImagePullBackOff, or Pending state)
+
+# Step 2: Inspect a failing Pod
+kubectl describe pod my-app-&lt;new-replicaset-hash&gt;-&lt;pod-hash&gt;
+# Look at &#x27;Events&#x27; at the bottom — common messages:
+#   ImagePullBackOff: the image tag does not exist in ECR
+#   CrashLoopBackOff: the container starts then immediately crashes
+#   OOMKilled: container exceeded memory limit
+kubectl logs my-app-&lt;new-replicaset-hash&gt;-&lt;pod-hash&gt;
+# (Read the container&#x27;s stdout/stderr for application errors)
+
+# Step 3: Roll back to the previous revision
+kubectl rollout undo deployment/my-app
+# Verify the rollback is in progress:
+kubectl rollout status deployment/my-app
+# Confirm old image is now running:
+kubectl get deployment my-app -o jsonpath=&#x27;{.spec.template.spec.containers[0].image}&#x27;</code></pre>
+                <div class='exp2'><p>&#x27;kubectl get pods&#x27; quickly shows which Pods are in a bad state (CrashLoopBackOff, ImagePullBackOff, Pending). &#x27;kubectl describe pod &lt;name&gt;&#x27; shows the Event log, which is the most informative first step: ImagePullBackOff means the image tag &#x27;abc1234&#x27; was never pushed to ECR or the tag is wrong; CrashLoopBackOff means the image pulled but the process crashes immediately (check logs). &#x27;kubectl rollout undo&#x27; is the recovery command: it instructs the Deployment to revert to the previous ReplicaSet revision. Because the old Pods were never fully retired during the failed rollout (maxUnavailable keeps some healthy Pods alive), the rollback restores full capacity quickly. After rolling back, investigate the root cause before attempting another deploy.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=h7k45phtZgc' target='_blank'>Jenkins CI/CD Pipeline - Ansible, Docker, Github Webhooks on AWS | Resume Project 2 | English</a></li><li><a href='https://www.youtube.com/watch?v=MSDqlQurfaI' target='_blank'>Real-time project - Deploy an application to K8s using Jenkins CI/CD pipeline, Ansible, Docker, Git</a></li><li><a href='https://www.youtube.com/watch?v=u5924Zxr8Vw' target='_blank'>Terraform Jenkins CI/CD Pipeline AWS EKS Kubernetes Deployment | LAB-13 | Step by Step</a></li></ul></div>
+        </article>
+<article id='lec7' class='lecture'>
+          <h2>07. &quot;Rolling Updates, Rollbacks, and Health Checks&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Configure health checks with readiness and liveness probes.</li>
+<li>Check deployment status and roll back using <code class='ic'>kubectl rollout</code>.</li>
+<li>Verify a stable, zero-downtime rolling deployment.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why this lecture matters most</h4>
+<p>Your pipeline now deploys automatically. But &quot;automatic&quot; is dangerous if it is also &quot;reckless&quot; — pushing a broken version straight to all users with no safety net. This lecture is about making your rollouts <strong>safe</strong>: replacing versions gradually so users never see downtime, teaching Kubernetes how to tell a healthy Pod from a sick one, and being able to undo a bad release in seconds. These are the features that make people trust an automated pipeline in production.</p>
+<h4>Rolling updates: replace gradually</h4>
+<p>When you change a Deployment&#x27;s image (Lecture 6), Kubernetes uses the <strong>rolling update</strong> strategy by default. Instead of stopping all old Pods and starting new ones (which would cause an outage), it replaces them <em>incrementally</em>: spin up some new Pods, wait until they are ready, retire some old ones, repeat — until every Pod runs the new version. Throughout, there is always a working set serving traffic. That is what &quot;zero-downtime deployment&quot; means in practice.</p>
+<p>Two knobs control the pace, and they are commonly confused, so let us be precise. Both live under the Deployment&#x27;s <code class='ic'>strategy.rollingUpdate</code>:</p>
+<ul>
+<li><strong><code class='ic'>maxUnavailable</code></strong> — how many Pods are allowed to be <em>down</em> (below the desired count) at any moment during the update. It caps how far you dip <em>below</em> full capacity.</li>
+<li><strong><code class='ic'>maxSurge</code></strong> — how many <em>extra</em> Pods are allowed <em>above</em> the desired count during the update. It caps how far you go <em>over</em> desired size.</li>
+</ul>
+<p>Both default to <code class='ic'>25%</code>. A concrete example with <strong>4 replicas</strong> and the defaults:</p>
+<ul>
+<li><code class='ic'>maxUnavailable: 25%</code> of 4 = 1 → at most 1 Pod down at a time, so at least 3 keep serving.</li>
+<li><code class='ic'>maxSurge: 25%</code> of 4 = 1 → at most 1 extra Pod, so the total never exceeds 5 (125% of 4).</li>
+</ul>
+<p>You can use percentages or absolute integers. For a slow, extra-safe rollout, set both to small values:</p>
+<pre><code>
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+</code></pre>
+<blockquote class='callout'>
+<p>Mnemonic: <strong><code class='ic'>maxSurge</code> = how far over you may go; <code class='ic'>maxUnavailable</code> = how far under you may dip.</strong> Surge adds capacity temporarily; unavailable removes it temporarily. Together they bound the window the rollout operates in.</p>
+</blockquote>
+<p>The flow of a rolling update is as follows: create new Pods up to the surge limit, wait for them to pass their readiness check, then terminate old Pods within the unavailable limit, and repeat until the new version is fully rolled out. The diagram below also shows what happens when the new Pods never become ready.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Start[New image applied] --&gt; Surge[Start new Pods up to maxSurge]
+    Surge --&gt; Ready{New Pods pass&lt;br/&gt;readiness probe?}
+    Ready --&gt;|Yes| Retire[Terminate old Pods&lt;br/&gt;within maxUnavailable]
+    Retire --&gt; Done{All Pods on&lt;br/&gt;new version?}
+    Done --&gt;|No| Surge
+    Done --&gt;|Yes| Success[Rollout complete]
+    Ready --&gt;|No| Hold[&quot;Old Pods kept running&lt;br/&gt;(maxUnavailable blocks retirement)&quot;]
+    Hold --&gt; Stuck[rollout status reports stuck]
+    Stuck --&gt; Undo[kubectl rollout undo]
+    Undo --&gt; Success</div><figcaption>Rolling update gated by readiness, with rollback on failure</figcaption></figure>
+<h4>Health checks: how Kubernetes knows a Pod is OK</h4>
+<p>A rolling update is only safe if Kubernetes can actually tell whether a new Pod is healthy before it shifts traffic to it. That is the job of <strong>probes</strong>. There are three, and the two you must not confuse are readiness and liveness.</p>
+<p><strong>Readiness probe — &quot;can this Pod receive traffic <em>right now</em>?&quot;</strong></p>
+<p>A readiness probe decides whether a Pod should be in the Service&#x27;s pool of traffic targets. If it <strong>fails</strong>, Kubernetes does <strong>not</strong> kill the Pod — it simply <em>removes the Pod&#x27;s IP from the Service endpoints</em>, so no new requests are routed to it. When it passes again, the Pod is added back. This is exactly what gates a rolling update: a new Pod only starts receiving user traffic once its readiness probe passes (for example, after it has warmed up and connected to its database).</p>
+<p><strong>Liveness probe — &quot;is this Pod broken and in need of a <em>restart</em>?&quot;</strong></p>
+<p>A liveness probe decides whether the container is alive and well. If it <strong>fails</strong>, Kubernetes <strong>kills the container and restarts it</strong>. This recovers from states like a deadlock or a process that is stuck but not crashed — the classic &quot;have you tried turning it off and on again.&quot;</p>
+<p>The distinction is the heart of this lecture, so state it plainly:</p>
+<blockquote class='callout'>
+<p><strong>Readiness controls traffic; liveness controls restarts.</strong> A failing readiness probe means &quot;don&#x27;t send requests here yet&quot; (Pod stays running, just out of rotation). A failing liveness probe means &quot;this is broken — restart it.&quot; Swapping them is a classic and painful mistake: a too-aggressive <em>liveness</em> probe will restart Pods that were merely slow to warm up, potentially cascading into a cluster-wide restart storm under load.</p>
+</blockquote>
+<p>The third probe, the <strong>startup probe</strong>, simply holds off the liveness and readiness probes until a slow-starting app (think old Java services) has finished booting — so they do not kill a Pod that is just taking its time to start.</p>
+<p>Here is a Deployment container with both key probes, using HTTP checks (probes can also be TCP or run a command):</p>
+<pre><code>
+        livenessProbe:
+          httpGet:
+            path: /healthz       # is the app alive? restart if not
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready         # is the app ready for traffic? hold traffic if not
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+</code></pre>
+<p><code class='ic'>initialDelaySeconds</code> waits before the first check; <code class='ic'>periodSeconds</code> is how often to repeat it. A good practice is a lightweight <code class='ic'>/ready</code> endpoint that returns 200 only when dependencies (DB, caches) are reachable, and a <code class='ic'>/healthz</code> that returns 200 as long as the process itself is functioning.</p>
+<p>Probes and rolling updates are deeply linked: <strong>without a readiness probe, Kubernetes assumes a Pod is ready the instant its container starts</strong> and will shift traffic to it immediately — even if your app needs ten seconds to be usable. That means users hit errors during every deploy. Configure readiness, and the rollout actually waits.</p>
+<h4>Checking and controlling a rollout</h4>
+<p><code class='ic'>kubectl</code> gives you live visibility and control over a rollout (this works for Deployments, StatefulSets, and DaemonSets):</p>
+<pre><code>
+kubectl rollout status deployment/my-app     # block until the rollout finishes (or fails)
+kubectl rollout history deployment/my-app     # list past revisions
+kubectl rollout pause deployment/my-app        # freeze the rollout mid-way
+kubectl rollout resume deployment/my-app       # continue it
+</code></pre>
+<p><code class='ic'>rollout status</code> is the command your pipeline already uses (Lecture 6) to wait for success. <code class='ic'>pause</code>/<code class='ic'>resume</code> let you halt mid-rollout if you spot trouble and then continue once you are satisfied.</p>
+<h4>Rollback: undo a bad release in one command</h4>
+<p>This is the safety net that makes automated deployment tolerable. Kubernetes keeps a history of a Deployment&#x27;s revisions, so you can revert:</p>
+<pre><code>
+kubectl rollout undo deployment/my-app                  # back to the previous revision
+kubectl rollout undo deployment/my-app --to-revision=3  # to a specific revision
+</code></pre>
+<p>There is a beautiful interaction with readiness probes here. Suppose you deploy an image tag that does not exist, or one that crash-loops on startup. The new Pods never pass readiness, so — because of <code class='ic'>maxUnavailable</code> — Kubernetes <strong>refuses to retire the old, healthy Pods</strong>. Your old version keeps serving the whole time, <code class='ic'>kubectl rollout status</code> reports the rollout is stuck waiting, and you run <code class='ic'>kubectl rollout undo</code> to clear out the bad Pods. Users never noticed. This is the entire payoff of the lecture: gradual rollout + health checks + one-command rollback = you can deploy fearlessly.</p>
+<h4>Putting it in the pipeline</h4>
+<p>In practice you wire this together as: configure probes in your manifest (so rollouts gate on real health), let Jenkins run <code class='ic'>kubectl rollout status</code> so a stuck rollout fails the build, and keep <code class='ic'>kubectl rollout undo</code> ready — either run manually by an on-call engineer or, more maturely, automated when the rollout fails. (A more advanced path is to commit a revert in Git and let a GitOps controller reconcile, but the built-in <code class='ic'>rollout undo</code> is the direct tool and exactly what you need here.)</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A rolling update replaces Pods gradually so there is always a working version serving traffic; <code class='ic'>maxSurge</code> bounds how far <em>over</em> desired count you go, <code class='ic'>maxUnavailable</code> bounds how far <em>under</em> you dip (both default 25%).</li>
+<li><strong>Readiness probe = traffic control</strong>: on failure, the Pod is removed from the Service (not killed) — this is what gates a rollout. <strong>Liveness probe = restart control</strong>: on failure, Kubernetes restarts the container. Do not confuse them.</li>
+<li>Without a readiness probe, Kubernetes routes traffic to a Pod the moment it starts, causing errors during every deploy; the startup probe just delays the other probes for slow-booting apps.</li>
+<li><code class='ic'>kubectl rollout status/history/pause/resume</code> give visibility and control; <code class='ic'>kubectl rollout undo</code> reverts to a previous revision in one command.</li>
+<li>Together, gradual rollout + readiness gating + one-command rollback make automated deployment safe: a broken release leaves the old version serving and is trivially undone.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Distinguish readiness probes from liveness probes. For each of the following behaviors, state whether it is caused by a failing readiness probe, a failing liveness probe, both, or neither — and explain what Kubernetes does in each case.</p>
+<p>(a) A Pod is removed from the Service&#x27;s load-balancing rotation but continues running.</p>
+<p>(b) A Pod is restarted by Kubernetes.</p>
+<p>(c) A rolling update is paused because a new Pod never becomes healthy.</p>
+<p>(d) A Pod that is deadlocked (but still running) is automatically recovered.</p>
+<p>(e) A slow-starting container is killed before its app finishes booting.</p></div>
+              <pre class='starter'><code># For each behavior, state: readiness / liveness / both / neither
+# and describe what Kubernetes does.
+
+# (a) Pod removed from Service rotation, keeps running:
+# Probe type: ________
+# What Kubernetes does: ________
+
+# (b) Pod is restarted by Kubernetes:
+# Probe type: ________
+# What Kubernetes does: ________
+
+# (c) Rolling update paused because new Pod never becomes healthy:
+# Probe type: ________
+# What Kubernetes does: ________
+
+# (d) Deadlocked (running but unresponsive) Pod is auto-recovered:
+# Probe type: ________
+# What Kubernetes does: ________
+
+# (e) Slow-starting container killed before app finishes booting:
+# Probe type: ________
+# What Kubernetes does: ________</code></pre>
+              <details><summary>Hint</summary><ul><li>The mnemonic from the lecture: readiness = traffic gate; liveness = restart trigger. Print this somewhere visible while debugging probe issues.</li><li>&#x27;kubectl describe pod &lt;name&gt;&#x27; shows probe failures in the Events section with messages like &#x27;Liveness probe failed: HTTP probe failed with statuscode: 500&#x27;.</li><li>Use &#x27;kubectl get endpoints &lt;service-name&gt;&#x27; to check whether a Pod&#x27;s IP is currently in the Service&#x27;s rotation — if missing, readiness probe failed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># (a) Pod removed from Service rotation, keeps running:
+# Probe type: Readiness
+# What Kubernetes does: Removes the Pod&#x27;s IP from the Service&#x27;s Endpoints list
+#                       so new requests stop going to it; the Pod itself stays running.
+
+# (b) Pod is restarted by Kubernetes:
+# Probe type: Liveness
+# What Kubernetes does: Kills the container (according to the Pod&#x27;s restartPolicy)
+#                       and starts a new container instance in the same Pod.
+
+# (c) Rolling update paused because new Pod never becomes healthy:
+# Probe type: Readiness
+# What Kubernetes does: Blocks retirement of old Pods (maxUnavailable prevents
+#                       taking them down while the new Pod isn&#x27;t ready); the rollout
+#                       stalls and &#x27;kubectl rollout status&#x27; reports it as stuck.
+
+# (d) Deadlocked (running but unresponsive) Pod is auto-recovered:
+# Probe type: Liveness
+# What Kubernetes does: The liveness HTTP/TCP check fails (app is alive as a process
+#                       but not responding); Kubernetes kills and restarts the container.
+
+# (e) Slow-starting container killed before app finishes booting:
+# Probe type: Liveness (misconfigured — initialDelaySeconds too short)
+# What Kubernetes does: The liveness probe fires before the app is ready, fails,
+#                       and Kubernetes kills the container in a restart loop.
+#                       The fix is a startup probe or a longer initialDelaySeconds.</code></pre>
+                <div class='exp2'><p>The core rule: readiness controls whether traffic is sent (Pod in or out of Service), liveness controls whether the container is restarted. They operate independently. A failing readiness probe alone never kills a Pod — it just parks it out of rotation. A failing liveness probe always kills and restarts the container. Scenario (e) is the classic misconfiguration: setting initialDelaySeconds too short on the liveness probe causes Kubernetes to probe a still-booting container, fail, restart it, and loop. The startup probe was introduced precisely to hold off both liveness and readiness probes until the app signals &#x27;I have finished starting&#x27;.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Add readiness and liveness probes to a Deployment manifest. The application exposes:</p>
+<ul>
+<li>GET /healthz on port 3000 → responds 200 when the process is alive</li>
+<li>GET /ready on port 3000 → responds 200 when connected to its database</li>
+</ul>
+<p>The app takes about 8 seconds to start. Configure the probes so: liveness starts checking after 10 seconds (every 10 seconds), readiness starts checking after 5 seconds (every 5 seconds). Add both probes to the existing container spec below.</p></div>
+              <pre class='starter'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          ports:
+            - containerPort: 3000
+          # ADD livenessProbe here
+          # ADD readinessProbe here</code></pre>
+              <details><summary>Hint</summary><ul><li>If your app does not expose a dedicated health endpoint, a TCP probe checks if the port is open: tcpSocket: { port: 3000 } — this is weaker but better than no probe.</li><li>Add &#x27;failureThreshold: 3&#x27; (default is 3) to tolerate brief failures before triggering action — useful for transient network hiccups.</li><li>After applying, observe the probe results: kubectl describe pod &lt;pod-name&gt; and look at the &#x27;Conditions&#x27; and &#x27;Events&#x27; sections.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          ports:
+            - containerPort: 3000
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5</code></pre>
+                <div class='exp2'><p>The probes use &#x27;httpGet&#x27; — Kubernetes sends an HTTP GET to the specified path and port; a 2xx or 3xx response is success, anything else is failure. &#x27;initialDelaySeconds&#x27; gives the container time to boot before the first probe fires — set it slightly longer than the typical startup time to avoid false failures during initial boot. &#x27;periodSeconds&#x27; is how often to repeat. The readiness probe uses &#x27;/ready&#x27; (which checks database connectivity) with a shorter initialDelaySeconds because readiness failure only removes the Pod from the Service — it does not kill it — so it is safe to start checking earlier. The liveness probe uses &#x27;/healthz&#x27; with a longer initial delay because a liveness failure causes a restart, which is more disruptive.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Configure rolling update parameters and practice the rollout commands. Add &#x27;maxUnavailable: 1&#x27; and &#x27;maxSurge: 1&#x27; to the Deployment&#x27;s strategy. Then write the sequence of kubectl commands to: (1) trigger a new rollout by updating the image to tag &#x27;b2c3d4e&#x27;, (2) watch the rollout live, (3) pause the rollout, (4) resume it, and (5) view the rollout history.</p></div>
+              <pre class='starter'><code># Part 1: Add rolling update strategy to the Deployment spec
+# (Add under spec:, before replicas:)
+spec:
+  strategy:
+    type: ________
+    rollingUpdate:
+      maxUnavailable: ________
+      maxSurge: ________
+  replicas: 3
+  ...
+
+# Part 2: Write the kubectl commands
+
+# (1) Update image to tag &#x27;b2c3d4e&#x27;
+kubectl set image ________
+
+# (2) Watch the rollout live (block until done or failed)
+kubectl rollout ________
+
+# (3) Pause the rollout mid-way
+kubectl rollout ________
+
+# (4) Resume the rollout
+kubectl rollout ________
+
+# (5) View rollout history
+kubectl rollout ________</code></pre>
+              <details><summary>Hint</summary><ul><li>After &#x27;kubectl rollout pause&#x27;, &#x27;kubectl get pods&#x27; will show a mix of old and new Pods — the rollout is frozen at that split.</li><li>To annotate a rollout with a change reason (useful in history): kubectl annotate deployment/my-app kubernetes.io/change-cause=&#x27;update to tag b2c3d4e&#x27; — this shows in rollout history.</li><li>maxUnavailable and maxSurge can be percentages (e.g., &#x27;25%&#x27;) or absolute integers. Percentages are rounded down for maxUnavailable and up for maxSurge.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Part 1: Rolling update strategy
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  ...
+
+# Part 2: kubectl commands
+
+# (1) Update image to tag &#x27;b2c3d4e&#x27;
+kubectl set image deployment/my-app \
+  my-app=111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:b2c3d4e
+
+# (2) Watch the rollout live (block until done or failed)
+kubectl rollout status deployment/my-app
+
+# (3) Pause the rollout mid-way
+kubectl rollout pause deployment/my-app
+
+# (4) Resume the rollout
+kubectl rollout resume deployment/my-app
+
+# (5) View rollout history
+kubectl rollout history deployment/my-app</code></pre>
+                <div class='exp2'><p>With replicas=3, maxUnavailable=1, maxSurge=1: Kubernetes will never let more than 1 Pod be below desired count, and never spin up more than 4 total (3+1). The rollout proceeds one Pod at a time — retire one old Pod, spin up one new Pod, wait for it to pass readiness, repeat. &#x27;pause&#x27; is useful when you spot a problem (e.g., metrics looking bad) midway through a rollout — it freezes the update at the current state, leaving some old and some new Pods running. &#x27;resume&#x27; continues from where it stopped. &#x27;rollout history&#x27; shows all revisions — each time you change the Pod template, Kubernetes records a new revision that you can roll back to.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — A colleague deployed a broken image that causes all new Pods to crash immediately (&#x27;CrashLoopBackOff&#x27;). The deployment has 3 replicas, maxUnavailable=1, maxSurge=1, and has readiness probes configured. Explain what state the cluster is in right now (how many old vs. new Pods), then write the commands to: (1) verify the stuck rollout, (2) check why the new Pods are failing, and (3) roll back to revision 2 specifically.</p></div>
+              <pre class='starter'><code># Step 0: Explain the cluster state
+# With maxUnavailable=1 and readiness probes failing on new Pods,
+# how many old Pods are still running? How many new Pods are in CrashLoopBackOff?
+# Explanation: ________
+
+# Step 1: Verify the rollout is stuck
+kubectl ________
+
+# Step 2: Find out why new Pods are crashing
+kubectl get pods
+# (pick a crashing pod name and inspect it)
+kubectl ________
+kubectl logs ________ --previous
+
+# Step 3: Roll back to revision 2 specifically
+kubectl ________</code></pre>
+              <details><summary>Hint</summary><ul><li>&#x27;kubectl rollout history deployment/my-app&#x27; shows all revision numbers. Use &#x27;--revision=&lt;N&gt;&#x27; to see the details of a specific revision: kubectl rollout history deployment/my-app --revision=2</li><li>CrashLoopBackOff usually means the container starts and immediately exits non-zero. Check exit code in &#x27;kubectl describe pod&#x27; under &#x27;Last State: Terminated: Exit Code&#x27;.</li><li>After the rollback completes, &#x27;kubectl get pods&#x27; should show all 3 Pods in Running/Ready state with the old image tag.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 0: Cluster state explanation
+# With maxUnavailable=1 and the readiness probe failing on new Pods:
+# - Kubernetes retired at most 1 old Pod (maxUnavailable=1 permits taking 1 down)
+# - It started 1 new Pod (maxSurge=1) which is CrashLoopBackOff and never passes readiness
+# - Because the new Pod never becomes ready, RBAC blocks retiring more old Pods
+# - Result: 2 old Pods still running (healthy, serving traffic) +
+#           1 new Pod in CrashLoopBackOff + possibly 1 that was terminated
+# Users are still served by the 2 remaining old Pods — zero user impact so far.
+
+# Step 1: Verify the rollout is stuck
+kubectl rollout status deployment/my-app
+# Expected output: &#x27;Waiting for deployment &quot;my-app&quot; rollout to finish:
+#   1 out of 3 new replicas have been updated...&#x27;
+
+# Step 2: Find out why new Pods are crashing
+kubectl get pods
+# Identify pods in CrashLoopBackOff, e.g.: my-app-7d9f8b-xk9mn
+kubectl describe pod my-app-7d9f8b-xk9mn
+# Look at Events: exit codes, OOM, missing env vars, bad image, etc.
+kubectl logs my-app-7d9f8b-xk9mn --previous
+# &#x27;--previous&#x27; fetches logs from the last crashed container instance
+
+# Step 3: Roll back to revision 2 specifically
+kubectl rollout undo deployment/my-app --to-revision=2
+# Monitor recovery:
+kubectl rollout status deployment/my-app</code></pre>
+                <div class='exp2'><p>This scenario illustrates exactly why rolling updates + readiness probes are safe: the new crashing Pods never pass their readiness check, so maxUnavailable prevents Kubernetes from retiring more old Pods. At most 1 old Pod is retired and 1 new Pod is added (maxSurge=1), leaving 2 healthy old Pods serving traffic — users never notice. The &#x27;--previous&#x27; flag on &#x27;kubectl logs&#x27; retrieves logs from the last terminated container, which is essential when a Pod keeps restarting (current logs may be empty if the crash happens very quickly). Rolling back to a specific revision (&#x27;--to-revision=2&#x27;) is useful when you want to skip the immediately preceding revision (which might also be bad) and go to a known-good state.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=fqfieWP1jY4' target='_blank'>Kubernetes Health Checks: Liveness vs. Readiness vs. Startup Probe</a></li><li><a href='https://www.youtube.com/watch?v=lxc4EXZOOvE' target='_blank'>Most Common Kubernetes Deployment Strategies (Examples &amp; Code)</a></li><li><a href='https://www.youtube.com/watch?v=wWA9JgAvuqw' target='_blank'>Kubernetes Rolling Updates &amp; Rollbacks | Zero Downtime Deployments Explained</a></li></ul></div>
+        </article>
+<article id='lec8' class='lecture'>
+          <h2>08. &quot;Managing Manifests and Secrets, and Wrapping Up&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Separate configuration and secret values from images using ConfigMaps and Secrets, and inject them into Pods.</li>
+<li>Survey approaches to managing manifests at scale with Helm and Kustomize.</li>
+<li>Review the finished pipeline and how to apply it to your own code.</li>
+</ul>
+<h3>Body</h3>
+<h4>The last missing piece: configuration</h4>
+<p>Your pipeline deploys safely, but real apps need <em>configuration</em> — database URLs, feature flags, API keys, passwords. You should <strong>never</strong> bake these into the image (every environment would need a different image) or hardcode them in the Deployment manifest (especially secrets, which would then sit in your Git repo in plain text). Kubernetes gives you two objects to keep configuration separate from code: <strong>ConfigMap</strong> for non-sensitive settings and <strong>Secret</strong> for sensitive ones. This decoupling is what makes one image portable across dev, staging, and production.</p>
+<h4>ConfigMap: non-sensitive configuration</h4>
+<p>A <strong>ConfigMap</strong> stores configuration as key-value pairs. It is <em>not</em> encrypted and is meant for non-confidential data like ports, log levels, or feature flags. Create one from literals on the command line:</p>
+<pre><code>
+kubectl create configmap app-config \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=NGINX_PORT=8080
+</code></pre>
+<p>…or declaratively in YAML, which is what you commit to your repo:</p>
+<pre><code>
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: &quot;info&quot;
+  NGINX_PORT: &quot;8080&quot;
+</code></pre>
+<p>There are two ways a Pod consumes a ConfigMap, and the same two work for Secrets:</p>
+<p><strong>As environment variables.</strong> Inject specific keys with <code class='ic'>env</code>/<code class='ic'>valueFrom</code>, or pull in every key at once with <code class='ic'>envFrom</code>:</p>
+<pre><code>
+        envFrom:
+          - configMapRef:
+              name: app-config        # all keys become env vars
+        # or, one specific key:
+        env:
+          - name: LOG_LEVEL
+            valueFrom:
+              configMapKeyRef:
+                name: app-config
+                key: LOG_LEVEL
+</code></pre>
+<p><strong>As mounted files.</strong> Mount the ConfigMap as a volume and each key becomes a file (e.g., under <code class='ic'>/etc/config/</code>). This suits apps that read a config file rather than environment variables.</p>
+<h4>Secret: sensitive values — and what &quot;base64&quot; really means</h4>
+<p>A <strong>Secret</strong> looks almost identical to a ConfigMap but is intended for sensitive data — passwords, tokens, TLS certificates, DB credentials:</p>
+<pre><code>
+kubectl create secret generic db-secret \
+  --from-literal=username=admin \
+  --from-literal=password=S3cr3t123
+</code></pre>
+<p>Inject it the same way (note <code class='ic'>secretKeyRef</code> / <code class='ic'>secretRef</code> instead of the ConfigMap variants):</p>
+<pre><code>
+        env:
+          - name: DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-secret
+                key: password
+</code></pre>
+<p>Now for the single most misunderstood point in all of Kubernetes:</p>
+<blockquote class='callout'>
+<p><strong>Base64 is encoding, not encryption.</strong> When you inspect a Secret with <code class='ic'>kubectl get secret db-secret -o yaml</code>, the values look scrambled — but they are merely base64-encoded, which anyone can reverse instantly with <code class='ic'>echo &lt;value&gt; | base64 --decode</code>. A Secret is <strong>not</strong> secured by default. Treat its YAML exactly as carefully as a plaintext password.</p>
+</blockquote>
+<p>So what makes Secrets genuinely safer than ConfigMaps, and how do you protect them properly?</p>
+<ul>
+<li><strong>Enable encryption at rest</strong> on the cluster so the values are encrypted inside etcd (Kubernetes&#x27; datastore). Without this, anyone with etcd access reads them in the clear. On EKS you can enable envelope encryption with a KMS key.</li>
+<li><strong>Never commit real Secret YAML to Git.</strong> Use placeholders, or tooling like Sealed Secrets that stores an <em>encrypted</em> version safely in the repo.</li>
+<li><strong>For production, offload secrets to an external manager</strong> — AWS Secrets Manager, HashiCorp Vault, or the External Secrets Operator — and let Kubernetes pull them in at runtime rather than storing the real values in the cluster at all. On EKS, the AWS Secrets and Configuration Provider (ASCP) can mount Secrets Manager values directly.</li>
+<li><strong>Rotate secrets regularly.</strong> Credentials age; rotation limits the damage of a leak.</li>
+</ul>
+<h4>Managing manifests at scale: Helm and Kustomize</h4>
+<p>So far you have a handful of hand-written YAML files for one environment. Real systems run the same app across dev, staging, and production with small differences (more replicas in prod, a different image tag, an environment-specific DNS name). Copy-pasting YAML per environment quickly becomes unmaintainable. Two tools solve this:</p>
+<p><strong>Kustomize</strong> is a <em>template-free</em> tool, built right into <code class='ic'>kubectl</code> (<code class='ic'>kubectl apply -k</code>). You keep a <strong>base</strong> directory of plain Kubernetes YAML and per-environment <strong>overlays</strong> that patch only what differs — namespace, replica count, image tag. Because there are no templating placeholders, your base files are still valid, readable Kubernetes manifests. A handy bonus is its <code class='ic'>configMapGenerator</code>/<code class='ic'>secretGenerator</code>: when the data changes, Kustomize appends a hash to the object&#x27;s name, which <em>automatically triggers a rolling update</em> (plain ConfigMap edits do not). For many teams Kustomize hits the sweet spot of simple and powerful.</p>
+<p><strong>Helm</strong> is a <em>templating</em> package manager. It bundles your manifests into a reusable, versioned <strong>chart</strong> with a <code class='ic'>values.yaml</code> file of parameters, so you (or others) can install the same app with different values. Helm shines for packaging off-the-shelf software (databases, monitoring stacks) and sharing reusable charts; the trade-off is that to be flexible you end up parameterizing many fields, which adds its own complexity.</p>
+<p>You do not need to adopt either today — your hand-written manifests work fine for one app and one environment. But know the menu: reach for <strong>Kustomize</strong> when you need per-environment variants of your own app with minimal ceremony, and <strong>Helm</strong> when you are packaging something for reuse or installing third-party software.</p>
+<h4>The finished pipeline — and applying it to your code</h4>
+<p>Step back and look at what you built across this course. The end-to-end flow is:</p>
+<p>1. <strong>Containerize</strong> your app with a <code class='ic'>Dockerfile</code> and stand up an <strong>ECR</strong> repository (Lecture 2).</p>
+<p>2. <strong>Push to GitLab</strong> → a <strong>webhook</strong> triggers <strong>Jenkins</strong>, which checks out, tests, builds, and pushes a <strong>commit-SHA-tagged image</strong> to ECR (Lecture 3).</p>
+<p>3. Describe the workload with <strong>Deployment and Service manifests</strong>, where the image tag is injected (Lecture 4).</p>
+<p>4. Give Jenkins access to <strong>EKS</strong> via an <strong>IAM role mapped to an RBAC group</strong> (Lecture 5).</p>
+<p>5. Jenkins&#x27; <strong>deploy stage</strong> updates the image (<code class='ic'>kubectl apply</code> or <code class='ic'>set image</code>) and waits with <code class='ic'>kubectl rollout status</code> (Lecture 6).</p>
+<p>6. EKS performs a <strong>rolling update</strong>, gated by <strong>readiness/liveness probes</strong>, with <strong><code class='ic'>kubectl rollout undo</code></strong> ready as a one-command rollback (Lecture 7).</p>
+<p>7. <strong>ConfigMaps and Secrets</strong> keep configuration out of the image, managed at scale with <strong>Kustomize or Helm</strong> (this lecture).</p>
+<p>To run <em>your own</em> application through this pipeline, the pieces you customize are small and well-contained: your <code class='ic'>Dockerfile</code>; your <code class='ic'>deployment.yaml</code>/<code class='ic'>service.yaml</code> (your image reference, container port, replica count, and probes); your ConfigMap/Secret for environment-specific values; and the environment variables in the <code class='ic'>Jenkinsfile</code> (AWS account ID, region, ECR repo name, cluster name). The <em>shape</em> of the pipeline — webhook → build → push → deploy → verify — never changes. That reusability is the whole point: you set it up once and every project afterward inherits safe, automated, traceable deployments.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Keep configuration out of your image and manifest: ConfigMap for non-sensitive settings, Secret for sensitive ones; inject either as environment variables or mounted files.</li>
+<li>A Secret is base64-<em>encoded</em>, not encrypted — anyone can decode it. Protect real secrets with encryption at rest, by keeping them out of Git, and ideally with an external manager (AWS Secrets Manager, Vault) plus regular rotation.</li>
+<li>Manage manifests across environments with <strong>Kustomize</strong> (template-free base + overlays, built into <code class='ic'>kubectl</code>) or <strong>Helm</strong> (templated, versioned charts); hand-written YAML is fine to start.</li>
+<li>The finished pipeline turns a single push into a safe, traceable, zero-downtime EKS deployment; adapting it to a new app means changing only the Dockerfile, manifests, config/secrets, and a few <code class='ic'>Jenkinsfile</code> variables.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: ConfigMap vs. Secret — classification. For each of the following values, decide whether it belongs in a ConfigMap, a Secret, or neither (hardcoded in the image or Deployment). Justify each decision in one sentence.</p>
+<p>(a) LOG_LEVEL=info</p>
+<p>(b) DATABASE_PASSWORD=S3cr3t123</p>
+<p>(c) A compiled Go binary included in the Docker image</p>
+<p>(d) POSTGRES_HOST=postgres.production.svc.cluster.local</p>
+<p>(e) AWS_ACCESS_KEY_ID=AKIA...</p>
+<p>(f) REPLICA_COUNT=3 (the number of replicas in the Deployment)</p></div>
+              <pre class='starter'><code># For each value: ConfigMap / Secret / Neither — and one-sentence justification.
+
+# (a) LOG_LEVEL=info
+# Answer: ________
+# Justification: ________
+
+# (b) DATABASE_PASSWORD=S3cr3t123
+# Answer: ________
+# Justification: ________
+
+# (c) A compiled binary in the Docker image
+# Answer: ________
+# Justification: ________
+
+# (d) POSTGRES_HOST=postgres.production.svc.cluster.local
+# Answer: ________
+# Justification: ________
+
+# (e) AWS_ACCESS_KEY_ID=AKIA...
+# Answer: ________
+# Justification: ________
+
+# (f) REPLICA_COUNT=3
+# Answer: ________
+# Justification: ________</code></pre>
+              <details><summary>Hint</summary><ul><li>A good heuristic: if rotating this value would require rebuilding the image, it belongs in the image. If only the Kubernetes object needs updating, it belongs in a ConfigMap or Secret.</li><li>For the most sensitive secrets (DB passwords, API keys), consider not storing them in Kubernetes at all — use AWS Secrets Manager with the External Secrets Operator or ASCP.</li><li>REPLICA_COUNT in a ConfigMap is tempting but wrong — the Deployment controller reads &#x27;spec.replicas&#x27;, not an env var; changing a ConfigMap would not scale the Deployment.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># (a) LOG_LEVEL=info
+# Answer: ConfigMap
+# Justification: Non-sensitive configuration that varies by environment (debug in dev,
+#                info/warn in prod) but contains no credentials or secrets.
+
+# (b) DATABASE_PASSWORD=S3cr3t123
+# Answer: Secret
+# Justification: Sensitive credential that must never appear in plain text in Git
+#                or in a ConfigMap, which is not encrypted at rest by default.
+
+# (c) A compiled binary in the Docker image
+# Answer: Neither
+# Justification: Compiled artifacts are part of the image itself (built by the Dockerfile)
+#                and do not belong in Kubernetes configuration objects.
+
+# (d) POSTGRES_HOST=postgres.production.svc.cluster.local
+# Answer: ConfigMap
+# Justification: A hostname is non-sensitive configuration that changes per environment
+#                (dev vs. prod cluster) — suitable for a ConfigMap so it can vary
+#                without rebuilding the image.
+
+# (e) AWS_ACCESS_KEY_ID=AKIA...
+# Answer: Secret
+# Justification: An AWS access key is a sensitive credential; it should ideally be
+#                replaced by IRSA/Pod Identity to avoid storing keys at all, but if
+#                stored in Kubernetes it must be a Secret, never a ConfigMap.
+
+# (f) REPLICA_COUNT=3
+# Answer: Neither
+# Justification: The replica count belongs in the Deployment manifest&#x27;s &#x27;replicas:&#x27; field,
+#                where it is versioned with the deployment definition, not in a ConfigMap.</code></pre>
+                <div class='exp2'><p>The distinction is sensitivity: ConfigMap holds non-sensitive, environment-variable-like configuration that varies between environments. Secret holds anything that would be harmful if exposed — passwords, tokens, keys, certificates. Items that are intrinsic to the application&#x27;s packaging (binaries, compiled artifacts) belong in the image, not in Kubernetes objects. Deployment-level controls (replicas, resource limits) belong in the Deployment manifest. Putting secrets in ConfigMaps is a common and serious error — ConfigMaps are not encrypted at rest by default and are visible to anyone with &#x27;kubectl get configmap&#x27; permission.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice A — Create a ConfigMap and inject it into a Pod as environment variables. (1) Write the YAML for a ConfigMap named &#x27;app-config&#x27; with two keys: LOG_LEVEL=info and PORT=8080. (2) Write a Deployment snippet that injects all keys from &#x27;app-config&#x27; as environment variables using &#x27;envFrom&#x27;. (3) Write the kubectl command to verify the env vars are set inside a running Pod.</p></div>
+              <pre class='starter'><code># Part 1: ConfigMap YAML
+apiVersion: v1
+kind: ________
+metadata:
+  name: ________
+data:
+  ________: ________
+  ________: ________
+
+---
+# Part 2: Deployment container spec with envFrom
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          envFrom:
+            - ________:
+                name: ________
+
+---
+# Part 3: Verify env vars inside a running Pod
+# Replace &lt;pod-name&gt; with an actual Pod name from kubectl get pods
+kubectl exec -it ________ -- ________</code></pre>
+              <details><summary>Hint</summary><ul><li>Apply the ConfigMap before applying the Deployment: kubectl apply -f configmap.yaml &amp;&amp; kubectl apply -f deployment.yaml</li><li>If a Pod references a ConfigMap that does not exist, the Pod stays in &#x27;Pending&#x27; state. Check: kubectl describe pod &lt;name&gt; and look for &#x27;configmap not found&#x27; in Events.</li><li>Changes to ConfigMap values are NOT picked up by running Pods unless the Pod restarts. Force a rolling restart with: kubectl rollout restart deployment/my-app</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Part 1: ConfigMap YAML
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: &quot;info&quot;
+  PORT: &quot;8080&quot;
+
+---
+# Part 2: Deployment container spec with envFrom
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          envFrom:
+            - configMapRef:
+                name: app-config
+
+---
+# Part 3: Verify env vars inside a running Pod
+# List all env vars and search for the ones from the ConfigMap:
+kubectl exec -it my-app-&lt;hash&gt;-&lt;hash&gt; -- env | grep -E &#x27;LOG_LEVEL|PORT&#x27;
+# Or open a shell:
+kubectl exec -it my-app-&lt;hash&gt;-&lt;hash&gt; -- sh -c &#x27;echo $LOG_LEVEL; echo $PORT&#x27;</code></pre>
+                <div class='exp2'><p>&#x27;envFrom&#x27; with &#x27;configMapRef&#x27; injects every key-value pair in the named ConfigMap as an environment variable into the container — no need to enumerate them individually. The alternative &#x27;env&#x27; + &#x27;valueFrom.configMapKeyRef&#x27; injects only specific keys and lets you rename them. Use &#x27;envFrom&#x27; when you want all keys and the key names are acceptable as-is as env var names. &#x27;kubectl exec -it &lt;pod&gt; -- env&#x27; runs the &#x27;env&#x27; command inside the container, showing all environment variables — the ConfigMap keys should appear here. Note that updating a ConfigMap does NOT automatically restart running Pods; they keep the old values until restarted.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice B — Create a Secret and inject a specific key as an environment variable. (1) Create a Secret named &#x27;db-secret&#x27; imperatively (CLI) with username=admin and password=S3cr3t123. (2) Write the Deployment container spec that injects only the &#x27;password&#x27; key from &#x27;db-secret&#x27; as the env var &#x27;DB_PASSWORD&#x27;. (3) Decode the stored password using kubectl and base64, and explain why this demonstrates that Secrets are not encrypted by default.</p></div>
+              <pre class='starter'><code># Part 1: Create the Secret imperatively
+kubectl create secret generic ________ \
+  --from-literal=username=________ \
+  --from-literal=password=________
+
+# Part 2: Inject only &#x27;password&#x27; as DB_PASSWORD env var
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ________
+                  key: ________
+
+# Part 3: Retrieve and decode the secret value
+kubectl get secret ________ -o jsonpath=&#x27;{________}&#x27; | base64 --decode
+
+# Explain: why does this show the raw password?</code></pre>
+              <details><summary>Hint</summary><ul><li>On Windows PowerShell, the base64 decode command differs: [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String((kubectl get secret db-secret -o jsonpath=&#x27;{.data.password}&#x27;)))</li><li>To see all data fields in a Secret at once: kubectl get secret db-secret -o yaml — all values will be base64 encoded.</li><li>Never put production credentials in &#x27;--from-literal&#x27; in a shell command if your shell logs command history. Use &#x27;--from-file=password=./password.txt&#x27; and delete the file immediately after.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Part 1: Create the Secret imperatively
+kubectl create secret generic db-secret \
+  --from-literal=username=admin \
+  --from-literal=password=S3cr3t123
+
+# Part 2: Inject only &#x27;password&#x27; as DB_PASSWORD env var
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secret
+                  key: password
+
+# Part 3: Retrieve and decode the secret value
+kubectl get secret db-secret -o jsonpath=&#x27;{.data.password}&#x27; | base64 --decode
+# Output: S3cr3t123
+
+# Explanation:
+# The value stored in etcd is base64-ENCODED, not encrypted.
+# &#x27;base64 --decode&#x27; trivially reverses the encoding.
+# Anyone with &#x27;kubectl get secret&#x27; permission (or direct etcd access)
+# can read the real value. Kubernetes Secrets provide access control
+# (RBAC) and namespace isolation, but NOT cryptographic protection
+# unless you separately enable encryption at rest (e.g., EKS envelope
+# encryption with a KMS key).</code></pre>
+                <div class='exp2'><p>&#x27;secretKeyRef&#x27; injects a single named key from the Secret as an env var — unlike &#x27;envFrom/secretRef&#x27; which injects all keys. The &#x27;jsonpath&#x27; expression &#x27;{.data.password}&#x27; extracts the base64-encoded value from the Secret&#x27;s data field; piping to &#x27;base64 --decode&#x27; reveals the original plaintext. This exercise makes concrete the lecture&#x27;s most important warning: base64 is encoding, not encryption. The practical consequence is that you must never commit real Secret YAML to Git, must enable KMS-based encryption at rest on your cluster, and should use an external secrets manager for production credentials.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Write a Kustomize overlay. You have a base Deployment in &#x27;base/deployment.yaml&#x27; with replicas=1 and image tag &#x27;dev-snapshot&#x27;. Create a &#x27;production&#x27; overlay that: (1) increases replicas to 3, (2) sets the image to &#x27;v1.0.0&#x27; using Kustomize&#x27;s &#x27;images&#x27; transformer, and (3) adds the label &#x27;env: production&#x27; to all resources. Write the kustomization.yaml for both the base and the overlay, and provide the command to apply the overlay.</p></div>
+              <pre class='starter'><code># base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ________
+
+---
+# base/deployment.yaml (given — do not modify)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:dev-snapshot
+          ports:
+            - containerPort: 3000
+
+---
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ________   # path to the base
+commonLabels:
+  ________: ________
+images:
+  - name: ________
+    newTag: ________
+patches:
+  - target:
+      kind: Deployment
+      name: my-app
+    patch: |-
+      ________
+
+---
+# Command to apply the production overlay
+kubectl ________</code></pre>
+              <details><summary>Hint</summary><ul><li>Run &#x27;kubectl kustomize overlays/production/&#x27; first (without apply) to preview the merged YAML and confirm the image tag and replica count look correct before applying.</li><li>The &#x27;images&#x27; transformer matches on the full repository URL minus the tag. If your base uses a different registry URL than what you specify in &#x27;name:&#x27;, the transform will not apply — they must match exactly.</li><li>For a strategic merge patch (simpler syntax than JSON Patch), use &#x27;patchesStrategicMerge&#x27; with a partial YAML file that sets only &#x27;spec.replicas: 3&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># base/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+
+---
+# overlays/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base   # relative path to the base directory
+commonLabels:
+  env: production
+images:
+  - name: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app
+    newTag: v1.0.0
+patches:
+  - target:
+      kind: Deployment
+      name: my-app
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 3
+
+---
+# Command to apply the production overlay
+kubectl apply -k overlays/production/
+# Or preview what will be applied without applying it:
+kubectl kustomize overlays/production/</code></pre>
+                <div class='exp2'><p>Kustomize overlays let you keep a single base and layer environment-specific patches on top without duplicating YAML. The &#x27;commonLabels&#x27; transformer adds &#x27;env: production&#x27; to the metadata.labels of every resource. The &#x27;images&#x27; transformer replaces the image tag by matching on the full image name (everything before the &#x27;:&#x27;) and substituting only the tag — the image name itself stays the same. The &#x27;patches&#x27; field uses a JSON Patch operation to change &#x27;spec.replicas&#x27; to 3 in the Deployment. &#x27;kubectl apply -k&#x27; is the built-in Kustomize integration — no separate &#x27;kustomize&#x27; binary needed. &#x27;kubectl kustomize&#x27; (without &#x27;apply&#x27;) prints the rendered YAML so you can preview exactly what will be sent to the cluster.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=LWbbL3jZcgo' target='_blank'>Kubernetes Kustomize Tutorial: 4 Examples (ConfigMapGenerator, Secrets, Overlays, Build, Helm)</a></li><li><a href='https://www.youtube.com/watch?v=O6Uhe9bItkI' target='_blank'>What is configMap in Kubernetes? Part 6</a></li><li><a href='https://www.youtube.com/watch?v=X-pjSFVKnlY' target='_blank'>Kubernetes Secrets Deep Dive: Production-Grade Security</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>
