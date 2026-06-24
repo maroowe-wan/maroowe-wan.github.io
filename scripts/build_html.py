@@ -326,10 +326,14 @@ def build_course(course_dir, docs, lang, S):
     lang_toggle = (f"<a class='lang-toggle' data-lang='{other}' "
                    f"href='../../../{other}/courses/{html.escape(slug)}/index.html'>{S['toggle']}</a>")
     page_tmpl = load_template("page.html", PAGE_DEFAULT)
+    # 좌측 메뉴의 설명 줄(대상 · 강수)은 다강의 강좌에서만 노출한다.
+    # 토픽별 단일 강의 강좌(total_lectures==1)에서는 의미가 없어 숨긴다.
+    count_label = S["count_unit"].format(n=count, s="" if count == 1 else "s")
+    sub_block = (f'<div class="sub">{html.escape(curr.get("target_audience", ""))} · {count_label}</div>'
+                 if count > 1 else "")
     page = page_tmpl.format(
         title=html.escape(title),
-        subtitle=html.escape(curr.get("target_audience", "")),
-        count_label=S["count_unit"].format(n=count, s="" if count == 1 else "s"),
+        sub_block=sub_block,
         toc="\n".join(toc),
         sections="\n".join(sections),
         asset_base="../../../assets",
@@ -458,6 +462,7 @@ PAGE_DEFAULT = """<!DOCTYPE html>
 <nav>
   <div class="navtop"><a class="home" href="{home_href}">{home_label}</a>{lang_toggle}</div>
   <h1>{title}</h1>
+  {sub_block}
   <ul>{toc}</ul>
 </nav>
 <main>{sections}</main>
