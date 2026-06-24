@@ -1,0 +1,61 @@
+{
+  "lecture_no": 2,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "You compute the cosine similarity between two text chunk vectors and get a score of 0.92. A second pair of chunks returns a score of 0.07. Which statement BEST describes what these scores tell you?",
+      "options": [
+        "The first pair are nearly identical in meaning; the second pair are semantically unrelated.",
+        "The first pair are long documents; the second pair are short snippets.",
+        "The first pair were embedded with the same model; the second pair used different models.",
+        "The first pair share many exact keywords; the second pair share none."
+      ],
+      "answer_index": 0,
+      "explanation": "Cosine similarity measures the angle between two vectors in semantic space, ranging from -1 (opposite direction) through 0 (perpendicular / unrelated) to 1 (same direction / same meaning). A score of 0.92 means the two vectors point nearly in the same direction — the texts carry very similar meaning. A score of 0.07 means the vectors are nearly perpendicular — the texts are semantically unrelated. The metric deliberately ignores vector length, so document length (option B) does not affect it. Whether the same model was used (option C) is a validity concern but not what the score encodes. Keyword overlap (option D) is what TF-IDF measures, not cosine similarity on neural embeddings, which capture meaning even across different wordings."
+    },
+    {
+      "question": "Many production RAG systems report that cosine similarity and dot-product search give identical rankings for their embedding vectors. What is the correct technical reason for this?",
+      "options": [
+        "Cosine similarity and dot product are always mathematically identical for any pair of vectors.",
+        "Most modern embedding models return L2-normalized vectors (length = 1), which makes cosine similarity reduce to the dot product.",
+        "Vector databases automatically convert dot product scores to cosine scores before returning results.",
+        "Both metrics compute the Euclidean distance between vectors, so they must agree."
+      ],
+      "answer_index": 1,
+      "explanation": "The cosine similarity formula is (A · B) / (||A|| × ||B||). When every vector is L2-normalized its magnitude ||A|| = ||B|| = 1, so the denominator becomes 1 and the formula reduces to the plain dot product A · B. Models such as OpenAI text-embedding-3 return normalized vectors by default, which is why the two metrics are interchangeable in those systems — but only for normalized vectors (option A is wrong in the general case). Vector databases do not silently convert metrics (option C), and Euclidean distance is a third, distinct metric, not the same as either cosine or dot product (option D)."
+    },
+    {
+      "question": "A team has already indexed 2 million document chunks in a vector database using OpenAI text-embedding-3-small. They now want to switch to bge-m3 for better multilingual coverage. What must they do?",
+      "options": [
+        "Update only the query-time embedding call; the stored chunk vectors are compatible with any model that outputs 1,024-dimensional vectors.",
+        "Re-embed all 2 million chunks with bge-m3 and replace every vector in the database, because embeddings are model-specific.",
+        "Run a one-time alignment matrix to translate text-embedding-3-small vectors into bge-m3 space without re-embedding.",
+        "Keep the existing vectors and add bge-m3 vectors only for newly ingested documents going forward."
+      ],
+      "answer_index": 1,
+      "explanation": "Embeddings are model-specific: a vector produced by text-embedding-3-small and a vector produced by bge-m3 live in completely different semantic spaces, even if they happen to share the same number of dimensions. Comparing a query vector from model A against chunk vectors from model B produces meaningless similarity scores. There is no universal alignment matrix that reliably converts between arbitrary embedding spaces (option C). A hybrid approach (option D) would make the index inconsistent: queries embedded with bge-m3 could not meaningfully compare against chunks embedded with the old model. The only correct path is to re-embed the entire corpus with the new model and rebuild the index."
+    },
+    {
+      "question": "A startup is building a RAG-based customer-support assistant for a Korean e-commerce platform. Their documents are Korean product descriptions mixed with English brand names and technical SKUs. They have no GPU infrastructure and a tight per-query cost budget. Which embedding model choice is MOST appropriate as a starting point?",
+      "options": [
+        "A Korean-specialized model such as ko-sroberta, because the documents are primarily Korean.",
+        "OpenAI text-embedding-3-small via API, because it handles Korean acceptably, requires no GPU, and has the lowest friction for a first MVP.",
+        "all-MiniLM-L6-v2 from SBERT, because its 384-dimensional vectors minimize storage costs.",
+        "bge-large-en, because it ranks highest on the English MTEB leaderboard."
+      ],
+      "answer_index": 1,
+      "explanation": "The scenario describes a first MVP with Korean + English mixed content, no GPU, and a tight budget. OpenAI text-embedding-3-small handles Korean acceptably out of the box, requires only an API call (no infrastructure), and is the lowest-friction path — exactly matching the rule of thumb stated in the lecture. Korean-specialized models (option A) may struggle with the English brand names and technical terms mixed into the documents. all-MiniLM-L6-v2 (option C) is English-focused; its multilingual performance would be unreliable for Korean text. bge-large-en (option D) is an English-only model and would perform poorly on Korean regardless of its English benchmark ranking. Once a working baseline is established, the team should A/B test bge-m3 and Korean-specialized models against their own evaluation set before switching."
+    },
+    {
+      "question": "A healthcare company must build a RAG system over confidential patient records written entirely in Korean. Regulations prohibit sending any patient data to external APIs. Which embedding path should they choose, and why?",
+      "options": [
+        "OpenAI text-embedding-3-large, because it produces the highest-quality vectors and handles Korean well.",
+        "Cohere embed-multilingual-v3.0 via API, because it is the strongest multilingual commercial option.",
+        "A self-hosted Korean-specialized model (e.g., ko-sroberta) or bge-m3, because the data cannot leave their network and the corpus is purely Korean.",
+        "all-MiniLM-L6-v2 self-hosted, because it is the smallest and easiest model to deploy on CPU."
+      ],
+      "answer_index": 2,
+      "explanation": "Data-privacy constraints make self-hosting mandatory — options A and B both require sending data to a third-party API, which is ruled out by regulation. Given that the corpus is 100 percent Korean, a Korean-specialized model (ko-sroberta, ko-sbert) is the strongest candidate because it was trained on Korean corpora and uses a Korean-aware tokenizer, which means better morphological handling and accurate token counts. bge-m3 self-hosted is also a valid choice because it supports Korean among 100+ languages and can run on private infrastructure; it is especially useful if any English-language medical literature might be added later. all-MiniLM-L6-v2 (option D) is primarily an English model; self-hosting it would satisfy the privacy requirement but would likely deliver poor Korean retrieval quality — privacy compliance alone does not make it a good fit for this use case."
+    }
+  ]
+}

@@ -1,0 +1,97 @@
+## 영상 1: How to Build a Local AI Agent With Python (Ollama, LangChain & RAG) (https://www.youtube.com/watch?v=E4l91XKQSgw)
+
+In this video, we'll be showing you how to build a local AI agent using Python, Ollama, LangChain, and ChromeDB as a vector search database. We'll implement retrieval augmented generation (RAG), which means we can retrieve relevant information from documents like CSV files or PDFs and bring that into our model. All of this runs completely free on your local computer without needing an OpenAI account or cloud services.
+
+We'll start with a quick demo of the finished product. On the right side, we have a CSV file containing fake reviews for a pizza restaurant with fields like title, date, rating, and review content. The AI agent can look up relevant reviews from this document to answer questions about the restaurant. For example, when asked about the quality of pizza, the agent retrieves relevant reviews, analyzes them, and provides a comprehensive conclusion. When asked about vegan options, it pulls up related reviews and summarizes whether vegan options are available.
+
+To begin, open a code editor like VS Code and create a new folder. Download or create a CSV file with your data and add a requirements.txt file listing the three dependencies we need to install: langchain, langchain-lama, and langchain-chroma. Open your terminal in the project directory and create a virtual environment by typing `python -m venv venv`. On Windows, activate it with `.\venv\Scripts\activate`, or on Mac/Linux use `source venv/bin/activate`. Once activated, install the dependencies using pip.
+
+Next, we need to install Ollama from ollama.ai. This allows us to run models locally on our own computer using our own hardware. After downloading Ollama, open a terminal and pull two models: first, pull Llama 3.2 with `ollama pull llama2:3.2`, and second, pull the embedding model mxbai-embed-large. These models enable us to process documents and generate responses locally.
+
+In the code editor, create a main.py file and start with imports. Import OllamaLLM from langchain_ollama, import ChatPromptTemplate from langchain_core.prompts, and other necessary components. Set up your model by specifying `model = OllamaLLM(model_name="llama2:3.2")`. Create a template string that instructs the model: "You are an expert in answering questions about a pizza restaurant. Here are some relevant reviews. Here is the question to answer."
+
+Create a chat prompt template from this template. Build a chain by piping the prompt to the model using `prompt | model`. To test this quickly, invoke the chain with a Python dictionary containing the variables. For example, pass empty reviews and a question like "What is the best pizza place in town?" When you run this with `python main.py`, the Ollama model should generate a response.
+
+To set up vector search, create a new file called vector.py. This file will handle embedding documents and storing them in a local Chroma database. Import necessary components: OllamaEmbeddings from langchain_ollama, Chroma from langchain_chroma, Document from langchain_core.documents, and pandas to read the CSV file.
+
+Load your CSV file using pandas: `df = pd.read_csv("realistic_restaurant_reviews.csv")`. Set up the embeddings model by specifying `embeddings = OllamaEmbeddings(model="mxbai-embed-large")`. Define a persistent directory for the vector database, for example `"./chroma_langchain_db"`.
+
+Check if the database already exists. If it doesn't, you need to prepare the documents. Iterate through the CSV rows and create Document objects. For each row, combine the title and review text as page_content, add metadata like rating and date, and assign an ID. Prepare two lists: one for documents and one for their corresponding IDs.
+
+Create the vector store using Chroma by specifying the collection name, persistent directory, and embedding function. If the database doesn't already exist, add the documents using `vector_store.add_documents(documents=documents, ids=ids)`. Finally, create a retriever from the vector store using `retriever = vector_store.as_retriever(search_kwargs={"k": 5})`. This retriever will look up the five most relevant documents.
+
+In main.py, import the retriever from the vector module. Before invoking the chain, use the retriever to grab relevant reviews by passing your question. The retriever will embed the question, search the vector store for similar documents using a similarity search algorithm, and return the top five reviews. Pass these reviews as a parameter to your chain.
+
+When you run the program with `python main.py`, it will create the chroma database directory and embed all documents. This process takes a moment. Once ready, you can ask questions interactively. For instance, asking "How are the vegan options?" will show that the agent pulls up relevant reviews and analyzes them, concluding that vegan options are hit or miss but show potential.
+
+Everything runs completely locally, is very fast, and doesn't require any external API keys or cloud services. You can adjust the CSV file for different types of data, or convert any content into documents using the approach demonstrated. If you want the complete code from this video, it will be available in the video description.
+
+
+## 영상 2: LangChain RAG: Optimizing AI Models for Accurate Responses (https://www.youtube.com/watch?v=cDn7bf84LsM)
+
+This video explains how to use LangChain for a RAG (Retrieval Augmented Generation) example in Python. Large language models can be great at answering many questions, but they sometimes lack up-to-date information and can't answer questions about recent events. For example, when reading an IBM announcement about a UFC partnership on IBM.com and asking an LLM about the UFC announcement from November 14th, 2024, the model didn't know what was being discussed and mentioned it was trained on a limited dataset only up to 2021.
+
+The solution is RAG (Retrieval Augmented Generation). Typically, we ask a question directly to an LLM, which generates a response. However, as seen with the UFC announcement, the LLM didn't have the right information or context to answer properly. RAG adds several components between the question and the LLM:
+
+First, we set up a knowledge base containing the content we want the LLM to read. In this case, it's the most up-to-date content from IBM.com pages about IBM products and announcements.
+
+Second, we set up a retriever to fetch content from the knowledge base.
+
+Third, we configure the LLM to receive the retrieved content.
+
+Fourth, we establish a prompt with instructions for asking the LLM questions, including the top search results from retrieval.
+
+Once these four steps are complete, we can ask questions about the content in our knowledge base. The query is searched in the knowledge base vector store, the top results are returned as context for the LLM, and finally the LLM generates a response based on this context.
+
+To begin, fetch an API key and project ID. We need several libraries: you can install them with pip. Save your Watson X credentials in a .env file in the same directory as the notebook, then import them.
+
+Next, gather information from IBM.com URLs to create a knowledge base as a vector store. Establish a dictionary of URLs from which you'll get content. Use LangChain's web-based loader for the list of URLs. Loaders load data from a source and return a list of documents. It takes a little while to load, but once complete, sample documents will show page content. Clean up the loaded documents by removing whitespace and newline characters.
+
+Before vectorizing content, split it into smaller, more manageable pieces called chunks. LangChain's recursive character text splitter takes large text and splits it based on a specified chunk size. Use a chunk size of 512 characters. Next, instantiate an embedding model to vectorize the content. For this tutorial, use IBM's Slate model, then load the chunked content into a local instance of the Chroma vector database. The vector store will contain chunked documents embedded using the Slate model.
+
+Set up the vector store as a retriever. The retrieved information from the vector store serves as additional context that the LLM will use to generate a response later. This just requires setting up the vector store as a retriever in code.
+
+Set up the generative LLM. Establish which LLM you'll use to generate the response. In this tutorial, use an IBM Granite model. Set up the model parameters and instantiate the LLM using Watson X.
+
+Set up your prompt to combine instructions, search results from the retriever, and the user's question to provide context to the LLM. Create a template with instructions for the LLM and a helper function to format documents to differentiate between individual page content. Set up a RAG chain with the retriever, prompt, helper function, and LLM.
+
+Now you can ask questions about your knowledge base. The generative model will process the augmented context along with the user's question to produce a response. When asked "Tell me about the UFC announcement from November 14th, 2024," the model responds: "On November 14th, 2024, IBM and UFC announced a groundbreaking partnership." This time, the model could answer because it received context from the UFC article.
+
+You can also ask questions like "What is Watson X.data?" The model responds that "Watson X.data is a service offered by IBM that enables users to connect to various data sources and manage metadata for creating data products."
+
+Similarly, when asked "What does Watson X.ai do?" the model answers: "Watson X.ai is a comprehensive AI platform that enables users to build, deploy, and manage AI applications." Feel free to experiment with even more questions about IBM offerings and technologies discussed in the articles you loaded into the knowledge base.
+
+
+## 영상 3: RAG기반 AI 챗봇 직접 만들어쓰기. 무제한 확장은 기본, Supabase 활용은 덤! (https://www.youtube.com/watch?v=Fk5pQ0fQkJ0)
+
+Nowadays, AI chatbots are everywhere. On many websites, you see chat icons in the bottom right corner that trigger chatbot interfaces. Previously, these were built using algorithms without AI, but now many include AI capabilities. Have you ever thought about building your own chatbot using your own data? This is where RAG (Retrieval Augmented Generation) technology comes in.
+
+In a previous video, we discussed the limitations of LLMs. First, they can only answer questions based on their training data, and when asked about information they don't know, they either hallucinate or say they don't know. Second, domain-specific information can be limited. For example, with legal or medical information, LLMs can give general answers but often lack accuracy and specificity that comes from expert knowledge and case precedents.
+
+RAG helps solve the first two problems, though not perfectly. It enables you to build more accurate AI agents and chatbots by injecting specific knowledge. Today, we'll build a chatbot using legal data to demonstrate this. With a traditional chatbot, if you ask about important clauses in a contract, ChatGPT or Claude might give vague answers or suggest consulting with a lawyer. But with RAG based on legal documents, you can get precise answers about what the law says.
+
+To implement this, we need to create a Vector Store database that the LLM can reference. When using RAG, the LLM accesses the database we provide and answers based on that data. We'll also show how to embed these documents, which is the vectorization process.
+
+Using n8n (a no-code automation tool), we'll create a chatbot by attaching a Vector Store. We'll also show how to push your data into the Vector Store.
+
+Start by adding a Chat Trigger in n8n to enable chatting directly in the platform. When the chat is triggered, the message is sent to an AI Agent that processes and responds to it. Add an AI Agent node and configure it to use a model like GPT-4o-mini. Test by asking it a question.
+
+Now we need to add a Vector Store tool. This tool allows the AI Agent to search a vector database. Configure it with a description explaining when to use this tool, such as "Use this when referencing content about commercial law." Set a limit parameter for how many related data items to retrieve (for example, five).
+
+You'll need two more connections: set up Supabase as your vector store and OpenAI for embeddings. To use Supabase, first visit supabase.com and sign up. PostgreSQL and vector storage for AI are available on Supabase. After signing up, create a new organization and project. Generate a database password and select a region (Seoul is available). Create the project.
+
+Once created, copy the project URL and Service Role Secret from the settings, then connect them in n8n. Test the connection. Next, you need to create a database table in Supabase. Go to the SQL Editor and use the quickstart template for LangChain, which automatically creates a documents table with 1536-dimensional vector embeddings.
+
+Back in n8n, set the table name to documents. Now we need to prepare to add documents to the vector store. Create an n8n form to handle document uploads. Set the form title to something like "RAG documents" and add a PDF upload field.
+
+When documents arrive through the form, they need to be embedded. Add an embedding node and data loader node. The data loader processes files by splitting them into chunks. Select the Binary data type for files. For chunking, you can use simple character splitting, recursive character splitting, or token splitting. The recursive character splitter is recommended for most use cases. Set a chunk size (for example 1000 characters) and overlap value.
+
+The process works like this: documents are submitted through the form, split into chunks, embedded using an embedding model, and stored in the Supabase vector store. Later, when you chat and mention the domain (for example, commercial law), the AI Agent uses the vector store tool to search for the five most relevant document chunks, retrieves that content, and generates a response based on it.
+
+When you first test without data in the vector store, the agent will hallucinate because it has no reference material. For example, when asked about details from commercial law that aren't in its training data, it gives an incorrect answer like "3 months" instead of the accurate "20 days" found in actual law.
+
+After uploading the law documents through the form and processing them through embedding, the vector store is populated with 668 chunks. Now when you ask the same question again, the AI Agent will search the vector store, find the relevant passages, and answer correctly: "20 days" with the specific law reference "Article 335, Section 2."
+
+For a more complete chatbot experience, add memory so the AI Agent remembers previous conversation context. You can use Window Buffer Memory or connect to a Postgres Chat Memory using Supabase credentials. With memory enabled, the agent can understand follow-up questions within the conversation context. For example, after answering a detailed question about commercial law, when you ask "Which article is that from?", the agent now understands you're asking about the previously mentioned clause and gives the correct article number.
+
+This approach demonstrates that with no code, using n8n and Supabase, you can create sophisticated RAG-based chatbots and AI agents. You can extend this pattern to any domain and knowledge base you choose, making your own customized AI services.

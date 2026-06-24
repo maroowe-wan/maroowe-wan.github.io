@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-GitOps-ArgoCD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-23-gitops-argocd/index.html'>EN</a></div>
+  <h1>K8S-GitOps-ArgoCD</h1>
+  <div class="sub">중급2까지 마친 학습자 (RBAC·스케줄링·NetworkPolicy·Helm·모니터링을 이미 아는 수준) · 총 1강</div>
+  <ul><li><a href='#lec1'>01. GitOps와 ArgoCD — 선언형 지속적 배포</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. GitOps와 ArgoCD — 선언형 지속적 배포 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>GitOps 원칙과 &quot;Git as single source of truth&quot; 개념을 이해한다</li>
+<li>ArgoCD Application을 구성해 Git 저장소와 클러스터 상태를 동기화할 수 있다</li>
+<li>드리프트(drift) 감지와 self-heal·자동 동기화 동작을 관찰할 수 있다</li>
+</ul>
+<h3>본문</h3>
+<h4>push에서 pull로 — GitOps가 바꾼 것</h4>
+<p>전통적인 CI/CD를 떠올려 보자. 파이프라인이 빌드 후 <code class='ic'>kubectl apply</code>나 <code class='ic'>helm upgrade</code>를 클러스터에 <strong>밀어 넣는다(push)</strong>. 이 방식엔 구조적 문제가 있다. CI 시스템이 클러스터의 admin 자격증명을 들고 있어야 하고(보안 위험), 클러스터의 진짜 현재 상태가 어딘가의 파이프라인 로그에만 남으며, 누군가 <code class='ic'>kubectl edit</code>으로 손을 대면 그 변경은 어디에도 기록되지 않는다.</p>
+<p>GitOps는 흐름을 뒤집는다. 핵심 원칙은 다음과 같다.</p>
+<p>1. <strong>선언형(Declarative)</strong> — 시스템의 원하는 상태 전체를 선언형 매니페스트로 표현한다.</p>
+<p>2. <strong>Git이 단일 진실 공급원(Single Source of Truth)</strong> — 그 매니페스트를 Git에 저장하고, Git이 &quot;원하는 상태&quot;의 유일한 정본이 된다.</p>
+<p>3. <strong>자동 적용(Pull)</strong> — 클러스터 안의 에이전트가 Git의 변경을 받아, 클러스터 상태를 Git에 맞춘다. CI가 클러스터에 직접 미는 게 아니라 클러스터(에이전트)가 Git에서 당겨 온다.</p>
+<p>4. <strong>지속적 조정(Reconcile)</strong> — 에이전트가 끊임없이 &quot;현재 상태 == Git의 선언 상태&quot;인지 비교하고, 어긋나면 <strong>선언 상태와 실제 상태의 차이를 자동으로 맞춘다(조정한다)</strong>.</p>
+<p>3·4번이 익숙하지 않은가. 바로 앞 강의의 <strong>조정 루프</strong>다. GitOps는 컨트롤러 패턴을 배포 전체로 확장한 것이다. desired state가 etcd 안의 CR이 아니라 Git 저장소라는 점만 다르다.</p>
+<h4>CI는 사라지지 않는다 — 책임이 바뀔 뿐</h4>
+<p>여기서 가장 흔히 생기는 오해를 짚자. <strong>&quot;클러스터가 Git을 당겨 온다&quot;는 말은 CI가 없어진다는 뜻이 아니다.</strong> GitOps에서도 CI는 여전히 필수다. 다만 CI가 하던 일의 <em>마지막 단계</em>가 바뀐다.</p>
+<ul>
+<li><strong>빌드·테스트는 그대로 CI가 한다</strong> — 소스를 컴파일하고, 테스트를 돌리고, 컨테이너 이미지를 빌드해 레지스트리에 푸시한다.</li>
+<li><strong>달라진 것은 &quot;그다음&quot;이다.</strong> 과거엔 CI가 그 결과물을 <strong>클러스터에 직접 배포(push)</strong>했다. GitOps에서는 CI가 새 이미지 태그(예: <code class='ic'>web:v1.4.2</code>)를 <strong>Git 매니페스트에 반영(commit/PR)</strong>하는 것으로 끝난다. 실제 클러스터 적용은 ArgoCD가 그 커밋을 감지해 pull 방식으로 수행한다.</li>
+</ul>
+<p>즉 CI의 책임이 <strong>&quot;클러스터에 직접 명령(push to cluster)&quot;에서 &quot;Git에 상태 변경을 요청(push to Git)&quot;으로 이동</strong>한 것이다. 그 결과 CI는 더 이상 클러스터 admin 자격증명을 들 필요가 없고(보안 향상), 모든 배포가 Git 커밋이라는 단일 경로를 통과한다. CI(빌드/테스트/이미지 푸시) → Git(매니페스트 갱신) → CD(ArgoCD가 pull 적용)로 역할이 깔끔히 분리된다.</p>
+<p>아래 시퀀스는 CI가 새 이미지 태그를 Git에 올리면, Git이 webhook으로 ArgoCD에 변경을 알리고, 클러스터 안의 에이전트가 매니페스트를 당겨 와 클러스터에 적용하는 흐름을 보여 준다.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant Dev as 개발자/CI
+    participant Git as &quot;Git 저장소 (정본)&quot;
+    participant Agent as ArgoCD 에이전트
+    participant Cluster as 클러스터
+    Dev-&gt;&gt;Git: 매니페스트/이미지 태그 변경 PR 머지
+    Git-&gt;&gt;Agent: webhook 알림 (변경 발생, 권장 기본)
+    Note over Git,Agent: webhook 유실 대비 약 3분 주기 폴링이 보조로 함께 동작
+    Agent-&gt;&gt;Git: 최신 매니페스트 가져오기
+    Git--&gt;&gt;Agent: 원하는 상태
+    Agent-&gt;&gt;Cluster: 현재 상태 조회
+    Cluster--&gt;&gt;Agent: 실제 상태
+    Agent-&gt;&gt;Agent: 차이 비교 (Sync 상태)
+    Agent-&gt;&gt;Cluster: 차이를 Git 상태로 적용</div><figcaption>GitOps webhook 기반 동기화 흐름</figcaption></figure>
+<blockquote class='callout'>
+<p>GitOps의 가장 큰 실용적 이득은 <strong>감사(audit)와 롤백</strong>이다. 모든 변경이 Git 커밋으로 남으므로 &quot;누가, 언제, 무엇을, 왜&quot; 바꿨는지 PR 이력에 그대로 보존된다. 장애가 나면 <code class='ic'>git revert</code> 한 번으로 이전 상태로 되돌릴 수 있다. 클러스터 상태를 사람의 손버릇이 아니라 버전 관리된 코드로 다루는 것 — 이것이 GitOps의 본질이다.</p>
+</blockquote>
+<h4>ArgoCD는 변경을 어떻게 감지하는가 — webhook이 기본, 폴링은 대체</h4>
+<p>위 다이어그램에서 동기화를 촉발한 것은 Git의 webhook 알림이었다. <strong>실무에서 권장되는 기본 방식이 바로 이 Git 저장소 webhook</strong>이다. 폴링과의 차이를 정확히 알아 두자.</p>
+<ul>
+<li><strong>Git webhook (권장)</strong> — GitHub·GitLab 등에 ArgoCD 주소로 webhook을 걸어 두면, 커밋이 push되는 <strong>즉시</strong> Git 서버가 ArgoCD에 &quot;변경됐다&quot;고 알려 준다. ArgoCD는 그 알림을 받자마자 해당 Application의 동기화를 시작하므로 반영이 거의 실시간이다. 운영 환경에서는 이 방식을 기본으로 구성한다.</li>
+<li><strong>주기적 폴링 (대체/안전망)</strong> — ArgoCD는 기본적으로 약 3분 간격으로도 Git을 폴링한다. webhook이 어떤 이유로 누락되거나 설정되지 않았을 때를 위한 <strong>안전망</strong>이다. 폴링만 의존하면 최대 그 주기만큼 반영이 늦어진다.</li>
+</ul>
+<blockquote class='callout'>
+<p>정리하면, webhook은 &quot;변경되면 즉시 알림(push)&quot;이고 폴링은 &quot;주기적으로 직접 확인(pull)&quot;이다. 권장 구성은 webhook으로 빠른 반영을 얻고, 폴링은 webhook 유실에 대비한 백업으로 함께 두는 것이다. 위 시퀀스에서 webhook 알림을 주 경로로, 폴링을 보조 경로로 그린 것도 같은 이유다.</p>
+</blockquote>
+<p>어느 쪽으로 촉발되든, 촉발 이후의 동작 — 즉 Git의 선언 상태와 클러스터의 실제 상태를 비교해 차이를 맞추는 <strong>조정</strong> — 은 동일하다.</p>
+<h4>ArgoCD 설치와 Application 구성</h4>
+<p>ArgoCD는 GitOps를 구현하는 대표적인 도구다. 클러스터 안에서 동작하는 컨트롤러로서, 지정한 Git 저장소를 추적하며 desired state를 클러스터에 적용한다. 가장 빠른 시작은 공식 <code class='ic'>install.yaml</code>을 그대로 적용하는 것이다.</p>
+<pre><code>
+kubectl create namespace argocd
+kubectl apply -n argocd -f \
+  https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+</code></pre>
+<blockquote class='callout'>
+<p>위 <code class='ic'>install.yaml</code> 직접 적용은 학습·실습엔 간편하지만, 실제 운영에서는 설정을 버전 관리하고 커스터마이징하기 쉬운 <strong>ArgoCD 공식 Helm 차트나 Kustomize 기반 설치</strong>가 더 선호된다. 흥미롭게도 ArgoCD를 ArgoCD로 관리하는 &quot;self-managed&quot; 패턴(app-of-apps)이 흔하다 — ArgoCD 설정 자체도 Git에 두고 GitOps로 다루는 것이다.</p>
+</blockquote>
+<p>ArgoCD의 중심 개념은 <strong>Application</strong> CRD다. &quot;어느 Git 저장소의 / 어느 경로를 / 어느 클러스터의 / 어느 네임스페이스에 / 어떻게 동기화할지&quot;를 선언한다.</p>
+<pre><code>
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/our-org/k8s-manifests.git
+    targetRevision: main          # 추적할 브랜치/태그
+    path: apps/web                # 매니페스트가 있는 경로 (Helm/Kustomize/plain YAML)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: web
+  syncPolicy:
+    automated:
+      prune: true                 # Git에서 지운 리소스는 클러스터에서도 제거
+      selfHeal: true              # 드리프트를 자동 복구
+    syncOptions:
+      - CreateNamespace=true
+</code></pre>
+<p>이 Application을 <code class='ic'>kubectl apply</code>하면 ArgoCD가 즉시 Git을 읽어 클러스터에 배포한다. ArgoCD UI나 <code class='ic'>argocd app get web-app</code>에서 상태가 <strong>Synced / Healthy</strong>로 표시되는지 확인한다. ArgoCD는 plain YAML뿐 아니라 Helm 차트, Kustomize도 그대로 소스로 받아들이므로 기존 자산을 재활용할 수 있다.</p>
+<blockquote class='callout'>
+<p>위 예제는 단순화를 위해 <code class='ic'>spec.project</code>를 <code class='ic'>default</code>로 뒀지만, 실제 운영에서는 팀·목적별로 별도 <strong>AppProject</strong>를 만들어 격리하는 것이 모범 사례다. Project 단위로 &quot;어느 Git 저장소·어느 클러스터·어느 네임스페이스에만 배포 가능한지&quot;를 제한해 권한과 폭발 반경(blast radius)을 통제할 수 있다.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>위 예제는 단순화를 위해 <code class='ic'>main</code> 브랜치를 직접 추적한다. 하지만 실제 조직에서는 환경별로 변경을 <strong>승격(promotion)</strong>한다. 흔한 패턴은 환경마다 별도 경로/오버레이(예: Kustomize <code class='ic'>overlays/dev</code>, <code class='ic'>overlays/staging</code>, <code class='ic'>overlays/prod</code>)나 별도 Application을 두고, CI가 검증을 마친 이미지 태그를 dev → staging → prod 순서로 PR을 통해 끌어올리는 것이다. 즉 &quot;이 이미지를 운영에 올린다&quot;가 곧 &quot;운영 매니페스트의 태그를 바꾸는 PR을 머지한다&quot;가 된다. 이 이미지 프로모션 파이프라인이 GitOps의 실제 운영 모습이다.</p>
+</blockquote>
+<blockquote class='callout'>
+<p><strong>운영 Application이 <code class='ic'>main</code> 같은 개발 브랜치를 직접 추적하면 위험하다.</strong> <code class='ic'>targetRevision: main</code>으로 운영을 묶어 두면, 개발자가 <code class='ic'>main</code>에 올리는 <strong>모든 커밋이 곧바로 운영 배포 후보</strong>가 된다. 검증되지 않은 변경이 webhook 알림 한 번에 운영까지 흘러가므로 &quot;무엇이 언제 운영에 올라가는가&quot;를 통제하기 어렵고, 사고 시 폭발 반경도 커진다. 그래서 실무에서는 (1) 운영 Application의 <code class='ic'>targetRevision</code>을 <strong>환경별 브랜치(<code class='ic'>release/prod</code>)나 불변 버전 태그(<code class='ic'>v1.4.2</code>)로 고정</strong>해 개발 흐름과 운영 흐름을 분리하거나, (2) 운영 매니페스트는 <strong>승격용 PR로만 바뀌도록</strong> 하고 그 PR에 리뷰·승인 게이트를 둔다. 어느 쪽이든 Git-flow나 Trunk-based development 같은 브랜칭 전략과 ArgoCD의 추적 대상(<code class='ic'>targetRevision</code>)을 일관되게 맞춰, &quot;운영에 반영&quot;이 항상 의도된 승격 행위가 되도록 설계하는 것이 핵심이다.</p>
+</blockquote>
+<h4>드리프트, self-heal, 그리고 prune</h4>
+<p>ArgoCD가 추적하는 두 가지 상태가 있다. <strong>Sync 상태</strong>(클러스터가 Git과 일치하는가)와 <strong>Health 상태</strong>(리소스가 정상 동작하는가)다. 여기서 가장 중요한 개념이 <strong>드리프트(drift)</strong>다.</p>
+<p>드리프트란 클러스터의 실제 상태가 Git에 선언된 상태와 어긋난 것을 말한다. 누군가 <code class='ic'>kubectl edit deployment web</code>으로 replicas를 5로 바꿨는데 Git에는 3으로 적혀 있다면, ArgoCD는 이를 <strong>OutOfSync</strong>로 표시한다.</p>
+<p>이때 <code class='ic'>selfHeal: true</code>가 켜져 있으면 ArgoCD가 자동으로 클러스터를 Git 상태(replicas 3)로 <strong>되돌린다</strong>. 즉 Git을 거치지 않은 수동 변경은 거부되는 셈이다. 이를 직접 관찰해 보자.</p>
+<pre><code>
+# Git에는 replicas: 3 인데, 손으로 5로 바꿔 본다
+kubectl scale deployment web -n web --replicas=5
+# 잠시 후 다시 보면 ArgoCD가 3으로 되돌려 놓는다
+kubectl get deployment web -n web -w
+</code></pre>
+<p><code class='ic'>prune: true</code>는 반대 방향을 처리한다. Git에서 리소스를 <strong>삭제</strong>하면 ArgoCD가 클러스터에서도 그 리소스를 제거한다. prune을 끄면 Git에서 지워도 클러스터에는 고아 리소스로 남으니, GitOps의 일관성을 유지하려면 보통 켠다(단, 운영 안전을 위해 처음엔 수동 prune으로 영향도를 확인한 뒤 자동화하는 것을 권한다).</p>
+<p>정리하면 GitOps 운영의 실제 작업 흐름은 이렇게 단순해진다. 배포를 바꾸려면 클러스터를 직접 만지지 않고 <strong>Git에 PR을 올린다</strong>. PR이 머지되면 ArgoCD가 (webhook 알림으로) 변경을 감지해 클러스터에 적용한다. 잘못됐으면 PR을 revert한다. 클러스터를 만질 일이 없으니 admin 자격증명도 CI에 줄 필요가 없다.</p>
+<blockquote class='callout'>
+<p>self-heal은 강력하지만, 디버깅 중 임시로 <code class='ic'>kubectl edit</code>을 했다가 ArgoCD가 즉시 되돌려 혼란을 겪는 일이 흔하다. 긴급 조사 시에는 해당 Application의 자동 동기화를 잠시 비활성화하거나, 더 나은 방법으로 <strong>항상 Git을 통해 변경하는 습관</strong>을 들이는 것이 GitOps의 의도에 맞다.</p>
+</blockquote>
+<h3>핵심 요약</h3>
+<ul>
+<li>GitOps는 배포를 push에서 pull로 뒤집는다. 클러스터 안의 에이전트가 Git의 변경을 받아 desired state를 스스로 당겨 적용한다.</li>
+<li>CI는 사라지지 않는다. 여전히 빌드·테스트·이미지 푸시를 담당하되, 마지막 단계가 &quot;클러스터에 직접 배포&quot;에서 &quot;새 이미지 태그를 Git 매니페스트에 반영(PR)&quot;으로 바뀐다. 실제 적용은 ArgoCD가 pull로 수행한다.</li>
+<li>4대 원칙: 선언형, Git as single source of truth, 자동 pull 적용, 지속적 조정(선언 상태와 실제 상태의 차이를 자동으로 맞춤). 컨트롤러 조정 루프를 배포 전체로 확장한 개념이다.</li>
+<li>ArgoCD의 변경 감지는 <strong>Git webhook이 기본(권장)</strong>으로 push되는 즉시 동기화하고, 약 3분 주기의 <strong>폴링은 webhook 유실에 대비한 대체·안전망</strong>이다.</li>
+<li>ArgoCD의 Application CRD는 &quot;어느 Git 경로를 어느 클러스터/네임스페이스에 동기화할지&quot;를 선언한다. Helm·Kustomize·plain YAML 모두 지원하며, 운영에서는 AppProject로 권한을 격리하고 환경별 오버레이로 dev→staging→prod 프로모션을 구성한다.</li>
+<li>운영 Application이 <code class='ic'>main</code> 같은 개발 브랜치를 직접 추적하면 모든 커밋이 즉시 운영 배포 후보가 되어 위험하다. 운영은 환경별 브랜치(<code class='ic'>release/prod</code>)나 버전 태그를 추적하거나 승격용 PR로만 바뀌게 하고, 브랜칭 전략(Git-flow/Trunk-based)과 <code class='ic'>targetRevision</code>을 일관되게 맞춘다.</li>
+<li>드리프트는 클러스터가 Git과 어긋난 상태(OutOfSync)다. <code class='ic'>selfHeal</code>은 수동 변경을 Git 상태로 자동 복구하고, <code class='ic'>prune</code>은 Git에서 삭제된 리소스를 클러스터에서도 제거한다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. [워밍업] ArgoCD를 클러스터에 설치하고 UI에 접근하라. 설치 후 argocd 네임스페이스의 Pod 상태를 확인하고, argocd-server를 NodePort 또는 port-forward로 노출해 초기 admin 비밀번호로 로그인하라.</p></div>
+              <pre class='starter'><code># 1. ArgoCD 설치
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# 2. Pod가 Running 상태가 될 때까지 대기
+kubectl get pods -n argocd -w
+
+# 3. argocd-server를 port-forward로 로컬 노출
+kubectl port-forward svc/argocd-server -n argocd ___:443
+# https://localhost:&lt;포트&gt; 로 접근
+
+# 4. 초기 admin 비밀번호 조회
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath=&#x27;{.data.password}&#x27; | base64 -d
+
+# 5. argocd CLI로 로그인 (선택)
+argocd login localhost:___  --username admin --password &lt;위 비밀번호&gt; --insecure</code></pre>
+              <details><summary>힌트</summary><ul><li>port-forward 중 &#x27;bind: address already in use&#x27; 오류가 나면 다른 포트(예: 9090)를 사용하라.</li><li>argocd CLI를 설치하지 않아도 브라우저 UI로 모든 작업이 가능하다. CLI는 자동화·스크립팅 목적에 유용하다.</li><li>초기 admin 비밀번호 Secret이 없으면 kubectl -n argocd get pods 에서 argocd-server Pod 이름을 찾아 kubectl -n argocd exec -it argocd-server-xxx -- argocd admin initial-password 로 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1~2. 설치 (위 명령 그대로)
+
+# 3. port-forward (백그라운드 또는 별도 터미널)
+kubectl port-forward svc/argocd-server -n argocd 8080:443 &amp;
+# 브라우저에서 https://localhost:8080 접근
+
+# 4. 초기 admin 비밀번호
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath=&#x27;{.data.password}&#x27; | base64 -d
+# 출력 예: XkYjPqR4mN2vL8wZ  (매 설치마다 다름)
+
+# 5. CLI 로그인
+argocd login localhost:8080 --username admin --password $(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=&#x27;{.data.password}&#x27; | base64 -d) --insecure
+# &#x27;admin:login&#x27; logged in successfully
+
+# 6. 현재 연결된 클러스터 확인
+argocd cluster list
+# SERVER                                  NAME        STATUS
+# https://kubernetes.default.svc          in-cluster  Successful</code></pre>
+                <div class='exp2'><p>ArgoCD는 쿠버네티스 네이티브 GitOps 도구로, Git 저장소를 클러스터 상태의 단일 진실 공급원(single source of truth)으로 삼는다. 설치하면 argocd-server(API/UI), argocd-repo-server(Git 연동), argocd-application-controller(동기화 컨트롤러), argocd-dex-server(인증) 등 여러 컴포넌트가 생성된다. port-forward는 로컬 개발 환경에서 서비스에 접근하는 빠른 방법이다. 운영 환경에서는 Ingress나 LoadBalancer Service를 사용한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. [핵심 실습] GitHub의 공개 Git 저장소(또는 로컬 Git 서버)에서 Kubernetes 매니페스트를 가리키는 ArgoCD Application을 생성하라. 동기화 정책을 &#x27;수동(manual)&#x27;으로 설정하고, 첫 번째 수동 동기화를 실행해 클러스터에 애플리케이션이 배포되는 것을 확인하라.</p></div>
+              <pre class='starter'><code># ArgoCD 공식 예제 저장소 사용
+# https://github.com/argoproj/argocd-example-apps
+# 경로: guestbook/ (Deployment + Service)
+
+# Application 매니페스트 생성
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: ___   # HEAD 또는 특정 브랜치/태그/커밋
+    path: ___             # 저장소 내 매니페스트 경로 (guestbook)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ___        # 배포 대상 네임스페이스
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    # automated는 여기서는 설정하지 않음 (수동 동기화)
+
+# 적용
+kubectl apply -f guestbook-app.yaml
+
+# Application 상태 확인
+kubectl get applications -n argocd
+
+# 수동 동기화 실행
+argocd app sync ___</code></pre>
+              <details><summary>힌트</summary><ul><li>GitHub 접근이 안 되는 환경이라면 git clone 후 로컬 경로를 file:// URL로 지정하거나, Gitea/Gitea 로컬 서버를 사용할 수 있다.</li><li>argocd app sync 명령 없이 UI에서 &#x27;Sync&#x27; 버튼을 클릭해도 동일하게 동작한다.</li><li>Application의 Health Status가 Degraded이면 kubectl get pods -n guestbook 로 Pod 상태를 먼저 확인하라.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># Application 생성
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+EOF
+# application.argoproj.io/guestbook created
+
+# 상태 확인 (아직 동기화 전 → OutOfSync)
+kubectl get applications -n argocd
+# NAME        SYNC STATUS   HEALTH STATUS
+# guestbook   OutOfSync     Missing
+
+# 수동 동기화 실행
+argocd app sync guestbook
+# 또는 kubectl로:
+# kubectl patch application guestbook -n argocd --type=merge -p &#x27;{&quot;operation&quot;:{&quot;sync&quot;:{}}}&#x27;
+
+# 동기화 후 상태
+kubectl get applications -n argocd
+# NAME        SYNC STATUS   HEALTH STATUS
+# guestbook   Synced        Healthy
+
+# 배포된 리소스 확인
+kubectl get all -n guestbook</code></pre>
+                <div class='exp2'><p>ArgoCD Application은 &#x27;Git 저장소의 어느 경로&#x27;를 &#x27;클러스터의 어느 네임스페이스&#x27;에 배포할지 선언한다. syncPolicy.automated가 없으면 수동 동기화 모드다. Application이 OutOfSync 상태는 Git 소스와 클러스터 상태가 다름을 의미하며, Synced는 일치한다는 뜻이다. Health 상태는 실제 리소스(Deployment, Pod 등)가 정상인지를 나타낸다. GitOps에서는 kubectl apply 대신 Git 커밋이 배포의 트리거다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. [핵심 실습] ArgoCD의 self-heal(자동 복구)와 drift 감지를 실습하라. Application에 automated syncPolicy(selfHeal: true, prune: true)를 활성화하고, 클러스터에서 직접 리소스를 변경(drift 유발)한 뒤 ArgoCD가 자동으로 Git 상태로 되돌리는 것을 관찰하라.</p></div>
+              <pre class='starter'><code># 1. automated syncPolicy 활성화
+kubectl patch application guestbook -n argocd \
+  --type=merge \
+  -p &#x27;{
+    &quot;spec&quot;: {
+      &quot;syncPolicy&quot;: {
+        &quot;automated&quot;: {
+          &quot;selfHeal&quot;: ___,    # true: Git과 다른 변경 자동 복구
+          &quot;prune&quot;: ___         # true: Git에 없는 리소스 자동 삭제
+        }
+      }
+    }
+  }&#x27;
+
+# 2. Drift 유발: guestbook-ui Deployment의 replicas를 직접 변경
+kubectl scale deployment guestbook-ui -n guestbook --replicas=5
+
+# 3. 즉시 상태 확인 (OutOfSync 되었다가 자동 복구)
+kubectl get deployment guestbook-ui -n guestbook -w
+
+# 4. ArgoCD가 감지한 drift 이력 확인
+argocd app history guestbook</code></pre>
+              <details><summary>힌트</summary><ul><li>selfHeal의 기본 체크 주기는 3분(180초)이다. argocd-cm ConfigMap의 timeout.reconciliation 값으로 조정 가능하다.</li><li>prune: true는 강력한 설정이다. 운영 환경에서 처음 활성화할 때는 ArgoCD UI의 &#x27;Diff&#x27; 기능으로 삭제될 리소스를 먼저 확인하는 것을 권장한다.</li><li>drift 감지 즉시 자동 동기화를 원한다면 argocd-cmd-params-cm ConfigMap에 &#x27;server.disable.auth: &quot;false&quot;&#x27; 설정을 확인하라.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. selfHeal + prune 활성화
+kubectl patch application guestbook -n argocd \
+  --type=merge \
+  -p &#x27;{&quot;spec&quot;:{&quot;syncPolicy&quot;:{&quot;automated&quot;:{&quot;selfHeal&quot;:true,&quot;prune&quot;:true}}}}&#x27;
+
+# 2. Drift 유발 (replicas 5로 강제 변경)
+kubectl scale deployment guestbook-ui -n guestbook --replicas=5
+
+# 3. 자동 복구 관찰 (수 초~수십 초 내)
+kubectl get deployment guestbook-ui -n guestbook -w
+# NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+# guestbook-ui   5/5     5            5           5m   &lt;-- 일시적으로 5
+# guestbook-ui   1/1     1            1           5m   &lt;-- ArgoCD가 Git값(1)으로 복원
+
+# 4. Application 상태 확인
+argocd app get guestbook
+# Sync Status: Synced
+# Health Status: Healthy
+
+# 5. 동기화 이력
+argocd app history guestbook
+# ID   DATE                           REVISION
+# 0    2024-01-01 00:00:00 +0000 UTC  HEAD (xxxx)
+# 1    2024-01-01 00:01:00 +0000 UTC  HEAD (xxxx)   &lt;-- self-heal 동기화
+
+# 6. 직접 생성한 추가 리소스 삭제 테스트 (prune)
+kubectl create configmap extra-config -n guestbook --from-literal=key=val
+# 수 초 후 ArgoCD가 자동 삭제 (Git에 없는 리소스)
+kubectl get configmap -n guestbook</code></pre>
+                <div class='exp2'><p>selfHeal: true를 설정하면 ArgoCD가 3분마다(기본값) 클러스터 상태와 Git 상태를 비교해 차이(drift)가 있으면 자동으로 동기화한다. kubectl scale로 replicas를 바꿔도 ArgoCD가 Git의 값으로 되돌린다. prune: true는 Git에 없는 리소스를 클러스터에서 삭제한다. 이 두 설정이 GitOps의 핵심인 &#x27;Git이 클러스터의 유일한 진실&#x27;을 구현한다. 이제 클러스터를 변경하려면 반드시 Git 커밋을 통해야 한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. [응용] ArgoCD Application을 여러 환경(dev/prod)에 배포하는 패턴을 실습하라. 같은 Git 저장소의 다른 경로(또는 다른 브랜치)를 가리키는 Application 두 개를 만들고, Git에서 dev 경로의 매니페스트를 변경 후 push했을 때 dev Application만 OutOfSync가 되는 것을 확인하라.</p></div>
+              <pre class='starter'><code># 전제: argocd-example-apps 저장소를 fork하거나 로컬 Git 서버 사용
+# 여기서는 path를 다르게 해서 시뮬레이션
+
+# dev Application (guestbook 경로)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: ___          # dev 환경 경로
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-dev
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    automated:
+      selfHeal: true
+
+---
+# prod Application (helm-guestbook 경로 - 다른 배포 단위 시뮬레이션)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: ___          # prod 환경 경로
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    # automated 없음 (prod는 수동 승인)
+
+# 두 Application 상태 동시 확인
+kubectl get applications -n argocd</code></pre>
+              <details><summary>힌트</summary><ul><li>helm-guestbook 경로는 Helm 차트로 패키징된 동일 앱이다. ArgoCD는 plain YAML, Helm, Kustomize를 모두 지원한다.</li><li>실제 팀에서는 prod Application에 ArgoCD RBAC으로 특정 팀만 sync 권한을 갖도록 제한하는 것이 권장 패턴이다.</li><li>argocd app diff &lt;name&gt; 명령으로 동기화 전 Git과 클러스터의 차이를 미리 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 두 Application 생성
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-dev
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    automated:
+      selfHeal: true
+EOF
+
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: helm-guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+EOF
+
+# 두 Application 동기화
+argocd app sync guestbook-dev
+argocd app sync guestbook-prod
+
+# 상태 확인
+kubectl get applications -n argocd
+# NAME             SYNC STATUS   HEALTH STATUS
+# guestbook-dev    Synced        Healthy
+# guestbook-prod   Synced        Healthy
+
+# dev만 변경: guestbook-dev의 replicas를 직접 바꾸면 selfHeal로 복구됨
+# prod는 automated 없으므로 OutOfSync 유지
+kubectl scale deployment -n guestbook-prod --replicas=3 --all
+kubectl get applications -n argocd
+# NAME             SYNC STATUS   HEALTH STATUS
+# guestbook-dev    Synced        Healthy
+# guestbook-prod   OutOfSync     Healthy  &lt;-- prod는 수동 동기화 필요
+
+# 정리
+argocd app delete guestbook guestbook-dev guestbook-prod
+kubectl delete namespace guestbook guestbook-dev guestbook-prod</code></pre>
+                <div class='exp2'><p>다중 환경(dev/prod) GitOps 패턴에서 dev는 automated selfHeal로 빠르게 반영하고, prod는 수동 동기화로 변경 전 검토와 승인 단계를 두는 것이 일반적이다. ArgoCD App of Apps 패턴이나 ApplicationSet을 사용하면 수십 개의 환경/클러스터에 대한 Application을 코드로 관리할 수 있다. Git 저장소의 디렉터리 구조(또는 브랜치)로 환경을 분리하면 동일한 ArgoCD에서 다수의 환경을 선언적으로 관리할 수 있다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=f5EpcWp0THw' target='_blank'>What is GitOps, How GitOps works and Why it&#x27;s so useful</a></li><li><a href='https://www.youtube.com/watch?v=MeU5_k9ssrs' target='_blank'>ArgoCD Tutorial for Beginners | GitOps CD for Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=Yb3_4PZX0B0' target='_blank'>Let&#x27;s do GitOps in Kubernetes! ArgoCD Tutorial</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

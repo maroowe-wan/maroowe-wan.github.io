@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-RBAC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-14-rbac/index.html'>한국어</a></div>
+  <h1>K8S-RBAC</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 1 (ConfigMap/Secret, PV/PVC, Probes, rolling updates and rollback, requests/limits and HPA, Ingress) and want to broaden their real-world cluster operations skills. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. RBAC and ServiceAccount - Who Can Do What</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. RBAC and ServiceAccount - Who Can Do What </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the difference between Authentication and Authorization, and grasp the concept of Role-Based Access Control (RBAC)</li>
+<li>Explain the structure that grants permissions via Role/ClusterRole and RoleBinding/ClusterRoleBinding</li>
+<li>Assign least-privilege permissions to a ServiceAccount and verify them with <code class='ic'>kubectl auth can-i</code></li>
+</ul>
+<h3>Content</h3>
+<h4>Introduction — What Happens Behind a Single <code class='ic'>kubectl apply</code></h4>
+<p>In the previous lecture we used Namespaces to divide the cluster logically and ResourceQuotas to limit resource consumption. But &quot;dividing the space&quot; alone is not enough. <strong>If a member of development team A can freely delete Pods in the production namespace</strong>, that isolation is meaningless. Controlling who can do what, where — that is the subject of this lecture: <strong>RBAC (Role-Based Access Control)</strong>.</p>
+<p>The story starts with the <code class='ic'>kubectl apply -f pod.yaml</code> command we type every day. When you run that command, kubectl reads your local configuration, connects to the API server, validates the YAML, and sends the request. But <strong>kube-apiserver</strong>, the brain of the cluster, does not immediately write the request to the etcd database. First, it passes the request through two gates.</p>
+<blockquote class='callout'>
+<p>Gate 1 — <strong>Authentication</strong>: &quot;Who are you?&quot; The identity of the requesting party is verified. Failure returns <code class='ic'>401 Unauthorized</code>.</p>
+<p>Gate 2 — <strong>Authorization</strong>: &quot;Are you allowed to do that?&quot; Once identity is confirmed, the cluster checks whether the principal has permission to perform that action. Failure returns <code class='ic'>403 Forbidden</code>.</p>
+</blockquote>
+<p>These two steps are often confused, but they are entirely separate. Think of it as the difference between showing your ID to receive an access badge (authentication) and having your badge restrict which rooms you can enter (authorization). <strong>Being able to connect to the cluster does not mean you can create or read every resource.</strong> You can pass authentication and still be blocked by authorization. RBAC is the most common mechanism responsible for that second gate.</p>
+<p>As shown in the diagram below, a single request must pass through both authentication and authorization in sequence before it is written to etcd.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    K[&quot;kubectl apply request&quot;] --&gt; A{&quot;Authentication: Who are you?&quot;}
+    A --&gt;|&quot;Identity verification failed&quot;| E1[&quot;401 Unauthorized&quot;]
+    A --&gt;|&quot;Identity verified&quot;| Z{&quot;Authorization RBAC: Are you allowed?&quot;}
+    Z --&gt;|&quot;No permission&quot;| E2[&quot;403 Forbidden&quot;]
+    Z --&gt;|&quot;Permission granted&quot;| S[&quot;Stored in etcd and processed&quot;]</div><figcaption>Two gates — Authentication and Authorization — that a kube-apiserver request must pass through</figcaption></figure>
+<h4>Why Have a &quot;Role&quot; Layer at All?</h4>
+<p>Imagine designing a permission management system from scratch. The simplest approach is a single table with three columns: <code class='ic'>User | Permission | Resource</code> — entries like &quot;John has read/write on app1, Robert has read on app2.&quot; That works fine at small scale.</p>
+<p>The problem appears as things grow. If Robert and Jennifer are on the same team and both need read access to app1, you add two rows. As the number of people and resources multiplies, the table explodes combinatorially, and nowhere in the table is the fact captured that &quot;these two share the same role.&quot;</p>
+<p>The solution is <strong>to stop linking users directly to permissions and instead insert a &quot;role&quot; layer between them</strong>.</p>
+<ul>
+<li>First, define a container for permissions — a <strong>Role</strong>. (Example: the &quot;viewer&quot; role = permission to read Pods.)</li>
+<li>Permissions are assigned to the role, not to users.</li>
+<li>Finally, <strong>bind</strong> the role to users.</li>
+</ul>
+<p>This separation means that when a new member joins, you simply bind them to an existing role — no need to duplicate permission definitions. The larger the organization, the more dramatically this decoupling simplifies security management. Kubernetes RBAC follows exactly this model, using the following three elements:</p>
+<ul>
+<li><strong>Identity</strong> — Who? → User, <strong>ServiceAccount</strong>, Group</li>
+<li><strong>Permission</strong> — What can be done? → <strong>Role / ClusterRole</strong></li>
+<li><strong>Binding</strong> — Who gets that permission? → <strong>RoleBinding / ClusterRoleBinding</strong></li>
+</ul>
+<p>The structure connecting identity to resource access in RBAC is shown below. As the diagram illustrates, identity and permissions are never linked directly — they must always connect through a Binding.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph ID[&quot;Identity - Who?&quot;]
+        U[&quot;User (human / external)&quot;]
+        SA[&quot;ServiceAccount (in-cluster app)&quot;]
+        G[&quot;Group&quot;]
+    end
+    B[&quot;RoleBinding / ClusterRoleBinding (binding)&quot;]
+    R[&quot;Role / ClusterRole (set of permission rules)&quot;]
+    RES[&quot;Resource access granted (Pod, Service, etc.)&quot;]
+    U --&gt; B
+    SA --&gt; B
+    G --&gt; B
+    B --&gt;|&quot;referenced via roleRef&quot;| R
+    R --&gt; RES</div><figcaption>RBAC connection structure from identity to resource access</figcaption></figure>
+<h4>Identity — The Critical Differences Among User, ServiceAccount, and Group</h4>
+<p>First, let&#x27;s look at &quot;who&quot; — the identity side. Kubernetes has three types, and understanding their differences is critical in practice.</p>
+<p>A <strong>User</strong> represents a human or an external system. Surprisingly, <strong>Kubernetes has no object that represents a User.</strong> There is no <code class='ic'>kubectl create user</code> command. Instead, any principal holding a valid certificate signed by the cluster&#x27;s Certificate Authority (CA) is treated as an authenticated user, and the Common Name (CN) field in the certificate becomes the username. In other words, Users are a concept managed entirely outside the cluster.</p>
+<p>A <strong>ServiceAccount (SA)</strong> is an <strong>identity for applications running inside the cluster, primarily Pods</strong>. It works similarly to a User, but with one crucial difference: it is <strong>a Kubernetes-native object managed directly by Kubernetes</strong>, so it can be created from a YAML manifest like any other resource. When a Pod needs to call the Kubernetes API — for example, Prometheus discovering scrape targets, or the Nginx Ingress controller querying backend endpoint lists — it makes those calls under the permissions of its assigned SA.</p>
+<p>A <strong>Group</strong> is a concept for bundling multiple identities together so you can grant permissions to all of them at once. Like User, <strong>Group is not a Kubernetes object you can directly manage.</strong> There is no <code class='ic'>kubectl create group</code> command. Instead, group membership is typically conveyed by an <strong>external authentication system (such as OIDC or LDAP) via a claim in the authentication token</strong> (for example, a <code class='ic'>groups</code> field in the token). The cluster simply receives the group name from the external identity provider and uses it as the subject in a Binding. In short, &quot;this user belongs to the <code class='ic'>dev-team</code> group&quot; is declared by the external identity provider, not by Kubernetes.</p>
+<blockquote class='callout'>
+<p>To summarize: <strong>Users and Groups are managed outside the cluster; ServiceAccounts are the only identities managed directly as Kubernetes objects.</strong> The exercises in this lecture use SAs because impersonating a human user account in a single-cluster environment like minikube is inconvenient — but the permission logic applies identically to Users and Groups.</p>
+</blockquote>
+<p>Creating a ServiceAccount is as simple as any other resource:</p>
+<pre><code>
+# qa-sa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qa
+  namespace: staging
+</code></pre>
+<pre><code>
+kubectl apply -f qa-sa.yaml
+</code></pre>
+<h4>Permission — What Does a Role&#x27;s <code class='ic'>rules</code> Express?</h4>
+<p>Next, &quot;what can be done.&quot; What Kubernetes RBAC controls is <strong>access to resources</strong> such as Pods, Services, and Deployments. Because all of these resources are accessed through API endpoints, permissions are expressed in terms of two things: <strong>which resources</strong> and <strong>which operations</strong> are allowed.</p>
+<ul>
+<li><strong>resources</strong>: targets such as <code class='ic'>pods</code>, <code class='ic'>services</code>, <code class='ic'>pods/log</code></li>
+<li><strong>verbs</strong>: operation types such as <code class='ic'>get</code>, <code class='ic'>list</code>, <code class='ic'>watch</code>, <code class='ic'>create</code>, <code class='ic'>update</code>, <code class='ic'>patch</code>, <code class='ic'>delete</code></li>
+<li><strong>apiGroups</strong>: the API group the resource belongs to. Core resources like Pod and Service use an <strong>empty string <code class='ic'>&quot;&quot;</code></strong> (the core group); Deployments belong to <code class='ic'>apps</code>; custom resources have their own groups.</li>
+</ul>
+<p>A single combination of <code class='ic'>apiGroups + resources + verbs</code> is called a <strong>Rule</strong>, and a collection of rules is a <strong>Role</strong>. For example, permission to &quot;read (get/list) Pods and Services and access Pod logs&quot; looks like this:</p>
+<pre><code>
+# qa-role.yaml — valid only within the staging namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qa-read
+  namespace: staging
+rules:
+  - apiGroups: [&quot;&quot;]                 # core group (Pod, Service, etc.)
+    resources: [&quot;pods&quot;, &quot;services&quot;]
+    verbs: [&quot;get&quot;, &quot;list&quot;]
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;pods/log&quot;]         # Pod logs are a separate sub-resource
+    verbs: [&quot;get&quot;]
+</code></pre>
+<p>Here, <strong>anything not explicitly listed is denied.</strong> RBAC uses a &quot;deny by default&quot; model. Because <code class='ic'>create</code> and <code class='ic'>delete</code> are absent from the rules above, a principal holding this Role cannot create or delete Pods. This is the starting point of the <strong>principle of least privilege</strong>.</p>
+<h4>Role vs ClusterRole — The Scope Difference</h4>
+<p>The difference between Role and ClusterRole is exactly one thing: <strong>the scope of the permissions</strong>.</p>
+<ul>
+<li><strong>Role</strong>: Valid <strong>only within a specific namespace</strong>. Can only be applied to namespace-scoped resources like Pods and Services.</li>
+<li><strong>ClusterRole</strong>: <strong>Not tied to any namespace.</strong> Used when you need to access cluster-scoped resources like Nodes and PersistentVolumes, or when you need permissions that span all namespaces.</li>
+</ul>
+<p>A common pitfall: Node and PersistentVolume are <strong>cluster-scoped resources</strong>, so listing them in a Role simply does not work — a Role handles only namespace-scoped resources. The fix is to change <code class='ic'>kind: Role</code> to <code class='ic'>kind: ClusterRole</code> (everything else stays the same).</p>
+<pre><code>
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole              # no namespace field
+metadata:
+  name: node-reader
+rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;nodes&quot;, &quot;persistentvolumes&quot;]
+    verbs: [&quot;get&quot;, &quot;list&quot;]
+</code></pre>
+<p>Another advantage of ClusterRole is <strong>reusability</strong>. If you define a common permission like &quot;read Pods&quot; as a ClusterRole once, multiple namespaces can pull it in via their own RoleBindings — no need to duplicate the same Role in every namespace.</p>
+<h4>Binding — RoleBinding and ClusterRoleBinding</h4>
+<p>Now for the final piece that connects identity to permissions: the <strong>Binding</strong>. A RoleBinding has two essential fields:</p>
+<ul>
+<li><code class='ic'>roleRef</code>: which Role or ClusterRole to reference</li>
+<li><code class='ic'>subjects</code>: who (which User, ServiceAccount, or Group) receives the permission</li>
+</ul>
+<pre><code>
+# qa-binding.yaml — grants the qa-read role to the qa SA in staging
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qa-read-binding
+  namespace: staging
+subjects:
+  - kind: ServiceAccount
+    name: qa
+    # namespace can be omitted when it matches the RoleBinding&#x27;s namespace (staging)
+roleRef:
+  kind: Role
+  name: qa-read
+  apiGroup: rbac.authorization.k8s.io
+</code></pre>
+<p>In the example above, the <code class='ic'>namespace</code> field is intentionally left out of <code class='ic'>subjects</code>. Because the <code class='ic'>qa</code> SA lives in the same namespace as the RoleBinding (<code class='ic'>staging</code>), <strong>the field can be omitted</strong>, and omitting it is more common in practice. You only need to specify it explicitly when pointing to a ServiceAccount in a different namespace.</p>
+<p>The moment this RoleBinding is applied, the <code class='ic'>qa</code> SA can read Pods and Services and access Pod logs within <code class='ic'>staging</code>. <strong>Deleting the binding removes the permission immediately, but the Role itself remains</strong> and can be reused by other bindings. Once again, the separation between defining a permission and granting it is clear.</p>
+<p>Understanding the rules for Binding combinations prevents a lot of confusion:</p>
+<p>| Combination | Scope of permissions |</p>
+<p>|---|---|</p>
+<p>| <strong>Role + RoleBinding</strong> | Inside the namespace where the RoleBinding is located |</p>
+<p>| <strong>ClusterRole + RoleBinding</strong> | <strong>Restricted to the single namespace</strong> where the RoleBinding is located (the ClusterRole behaves like a Role) |</p>
+<p>| <strong>ClusterRole + ClusterRoleBinding</strong> | <strong>Cluster-wide</strong> across all namespaces |</p>
+<p>The middle row is particularly important. <strong>When you bind a ClusterRole via a RoleBinding, the permissions are scoped to the namespace containing that RoleBinding.</strong> This makes it possible to define a single shared ClusterRole like &quot;read Pods&quot; and let each team safely reuse it by creating their own RoleBinding in their own namespace. By contrast, a <code class='ic'>ClusterRoleBinding</code> grants permissions across the entire cluster with no namespace boundary, so use it sparingly and only when truly necessary. (Note: a ClusterRoleBinding cannot reference a Role, because Roles are namespace-scoped.)</p>
+<p>The full binding structure and scope differences are summarized in the diagram below. As illustrated, the same ClusterRole can result in very different permission scopes depending on which type of Binding is used.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    R[&quot;Role (namespace-scoped)&quot;] --&gt; RB1[&quot;RoleBinding&quot;]
+    RB1 --&gt; S1[&quot;Scope: within that namespace&quot;]
+
+    CR[&quot;ClusterRole (cluster-scoped)&quot;] --&gt; RB2[&quot;RoleBinding&quot;]
+    CR --&gt; CRB[&quot;ClusterRoleBinding&quot;]
+    RB2 --&gt; S2[&quot;Scope: restricted to one namespace&quot;]
+    CRB --&gt; S3[&quot;Scope: cluster-wide, all namespaces&quot;]
+
+    RB3X[&quot;ClusterRoleBinding cannot reference Role&quot;] -.-&gt;|&quot;not allowed&quot;| R</div><figcaption>Permission scope differences based on Role/ClusterRole and Binding combinations</figcaption></figure>
+<h4>Verifying Permissions — <code class='ic'>kubectl auth can-i</code></h4>
+<p>Once permissions have been granted, you need to <strong>verify that they actually work as intended.</strong> You do not need to spin up a Pod as the SA every time — the <code class='ic'>kubectl auth can-i</code> command combined with impersonation gives you an immediate answer.</p>
+<p>Use the <code class='ic'>--as</code> flag to send a request impersonating a specific SA. The string format for impersonating a ServiceAccount is fixed: <code class='ic'>system:serviceaccount:&lt;namespace&gt;:&lt;sa-name&gt;</code>.</p>
+<pre><code>
+# Can the qa SA in staging get Pods in staging?
+kubectl auth can-i get pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: yes
+
+# Can the same SA get Pods in production?
+kubectl auth can-i get pods \
+  --namespace production \
+  --as system:serviceaccount:staging:qa
+# Output: no   (the qa-read Role exists only in staging)
+
+# Can it read Pod logs?
+kubectl auth can-i get pods/log \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: yes
+
+# What about delete, which was never granted?
+kubectl auth can-i delete pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: no   (delete verb is not in the rules, so it is denied)
+</code></pre>
+<p>You can also quickly check your own permissions without <code class='ic'>--as</code>.</p>
+<pre><code>
+kubectl auth can-i create deployments --namespace staging   # check my own permission
+kubectl auth can-i --list --namespace staging               # list my permissions in that namespace
+</code></pre>
+<blockquote class='callout'>
+<p>Important: <code class='ic'>kubectl auth can-i --list</code> shows only the permissions in the <strong>current context&#x27;s namespace</strong> (or the one specified with <code class='ic'>--namespace</code>) — not your entire permission set across the cluster. The command above shows only what you can do within <code class='ic'>staging</code>. Permissions on cluster-scoped resources like Nodes or PersistentVolumes, or permissions in other namespaces, may not appear. Do not assume &quot;this is everything I can do.&quot; Check each namespace you care about explicitly to avoid misreading your access during a security audit.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>Pro tip: After granting or revoking permissions, always use <code class='ic'>auth can-i</code> to verify <strong>both directions</strong> — &quot;what should be allowed returns yes, what should be blocked returns no.&quot; Checking only what you granted and forgetting to verify what you blocked is how over-permissioning slips through.</p>
+</blockquote>
+<h4>Exploring Kubernetes Built-in Roles</h4>
+<p>Kubernetes ships with several useful ClusterRoles out of the box. The most notable are <code class='ic'>cluster-admin</code> (full access), <code class='ic'>admin</code>, <code class='ic'>edit</code>, and <code class='ic'>view</code> (read-only). Roles managed by the control plane typically carry the <code class='ic'>system:</code> prefix.</p>
+<pre><code>
+# Linux/macOS (bash) — filter with grep
+kubectl get clusterroles | grep -E &quot;cluster-admin|^edit|^view&quot;
+
+# Windows (PowerShell / CMD) — use findstr instead of grep
+kubectl get clusterroles | findstr /R /C:&quot;cluster-admin&quot; /C:&quot;^edit&quot; /C:&quot;^view&quot;
+
+kubectl describe clusterrole view      # inspect what permissions the view role contains (all OS)
+</code></pre>
+<blockquote class='callout'>
+<p>OS compatibility note: <code class='ic'>grep</code> is a Linux/macOS shell utility and is not built into Windows PowerShell or CMD. On Windows, use <code class='ic'>findstr</code> (regex with <code class='ic'>/R</code>, search terms with <code class='ic'>/C:&quot;pattern&quot;</code>) or, in PowerShell, <code class='ic'>kubectl get clusterroles | Select-String &quot;cluster-admin|edit|view&quot;</code>. kubectl commands that do not involve a pipe — such as <code class='ic'>get</code> or <code class='ic'>describe</code> — work identically on all operating systems.</p>
+</blockquote>
+<p>Before writing a custom Role, check whether one of these built-in roles already covers your needs — it can save you from unnecessary definitions. That said, never casually bind <code class='ic'>cluster-admin</code> to a user or application with a ClusterRoleBinding; it grants unrestricted access to the entire cluster.</p>
+<h4>Least-Privilege Design Checklist</h4>
+<p>When applying RBAC in production, keep the following principles in mind:</p>
+<ul>
+<li><strong>Grant only the verbs and resources you actually need.</strong> Avoid wildcard <code class='ic'><em></code> and <code class='ic'>verbs: [&quot;</em>&quot;]</code> wherever possible.</li>
+<li><strong>Assign an appropriate ServiceAccount to each Pod.</strong> If none is specified, the namespace&#x27;s <code class='ic'>default</code> SA is used. For Pods that never call the Kubernetes API, set <code class='ic'>automountServiceAccountToken: false</code> to disable automatic token mounting and reduce the attack surface.</li>
+<li><strong>Keep scope as narrow as possible.</strong> Do not use ClusterRoleBinding for permissions that only need to apply within a single namespace.</li>
+<li><strong>Always verify after granting.</strong> Use <code class='ic'>kubectl auth can-i</code> to confirm both allowed and denied cases, specifying the target namespace explicitly.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>Authentication (who are you, 401) and Authorization (are you allowed, 403) are separate steps.</strong> RBAC handles authorization, inserting a &quot;role&quot; layer between identities and permissions to simplify access management.</li>
+<li>Identities come in three types: <strong>User (human/external, managed outside the cluster)</strong>, <strong>Group (external groups delivered as claims by OIDC/LDAP, not a Kubernetes object)</strong>, and <strong>ServiceAccount (in-cluster app, a Kubernetes object managed via YAML)</strong>. Only ServiceAccounts are managed directly by Kubernetes.</li>
+<li>Permissions are defined as <strong>Role (namespace-scoped)</strong> / <strong>ClusterRole (cluster-wide)</strong> — each a collection of <code class='ic'>apiGroups + resources + verbs</code> rules. RBAC is deny by default.</li>
+<li>Bindings are <strong>RoleBinding / ClusterRoleBinding</strong>. Binding a ClusterRole via a RoleBinding restricts the permission to that namespace, enabling safe reuse of a common role across teams. The <code class='ic'>namespace</code> field in <code class='ic'>subjects</code> can be omitted when it matches the RoleBinding&#x27;s own namespace.</li>
+<li>Always verify permissions with <code class='ic'>kubectl auth can-i ... --as system:serviceaccount:&lt;ns&gt;:&lt;sa&gt;</code>, checking both the allowed and denied cases. <code class='ic'>--list</code> shows only the specified namespace — do not treat it as your complete permission set. Follow the principle of least privilege.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>Anton Putra, &quot;Kubernetes RBAC Explained&quot; — https://www.youtube.com/watch?v=iE9Qb8dHqWI</li>
+<li>Google Cloud Tech, &quot;What are Service Accounts?&quot; — https://www.youtube.com/watch?v=xXk1YlkKW_k</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. 1. Create the staging and production namespaces imperatively.</p>
+<p>2. Declare a ServiceAccount named qa in the staging namespace using a YAML manifest (qa-sa.yaml) and apply it.</p>
+<p>3. Run kubectl get serviceaccount -n staging to verify that both the default SA and the qa SA appear.</p>
+<p>4. Run kubectl describe serviceaccount qa -n staging and inspect the Mountable secrets and Tokens fields.</p></div>
+              <pre class='starter'><code># 1. Create namespaces (imperative)
+kubectl create namespace ____
+kubectl create namespace ____
+
+# 2. qa-sa.yaml (fill in the blanks)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ____
+  namespace: ____</code></pre>
+              <details><summary>Hint</summary><ul><li>The kubectl create namespace command allows hyphens (-) but not underscores (_). If a name is rejected, check the character combination.</li><li>If you accidentally omit the namespace field in the YAML, the SA will be created in the default namespace. After applying, always confirm its location with kubectl get sa -n staging.</li><li>It is normal for the Tokens field to be empty in kubectl describe serviceaccount qa -n staging. Since Kubernetes 1.24, long-lived tokens are no longer automatically created when a ServiceAccount is created.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create namespaces
+kubectl create namespace staging
+kubectl create namespace production
+
+# 2. qa-sa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qa
+  namespace: staging
+
+# Apply
+kubectl apply -f qa-sa.yaml
+
+# 3. List SAs
+kubectl get serviceaccount -n staging
+# Expected output:
+# NAME      SECRETS   AGE
+# default   0         10s
+# qa        0         3s
+
+# 4. Detailed inspection
+kubectl describe serviceaccount qa -n staging</code></pre>
+                <div class='exp2'><p>When a namespace is created, Kubernetes automatically creates a default ServiceAccount inside it. This default SA is the identity used by any Pod that does not specify a serviceAccountName. The reason we create a separate qa SA in this exercise is to isolate the permissions needed specifically by QA team Pods, in keeping with the principle of least privilege. Because ServiceAccounts are Kubernetes-native objects, they can be created and updated with kubectl apply -f just like any other resource.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. 1. Write a Role named qa-read in the staging namespace (qa-role.yaml).</p>
+<ul>
+<li>Allow get and list on pods and services</li>
+<li>Allow get on pods/log</li>
+<li>Do not grant any other verbs (create, delete, etc.).</li>
+</ul>
+<p>2. Write a RoleBinding (qa-binding.yaml) that connects the qa SA to the qa-read Role and apply it.</p>
+<p>3. Use kubectl auth can-i to check all four of the following cases, predict the expected output (yes/no) before running, then compare with the actual result.</p>
+<p>   a. Can the qa SA get pods in staging?</p>
+<p>   b. Can the qa SA delete pods in staging?</p>
+<p>   c. Can the qa SA get pods/log in staging?</p>
+<p>   d. Can the qa SA get pods in production?</p></div>
+              <pre class='starter'><code># 1. qa-role.yaml (fill in the blanks)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ____
+  namespace: ____
+rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [____, ____]
+    verbs: [____, ____]
+  - apiGroups: [&quot;&quot;]
+    resources: [____]
+    verbs: [____]
+
+# 2. qa-binding.yaml (fill in the blanks)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qa-read-binding
+  namespace: ____
+subjects:
+  - kind: ServiceAccount
+    name: ____
+    namespace: ____
+roleRef:
+  kind: Role
+  name: ____
+  apiGroup: rbac.authorization.k8s.io
+
+# 3. can-i verification commands (fill in the blanks)
+kubectl auth can-i get pods \
+  --namespace ____ \
+  --as system:serviceaccount:____:____
+
+kubectl auth can-i delete pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+
+kubectl auth can-i get pods/log \
+  --namespace staging \
+  --as ____
+
+kubectl auth can-i get pods \
+  --namespace ____ \
+  --as system:serviceaccount:staging:qa</code></pre>
+              <details><summary>Hint</summary><ul><li>roleRef.kind must be either &#x27;Role&#x27; or &#x27;ClusterRole&#x27;, and it is case-sensitive. Writing &#x27;role&#x27; (lowercase) will cause an error when applying.</li><li>If a can-i result differs from your expectation, run kubectl describe rolebinding qa-read-binding -n staging first to confirm that subjects and roleRef are configured as intended.</li><li>The string format after --as is system:serviceaccount:&lt;namespace&gt;:&lt;sa-name&gt;. Omitting the colons (:) or the namespace will cause kubectl to treat it as a User identity and return unexpected results.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. qa-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qa-read
+  namespace: staging
+rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;pods&quot;, &quot;services&quot;]
+    verbs: [&quot;get&quot;, &quot;list&quot;]
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;pods/log&quot;]
+    verbs: [&quot;get&quot;]
+
+# 2. qa-binding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qa-read-binding
+  namespace: staging
+subjects:
+  - kind: ServiceAccount
+    name: qa
+    namespace: staging
+roleRef:
+  kind: Role
+  name: qa-read
+  apiGroup: rbac.authorization.k8s.io
+
+# Apply
+kubectl apply -f qa-role.yaml
+kubectl apply -f qa-binding.yaml
+
+# 3. can-i verification
+# a. get pods in staging -&gt; yes
+kubectl auth can-i get pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: yes
+
+# b. delete pods in staging -&gt; no (delete not in rules)
+kubectl auth can-i delete pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: no
+
+# c. get pods/log in staging -&gt; yes
+kubectl auth can-i get pods/log \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: yes
+
+# d. get pods in production -&gt; no (RoleBinding only exists in staging)
+kubectl auth can-i get pods \
+  --namespace production \
+  --as system:serviceaccount:staging:qa
+# Output: no</code></pre>
+                <div class='exp2'><p>RBAC is a &#x27;deny by default&#x27; model. Only the verb and resource combinations explicitly listed in rules are allowed; everything else is denied. Because delete was not added to the rules in this exercise, (b) returns no. The reason (d) returns no is that the RoleBinding itself lives in the staging namespace — a RoleBinding grants permissions only within the namespace it belongs to. The --as system:serviceaccount:&lt;namespace&gt;:&lt;name&gt; format tells kubectl to impersonate the given SA and ask the API server for an authorization decision upfront. This allows you to verify permissions instantly without launching an actual Pod, making it extremely useful in practice.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. 1. Write a ClusterRole named pod-reader (pod-reader-cr.yaml) that allows get and list on pods and services.</p>
+<p>2. Create a ServiceAccount named dev in the staging namespace.</p>
+<p>3. Write a RoleBinding (dev-rb.yaml) in the staging namespace that connects the dev SA to the pod-reader ClusterRole.</p>
+<p>4. Create a ServiceAccount named ops in the staging namespace.</p>
+<p>5. Write a ClusterRoleBinding (ops-crb.yaml) that connects the ops SA to the pod-reader ClusterRole.</p>
+<p>6. Verify the following four cases with can-i and explain the difference.</p>
+<p>   a. Can the dev SA get pods in staging?</p>
+<p>   b. Can the dev SA get pods in production?</p>
+<p>   c. Can the ops SA get pods in staging?</p>
+<p>   d. Can the ops SA get pods in production?</p></div>
+              <pre class='starter'><code># 1. pod-reader-cr.yaml (fill in the blanks)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ____
+metadata:
+  name: pod-reader
+  # no namespace field — ClusterRole is cluster-scoped
+rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;pods&quot;, &quot;services&quot;]
+    verbs: [&quot;get&quot;, &quot;list&quot;]
+
+# 2. Create the dev SA
+kubectl create serviceaccount dev -n staging
+
+# 3. dev-rb.yaml (fill in the blanks)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-rb
+  namespace: ____
+subjects:
+  - kind: ServiceAccount
+    name: dev
+    namespace: staging
+roleRef:
+  kind: ____     # referencing a ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+# 4. Create the ops SA
+kubectl create serviceaccount ops -n staging
+
+# 5. ops-crb.yaml (fill in the blanks)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-crb
+subjects:
+  - kind: ServiceAccount
+    name: ops
+    namespace: staging
+roleRef:
+  kind: ClusterRole
+  name: ____
+  apiGroup: rbac.authorization.k8s.io</code></pre>
+              <details><summary>Hint</summary><ul><li>When referencing a ClusterRole in a RoleBinding, roleRef.kind must be &#x27;ClusterRole&#x27;. Writing &#x27;Role&#x27; will make Kubernetes look for a namespace-scoped Role with that name and return a &#x27;not found&#x27; error.</li><li>ClusterRoleBinding has no metadata.namespace field. Adding one by mistake does not break anything (Kubernetes ignores it), but it is conventional to omit it to avoid confusion.</li><li>If (d) does not return yes for the ops SA, run kubectl describe clusterrolebinding ops-crb to confirm that subjects[0].name is &#x27;ops&#x27; and namespace is &#x27;staging&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. pod-reader-cr.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-reader
+rules:
+  - apiGroups: [&quot;&quot;]
+    resources: [&quot;pods&quot;, &quot;services&quot;]
+    verbs: [&quot;get&quot;, &quot;list&quot;]
+
+# Apply
+kubectl apply -f pod-reader-cr.yaml
+
+# 2. Create dev SA
+kubectl create serviceaccount dev -n staging
+
+# 3. dev-rb.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-rb
+  namespace: staging
+subjects:
+  - kind: ServiceAccount
+    name: dev
+    namespace: staging
+roleRef:
+  kind: ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+kubectl apply -f dev-rb.yaml
+
+# 4. Create ops SA
+kubectl create serviceaccount ops -n staging
+
+# 5. ops-crb.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ops-crb
+subjects:
+  - kind: ServiceAccount
+    name: ops
+    namespace: staging
+roleRef:
+  kind: ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+
+kubectl apply -f ops-crb.yaml
+
+# 6. can-i verification
+# a. dev SA / staging -&gt; yes (RoleBinding is in staging)
+kubectl auth can-i get pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:dev
+# Output: yes
+
+# b. dev SA / production -&gt; no (RoleBinding only exists in staging)
+kubectl auth can-i get pods \
+  --namespace production \
+  --as system:serviceaccount:staging:dev
+# Output: no
+
+# c. ops SA / staging -&gt; yes
+kubectl auth can-i get pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:ops
+# Output: yes
+
+# d. ops SA / production -&gt; yes (ClusterRoleBinding is cluster-wide)
+kubectl auth can-i get pods \
+  --namespace production \
+  --as system:serviceaccount:staging:ops
+# Output: yes</code></pre>
+                <div class='exp2'><p>The dev SA and ops SA both reference the same ClusterRole (pod-reader), but the type of Binding gives them completely different permission scopes. Because dev SA is connected via a RoleBinding, permissions are valid only within staging — the namespace the RoleBinding belongs to. Even though the ClusterRole is cluster-wide, the RoleBinding narrows the scope to staging. The ops SA, on the other hand, is connected via a ClusterRoleBinding, so permissions apply cluster-wide regardless of namespace. This difference is exactly why you can define a single common ClusterRole and let each team attach their own RoleBinding in their own namespace — granting equivalent permissions without ever duplicating the permission definition.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. 1. Write a Pod manifest (qa-pod.yaml) in the staging namespace that specifies qa as the serviceAccountName and apply it.</p>
+<ul>
+<li>Image: bitnami/kubectl:latest (a kubectl-equipped image)</li>
+<li>Command: sleep 3600</li>
+</ul>
+<p>2. Use kubectl exec to enter the Pod and perform the following:</p>
+<p>   a. Run ls /var/run/secrets/kubernetes.io/serviceaccount/ to confirm the token file is mounted.</p>
+<p>   b. Run kubectl get pods -n staging to query the Pod list under the qa SA&#x27;s permissions.</p>
+<p>   c. Run kubectl delete pod qa-pod -n staging to verify the delete request is denied.</p>
+<p>3. Write a second Pod manifest (no-token-pod.yaml) that adds automountServiceAccountToken: false and apply it.</p>
+<p>4. Use kubectl exec inside no-token-pod to run ls /var/run/secrets/kubernetes.io/serviceaccount/ and confirm the token is not mounted.</p>
+<p>5. Use can-i to make a final verification that the delete pods permission is no for the SA attached to both Pods.</p></div>
+              <pre class='starter'><code># 1. qa-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qa-pod
+  namespace: staging
+spec:
+  serviceAccountName: ____
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+
+# 3. no-token-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-token-pod
+  namespace: staging
+spec:
+  serviceAccountName: qa
+  ____: false     # disable automatic token mounting
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: [&quot;sleep&quot;, &quot;3600&quot;]</code></pre>
+              <details><summary>Hint</summary><ul><li>Pulling the bitnami/kubectl image may take some time. Watch the status with kubectl get pod qa-pod -n staging -w and wait until it shows Running before running exec.</li><li>If you see &#x27;Error from server: the server doesn&#x27;t have a resource type &quot;pods&quot;&#x27; in step 2b, the kubectl inside the Pod cannot locate the kube-apiserver address. Confirm that KUBERNETES_SERVICE_HOST is set by running kubectl exec -n staging qa-pod -- env | grep KUBERNETES.</li><li>In step 4, receiving a &#x27;No such file or directory&#x27; error is the expected correct outcome. If the directory still exists, check that the automountServiceAccountToken field is placed directly under spec (not under containers) by reviewing the YAML indentation.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. qa-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qa-pod
+  namespace: staging
+spec:
+  serviceAccountName: qa
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+
+kubectl apply -f qa-pod.yaml
+kubectl get pod qa-pod -n staging   # wait for Running
+
+# 2a. Confirm token is mounted
+kubectl exec -n staging qa-pod -- ls /var/run/secrets/kubernetes.io/serviceaccount/
+# Expected output: ca.crt  namespace  token
+
+# 2b. Query Pod list under qa SA permissions (allowed)
+kubectl exec -n staging qa-pod -- kubectl get pods -n staging
+# Expected output: current Pod list in staging (including qa-pod)
+
+# 2c. Attempt deletion (verify it is denied)
+kubectl exec -n staging qa-pod -- kubectl delete pod qa-pod -n staging
+# Expected output: Error from server (Forbidden): pods &quot;qa-pod&quot; is forbidden:
+#   User &quot;system:serviceaccount:staging:qa&quot; cannot delete resource &quot;pods&quot; ...
+
+# 3. no-token-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-token-pod
+  namespace: staging
+spec:
+  serviceAccountName: qa
+  automountServiceAccountToken: false
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+
+kubectl apply -f no-token-pod.yaml
+
+# 4. Confirm token is not mounted
+kubectl exec -n staging no-token-pod -- ls /var/run/secrets/kubernetes.io/serviceaccount/
+# Expected output: ls: cannot access &#x27;/var/run/secrets/kubernetes.io/serviceaccount/&#x27;: No such file or directory
+# (the token directory itself does not exist)
+
+# 5. Final can-i verification
+kubectl auth can-i delete pods \
+  --namespace staging \
+  --as system:serviceaccount:staging:qa
+# Output: no</code></pre>
+                <div class='exp2'><p>When serviceAccountName is specified in a Pod, Kubernetes automatically mounts the SA&#x27;s token at /var/run/secrets/kubernetes.io/serviceaccount/token. Code running inside the container can include this token in an HTTP Authorization: Bearer &lt;token&gt; header to call kube-apiserver within the permission bounds granted to that SA. In step 2b, get pods succeeds; in step 2c, delete pods returns Forbidden — because the qa-read Role includes only get and list, not delete. Setting automountServiceAccountToken: false prevents the token file from being mounted at all. If the container is ever compromised, an attacker cannot obtain the kube-apiserver token. For applications that never need to call the Kubernetes API (simple web servers, batch jobs, etc.), applying this setting as a default is a security best practice.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=iE9Qb8dHqWI' target='_blank'>Kubernetes RBAC Explained</a></li><li><a href='https://www.youtube.com/watch?v=xXk1YlkKW_k' target='_blank'>What are Service Accounts?</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

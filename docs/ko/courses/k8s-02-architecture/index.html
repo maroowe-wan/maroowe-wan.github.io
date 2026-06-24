@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-02-architecture/index.html'>EN</a></div>
+  <h1>K8S-Architecture</h1>
+  <div class="sub">쿠버네티스를 처음 접하는 입문자/초급자 (컨테이너·도커 기초 정도만 아는 수준) · 총 1강</div>
+  <ul><li><a href='#lec1'>01. 쿠버네티스 아키텍처 - 컨트롤 플레인과 워커 노드</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. 쿠버네티스 아키텍처 - 컨트롤 플레인과 워커 노드 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>클러스터, 마스터(컨트롤 플레인), 워커 노드가 각각 무슨 역할을 하는지 구분한다.</li>
+<li>API Server, Scheduler, etcd, kubelet 등 핵심 구성요소가 무엇을 담당하는지 이해한다.</li>
+<li>사용자가 명령을 내렸을 때 그 요청이 클러스터 안에서 어떤 순서로 처리되는지 그릴 수 있다.</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 아키텍처를 알아야 할까</h4>
+<p>1강에서 우리는 &quot;쿠버네티스가 컨테이너를 알아서 배치하고, 죽으면 다시 살려준다&quot;고 배웠습니다. 그런데 그 &quot;알아서&quot;의 정체를 모르면, 막상 무언가 잘못됐을 때 어디를 들여다봐야 할지 막막합니다. Pod가 안 뜰 때, 어떤 부품이 일을 안 하고 있는 걸까요?</p>
+<p>쿠버네티스는 마법 상자가 아니라, <strong>여러 개의 작은 프로그램(프로세스)이 서로 통신하며 협력하는 시스템</strong>입니다. 이 구조를 한 번 머릿속에 그려 두면, 이후 모든 실습이 훨씬 쉬워집니다. 이번 강의는 직접 명령을 치는 실습은 없지만, 앞으로의 실습을 떠받치는 가장 중요한 밑그림입니다.</p>
+<p>비유하자면 쿠버네티스 클러스터는 <strong>하나의 큰 물류 창고 회사</strong>와 같습니다. 실제로 물건을 나르고 쌓는 작업자들이 있는 창고(워커 노드)가 있고, 그 작업자들에게 &quot;무엇을, 어디에, 몇 개 둘지&quot; 지시하는 본사 관제실(컨트롤 플레인)이 있습니다.</p>
+<h4>클러스터, 컨트롤 플레인, 워커 노드</h4>
+<p>먼저 가장 큰 그림부터 봅시다.</p>
+<ul>
+<li><strong>클러스터(Cluster)</strong>: 여러 대의 머신(서버)을 하나로 묶어 컨테이너 앱을 실행하는 전체 시스템입니다. 회사 전체라고 보면 됩니다. 한 조직이 운영 환경용, 테스트 환경용처럼 여러 클러스터를 동시에 운영하기도 합니다.</li>
+<li><strong>노드(Node)</strong>: 클러스터를 구성하는 개별 머신 한 대입니다. 클라우드의 가상 머신(EC2 등)일 수도, 물리 서버일 수도, 심지어 여러분의 노트북일 수도 있습니다.</li>
+</ul>
+<p>이 노드들은 역할에 따라 두 종류로 나뉩니다.</p>
+<ul>
+<li><strong>컨트롤 플레인(Control Plane, 옛 명칭 &#x27;마스터&#x27;)</strong>: 클러스터 전체를 관리하고 <strong>결정을 내리는 두뇌</strong>입니다. 사용자 요청을 받고, 어떤 컨테이너를 어디에 띄울지 정하고, 클러스터의 상태 데이터를 보관하며, 장애에 반응합니다. 직접 앱을 실행하지는 않습니다 — 명령하는 쪽입니다.</li>
+<li><strong>워커 노드(Worker Node)</strong>: 실제로 여러분의 애플리케이션이 <strong>돌아가는 작업장</strong>입니다. 컨트롤 플레인의 지시를 받아 컨테이너를 실제로 띄우고 유지합니다.</li>
+</ul>
+<blockquote class='callout'>
+<p>운영 환경에서는 두뇌가 멈추면 클러스터 전체가 위험하므로, 컨트롤 플레인을 여러 노드에 분산 배치해 고가용성을 확보합니다. 반면 테스트용이라면 컨트롤 플레인과 워커를 한 머신에 몰아넣어도 됩니다.</p>
+</blockquote>
+<p>한 가지 중요한 사실: <strong>워커 노드는 컨테이너를 직접 실행하지 않고 &quot;Pod&quot;라는 단위를 실행합니다.</strong> 도커에서 최소 단위가 컨테이너였다면, 쿠버네티스의 최소 배포 단위는 Pod입니다. Pod 하나 안에는 한 개 이상의 컨테이너가 들어가며, 앱을 더 늘리고 싶으면 Pod를 더 띄우면 됩니다. (Pod는 3강에서 자세히 다룹니다.)</p>
+<h4>컨트롤 플레인의 핵심 부품 4가지</h4>
+<p>관제실(컨트롤 플레인) 안에는 역할이 다른 네 개의 프로그램이 있습니다.</p>
+<p><strong>1. API Server (관제실의 안내데스크)</strong></p>
+<p>클러스터로 들어오는 모든 요청이 거쳐 가는 <strong>유일한 정문</strong>입니다. 우리가 <code class='ic'>kubectl</code>(쿠버네티스 명령줄 도구)이나 대시보드로 명령을 내리면, 실제로는 이 API Server와 대화하는 것입니다. 심지어 워커 노드의 부품들조차 API Server를 통해서만 소통합니다. 정문인 만큼 <strong>인증(누구인지 확인)과 인가(권한이 있는지 확인)</strong>, 요청이 올바른 형식인지 검증하는 일도 여기서 합니다.</p>
+<p><strong>2. etcd (회사의 장부)</strong></p>
+<p>클러스터의 모든 상태 데이터를 저장하는 <strong>키-값 저장소</strong>입니다. 어떤 노드가 있고, 어떤 Pod가 어디서 돌고 있으며, 사용자가 무엇을 요청했는지 — 이 모든 &quot;현재 사실&quot;이 etcd에 기록됩니다. 그래서 etcd를 클러스터의 <strong>단일 진실 공급원(single source of truth)</strong>이라 부릅니다. Pod를 만들면 그 정보가 etcd에 기록되고, 지우면 etcd에서도 지워집니다.</p>
+<p><strong>3. Scheduler (배치 담당자)</strong></p>
+<p>새로 만들어야 할 Pod를 <strong>어느 워커 노드에 올릴지 결정</strong>합니다. 단순히 빈자리에 넣는 게 아니라, Pod가 요구하는 CPU·메모리 양, 노드의 여유 자원, &quot;이 Pod는 저 Pod와 가까이 둬라&quot; 같은 제약 조건을 종합해 가장 적합한 노드를 고릅니다. 한정된 서버에 여러 앱을 최적으로 욱여넣는 이른바 &#x27;짐 싸기(bin packing) 문제&#x27;를 푸는 역할입니다.</p>
+<p><strong>4. Controller Manager (현장 감독)</strong></p>
+<p>시스템을 항상 <strong>사용자가 원하는 상태(desired state)로 되돌리려는</strong> 백그라운드 프로세스입니다. 예를 들어 Deployment나 ReplicaSet으로 &quot;Pod 3개가 떠 있어야 한다&quot;고 선언했는데 하나가 죽으면, 컨트롤러가 이를 감지하고 부족한 만큼 새 Pod 객체를 만들어 채웁니다. 노드가 다운되면 감지하는 노드 컨트롤러, 배포를 관리하는 디플로이먼트 컨트롤러처럼, 자원 종류마다 전담 컨트롤러가 돌아갑니다. 쿠버네티스의 &#x27;자가 치유&#x27;가 바로 여기서 나옵니다.</p>
+<blockquote class='callout'>
+<p>Controller Manager는 &quot;선언한 개수만큼 Pod 객체가 존재하는가&quot;를 맞추는 역할이지, 개별 Pod를 어느 노드에서 직접 기동시키는 주체가 아닙니다. 컨트롤러가 만든 Pod도 처음엔 노드가 정해지지 않은 상태로, Scheduler가 노드를 골라준 뒤에야 그 노드의 kubelet이 실제로 띄웁니다.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>클라우드에서 운영한다면 Cloud Controller Manager가 추가로 붙어, 노드용 가상 머신 생성 같은 작업을 클라우드 제공자(AWS·GCP·Azure)에게 위임합니다.</p>
+</blockquote>
+<h4>워커 노드의 핵심 부품 3가지</h4>
+<p>작업장(워커 노드)에는 Pod를 실제로 돌리기 위한 세 가지 프로그램이 있습니다.</p>
+<p><strong>1. kubelet (현장 작업반장)</strong></p>
+<p>모든 워커 노드에서 도는 에이전트입니다. 컨트롤 플레인(API Server)과 통신해 &quot;이 노드에서 어떤 Pod를 돌려라&quot;는 지시를 받고, 그 Pod가 실제로 살아 건강하게 돌아가는지 책임집니다. 노드와 두뇌를 잇는 연락책이라고 보면 됩니다.</p>
+<p><strong>2. Container Runtime (컨테이너 실행 엔진)</strong></p>
+<p>실제로 컨테이너를 실행하는 소프트웨어입니다. 이미지를 레지스트리에서 내려받고, 컨테이너를 시작·중지하며 자원을 관리합니다. 흔히 도커를 떠올리지만, 도커는 여러 런타임 중 하나일 뿐입니다. 쿠버네티스는 표준 규격(CRI)만 만족하면 containerd, CRI-O 등 어떤 런타임이든 끼워 쓸 수 있습니다. kubelet이 이 런타임에게 실제 실행을 지시합니다.</p>
+<p><strong>3. kube-proxy (네트워크 교통정리)</strong></p>
+<p>각 노드의 네트워크 규칙을 관리해, 클러스터 안팎의 트래픽이 올바른 Pod로 전달되도록 라우팅하고 부하를 분산합니다.</p>
+<p>지금까지 설명한 클러스터의 전체 구성을 한 장으로 정리하면 아래 구성도와 같습니다. 컨트롤 플레인의 4대 부품과 워커 노드의 3대 부품이 각각 어디에 속하는지, 그리고 <strong>모든 통신 화살표가 결국 API Server를 향한다는 점</strong>을 눈으로 확인해 보세요. Scheduler·Controller·각 노드의 kubelet은 API Server를 <strong>watch(지속 구독)</strong> 하고, 변경이 생기면 API Server가 그 구독으로 정보를 되돌려 줍니다. 즉 부품들이 API Server에 &quot;물어보는&quot; 방향으로 연결되어 있고, API Server가 응답·이벤트를 보내 주는 구조입니다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    User[&quot;사용자 (kubectl)&quot;]
+
+    subgraph Cluster[&quot;쿠버네티스 클러스터&quot;]
+        subgraph CP[&quot;컨트롤 플레인 (두뇌)&quot;]
+            API[&quot;API Server&lt;br/&gt;유일한 정문·인증&quot;]
+            ETCD[&quot;etcd&lt;br/&gt;상태 저장소&quot;]
+            SCH[&quot;Scheduler&lt;br/&gt;노드 배치 결정&quot;]
+            CM[&quot;Controller Manager&lt;br/&gt;자가 치유&quot;]
+        end
+
+        subgraph W1[&quot;워커 노드 1&quot;]
+            KL1[&quot;kubelet&quot;]
+            CR1[&quot;Container Runtime&quot;]
+            KP1[&quot;kube-proxy&quot;]
+            POD1[&quot;Pod&quot;]
+        end
+
+        subgraph W2[&quot;워커 노드 2&quot;]
+            KL2[&quot;kubelet&quot;]
+            CR2[&quot;Container Runtime&quot;]
+            KP2[&quot;kube-proxy&quot;]
+            POD2[&quot;Pod&quot;]
+        end
+    end
+
+    User --&gt;|명령 요청| API
+    API &lt;--&gt;|상태 읽기·쓰기| ETCD
+    SCH --&gt;|watch·결정 쓰기| API
+    CM --&gt;|watch·결정 쓰기| API
+    KL1 --&gt;|watch·상태 보고| API
+    KL2 --&gt;|watch·상태 보고| API
+    API -.-&gt;|변경 이벤트 응답| SCH
+    API -.-&gt;|변경 이벤트 응답| KL1
+    API -.-&gt;|변경 이벤트 응답| KL2
+    KL1 --&gt;|실행 지시| CR1
+    KL2 --&gt;|실행 지시| CR2
+    CR1 --&gt;|컨테이너 실행| POD1
+    CR2 --&gt;|컨테이너 실행| POD2</div><figcaption>쿠버네티스 클러스터 구성도 - 모든 부품이 API Server를 watch하는 허브 구조</figcaption></figure>
+<h4>사용자 명령이 처리되는 흐름</h4>
+<p>이제 부품들이 어떻게 협력하는지, &quot;Pod 하나를 만들어줘&quot;라는 요청이 클러스터를 흐르는 과정을 따라가 봅시다. <strong>핵심은 모든 소통이 API Server를 거친다는 점입니다.</strong> 흐름은 다음과 같습니다.</p>
+<p>1. 사용자가 <code class='ic'>kubectl</code>로 &quot;이 컨테이너를 Pod로 실행해줘&quot;를 <strong>API Server</strong>에 요청한다.</p>
+<p>2. API Server가 인증·인가와 요청 형식을 검증한 뒤, 이 Pod 정보를 <strong>etcd</strong>에 기록한다. 이 시점의 Pod는 아직 어느 노드에서 돌지 정해지지 않은 <strong>Pending(대기) 상태</strong>다.</p>
+<p>3. 아직 노드가 정해지지 않은 이 Pending Pod를 <strong>Scheduler</strong>가 발견하고, 자원 상황을 분석해 최적의 워커 노드를 골라 &quot;이 Pod는 이 노드에서 돌려라&quot;라고 API Server에 알린다(바인딩). 이 결정도 etcd에 기록된다.</p>
+<p>4. 선택된 워커 노드의 <strong>kubelet</strong>이 API Server를 계속 지켜보다가(watch), 자기 노드에 배정된 Pod를 발견하고 직접 실행에 들어간다.</p>
+<p>5. kubelet이 노드의 <strong>Container Runtime</strong>에게 지시하고, 런타임이 이미지를 내려받아 컨테이너를 실행한다 → Pod가 뜬다.</p>
+<p>6. kubelet이 &quot;이 Pod는 Running 상태&quot;라고 API Server에 보고하고, 그 상태 변화가 다시 etcd에 저장된다. 이제 사용자가 <code class='ic'>kubectl get pod</code>로 확인하면 &quot;Running&quot;이 보인다.</p>
+<p>여기서 컨트롤 플레인의 역할 분담을 한 문장으로 정리하면 이렇습니다 — <strong>컨트롤러가 &#x27;무엇을 몇 개&#x27; 보장하고, Scheduler가 &#x27;어디에&#x27; 둘지 결정하며, kubelet이 &#x27;실제 실행&#x27;을 맡습니다.</strong> 그래서 단일 Pod를 직접 만든 위 흐름에는 <strong>Controller Manager가 등장하지 않습니다.</strong> 우리가 Pod 하나를 콕 집어 만들었으니 &quot;몇 개를 보장할지&quot;를 챙기는 컨트롤러가 끼어들 일이 없고, 곧바로 Scheduler가 노드를 정한 뒤 그 노드의 kubelet이 스스로 Pod를 띄우기 때문입니다.</p>
+<p>Controller Manager가 일하는 때는 따로 있습니다 — Deployment나 ReplicaSet처럼 &quot;Pod를 몇 개 유지하라&quot;고 선언했을 때, 현재 개수가 모자라면 부족한 만큼 Pod <strong>객체를 생성</strong>하는 일을 합니다. 단, 컨트롤러는 Pod 객체를 만들어 &quot;개수&quot;만 채울 뿐, 그 Pod를 어느 노드에 둘지는 정하지 않습니다. 그래서 컨트롤러가 만든 Pod도 처음엔 노드 미정의 Pending 상태로 태어나, 위 흐름의 <strong>3단계(Scheduler의 노드 배치)부터 6단계(kubelet 실행·보고)까지를 똑같이 거쳐</strong> 비로소 노드 위에 떠오릅니다. Scheduler 단계는 어떤 경로로 만들어진 Pod든 건너뛸 수 없는 필수 관문입니다.</p>
+<p>이 6단계를 시간 순서대로 그리면 아래 시퀀스 다이어그램과 같습니다. 여기서 꼭 기억할 점은 Scheduler와 kubelet이 매번 API Server에 &quot;새 일감 있나요?&quot;라고 물어보는 게 아니라, <strong>처음에 한 번 watch(지속 구독)를 걸어 두면 변경이 생길 때마다 API Server가 그쪽으로 이벤트를 밀어 보낸다</strong>는 것입니다. 그래서 화살표가 단발성 조회가 아니라 끊기지 않는 구독 위에서 흐릅니다.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as 사용자(kubectl)
+    participant API as API Server
+    participant ETCD as etcd
+    participant SCH as Scheduler
+    participant KL as kubelet
+    participant CR as Container Runtime
+
+    Note over SCH,KL: 시작 시 API Server에 watch(지속 구독)를 걸어 둠
+    SCH-&gt;&gt;API: watch 구독 시작(미배치 Pod 감시)
+    KL-&gt;&gt;API: watch 구독 시작(내 노드 Pod 감시)
+
+    U-&gt;&gt;API: 1. Pod 실행 요청
+    API-&gt;&gt;API: 2. 인증·인가·형식 검증
+    API-&gt;&gt;ETCD: 2. Pod 정보 기록
+    API--&gt;&gt;SCH: 3. 미배치 Pod 이벤트 푸시
+    SCH-&gt;&gt;API: 3. 최적 노드 선정 결과 쓰기(바인딩)
+    API--&gt;&gt;KL: 4. 내 노드 배정 Pod 이벤트 푸시
+    KL-&gt;&gt;CR: 5. 컨테이너 실행 지시
+    CR--&gt;&gt;KL: 5. Pod 실행 완료
+    KL-&gt;&gt;API: 6. 상태 보고(Running)
+    API-&gt;&gt;ETCD: 6. 상태 변화 저장
+    U-&gt;&gt;API: kubectl get pod
+    API--&gt;&gt;U: Running</div><figcaption>Pod 생성 요청이 watch 기반으로 클러스터를 흐르는 6단계 처리 순서</figcaption></figure>
+<p>여기서 한 가지 더. 만약 Deployment 같은 컨트롤러로 띄운 Pod가 갑자기 죽으면 어떻게 될까요? <strong>Controller Manager</strong>가 &quot;원하는 상태(Pod N개 실행 중)와 현재 상태(N-1개)가 다르다&quot;는 것을 감지하고 부족한 Pod 객체를 새로 만듭니다. 이때도 새 Pod는 노드 미정의 Pending 상태로 태어나므로, <strong>Scheduler가 노드를 고르고(3단계) → kubelet이 실행·보고(4~6단계)</strong> 하는 동일한 경로를 다시 타고 새 노드에 떠오릅니다. 이것이 우리가 손대지 않아도 클러스터가 스스로 복구되는 원리입니다.</p>
+<h3>핵심 요약</h3>
+<ul>
+<li><strong>클러스터</strong>는 여러 노드의 묶음이며, 노드는 결정을 내리는 <strong>컨트롤 플레인</strong>과 앱을 실제 실행하는 <strong>워커 노드</strong>로 나뉜다.</li>
+<li>컨트롤 플레인 4대 부품: <strong>API Server</strong>(유일한 정문·인증), <strong>etcd</strong>(상태를 보관하는 단일 진실 공급원), <strong>Scheduler</strong>(Pod를 어느 노드에 둘지 결정), <strong>Controller Manager</strong>(선언한 개수만큼 Pod 객체를 맞추는 자가 치유).</li>
+<li>워커 노드 3대 부품: <strong>kubelet</strong>(API Server를 watch하며 자기 노드 Pod를 직접 실행·유지), <strong>Container Runtime</strong>(컨테이너 실제 실행), <strong>kube-proxy</strong>(네트워크 라우팅).</li>
+<li>워커 노드는 컨테이너가 아니라 <strong>Pod</strong>를 실행한다.</li>
+<li>모든 요청과 내부 통신은 <strong>반드시 API Server를 거친다.</strong> 단일 Pod 생성은 API Server → etcd → Scheduler(노드 결정) → 해당 노드의 kubelet(직접 실행) → Runtime 순으로 흐른다.</li>
+<li>컨트롤 플레인의 역할은 <strong>컨트롤러(&#x27;무엇을 몇 개&#x27; 보장) → Scheduler(&#x27;어디에&#x27; 결정) → kubelet(&#x27;실제 실행&#x27;)</strong> 으로 나뉜다. Controller Manager가 만든 Pod도 노드 미정의 Pending 상태로 태어나 반드시 <strong>Scheduler의 노드 배치 단계를 거친 뒤</strong> kubelet이 띄운다 — Scheduler는 어떤 Pod든 건너뛸 수 없는 필수 관문이다.</li>
+</ul>
+          <section class='ex'><h3>📝 퀴즈</h3><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q1. 컨트롤 플레인과 워커 노드의 역할 구분에 대한 설명으로 가장 옳은 것은?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>컨트롤 플레인은 사용자의 애플리케이션 컨테이너를 직접 실행하며, 워커 노드는 어느 노드에 컨테이너를 배치할지 결정한다.</li><li class='opt' onclick='pick(this,0,1)'>컨트롤 플레인은 클러스터 전체를 관리하고 결정을 내리는 두뇌 역할이며, 실제 애플리케이션 Pod는 워커 노드에서 실행된다.</li><li class='opt' onclick='pick(this,0,2)'>컨트롤 플레인과 워커 노드는 모두 Pod를 실행할 수 있으며, 역할 차이는 보유한 자원의 크기에 따라 결정된다.</li><li class='opt' onclick='pick(this,0,3)'>워커 노드 없이 컨트롤 플레인만으로도 컨테이너 앱을 정상적으로 서비스할 수 있다.</li></ul>
+              <div class='exp'><p>정답(B): 컨트롤 플레인은 &#x27;지시·관리&#x27;를, 워커 노드는 &#x27;실행&#x27;을 담당한다. 컨트롤 플레인(API Server·etcd·Scheduler·Controller Manager)은 애플리케이션 컨테이너를 직접 실행하지 않고, 어디에 무엇을 띄울지 결정하고 조율한다. 실제 Pod는 오직 워커 노드에서만 실행된다. (A) 역할이 뒤바뀐 오답이다. (C) 컨트롤 플레인은 운영 환경에서 앱 Pod를 실행하지 않으며, 역할은 자원 크기가 아닌 설계에 따라 구분된다. (D) 워커 노드 없이는 실제로 컨테이너를 실행할 노드가 없으므로 앱을 서비스할 수 없다.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q2. etcd에 대한 설명으로 옳은 것은?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>etcd는 사용자의 kubectl 명령을 직접 수신하고 인증·인가를 처리하는 클러스터 정문 역할을 한다.</li><li class='opt' onclick='pick(this,1,1)'>etcd는 Pod를 어느 워커 노드에 배치할지 계산하는 스케줄링 엔진이다.</li><li class='opt' onclick='pick(this,1,2)'>etcd는 클러스터의 모든 상태 데이터를 보관하는 키-값 저장소로, 클러스터의 단일 진실 공급원이다.</li><li class='opt' onclick='pick(this,1,3)'>etcd는 각 워커 노드에서 실행되며 컨테이너의 헬스 체크와 실행을 담당하는 에이전트다.</li></ul>
+              <div class='exp'><p>정답(C): etcd는 노드 목록, Pod 배치 정보, 사용자 선언 등 클러스터의 모든 상태 데이터를 저장하는 키-값 저장소이며, &#x27;단일 진실 공급원(single source of truth)&#x27;이라 불린다. Pod를 만들면 etcd에 기록되고, 삭제하면 etcd에서도 지워진다. (A) 모든 요청을 수신하고 인증·인가를 처리하는 것은 API Server의 역할이다. (B) 배치 노드를 결정하는 것은 Scheduler의 역할이다. (D) 각 워커 노드에서 실행되며 컨테이너 실행을 책임지는 것은 kubelet이다.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q3. Scheduler가 특정 Pod를 워커 노드 A에 배치하기로 결정했다. 이 결정 이후 실제로 컨테이너를 실행하는 주체는 누구인가? (판단형)</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>Scheduler가 직접 워커 노드 A의 Container Runtime에 컨테이너 실행을 지시한다.</li><li class='opt' onclick='pick(this,2,1)'>Controller Manager가 워커 노드 A를 선택한 뒤 kubelet에게 실행을 명령한다.</li><li class='opt' onclick='pick(this,2,2)'>워커 노드 A의 kubelet이 API Server를 watch하다가 자기 노드에 배정된 Pod를 발견하고, Container Runtime에게 실행을 지시한다.</li><li class='opt' onclick='pick(this,2,3)'>API Server가 워커 노드 A의 Container Runtime을 직접 호출해 컨테이너를 기동시킨다.</li></ul>
+              <div class='exp'><p>정답(C): Scheduler는 &#x27;어느 노드에 둘지 결정(바인딩)&#x27;하는 역할까지만 담당하고, 실제 실행은 하지 않는다. 결정 결과는 API Server를 통해 etcd에 기록된다. 이후 해당 노드의 kubelet이 API Server를 지속적으로 watch하다가 자기 노드에 배정된 Pod를 발견하고, 노드의 Container Runtime에게 이미지 다운로드 및 컨테이너 실행을 지시한다. (A) Scheduler는 노드에 직접 접근하지 않는다. (B) Controller Manager는 이 단일 Pod 생성 흐름에는 등장하지 않으며, Deployment 등으로 replica 수를 맞출 때 Pod 객체를 생성하는 역할이다. (D) API Server는 요청을 중계·검증하고 데이터를 etcd에 기록하는 역할이며, Container Runtime을 직접 호출하지 않는다.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q4. 사용자가 kubectl로 Pod 생성을 요청했을 때, 처리 순서로 올바른 것은?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>kubectl → Scheduler → API Server → etcd → kubelet → Container Runtime</li><li class='opt' onclick='pick(this,3,1)'>kubectl → API Server → etcd 기록 → Scheduler(노드 결정) → kubelet(실행 지시) → Container Runtime</li><li class='opt' onclick='pick(this,3,2)'>kubectl → kubelet → Container Runtime → API Server → etcd → Scheduler</li><li class='opt' onclick='pick(this,3,3)'>kubectl → etcd → API Server → Scheduler → Controller Manager → kubelet</li></ul>
+              <div class='exp'><p>정답(B): 모든 요청은 반드시 API Server를 첫 번째 관문으로 거친다. 흐름은 다음과 같다. (1) kubectl이 API Server에 요청 전송 → (2) API Server가 인증·인가·형식 검증 후 Pod 정보를 etcd에 기록 → (3) Scheduler가 배치 안 된 Pod를 발견하고 최적 노드를 선정(바인딩)해 API Server에 알림, etcd에도 기록 → (4) 해당 노드의 kubelet이 API Server를 watch하다 자기 노드 Pod를 발견 → (5) kubelet이 Container Runtime에 실행 지시 → Pod 기동. (A) Scheduler가 API Server보다 앞서면 인증·인가를 건너뛰게 되므로 틀렸다. (C) kubelet과 Container Runtime이 etcd·Scheduler보다 먼저 나오는 것은 불가능하다. (D) 단일 Pod 생성 흐름에서 Controller Manager는 관여하지 않는다.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q5. Deployment로 Pod 3개를 선언해 운영하던 중, 워커 노드 한 대가 갑자기 다운되어 Pod 1개가 사라졌다. 쿠버네티스가 자동으로 이 Pod를 다른 노드에 복구할 때, 가장 먼저 &#x27;부족한 Pod 객체를 새로 생성&#x27;하는 역할을 맡는 구성요소는? (적용형)</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>Scheduler — 남은 노드 중 최적의 위치를 계산해 Pod를 즉시 재배치한다.</li><li class='opt' onclick='pick(this,4,1)'>kubelet — 죽은 Pod를 감지하고 스스로 새 Pod 객체를 생성한다.</li><li class='opt' onclick='pick(this,4,2)'>Controller Manager — 선언된 replica 수(3개)와 실제 개수(2개)의 차이를 감지하고 부족한 Pod 객체를 생성한다.</li><li class='opt' onclick='pick(this,4,3)'>etcd — 저장된 desired state와 current state의 차이를 자동으로 맞추어 Pod를 재생성한다.</li></ul>
+              <div class='exp'><p>정답(C): Controller Manager(ReplicaSet 컨트롤러)가 &#x27;원하는 상태(Pod 3개)&#x27;와 &#x27;현재 상태(Pod 2개)&#x27;의 차이를 지속적으로 감시하다가 불일치를 감지하면, 부족한 수만큼 Pod 객체를 새로 생성한다. 그렇게 만들어진 Pod는 다시 Scheduler가 노드를 결정하고, 해당 노드의 kubelet이 실제 실행하는 정상 흐름을 탄다. (A) Scheduler는 이미 Pod 객체가 존재할 때 노드를 &#x27;결정&#x27;하는 역할이며, Pod 객체를 새로 만들지는 않는다. (B) kubelet은 자기 노드에 배정된 Pod를 실행·유지하는 역할이지, 새 Pod 객체를 생성하는 주체가 아니다. (D) etcd는 상태를 &#x27;저장&#x27;하는 저장소일 뿐이며, 스스로 아무 행동을 취하지 않는다.</p></div></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=TlHvYWVUZyc' target='_blank'>Kubernetes Explained in 6 Minutes | k8s Architecture</a></li><li><a href='https://www.youtube.com/watch?v=vZ9gEqeddxQ' target='_blank'>Day 2 | Kubernetes Architecture explained</a></li><li><a href='https://www.youtube.com/watch?v=VQUZF6k6g88' target='_blank'>Kubernetes architecture: Nodes and control plane</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

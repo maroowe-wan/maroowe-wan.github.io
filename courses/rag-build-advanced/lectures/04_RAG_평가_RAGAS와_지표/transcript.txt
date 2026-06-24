@@ -1,0 +1,96 @@
+## Video 1: RAG Evaluation: Precision, Recall, Faithfulness, RAGAS Explained Clearly
+https://www.youtube.com/watch?v=7_LTU0LA374
+
+A RAG system produces answers by combining two steps, retrieval and generation. The quality of the final response depends on how relevant the retrieved information is and how accurately the model uses that information.
+
+Let's look at how RAG evaluation works in a clear and structured way. We'll go through the key metrics that measure retrieval quality, grounding quality, and the final answer.
+
+Let's start with traditional evaluation metrics. BLEU or Bilingual Evaluation Under Study measures how many n-grams in the generated text also appear in the reference text. A 1-gram is a single word, a 2-gram is a pair of words and so on. BLEU checks these overlaps and produces a score between zero and one. A higher score means the generated sentence closely follows the reference.
+
+For example, take the reference: "the sky is blue today" and the output: "the sky looks blue today". In the output, four out of the five 1-grams (the, sky, blue, and today) match the reference. So the 1-gram precision becomes 4/5 or 0.8. For the 2-grams, two out of four pairs (the sky and blue today) also match the reference. So the 2-gram precision becomes almost half. BLEU then takes the geometric mean of these precisions and gives a combined score of about 0.63. Since both sentences have the same length, the brevity penalty equals one. The final BLEU score stays around 0.63. This is why BLEU became the standard for machine translation where short word patterns are a strong signal of quality.
+
+Next, let's discuss ROUGE or Recall-Oriented Under-Study for Gisting Evaluation. It measures how much of the reference content appears in the generated output. Instead of focusing on matching phrases exactly, ROUGE focuses on recall. For example, consider the reference summary: "The company achieved record profits" and the generated summary: "Record profits were reported this quarter". The keywords record and profits appear in both. The generated summary captures two out of three important content words. That gives us a ROUGE-1 recall of 2/3 which is around 0.66. For ROUGE-2, we look at 2-gram overlap. The reference has the pair "record profits" and the generated summary also contains the same pair. So ROUGE-2 recall becomes one. Since the generated summary captures the main idea even with different phrasing, ROUGE assigns a strong score. This is why ROUGE became the go-to metric for summarization.
+
+Now let's look at F1 score. It measures how many important elements in the generated answer match the reference. It works using precision and recall and combines them into a single number. Precision tells us how many of the predicted items are correct. Recall tells us how many of the correct items were captured. F1 is the harmonic mean of these two, giving a balanced score.
+
+For example, take the question: who discovered penicillin? The reference answer is Alexander Fleming and the generated answer is Fleming discovered it in 1928. The key element we care about is the entity Fleming which refers to the same person as Alexander Fleming. The model predicted one entity Fleming and it is correct. So the precision is one and the reference expected one entity Alexander Fleming which is also present in the output. So the recall is also one. Combining these, F1 becomes one. The F1 score is perfect even though the sentence is phrased differently.
+
+Traditional metrics like BLEU, ROUGE and F1 work well when there is a fixed reference answer and the goal is to match its wording or important elements. They are perfect for translation, summarization and extraction. But a RAG system works differently. It retrieves information first and then generates an answer from that information. The quality of the final answer depends on both the retrieval step and the generation step. So similarity-based metrics are not enough. A RAG system needs metrics that directly evaluate how relevant the retrieved context is, how well the answer uses that context, and how accurately the answer responds to the question.
+
+The first metric is Context Precision. Context Precision measures how much of the retrieved context is actually relevant to the question. If the system retrieves five chunks and only two out of them are useful, the precision is two out of five. A higher precision means the retriever brought in less noise. For example, if the query is "who founded Tesla" and the retriever brings five chunks but only two talk about Elon Musk and Tesla's founding, then the context precision is 2/5 which is 0.4.
+
+Next, let's discuss Context Recall. It measures how much of the relevant information the retriever managed to find. If there are three important chunks in the database and the retriever finds two of them, the recall is 2/3. For the same query, if there are three chunks that contain founding details of Tesla and the retriever returns two of them, the recall is 2/3 which is 0.66.
+
+Let's discuss Answer Relevance. Answer Relevance measures how directly the generated answer responds to the user's question. This is usually done using embeddings to check how closely the answer aligns with the query's meaning. For example, the question: "what is a transformer model?" gets the answer: "A transformer is a neural network architecture based on attention." Both are semantically close so relevance will be high.
+
+Next is Faithfulness. Faithfulness checks whether the answer is fully supported by the retrieved context. If a statement in the answer does not appear in the retrieved text, faithfulness goes down. For example, if the retrieved context mentions Tesla's founders and the answer adds a claim that isn't present in those chunks, faithfulness drops because the answer is no longer grounded in the provided evidence.
+
+The last metric is Groundedness. Groundedness measures how well the answer uses the retrieved context instead of relying on the model's internal memory. If the answer copies or closely paraphrases relevant parts of retrieved documents, groundedness is high. For example, if the retrieved chunk says "Fleming discovered penicillin in 1928" and the answer says "penicillin was discovered by Fleming in 1928", the grounding score is high because the answer is clearly based on the given evidence.
+
+These RAG evaluation metrics like context precision, context recall, answer relevance, faithfulness and groundedness give a good understanding of how well the system retrieved information and how accurately it used that information. But in practice, calculating these scores consistently is not always simple. Some can be computed with embeddings, but others need deeper reasoning. For example, to check faithfulness, an evaluator has to read the question, the retrieved context and the answer together and decide whether the answer is fully supported. This is where LLM as a judge becomes useful.
+
+To make all of this easier and standardize, the community built RAGAS, a dedicated open-source framework for evaluating RAG systems. RAGAS provides a structured way to compute RAG evaluation metrics without manually building evaluators for each one. It uses embeddings for semantic comparisons and uses LLM as a judge for evaluations that require deeper understanding. RAGAS provides four main scores: Faithfulness which is whether the answer is fully supported by the retrieved context, Answer Relevance which checks how well the answer addresses the question, Context Precision which checks how much of the retrieved context is actually relevant, and Context Recall which tells how much of the relevant information was successfully retrieved. These four metrics together give a clear and consistent picture of RAG system quality.
+
+## Video 2: RAGAS: How to Evaluate a RAG Application Like a Pro for Beginners
+https://www.youtube.com/watch?v=5fp6e5nhJRk
+
+RAGAS is a framework to evaluate RAG applications. You are able to effectively test the retrieval system, the answer generation system, testing your large language models and embedding models in regards to RAG applications.
+
+RAGAS mainly focuses on two main things: one is Generation, that is when a large language model generates a response. Second is Retrieval, that's when the relevant information is searched from the database and provided as context to the large language model.
+
+In simple terms, the first step in a RAG application is to ingest the data. The data for example a PDF or a text file is ingested, then it's divided into chunks. Those chunks are converted to embeddings and stored in the database. Now when the user asks a question, relevant information is retrieved from the database and sent as context to the large language model and finally the large language model will generate the response.
+
+We can test how effective the retrieval system is to retrieve relevant context and how effective the answer generator is related and is more relevant to the question asked by the user. So we can test two things: one is retrieval and generation. Retrieval is more related to the embedding model which we use and generation is more related to the large language model use.
+
+In regards to RAGAS, there are four different things which we need to focus on: one is the question, that is a question which the user is going to ask. Next is the ground truth, what is the real answer. So these question and ground truth will be provided as the input. The answer and the context will be generated by the models. The answer will be generated by the large language model. The context will be generated during the time of retrieval and also used with embeddings models.
+
+First step we need to have a question and ground truth, that is the real answer. With those two things we are going to evaluate the answer and context. Now we can install RAGAS and set up a basic example with all these four components. We import the necessary modules and provide sample data.
+
+This sample data contains the question, answer, context and ground truth. In this example we've already provided all four pieces of information to make this easy for beginners to understand. But generally, the answer and context are generated when you run the application. The answer is generated using a large language model and the context is retrieved when using a retrieval tool.
+
+We initiate the data set and provide the data samples. Then we score equals evaluate by providing the data sets. Here we're going to calculate faithfulness and answer correctness.
+
+Faithfulness is the factual consistency of the generated answer against the given context. So we are comparing the answer and the context. Is the answer generated in line with the context? When and where was Einstein born? If the large language model uses this context perfectly and generates the accurate response that is the specific date, that means it has a high faithfulness score. If it responds with an incorrect answer not even considering the context then it is low faithfulness.
+
+Answer Correctness is the accuracy of the generated answer when compared to the ground truth. So it's just comparing the answer with the ground truth. Once after the answer got generated by the large language model we are comparing that with the ground truth which is the real correct answer. If these two match with each other then that answer correctness score is going to be high. If the answer generated is completely wrong then it is low answer correctness.
+
+When we run the code, the evaluation starts and completes. Then we can open the scores file to see the final results. For example, "When was the first Super Bowl?" The large language model gave this as the answer: Jan 15, 1967. The context also shows Jan 15, 1967. Comparing to the ground truth, we can see the faithfulness score is one and the answer correctness is 0.74. The faithfulness is one because the ground truth and the context is in line.
+
+For another question, "Who won the most Super Bowls?" The answer generated was the New England Patriots but if you see the context, there's nothing written about the New England Patriots which means the retrieval system or the embedding model is not as effective. That's why the faithfulness score is zero and answer correctness is lower. The reason why the answer correctness is still somewhat high is because the large language model has its own knowledge so it used its own knowledge to respond correctly saying that the answer is the New England Patriots which is correct.
+
+As you can see, there are different metrics such as answer relevance, context precision, context relevancy, context recall, context entities recall, answer semantic similarity, and aspect critique. RAGAS has its own system to generate questions and ground truth automatically based on the provided data. So you can provide any data and RAGAS can automatically generate the question and ground truth. With that information, you can evaluate your RAG application when it generates answers and context.
+
+## Video 3: Key Metrics and Evaluation Methods for RAG
+https://www.youtube.com/watch?v=cRz0BWkuwHg
+
+You are probably implementing RAG systems missing out on easy improvements. Most don't even have an evaluation pipeline. How can you know if it's optimal or if the system is improving with any changes? This is only through real evaluation which is different from evaluating LLMs themselves.
+
+RAG combines retrieval mechanisms like Google search with generative models to improve response quality and relevance. RAG is simply the process of adding knowledge to an existing LLM into the input prompt. It's most useful for private data or advanced topics the LLM might not have seen during its training.
+
+Why is evaluating RAG systems important? Effectively evaluating and optimizing LLM based systems like RAG can be the difference between a nice demo and a highly useful trustworthy LLM tool or product. Whether you are developing a customer service bot or a research tool, good evaluation will help you create more reliable and effective AI solutions that can actually be shipped to production.
+
+For example, if you're building a legal research tool with RAG, it will need to be contextually appropriate and up to date. You can't just assume it will work fine. You need proper evaluation to ensure good interpretation of legal jargon and relevant information.
+
+While testing the application yourself is very important, you need to play with it yourself which we call Vibe checking. But it doesn't tell you the whole story. We need more rigorous methods and metrics to ensure the LLM applications are performing optimally.
+
+RAG systems have two distinct components that need evaluation: the retrieval component and the answer generation component.
+
+Retrieval metrics focus on how well the system retrieves relevant information. You can use four main metrics. Precision measures the proportion of relevant documents among the retrieved documents. It's particularly useful when you want to ensure that the information your system retrieves is highly relevant. Recall measures the proportion of relevant documents that were successfully retrieved. It's crucial in scenarios where missing important information could be costly. The Hit Rate measures the proportion of queries for which at least one relevant document is retrieved within the top few results. The Mean Reciprocal Rank or MRR evaluates how high the first relevant document appears in the search results. Finally, Normalized Discounted Cumulative Gain or NDCG takes into account both the relevance and the ranking of retrieved documents.
+
+For generation metrics, we have three main metrics: Faithfulness measures the integrity of the answer concerning the retrieved context. It ensures that the generated response accurately reflects the information in the retrieved documents. Answer Relevancy evaluates the relevance of the generated answer to the original query. Answer Correctness assesses whether the generated answer aligns with a given query's reference answer.
+
+An evaluation data set can be done by leveraging expertise from domain experts using your own knowledge if you have domain expertise or even using a powerful LLM to generate complex and contextually rich questions from your indexed data. You basically want to generate questions where the answer is in your data set. You can then see if the answer provided leverages the right data and gives the expected answer.
+
+One of the cool new approaches for evaluating generation is using another LLM as a judge. When using an LLM to evaluate outputs, it's often more effective to have it compare two responses rather than evaluate a single response in isolation. This is called pairwise comparison. When presenting pairs of responses to the LLM judge, you need to randomize the order. LLMs tend to have a bias with order. Similarly, you need to allow for ties. It's possible that two answers are just as good.
+
+The best tip is to use a Chain of Thought approach when evaluating, asking the LLM to explain its reasoning before making a final decision. This can lead to more reliable and interpretable evaluations. Also try to ensure that responses are similar in length when comparing them. This helps create a fairer comparison.
+
+By incorporating LLM based evaluations alongside traditional retrieval metrics, we can get a more comprehensive view of our RAG system's performance addressing both the retrieval and generation aspects. Then any tweak, feature, or prompt can be linked to a quantitative change.
+
+However, metrics and vibe checking yourself aren't enough. We must consider the broader context of how our RAG system is used. One of the most effective ways to do this is by logging and analyzing user queries. By implementing logging systems, you can capture every question asked to your RAG system. Then using techniques like topic clustering, you can analyze these questions to identify common themes and patterns.
+
+You can then tailor your evaluation data sets to these high-frequency topics, ensuring that your systems performs exceptionally well on the queries your users care most about. It's also much easier to vibe check than trying to check the whole set of possible questions.
+
+The next step is to implement it. We suggest using libraries like RAGAS to automate and scale your evaluation process. Don't code everything yourself. These tools can help you measure various aspects of your RAG system's performance including both retrieval and generation quality.
+
+Last but not least, don't forget human evaluation. While automated metrics and LLM based evaluations are valuable and more scalable, human judgment is still the gold standard, especially for assessing factors like fluency, naturalness of responses and overall usefulness in real world scenarios.

@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Resources&amp;HPA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-09-hpa/index.html'>EN</a></div>
+  <h1>K8S-Resources&amp;HPA</h1>
+  <div class="sub">쿠버네티스 기초(Pod, Deployment, Service, YAML 매니페스트)를 이미 아는 학습자. 실무 운영·배포 안정화 단계로 한 단계 더 나아가려는 중급 학습자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. 리소스 관리와 오토스케일링 - requests/limits와 HPA</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. 리소스 관리와 오토스케일링 - requests/limits와 HPA </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>CPU/메모리 requests와 limits가 스케줄링·QoS·OOMKill에 미치는 영향을 이해한다</li>
+<li>Horizontal Pod Autoscaler(HPA)가 부하에 따라 Pod 수를 조절하는 원리를 안다</li>
+<li>metrics-server 기반으로 HPA를 설정하고 부하 테스트로 동작을 확인한다</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 리소스 관리가 중요한가</h4>
+<p>클러스터에서 requests와 limits를 모른 채 워크로드를 운영하는 것은, 예산을 모른 채 돈을 쓰는 것과 같다. 두 가지 결과가 기다린다. 하나는 클라우드 비용이 새는 것이고, 다른 하나는 어느 날 갑자기 Pod가 쿠버네티스에 의해 죽는 것이다.</p>
+<p>모든 애플리케이션은 실행을 위해 <strong>CPU</strong>와 <strong>메모리</strong> 두 가지 자원을 필요로 한다. Pod는 노드(워커 머신) 위에서 돌고, 같은 노드에 있는 모든 Pod는 그 노드의 CPU·메모리를 <strong>나눠 쓴다</strong>. 따라서 한 Pod가 자원을 폭주시키면 같은 노드의 다른 Pod까지 피해를 본다. 이를 &quot;시끄러운 이웃(Noisy Neighbor)&quot; 문제라고 부른다. 리소스를 명시적으로 관리해야 하는 첫 번째 이유가 바로 이 격리다.</p>
+<h4>requests와 limits: 두 개의 숫자가 하는 일</h4>
+<p>컨테이너마다 두 가지 값을 지정할 수 있다.</p>
+<ul>
+<li><strong>requests(요청)</strong>: 이 컨테이너가 정상 동작을 위해 &quot;최소한 보장받아야 하는&quot; 자원. 게임을 살 때의 최소 사양과 같다. 스케줄러가 노드를 고를 때 이 값을 기준으로 삼는다.</li>
+<li><strong>limits(제한)</strong>: 이 컨테이너가 &quot;최대로 쓸 수 있는&quot; 자원의 상한. 이걸 넘기면 쿠버네티스가 개입한다.</li>
+</ul>
+<p>설정은 컨테이너 스펙의 <code class='ic'>resources</code> 섹션에 들어간다.</p>
+<pre><code>
+resources:
+  requests:
+    cpu: &quot;250m&quot;      # 0.25 코어 보장
+    memory: &quot;256Mi&quot;
+  limits:
+    cpu: &quot;500m&quot;      # 최대 0.5 코어까지
+    memory: &quot;512Mi&quot;
+</code></pre>
+<p>단위에 주의하자. <strong>메모리는 바이트 단위</strong>(Mi=메비바이트, Gi=기비바이트)이고, <strong>CPU는 코어 단위</strong>다. CPU는 분수도 가능한데, <code class='ic'>1000m</code>(밀리코어)이 가상 CPU 1코어다. 즉 <code class='ic'>250m</code>은 0.25코어다. 운영체제가 시간을 잘게 쪼개(타임 슬라이스) 여러 컨테이너에 CPU를 나눠 주기 때문에 분수 할당이 가능하다.</p>
+<h4>requests는 스케줄링에, limits는 런타임에 작동한다</h4>
+<p>두 값이 작동하는 <strong>시점이 다르다</strong>는 것이 핵심이다.</p>
+<p><strong>requests는 스케줄링 시점</strong>에 쓰인다. 새 Pod가 생기면 스케줄러는 그 Pod의 requests 합계를 보고, 그만큼의 여유가 있는 노드를 찾는다. 예를 들어 메모리 800Mi를 요청하면 800Mi가 남은 노드를 찾고, 어느 노드에도 자리가 없으면 Pod는 <code class='ic'>Pending</code> 상태로 대기한다. (클러스터 오토스케일러가 있으면 새 노드가 떠서 그 위에 배치된다.)</p>
+<p><strong>limits는 실행 중 내내</strong> 감시된다. 그런데 CPU와 메모리에서 한계 초과 시 동작이 완전히 다르다.</p>
+<blockquote class='callout'>
+<p>메모리는 OOMKill, CPU는 Throttle. 메모리 limit을 넘으면 컨테이너는 <strong>OOMKilled</strong>(Out Of Memory) 시그널로 죽는다. 반면 CPU limit을 넘으면 죽지 않고 <strong>스로틀링</strong>(throttling) — CPU 사이클을 덜 주어 그냥 느려진다.</p>
+</blockquote>
+<p>이 차이가 운영자를 가장 괴롭힌다. 메모리 초과는 Pod가 재시작되니 금방 눈에 띄지만, CPU 스로틀링은 &quot;어딘가 느려졌는데 죽지는 않은&quot; 상태라 원인 추적이 어렵다. <strong>&quot;메모리는 죽고, CPU는 느려진다&quot;</strong>를 외워 두면 장애 분석이 한결 수월해진다.</p>
+<h4>QoS 클래스와 OOM 시 축출 순서</h4>
+<p>requests/limits는 단순한 자원 숫자를 넘어, 쿠버네티스에게 <strong>이 애플리케이션이 얼마나 중요한지</strong>를 알려주는 신호이기도 하다. 쿠버네티스는 이 조합으로 Pod에 세 가지 QoS(Quality of Service, 서비스 품질) 클래스를 자동 부여한다.</p>
+<ul>
+<li><strong>Guaranteed(보장)</strong>: Pod의 모든 컨테이너가 CPU·메모리 모두에 대해 requests = limits로 동일하게 설정된 경우. 자원이 처음부터 끝까지 예약되어 가장 안정적이지만, 실제로 다 쓰지 않으면 그만큼 낭비다.</li>
+<li><strong>Burstable(버스트 가능)</strong>: Guaranteed도 BestEffort도 아닌 모든 경우. 즉 requests나 limits <strong>중 적어도 하나라도 지정</strong>돼 있으면(예: requests만 지정, 또는 requests &lt; limits) Burstable이다. 평소엔 requests만큼 쓰다가 여유가 있을 때 limits까지 치솟을(burst) 수 있다. 비용 효율과 안정성의 절충안이며 가장 흔히 쓰인다.</li>
+<li><strong>BestEffort(최선 노력)</strong>: Pod의 어떤 컨테이너에도 requests와 limits가 <strong>둘 다 전혀 지정되지 않은</strong> 경우에만 해당한다. 하나라도 지정하면 BestEffort가 아니다. 우선순위가 가장 낮다.</li>
+</ul>
+<p>핵심은 분류 기준이다. <strong>둘 다 미지정이면 BestEffort, 모두 requests=limits면 Guaranteed, 그 사이의 모든 경우(requests만 지정 포함)는 Burstable</strong>이다. 아래 분류 흐름처럼, requests와 limits를 어떻게 지정했느냐에 따라 QoS 클래스가 자동으로 갈리고, 그것이 곧 메모리 압박 시의 축출 순서를 결정한다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A{&quot;requests·limits를 지정했는가?&quot;} --&gt;|&quot;둘 다 미지정&quot;| BE[&quot;BestEffort - 우선순위 최저&quot;]
+    A --&gt;|&quot;지정함&quot;| B{&quot;requests와 limits가 같은가?&quot;}
+    B --&gt;|&quot;같음&quot;| GU[&quot;Guaranteed - 가장 안정적&quot;]
+    B --&gt;|&quot;requests 가 더 작음&quot;| BU[&quot;Burstable - 절충안, 가장 흔함&quot;]
+    BE --&gt;|&quot;1순위로 축출&quot;| EV[&quot;메모리 압박 시 축출&quot;]
+    BU --&gt;|&quot;2순위로 축출&quot;| EV
+    GU --&gt;|&quot;마지막에 축출&quot;| EV</div><figcaption>QoS 클래스 자동 분류와 메모리 압박 시 축출 순서</figcaption></figure>
+<p>이 클래스는 노드에 <strong>메모리 압박</strong>이 생겼을 때 결정적으로 작동한다. 노드 메모리가 부족하면 쿠버네티스는 <strong>우선순위가 낮은 Pod부터 축출(evict)·종료</strong>한다. 순서는 BestEffort → Burstable → Guaranteed다. 즉 중요한 서비스일수록 requests를 제대로 채워 줘야 살아남는다.</p>
+<blockquote class='callout'>
+<p>어떤 워크로드든 requests와 limits 없이 운영하지 말라. 지정하지 않으면 BestEffort가 되어, 노드가 압박받는 순간 가장 먼저 희생된다.</p>
+</blockquote>
+<p>처음부터 완벽한 값을 알 수는 없다. <strong>작게 시작해 측정하며 올려라</strong>가 정석이다. 모니터링 도구(Prometheus, Grafana, Datadog 등)로 실사용량을 관찰한 뒤 값을 조정한다. limit을 너무 낮게 잡으면 스로틀링/OOM으로 앱이 고통받고, request를 너무 높게 잡으면 안 쓰는 자원을 묶어 두는 &quot;빈 수표&quot;가 되어 낭비된다.</p>
+<p>CPU limit을 두고는 커뮤니티 내 논쟁이 있다. &quot;CPU limit을 설정하지 말자&quot;는 주장인데, 여유 CPU가 있는데도 스로틀링당하는 게 비합리적이고, <strong>많은 웹 기반 서비스 환경에서는</strong> CPU가 주된 병목이 아니라는 이유다. (다만 영상 인코딩·과학 연산처럼 연산 집약적인 CPU-bound 워크로드에서는 CPU가 명백한 병목이 될 수 있으니 일반화는 금물이다.) limit을 빼면 시끄러운 이웃 위험과 QoS 저하가 따른다. <strong>권장은 &quot;limit을 설정하되 신중하게 잡는 것&quot;</strong>이다.</p>
+<h4>metrics-server: 오토스케일링의 눈</h4>
+<p>이제 부하에 따라 Pod 수를 자동 조절하는 단계로 넘어간다. 그런데 쿠버네티스가 &quot;지금 CPU를 얼마나 쓰는지&quot;를 알아야 스케일 판단을 할 수 있다. 이 사용량 데이터를 모아 주는 컴포넌트가 <strong>metrics-server</strong>다.</p>
+<p>수집 흐름은 이렇다. 각 워커 노드의 kubelet 안에는 <strong>cAdvisor</strong>라는 에이전트가 있어 Pod의 CPU·메모리 사용량을 측정한다. <strong>metrics-server</strong>는 이 값을 노드들로부터 주기적으로 긁어와 집계(aggregate)해 쿠버네티스 API 서버에 노출한다. 이때 metrics-server가 노드를 긁는 주기를 <strong>메트릭 해상도(<code class='ic'>--metric-resolution</code>)</strong>라고 부르는데, <strong>기본값이 60초</strong>다(과거 일부 버전·튜닝 환경에서는 더 짧게 잡기도 한다). 그러면 우리는 <code class='ic'>kubectl top</code> 명령으로 실사용량을 볼 수 있고, HPA 컨트롤러도 이 데이터를 읽어 판단한다. 아래 구성도처럼 사용량 데이터가 노드에서 API 서버를 거쳐 HPA와 사용자에게 흘러간다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph 워커노드
+        CA[&quot;cAdvisor - kubelet 내장, Pod 사용량 측정&quot;]
+    end
+    CA --&gt;|&quot;Pod CPU·메모리 사용량&quot;| MS[&quot;metrics-server - 기본 60초 주기로 노드별 값 수집·집계&quot;]
+    MS --&gt;|&quot;집계 메트릭 노출&quot;| API[&quot;쿠버네티스 API 서버&quot;]
+    API --&gt;|&quot;kubectl top&quot;| USER[&quot;운영자&quot;]
+    API --&gt;|&quot;메트릭 질의&quot;| HPA[&quot;HPA 컨트롤러&quot;]</div><figcaption>metrics-server의 사용량 데이터 수집·노출 흐름</figcaption></figure>
+<p>metrics-server는 기본 설치가 아니므로 직접 배포해야 한다.</p>
+<pre><code>
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# 설치 확인 — 사용량이 표시되면 정상
+kubectl top nodes
+kubectl top pods
+</code></pre>
+<blockquote class='callout'>
+<p>minikube를 쓴다면 <code class='ic'>minikube addons enable metrics-server</code> 한 줄이면 된다. 로컬/자체 클러스터에서 TLS 오류가 나면 metrics-server 인자에 <code class='ic'>--kubelet-insecure-tls</code>를 추가해야 할 수 있다(운영 환경에서는 권장하지 않음).</p>
+</blockquote>
+<h4>HPA의 동작 원리</h4>
+<p><strong>Horizontal Pod Autoscaler(HPA)</strong>는 부하에 따라 <strong>Pod의 개수(레플리카)를 자동으로 늘리고 줄이는</strong> 컨트롤러다. 사용량이 오르면 Pod를 더 띄워(scale-out) 부하를 분산하고, 부하가 빠지면 Pod를 줄여(scale-in) 자원을 아낀다. 한 번 잘 설정해 두면 사람이 손댈 필요가 없다.</p>
+<p>참고로 쿠버네티스의 오토스케일러는 세 종류다. HPA(Pod 수 조절), VPA(개별 Pod의 requests/limits 조절), Cluster Autoscaler(노드 수 조절). 이 강의는 가장 널리 쓰이는 HPA에 집중한다.</p>
+<p>HPA의 판단 주기와 계산식을 이해하는 게 중요하다. HPA 컨트롤러는 컨트롤 플레인에서 약 <strong>15초마다</strong> API 서버에 메트릭을 질의하고, 다음 공식으로 목표 레플리카 수를 계산한다.</p>
+<pre><code>
+원하는 레플리카 수 = ceil( 현재 레플리카 수 × (현재 메트릭 값 / 목표 메트릭 값) )
+</code></pre>
+<p>예를 들어 Pod가 2개이고 평균 CPU가 90%인데 목표를 70%로 잡았다면, <code class='ic'>2 × (90 / 70) = 2.57</code>이고 <strong>올림(ceil)</strong>하여 3개로 늘린다. 여기서 핵심은 분수가 나오면 항상 <strong>올림</strong>한다는 점이다. (1개 Pod가 240%이고 목표 100%면 <code class='ic'>1 × 2.4 = 2.4</code>, 올림하여 3개다 — 반올림 2가 아니다.) 여러 메트릭을 동시에 지정하면 각각 계산한 뒤 <strong>가장 큰 값</strong>을 택한다.</p>
+<blockquote class='callout'>
+<p>CPU 사용률이 어떻게 100%를 넘을까? 여기서 &quot;%&quot;는 requests 대비 비율이다. 멀티코어 노드에서 한 Pod 안의 멀티스레드 프로세스가 여러 코어를 동시에 점유하면, requests로 잡은 양(예: 1코어)보다 실제로 더 많이(예: 2.4코어) 쓸 수 있다. 그래서 240% 같은 값이 나온다. limit이 이를 막지 않는 한 가능하다.</p>
+</blockquote>
+<p>HPA 컨트롤러는 <strong>레플리카 수만 갱신</strong>한다. 실제 Pod를 띄우거나 지우는 일은 Deployment/ReplicaSet 컨트롤러가 처리한다. 아래 판단 루프처럼, 약 15초마다 질의·계산·갱신을 반복하고 실제 Pod 생성은 다른 컨트롤러에 위임한다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Q[&quot;API 서버에 메트릭 질의 - 약 15초마다&quot;] --&gt; C[&quot;목표 레플리카 계산 - ceil 현재×현재값÷목표값&quot;]
+    C --&gt; D{&quot;목표 수가 현재와 다른가?&quot;}
+    D --&gt;|&quot;다름&quot;| U[&quot;Deployment 레플리카 수 갱신&quot;]
+    D --&gt;|&quot;같음&quot;| W[&quot;변경 없음&quot;]
+    U --&gt; DC[&quot;Deployment·ReplicaSet 컨트롤러가 Pod 생성·삭제&quot;]
+    DC --&gt; Q
+    W --&gt; Q</div><figcaption>HPA 컨트롤러의 15초 주기 판단 루프</figcaption></figure>
+<p>참고로 Deployment의 롤링 업데이트 전략(<code class='ic'>maxSurge</code>, <code class='ic'>maxUnavailable</code>)은 <strong>Pod 템플릿(이미지·환경변수 등)이 바뀌어 기존 Pod를 새 Pod로 교체할 때의 교체 속도</strong>에만 관여한다. <strong>HPA의 스케일 인/아웃과는 무관</strong>하다. HPA가 레플리카 수만 늘리거나 줄이는 것은 동일한 사양의 Pod 개수 변경이라 롤링 업데이트가 아니기 때문이다. 따라서 스케일이 기대만큼 빠르지 않다면 <code class='ic'>maxSurge</code>/<code class='ic'>maxUnavailable</code>이 아니라, 뒤에서 설명할 metrics-server 수집 주기·HPA 동기화 주기·Pod 기동 시간을 점검해야 한다.</p>
+<h4>반응에는 지연이 있다 (천둥과 번개)</h4>
+<p>HPA는 즉각적이지 않다. 메트릭이 HPA의 판단에 닿기까지 여러 단계의 지연이 쌓인다. 가장 큰 몫은 <strong>metrics-server의 수집 주기</strong>다. 앞서 봤듯 기본값(<code class='ic'>--metric-resolution</code>)이 <strong>60초</strong>이므로, HPA가 보는 사용량은 이미 최대 1분쯤 묵은 값일 수 있다. 여기에 HPA 컨트롤러의 동기화 주기(약 15초)가 더해진다. 그래서 <strong>기본 설정 그대로라면 부하가 실제로 치솟은 뒤 스케일업 결정까지 1분 이상 걸리는 것이 정상</strong>이다. 번개를 보고 나서 천둥소리가 늦게 들리는 것과 같다. 목표를 80%로 잡아도 실제 스케일은 부하가 85%, 90%까지 오른 뒤에 일어날 수 있다.</p>
+<blockquote class='callout'>
+<p>흔히 보이는 &quot;30~45초 안에 반응한다&quot;는 수치는 metrics-server의 수집 주기를 기본 60초보다 짧게(예: 15~30초) 튜닝한, 기본값보다 공격적인 환경을 가정한 것이다. 기본 설치 그대로라면 1분 이상을 염두에 두고, 더 빠른 반응이 필요하면 <code class='ic'>--metric-resolution</code>을 명시적으로 낮춰야 한다.</p>
+</blockquote>
+<p>이 주기를 설정으로 줄일 수는 있지만, 1초처럼 극단적으로 낮추면 API 서버 부하가 폭증하는 트레이드오프가 있다. 권장은 무리하게 줄이지 않는 것이다. 대신 다음을 고려한다.</p>
+<ul>
+<li><strong>목표 사용률(target utilization) 조정</strong>: 80%는 반응이 느릴 수 있다. 50%로 낮추면 더 빨리 대응하지만, 평소에도 Pod를 여유 있게 띄우므로 비용이 늘 수 있다. 트래픽 패턴을 보며 민감도를 맞춘다.</li>
+<li><strong>스케일 속도 자체를 높이기</strong>: 새 Pod가 뜰 때 이미지 다운로드, init 작업, readiness 체크 지연이 모두 시간을 잡아먹는다. 이미지를 미리 캐시하고, 무거운 초기화를 피하고, readiness 지연을 최소화하면 스케일이 빨라진다.</li>
+<li><strong>Burstable QoS로 버티기</strong>: requests보다 limits를 넉넉히 잡아 두면, 스케일이 완료될 때까지의 짧은 구간을 여유 자원으로 버틸 수 있다(OOM 없이).</li>
+</ul>
+<h4>실습: HPA 설정과 부하 테스트</h4>
+<p>직접 HPA를 걸고 부하를 줘서 Pod가 늘었다 줄어드는지 확인해 보자. 부하를 받을 Deployment부터 만든다. requests를 반드시 지정해야 HPA가 사용률(%)을 계산할 수 있다.</p>
+<pre><code>
+# php-apache.yaml — CPU 부하 테스트용 샘플 앱
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-apache
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: php-apache }
+  template:
+    metadata:
+      labels: { app: php-apache }
+    spec:
+      containers:
+        - name: php-apache
+          image: registry.k8s.io/hpa-example
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests:
+              cpu: &quot;200m&quot;     # ← HPA 사용률 계산의 기준
+            limits:
+              cpu: &quot;500m&quot;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+spec:
+  selector: { app: php-apache }
+  ports: [{ port: 80 }]
+</code></pre>
+<pre><code>
+kubectl apply -f php-apache.yaml
+</code></pre>
+<p>HPA를 거는 방법은 두 가지다. 빠르게는 명령형으로,</p>
+<pre><code>
+kubectl autoscale deployment php-apache --cpu-percent=50 --min=1 --max=10
+</code></pre>
+<p>선언형(YAML)으로 관리하려면 다음과 같다.</p>
+<pre><code>
+# hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-apache
+  minReplicas: 1            # 최소 Pod 수
+  maxReplicas: 10           # 최대 Pod 수
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50   # 평균 CPU 50% 목표
+</code></pre>
+<p><code class='ic'>minReplicas</code>/<code class='ic'>maxReplicas</code>는 스케일 하한·상한이고, <code class='ic'>averageUtilization: 50</code>은 &quot;Pod 평균 CPU 사용률을 50%(=requests 200m의 50%인 100m) 근처로 유지하라&quot;는 뜻이다.</p>
+<p>이제 부하를 준다. 임시 Pod를 하나 띄워 서비스를 무한 호출한다. 부하 생성 Pod는 일회성이므로 <code class='ic'>--restart=Never</code>로 만들고, <code class='ic'>--rm</code>으로 종료 시 자동 삭제되게 한다. <code class='ic'>--</code> 뒤에 실행할 명령을 넘기는 것이 현재 권장 형태다(과거의 <code class='ic'>--generator</code> 류 옵션은 제거되었다).</p>
+<pre><code>
+# 별도 터미널 — 임시 Pod에서 무한 요청 발생
+kubectl run -i --tty load-generator --rm --image=busybox:1.28 --restart=Never -- \
+  /bin/sh -c &quot;while sleep 0.01; do wget -q -O- http://php-apache; done&quot;
+</code></pre>
+<blockquote class='callout'>
+<p>일관성·재현성을 중시한다면 부하 생성 Pod도 별도 YAML(<code class='ic'>kind: Pod</code>)로 정의해 <code class='ic'>kubectl apply -f</code>로 띄우는 방법도 있다. 자동화 스크립트나 반복 테스트에서는 이 선언형 방식이 더 깔끔하다.</p>
+</blockquote>
+<p>다른 터미널에서 HPA와 Pod를 관찰한다.</p>
+<pre><code>
+kubectl get hpa php-apache --watch    # TARGETS의 CPU%가 50을 넘으면 REPLICAS 증가
+kubectl get pods -w                    # Pod가 늘어나는 모습 확인
+kubectl top pods                       # 실제 사용량 확인
+</code></pre>
+<p>CPU가 목표를 넘으면 REPLICAS가 1 → 4 → ... 식으로 상한(10)까지 늘어난다. 다만 앞서 설명한 수집 지연 때문에 부하를 준 직후 바로 늘지 않고 잠시(기본 설정이면 1분 안팎) 뜸을 들인 뒤 반응하니 조급해하지 말자. <code class='ic'>kubectl describe hpa php-apache</code>를 보면 &quot;CPU resource above target&quot; 같은 스케일 사유가 기록된다. 그다음 부하 생성 터미널에서 <code class='ic'>Ctrl+C</code>로 호출을 멈추면, 잠시 뒤 CPU가 떨어지고 HPA가 Pod를 다시 minReplicas까지 줄인다.</p>
+<blockquote class='callout'>
+<p>스케일 다운에는 <strong>다운스케일 안정화 창</strong>(<code class='ic'>behavior.scaleDown.stabilizationWindowSeconds</code>, 기본 300초=5분)이 적용된다. 이 창은 짧은 스파이크에 Pod를 곧장 없앴다가 다시 띄우는 &quot;출렁임(flapping)&quot;을 막기 위한 의도적 설계다. 동작은 이렇다 — HPA는 매 주기 계산한 권장 레플리카 값을 안정화 창 기간 동안 모두 기억해 두고, <strong>창 끝 시점에 그중 가장 높았던 값을 선택해 적용</strong>한다. 즉 도중에 더 낮은 권장값이 나와도 즉시 줄이지 않고, 지난 창 안의 최고치가 충분히 떨어져야 비로소 그만큼만 줄인다. 그래서 부하를 멈춰도 약 5분간은(직전 창의 최고 권장값 때문에) Pod 수가 유지되다가 줄어드는 것이 정상이다. (반대로 스케일 업의 안정화 창 기본값은 0초라 빠르게 늘린다.)</p>
+</blockquote>
+<h4>HPA만으로는 부족한 지점</h4>
+<p>HPA를 잘 걸어도 서비스가 무너질 수 있다. 부하가 폭증해 Pod가 메모리·DB 커넥션 한계에 도달하면, 그 Pod는 더 이상 요청을 처리할 수 없는데도 트래픽을 계속 받다가 죽는다. 그래서 <strong>헬스체크(readiness probe)</strong>가 함께 필요하다. Pod가 &quot;나 지금 힘들다&quot;고 정직하게 알리면, 쿠버네티스는 그 Pod로 트래픽을 보내지 않고(라우팅 제외) 건강한 Pod로만 요청을 보낸다. 즉 안정적인 오토스케일링은 requests/limits + HPA + readiness probe가 <strong>함께</strong> 맞물려야 완성된다. (헬스체크는 3강에서 다뤘다.)</p>
+<h3>핵심 요약</h3>
+<ul>
+<li><strong>requests</strong>는 스케줄링 기준(최소 보장), <strong>limits</strong>는 런타임 상한이다. 단위는 메모리=바이트(Mi/Gi), CPU=코어(1000m=1코어).</li>
+<li><strong>메모리 limit 초과는 OOMKill(죽음), CPU limit 초과는 스로틀링(느려짐)</strong>으로 동작이 다르다.</li>
+<li>requests/limits 조합으로 QoS 클래스가 정해진다: <strong>둘 다 미지정=BestEffort, 모두 requests=limits=Guaranteed, 그 사이(requests만 지정 포함)=Burstable.</strong> 메모리 압박 시 BestEffort부터 축출되므로, 어떤 워크로드든 최소한 requests는 지정한다.</li>
+<li>HPA는 <code class='ic'>현재 레플리카 × (현재값/목표값)</code>을 <strong>올림</strong>해 Pod 수를 조절하며, metrics-server(cAdvisor→집계→API 서버)의 사용량 데이터에 의존한다. <code class='ic'>maxSurge</code>/<code class='ic'>maxUnavailable</code>은 롤링 업데이트 교체 속도에만 관여하며 HPA 스케일 속도와는 무관하다.</li>
+<li>metrics-server의 기본 수집 주기(<code class='ic'>--metric-resolution</code>)는 <strong>60초</strong>라서, 기본 설정이면 부하 폭증 후 스케일업까지 <strong>1분 이상</strong> 걸리는 게 정상이다. 더 빠른 반응이 필요하면 수집 주기를 낮추되, 목표 사용률 조정·빠른 Pod 기동·Burstable QoS·readiness probe를 함께 활용해야 안정적이다.</li>
+<li>스케일 다운에는 기본 300초의 <strong>다운스케일 안정화 창</strong>이 있어, 그 기간의 권장값을 모두 기억했다가 <strong>창 끝에서 그중 최댓값을 적용</strong>한다(급격한 축소·flapping 방지). 그래서 부하가 빠진 뒤에도 한동안 Pod 수가 유지된다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. [워밍업] requests/limits를 지정한 Deployment를 배포하고 QoS 클래스를 확인하라.</p>
+<p>아래 조건을 충족하는 Deployment 매니페스트 php-apache.yaml을 작성하고 적용하라.</p>
+<ul>
+<li>이미지: registry.k8s.io/hpa-example</li>
+<li>CPU requests: 200m, CPU limits: 500m</li>
+<li>메모리 requests: 128Mi, 메모리 limits: 256Mi</li>
+<li>포트 80 노출, 같은 파일에 ClusterIP Service(포트 80) 포함</li>
+</ul>
+<p>배포 후 다음 두 가지를 확인하라.</p>
+<p>1. Pod가 Running 상태인지</p>
+<p>2. kubectl describe pod &lt;pod명&gt;으로 QoS 클래스가 무엇인지 확인하고, 왜 그 클래스인지 설명하라.</p></div>
+              <pre class='starter'><code># php-apache.yaml 골격 — 빈칸을 채워라
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-apache
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: php-apache }
+  template:
+    metadata:
+      labels: { app: php-apache }
+    spec:
+      containers:
+        - name: php-apache
+          image: registry.k8s.io/hpa-example
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: ______
+              memory: ______
+            limits:
+              cpu: ______
+              memory: ______
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+spec:
+  selector: { app: php-apache }
+  ports:
+    - port: 80</code></pre>
+              <details><summary>힌트</summary><ul><li>CPU 단위 m(밀리코어)은 문자열이므로 YAML에서 큰따옴표로 감싸거나 숫자로만 쓴다. 200m은 0.25코어가 아닌 0.2코어다.</li><li>kubectl describe pod &lt;이름&gt; 출력 맨 아래쪽 QoS Class 줄을 확인하거나 grep -i qos로 필터링한다.</li><li>requests와 limits가 같은 값이면 Guaranteed, requests &lt; limits면 Burstable, 둘 다 미지정이면 BestEffort다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># php-apache.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-apache
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: php-apache }
+  template:
+    metadata:
+      labels: { app: php-apache }
+    spec:
+      containers:
+        - name: php-apache
+          image: registry.k8s.io/hpa-example
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: &quot;200m&quot;
+              memory: &quot;128Mi&quot;
+            limits:
+              cpu: &quot;500m&quot;
+              memory: &quot;256Mi&quot;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+spec:
+  selector: { app: php-apache }
+  ports:
+    - port: 80
+
+# 적용
+kubectl apply -f php-apache.yaml
+
+# Pod 상태 확인
+kubectl get pods -l app=php-apache
+
+# QoS 클래스 확인 — describe 출력 하단의 QoS Class 항목을 본다
+kubectl describe pod -l app=php-apache | grep -i qos
+
+# 기대 출력 예시
+# QoS Class: Burstable</code></pre>
+                <div class='exp2'><p>requests(200m/128Mi) &lt; limits(500m/256Mi)이므로 QoS 클래스는 Burstable이 된다. Guaranteed가 되려면 모든 컨테이너에서 requests == limits여야 한다. Burstable은 평소에 requests만큼 자원을 보장받으면서 여유가 있을 때 limits까지 더 쓸 수 있는 절충 모드다. requests를 지정했으므로 스케줄러가 200m CPU·128Mi 메모리가 남는 노드를 골라 Pod를 배치하고, 런타임에는 limits를 상한으로 삼아 초과 시 CPU는 스로틀링, 메모리 초과 시 OOMKill로 응답한다. requests/limits를 모두 지정하지 않으면 BestEffort가 되어 메모리 압박 시 가장 먼저 축출되므로 반드시 두 값을 모두 채운다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. [핵심 실습 1] metrics-server를 설치하고 kubectl top으로 실사용량을 확인하라.</p>
+<p>1단계에서 배포한 php-apache Pod의 CPU·메모리 실사용량을 kubectl top으로 읽는 것이 목표다.</p>
+<p>아래 절차를 순서대로 실행하라.</p>
+<p>1. metrics-server를 클러스터에 설치한다.</p>
+<ul>
+<li>표준 클러스터: kubectl apply -f 공식 URL</li>
+<li>minikube: addons enable 명령</li>
+</ul>
+<p>2. metrics-server가 Ready 상태가 될 때까지 기다린다.</p>
+<p>3. kubectl top nodes와 kubectl top pods 두 명령을 실행해 출력을 확인한다.</p>
+<p>4. kubectl top 결과에서 php-apache Pod의 CPU(m)와 메모리(Mi) 값을 읽어라.</p>
+<p>(kubectl top이 &#x27;error: metrics not available yet&#x27;을 반환하면 30~60초 더 기다린 뒤 재시도한다.)</p></div>
+              <pre class='starter'><code># 표준 클러스터용 설치 명령
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# minikube 사용자는 아래 한 줄로 대체
+# minikube addons enable metrics-server
+
+# metrics-server Pod가 Running 될 때까지 확인
+kubectl get pods -n kube-system -l k8s-app=metrics-server
+
+# 아래 두 명령 실행 후 출력 값을 기록하라
+kubectl top nodes
+kubectl top pods</code></pre>
+              <details><summary>힌트</summary><ul><li>metrics-server Pod가 Running인데도 kubectl top이 에러를 내면 아직 데이터 수집 중인 것이다. 1분 정도 기다린 뒤 재시도한다.</li><li>로컬 kind/kubeadm 클러스터에서 x509 TLS 오류가 나면 kubectl patch로 --kubelet-insecure-tls 인자를 추가한다.</li><li>kubectl top pods --all-namespaces로 kube-system 포함 전체 Pod의 사용량을 한 번에 볼 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. 설치 (표준 클러스터)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# 로컬/자체 서명 TLS 클러스터에서 오류 시 insecure 옵션 패치
+# kubectl patch deployment metrics-server -n kube-system \
+#   --type=&#x27;json&#x27; \
+#   -p=&#x27;[{&quot;op&quot;:&quot;add&quot;,&quot;path&quot;:&quot;/spec/template/spec/containers/0/args/-&quot;,&quot;value&quot;:&quot;--kubelet-insecure-tls&quot;}]&#x27;
+
+# 2. Ready 대기
+kubectl rollout status deployment/metrics-server -n kube-system
+
+# 3. 노드·Pod 사용량 확인
+kubectl top nodes
+# 예시 출력:
+# NAME       CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
+# minikube   120m         6%     820Mi           10%
+
+kubectl top pods
+# 예시 출력:
+# NAME                          CPU(cores)   MEMORY(bytes)
+# php-apache-xxxxxxxxx-xxxxx    1m           10Mi
+
+# 4. php-apache Pod 한정 조회
+kubectl top pods -l app=php-apache</code></pre>
+                <div class='exp2'><p>metrics-server는 각 워커 노드의 kubelet 내장 cAdvisor가 약 10초마다 수집한 Pod CPU·메모리 사용량을 모아 쿠버네티스 API 서버의 metrics API(/apis/metrics.k8s.io)로 노출한다. kubectl top은 그 API를 호출해 값을 출력한다. HPA 컨트롤러도 동일한 경로로 메트릭을 읽어 스케일 판단을 내리므로, metrics-server가 없으면 HPA가 동작하지 않는다. minikube 환경은 addons enable 한 줄로 TLS 설정까지 자동 처리해 주므로 편리하다. 직접 설치한 클러스터에서 kubelet이 자체 서명 인증서를 쓰는 경우 --kubelet-insecure-tls 패치가 필요하지만, 운영 환경에서는 올바른 CA 인증서를 구성하는 것이 권장 방법이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. [핵심 실습 2] autoscaling/v2 HPA YAML을 작성하고 적용하라.</p>
+<p>1단계 php-apache Deployment를 대상으로 아래 조건의 HPA를 hpa.yaml로 작성해 적용하라.</p>
+<ul>
+<li>apiVersion: autoscaling/v2</li>
+<li>대상: Deployment php-apache</li>
+<li>최소 레플리카: 1, 최대 레플리카: 10</li>
+<li>메트릭: CPU 평균 사용률(Utilization) 50%</li>
+</ul>
+<p>적용 후 kubectl get hpa php-apache 출력에서 TARGETS와 MINPODS, MAXPODS 값을 확인하라.</p>
+<p>부하가 없는 지금 TARGETS 값이 어떻게 보이는지 기록하고, 그 이유를 설명하라.</p></div>
+              <pre class='starter'><code># hpa.yaml 골격 — 빈칸을 채워라
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ______
+  minReplicas: ______
+  maxReplicas: ______
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: ______</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl get hpa 직후 TARGETS가 &lt;unknown&gt;/50%로 보이면 metrics-server가 아직 데이터를 수집 중인 것이다. 30초 후 재확인한다.</li><li>autoscaling/v2beta2는 쿠버네티스 1.26에서 제거됐다. 현재 클러스터 버전이 1.23 이상이면 autoscaling/v2를 쓴다.</li><li>kubectl describe hpa php-apache의 Conditions와 Events 섹션에서 스케일 판단 이유와 마지막 스케일 시각을 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-apache
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+# 적용
+kubectl apply -f hpa.yaml
+
+# 상태 확인
+kubectl get hpa php-apache
+# 예시 출력 (부하 없음):
+# NAME         REFERENCE               TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+# php-apache   Deployment/php-apache   1%/50%    1         10        1          30s
+
+# 상세 이벤트 확인
+kubectl describe hpa php-apache</code></pre>
+                <div class='exp2'><p>autoscaling/v2는 v1 대비 복수 메트릭(CPU+메모리+커스텀 메트릭 동시 지정), scaleTargetRef의 명시적 apiVersion, behavior 블록으로 스케일 속도 세밀 제어 등이 가능한 현행 표준 API다. averageUtilization: 50은 &#x27;모든 Pod의 평균 CPU 사용률을 requests 대비 50%로 유지하라&#x27;는 뜻이다. requests가 200m이므로 목표 절댓값은 100m이다. 부하가 없을 때 TARGETS는 1%/50% 처럼 낮은 실사용률을 보이며 REPLICAS는 minReplicas인 1을 유지한다. HPA 컨트롤러가 계산한 레플리카 수(1 × 1%/50% = 0.02, 올림 → 1)가 minReplicas와 같으므로 변화가 없는 것이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. [핵심 실습 3] busybox로 부하를 생성하고 kubectl get hpa --watch로 스케일아웃을 관찰하라.</p>
+<p>터미널을 두 개 열고 아래 절차를 진행하라.</p>
+<p>[터미널 A — 부하 생성]</p>
+<p>busybox 임시 Pod를 띄워 php-apache 서비스에 무한 HTTP 요청을 보낸다.</p>
+<p>[터미널 B — 관찰]</p>
+<p>아래 세 명령을 순서대로 실행해 스케일 과정을 관찰한다.</p>
+<p>1. kubectl get hpa php-apache --watch</p>
+<p>2. (별도 실행) kubectl get pods -w</p>
+<p>3. (별도 실행) kubectl top pods</p>
+<p>다음 질문에 답하라.</p>
+<ul>
+<li>TARGETS의 CPU%가 50을 처음 넘는 데 몇 초나 걸렸는가?</li>
+<li>REPLICAS가 처음 증가할 때 몇 개가 됐는가?</li>
+<li>부하 시작 후 최종 REPLICAS는 몇 개까지 늘었는가?</li>
+</ul></div>
+              <pre class='starter'><code># [터미널 A] 부하 생성 — 이 명령을 그대로 실행
+kubectl run -it --rm load-generator \
+  --image=busybox:1.28 \
+  -- /bin/sh -c &quot;while true; do wget -q -O- http://php-apache; done&quot;
+
+# [터미널 B] HPA 상태 관찰
+kubectl get hpa php-apache --watch
+
+# [터미널 B - 별창] Pod 증감 관찰
+kubectl get pods -w
+
+# [터미널 B - 별창] 실사용량 실시간 확인 (반복 실행)
+watch kubectl top pods</code></pre>
+              <details><summary>힌트</summary><ul><li>부하를 줬는데 TARGETS가 변하지 않으면 load-generator Pod가 정상 기동됐는지 확인한다(kubectl get pods). 서비스명이 php-apache인지도 재확인한다.</li><li>스케일이 한 번에 크게 오르지 않고 단계적으로 오르는 것은 정상이다. HPA는 기본적으로 1회에 현재 레플리카의 2배까지만 늘린다.</li><li>kubectl top pods를 반복 실행하면 새로 뜬 Pod들이 부하를 나눠받으면서 Pod별 CPU가 낮아지는 것을 볼 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># [터미널 A] 부하 생성
+kubectl run -it --rm load-generator \
+  --image=busybox:1.28 \
+  -- /bin/sh -c &quot;while true; do wget -q -O- http://php-apache; done&quot;
+
+# [터미널 B] HPA watch — 약 30~45초 후 REPLICAS 증가 시작
+kubectl get hpa php-apache --watch
+# 관찰 예시:
+# NAME         REFERENCE               TARGETS    MINPODS  MAXPODS  REPLICAS  AGE
+# php-apache   Deployment/php-apache   1%/50%     1        10       1         2m
+# php-apache   Deployment/php-apache   248%/50%   1        10       1         2m30s
+# php-apache   Deployment/php-apache   248%/50%   1        10       4         2m45s
+# php-apache   Deployment/php-apache   86%/50%    1        10       7         3m
+# php-apache   Deployment/php-apache   52%/50%    1        10       7         3m30s
+
+# [터미널 B] Pod 증감 확인
+kubectl get pods -w
+
+# [터미널 B] 스케일 판단 상세 이유 확인
+kubectl describe hpa php-apache
+# Events 섹션에서 &#x27;SuccessfulRescale&#x27; 항목과 new size 값을 확인</code></pre>
+                <div class='exp2'><p>busybox의 while 루프가 php-apache 서비스에 초당 수십~수백 건의 요청을 보내면 Pod CPU 사용률이 requests(200m) 대비 수백 %로 치솟는다. HPA 컨트롤러는 15초마다 메트릭을 질의하고, cAdvisor 수집(10초)과 metrics-server 집계(평균 약 30초)가 겹쳐 TARGETS가 높아지기까지 30~45초가 걸린다. 계산 예: REPLICAS=1, 현재 248%, 목표 50% → ceil(1 × 248/50) = ceil(4.96) = 5. 단 HPA는 한 번에 최대 2배(또는 최대 4개 추가) 제한이 기본이므로, 1→4→7처럼 단계적으로 오르기도 한다. 여러 Pod가 부하를 나눠 받으면서 평균 사용률이 목표 50%에 수렴해 가고 스케일이 멈춘다. kubectl describe hpa의 Events에서 &#x27;SuccessfulRescale reason: cpu resource above target&#x27;으로 판단 근거가 기록된 것을 확인할 수 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 5. [응용] 부하를 제거해 스케일인을 관찰하고, HPA 계산식을 직접 검증하라.</p>
+<p>[파트 A — 스케일인 관찰]</p>
+<p>터미널 A에서 Ctrl+C로 load-generator를 종료하라. 그 후 kubectl get hpa php-apache --watch를 계속 실행하며 REPLICAS가 다시 1로 돌아오는 데 걸리는 시간을 측정하라.</p>
+<p>스케일다운이 스케일업보다 느린 이유를 설명하라.</p>
+<p>[파트 B — 계산식 검증]</p>
+<p>kubectl top pods로 현재 CPU(m)를 확인한 뒤 아래 공식으로 직접 필요 레플리카 수를 계산하고, 실제 HPA REPLICAS와 비교하라.</p>
+<p>  필요 레플리카 수 = ceil( 현재 레플리카 수 × (현재 CPU 사용률% / 목표 사용률%) )</p>
+<p>계산 결과와 실제 REPLICAS가 일치하는지 확인하고, 일치하지 않는다면 그 이유(안정화 대기 등)를 설명하라.</p>
+<p>[파트 C — 정리]</p>
+<p>실습에서 사용한 리소스를 모두 삭제하라.</p></div>
+              <pre class='starter'><code># [파트 A] 부하 제거 후 관찰
+# 터미널 A: Ctrl+C 입력 (load-generator 자동 삭제됨)
+
+# 터미널 B: HPA 계속 관찰
+kubectl get hpa php-apache --watch
+
+# [파트 B] 현재 상태 스냅샷 (부하 종료 직후)
+kubectl top pods
+kubectl get hpa php-apache
+
+# 위 값으로 아래 공식을 직접 계산해 보라
+# 필요 레플리카 = ceil( 현재_레플리카 × (현재_CPU% / 50) )
+
+# [파트 C] 정리
+kubectl delete -f php-apache.yaml
+kubectl delete -f hpa.yaml</code></pre>
+              <details><summary>힌트</summary><ul><li>스케일다운이 5분 넘게 걸리는 것은 버그가 아니다. kubectl describe hpa의 Conditions에서 &#x27;ScalingActive&#x27; 상태와 &#x27;stabilizing&#x27; 메시지를 확인할 수 있다.</li><li>파트 B에서 kubectl top pods의 CPU 값(m)을 requests(200m)으로 나눠 100을 곱하면 사용률(%)이 나온다. 예: 4m/200m × 100 = 2%.</li><li>리소스 정리 시 kubectl delete -f 파일명으로 매니페스트에 정의된 모든 오브젝트(Deployment, Service, HPA)를 한 번에 삭제할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># [파트 A] 스케일인 관찰
+# Ctrl+C로 load-generator 종료 → load-generator Pod 자동 삭제
+# kubectl get hpa --watch 출력 예시 (부하 종료 후):
+# NAME         TARGETS   REPLICAS  AGE
+# php-apache   52%/50%   7         8m
+# php-apache   12%/50%   7         9m       ← CPU 내려가기 시작
+# php-apache   3%/50%    7         10m      ← 아직 Pod 수 그대로
+# php-apache   1%/50%    1         14m      ← 약 5분 후 스케일다운
+
+# [파트 B] 계산식 검증 예시
+# kubectl top pods 출력: 7개 Pod, 각 약 3m CPU → 평균 사용률 = 3/200 ≈ 1.5%
+# 필요 레플리카 = ceil( 7 × (1.5 / 50) ) = ceil(0.21) = 1
+# 실제 REPLICAS: 한동안 7 유지 → 5분 안정화 후 1로 감소
+# 계산상 1이 맞지만 HPA는 스케일다운 안정화(stabilizationWindowSeconds=300, 기본 5분)을 적용해 즉시 줄이지 않는다
+
+# [파트 C] 리소스 정리
+kubectl delete -f php-apache.yaml
+kubectl delete -f hpa.yaml
+
+# 확인
+kubectl get deployment php-apache   # Error: not found
+kubectl get hpa php-apache          # Error: not found
+kubectl get svc php-apache          # Error: not found</code></pre>
+                <div class='exp2'><p>스케일다운이 느린 이유는 HPA의 &#x27;안정화 윈도우(stabilizationWindowSeconds)&#x27; 때문이다. 기본값은 스케일다운 방향에서 300초(5분)다. 즉 부하가 빠져도 지난 5분 간 계산된 필요 레플리카 수 중 최댓값을 기준으로 판단한다. 짧은 스파이크에 Pod를 곧장 줄였다가 곧 다시 늘리는 &#x27;플래핑(flapping)&#x27; 현상을 막기 위해서다. 반면 스케일업 안정화 윈도우 기본값은 0초로, 즉시 반응한다. 계산식 검증에서 CPU가 내려가면 수식상 필요 레플리카는 1이 나오지만, 안정화 윈도우가 지나야 실제로 줄어든다. 이 동작은 HPA의 spec.behavior.scaleDown.stabilizationWindowSeconds 값으로 조정할 수 있다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=lKH1K5R3kqg' target='_blank'>12분 안에 알아야 할 모든 것: 쿠버네티스의 포드 요청 및 제한</a></li><li><a href='https://www.youtube.com/watch?v=V-Ib-DdconY' target='_blank'>K8S HPA 강의 제대로 듣고 있었습니까? 정신 차리십시오 | Kubernetes Autoscaling with HPA</a></li><li><a href='https://www.youtube.com/watch?v=jyBDbm1FHiM' target='_blank'>Autoscaling in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=2CrprvnzPXY' target='_blank'>Kubernetes CPU Limits &amp; Requests EXPLAINED (Stop Wasting Resources!)</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

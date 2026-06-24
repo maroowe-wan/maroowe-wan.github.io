@@ -1,0 +1,1638 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building RAG: A Practical Introduction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/rag-build-basics/index.html'>한국어</a></div>
+  <h1>Building RAG: A Practical Introduction</h1>
+  <div class="sub">Developers who have experience using LLMs or generative AI but have not yet built a RAG system from scratch. Familiarity with Python basics and calling SDKs such as OpenAI or LangChain is sufficient. · 5 lectures</div>
+  <ul><li><a href='#lec1'>01. &quot;RAG Overview and Architecture: Why Attach Retrieval to an LLM?&quot;</a></li>
+<li><a href='#lec2'>02. &quot;Embedding Models and Vector Representations: Turning Meaning into Numbers&quot;</a></li>
+<li><a href='#lec3'>03. &quot;Comparing Vector Databases - Chroma, FAISS, Pinecone, and pgvector&quot;</a></li>
+<li><a href='#lec4'>04. &quot;Document Loading and Chunking Strategies: chunk_size, overlap, and Metadata&quot;</a></li>
+<li><a href='#lec5'>05. &quot;Building a Basic RAG Pipeline: An End-to-End MVP with LangChain&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;RAG Overview and Architecture: Why Attach Retrieval to an LLM?&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Explain the inherent limits of a pure LLM (hallucination, stale knowledge, missing domain expertise) and describe how RAG addresses each one.</li>
+<li>Identify the three building blocks of a RAG system - Retriever, Augmenter, and Generator - and trace the data flow from a user question to a grounded answer.</li>
+<li>Compare RAG against fine-tuning (and prompt engineering) and decide which approach fits a given problem.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why we need more than just an LLM</h4>
+<p>Large language models are remarkable, but they share one stubborn property: they are frozen in time. Once a model finishes training, it stops learning. It knows the world up to its training cutoff and nothing after that. It also knows nothing about <em>your</em> world - your company&#x27;s internal wiki, your customer contracts, your proprietary codebase, the new policy that was published this morning.</p>
+<p>That gap leads to the three failure modes that drive almost every practical AI project today:</p>
+<p>1. <strong>Hallucination.</strong> When asked about something it does not actually know, a well-trained LLM rarely says &quot;I&#x27;m not sure.&quot; It produces a smooth, confident-sounding answer that is wrong. A simple example: imagine asking a model in early 2024 for a low-interest government home loan in Korea. The model might recommend a product called Special Bogeumjari Loan because it was widely covered in 2023 articles. The problem is that this specific product was discontinued in January 2024 and replaced by a renamed program. The model is not lying on purpose - it simply has no way of knowing the data has changed.</p>
+<p>2. <strong>Stale knowledge.</strong> Anything that happened after the cutoff is invisible. New regulations, the latest API release, last week&#x27;s incident postmortem - none of it exists for the model.</p>
+<p>3. <strong>Missing domain context.</strong> Even within its training period, a general-purpose model has never seen your internal documents, so it cannot reason about them.</p>
+<p>A second symptom of these gaps is that the model cannot cite a source. When you ask &quot;where did you get that?&quot;, a bare LLM has no honest answer. For an enterprise use case - legal, medical, financial, customer support - an unverifiable answer is often worse than no answer at all.</p>
+<p>This is where <strong>Retrieval-Augmented Generation (RAG)</strong> comes in. The idea is deceptively simple: instead of expecting the model to <em>remember</em> everything, give it the option to <em>look things up</em> at answer time, then ask it to write the response while staying faithful to what it just read.</p>
+<blockquote class='callout'>
+<p>RAG does not make the LLM smarter. It changes the question the LLM is being asked. Instead of &quot;what do you remember about X?&quot; it becomes &quot;given these specific passages, what is the best answer to X?&quot; That reframing is the whole point.</p>
+</blockquote>
+<h4>The three building blocks of RAG</h4>
+<p>The name itself is the architecture. <strong>Retrieval-Augmented Generation</strong> decomposes into three stages, and almost every RAG system - simple or sophisticated - is a variation on these three.</p>
+<p><strong>1. Retrieval.</strong> When a user asks a question, the system does not send it straight to the LLM. It first searches an external knowledge store - typically a <em>vector database</em> - to find passages that are likely to contain the answer. Unlike a keyword search engine that matches exact words, retrieval in RAG is <strong>semantic</strong>: the question and every document chunk have been converted into numerical vectors (embeddings) that capture meaning. A query about &quot;revenue growth last quarter&quot; can match a document that talks about &quot;fourth-quarter sales performance&quot; even though the words do not overlap. We will study embeddings and vector databases in detail in lectures 2 and 3.</p>
+<p><strong>2. Augmentation.</strong> The top-ranked passages are not the final answer. They are <em>raw evidence</em>. The system stitches them into the prompt that goes to the LLM, usually under a template like: <em>&quot;Use only the following sources to answer the user&#x27;s question. If the sources do not contain the answer, say you do not know. Sources: \[passage 1] \[passage 2] ... Question: ...&quot;</em> This is the step that takes a generic prompt and grounds it in real, retrieved facts.</p>
+<p><strong>3. Generation.</strong> Now the LLM does what it is best at: writing a fluent, well-structured answer. But because the relevant facts are now sitting inside its context window, it does not have to guess from memory. And because each passage carries metadata - document name, page number, URL - the system can hand back citations along with the answer.</p>
+<p>A useful way to visualize the system is to picture two flows that meet at the LLM. There is an <strong>offline indexing flow</strong>: documents are loaded, split into chunks, embedded into vectors, and stored in the vector database. This happens once per document and is reused for every query. And there is an <strong>online query flow</strong>: a user question is embedded, matched against the index, the top chunks are pulled, the prompt is built, and the LLM produces the response. The architect&#x27;s job is to make these two flows fit together cleanly, as shown in the diagram below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph OFFLINE[&quot;Offline Indexing (once per document)&quot;]
+        direction TB
+        D[Source Documents]
+        L[Document Loader]
+        C[Chunking]
+        E1[Embedding Model]
+        D --&gt; L --&gt; C --&gt; E1
+    end
+
+    subgraph ONLINE[&quot;Online Query (every user request)&quot;]
+        direction TB
+        Q[User Question]
+        E2[Embedding Model]
+        R[Retriever: top-k search]
+        A[Augmenter: prompt builder]
+        G[LLM Generator]
+        ANS[Grounded Answer + Citations]
+        Q --&gt; E2 --&gt; R
+        R --&gt; A --&gt; G --&gt; ANS
+    end
+
+    VDB[(Vector Database)]
+    E1 -- write vectors --&gt; VDB
+    VDB -- nearest chunks --&gt; R</div><figcaption>RAG architecture: offline indexing flow and online query flow meeting at the vector database</figcaption></figure>
+<h4>Walking through a concrete example</h4>
+<p>Let us follow a single question end to end so the pieces click into place.</p>
+<p>A user types: <em>&quot;Which security requirements were dropped between the v1 spec and the v1.2 release notes?&quot;</em> In a bare-LLM setup, this question is hopeless - the model has never seen either of those internal documents. In a RAG setup, the system does this:</p>
+<ul>
+<li>The user&#x27;s question is converted into a query vector.</li>
+<li>The vector database returns, say, the top eight chunks ranked by semantic similarity: a few from the requirements doc that mention &quot;authentication&quot; and &quot;encryption&quot;, a few from the release notes that mention shipped features and known gaps.</li>
+<li>These chunks are inserted into the prompt along with an instruction such as <em>&quot;Compare the listed requirements with the listed release notes. List requirements that appear in the spec but not in the release. Cite the source for each.&quot;</em></li>
+<li>The LLM produces an answer grounded in those specific chunks, with citations.</li>
+</ul>
+<p>Notice two things. First, the LLM never needed to be retrained - we just changed what it was looking at. Second, retrieval quality is the entire ball game. If the relevant chunk does not make it into the top-k results, the model will not see it, and the answer will be wrong or incomplete in a way that is hard to detect. The community has a name for this: <strong>silent failure</strong>. The right information exists in the database, but the retriever did not surface it, so the model produces a confident but incomplete answer with no warning that something was missed. Most of the engineering effort in a production RAG system goes into making retrieval not fail silently - through better chunking, better embedding models, reranking, hybrid keyword-plus-vector search, and so on. We will revisit these knobs in lectures 4 and 5.</p>
+<h4>Why not just dump everything into the context window?</h4>
+<p>A fair objection at this point is: &quot;Modern LLMs have million-token context windows. Why bother with vector databases at all? Just paste the entire knowledge base into the prompt.&quot;</p>
+<p>This is called the <strong>long-context approach</strong>, and it really is attractive for some problems. If your data set is small and bounded - a single contract, one product manual, one research paper - feeding the whole thing in often produces better reasoning than RAG, because the model sees the entire picture and can spot cross-document relationships and missing pieces. RAG, by design, only shows the model a handful of isolated snippets.</p>
+<p>But long context is not a universal replacement for RAG, for three concrete reasons:</p>
+<ul>
+<li><strong>Compute cost on every query.</strong> With RAG, you pay the embedding cost once at indexing time. With long context, the model re-processes the same documents on every request. A 500-page manual is roughly 250,000 tokens; pushing that through the model for every user turn gets expensive fast. Prompt caching helps for static content, but not for data that changes often.</li>
+<li><strong>The needle-in-a-haystack problem.</strong> Research consistently shows that as the context grows into the hundreds of thousands of tokens, the model&#x27;s attention gets diluted. A single critical sentence buried in the middle of a 2,000-page dump is often ignored, or the model hallucinates details from surrounding text. RAG sidesteps this by handing the model only the five or ten passages most likely to matter - more signal, less noise.</li>
+<li><strong>Enterprise scale.</strong> A million tokens sounds enormous until you compare it to a real corporate data lake measured in terabytes or petabytes. You cannot fit &quot;everything&quot; into any context window that exists today or will exist for the foreseeable future. Some form of retrieval layer is mandatory simply to filter the corpus down to a size the model can read.</li>
+</ul>
+<p>A practical rule of thumb: <strong>bounded data, deep reasoning → long context. Unbounded data, fact lookup → RAG.</strong> Many real systems use both - long context for the working passage, RAG to choose which passage to load.</p>
+<h4>RAG vs. fine-tuning vs. prompt engineering</h4>
+<p>RAG is one of three common ways to improve LLM output. The other two are fine-tuning and prompt engineering. They solve overlapping but different problems, and the most common beginner mistake is to reach for fine-tuning when RAG would be cheaper and better.</p>
+<p><strong>Prompt engineering</strong> is the lightest intervention. You change the wording of the prompt - adding examples, asking the model to &quot;think step by step&quot;, clarifying constraints - without touching the model or adding any data. It is free, immediate, and surprisingly powerful. But it cannot add knowledge the model does not have. No amount of clever phrasing will teach the model what your internal API looks like.</p>
+<p><strong>Fine-tuning</strong> goes the other direction. You take an existing pre-trained model and continue training it on a curated dataset of input-output pairs that demonstrate the behavior you want. The model&#x27;s weights are updated, so the new knowledge or style is <em>baked in</em>. This shines when you need deep domain expertise, a specific tone of voice, or structured output formats. Inference is fast because there is no retrieval step. But fine-tuning has real costs: you need thousands of high-quality examples, GPU budget for training, and a maintenance plan. Every time the knowledge changes, you have to retrain. And there is a real risk of <strong>catastrophic forgetting</strong>, where the model loses general capabilities while specializing.</p>
+<p><strong>RAG</strong> sits in between. It does not modify the model at all - it changes what the model can see. New documents can be added to the vector store in minutes instead of days. Updating yesterday&#x27;s policy is as simple as re-embedding the changed file. The model can cite where each fact came from. The trade-off is operational complexity: a chunking strategy, an embedding model, a vector database, possibly a reranker, and the latency overhead of retrieving on every query.</p>
+<p>The decision often boils down to the nature of the knowledge, and the following decision tree captures the most common reasoning path:</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    START[New LLM use case]
+    Q1{Does the model&lt;br/&gt;already know enough&lt;br/&gt;to answer?}
+    Q2{Does knowledge&lt;br/&gt;change often or&lt;br/&gt;need citations?}
+    Q3{Need a specific&lt;br/&gt;style, tone, or&lt;br/&gt;output format?}
+    PE[Prompt Engineering&lt;br/&gt;format, role, CoT]
+    RAG[RAG&lt;br/&gt;private docs, news,&lt;br/&gt;policies, KB]
+    FT[Fine-tuning&lt;br/&gt;stable expertise,&lt;br/&gt;style, schemas]
+    COMBO[Combine: RAG for facts&lt;br/&gt;+ FT for style&lt;br/&gt;+ PE for format]
+
+    START --&gt; Q1
+    Q1 -- Yes, just steer it --&gt; Q3
+    Q1 -- No, missing knowledge --&gt; Q2
+    Q2 -- Yes --&gt; RAG
+    Q2 -- No, stable expertise --&gt; FT
+    Q3 -- Yes --&gt; FT
+    Q3 -- No --&gt; PE
+    RAG --&gt; COMBO
+    FT --&gt; COMBO</div><figcaption>Decision tree for choosing between RAG, fine-tuning, and prompt engineering</figcaption></figure>
+<ul>
+<li><strong>Knowledge that changes often or must be cited?</strong> RAG. Examples: company knowledge bases, product documentation, news, regulations, customer records.</li>
+<li><strong>Stable, deep expertise or a specific behavior/style?</strong> Fine-tuning. Examples: legal writing style, medical coding conventions, a customer-service tone, structured JSON output schemas.</li>
+<li><strong>The model already knows but needs to be steered?</strong> Prompt engineering. Examples: format control, role framing, chain-of-thought reasoning.</li>
+</ul>
+<p>In practice they compose well. A real legal-AI assistant might use RAG to pull recent case law, fine-tuning to enforce the firm&#x27;s writing style, and prompt engineering to follow a specific document template. The question is rarely &quot;which one?&quot; but &quot;in what proportion?&quot;</p>
+<h4>What RAG gives you, summarized</h4>
+<p>Step back from the mechanics for a moment. What does adding a retrieval step actually buy you, in plain terms?</p>
+<ul>
+<li><strong>Freshness without retraining.</strong> New documents go into the vector store, not into the model weights. You can update knowledge daily without touching the LLM.</li>
+<li><strong>Domain knowledge from private data.</strong> Your internal documents never need to leave your control to influence the answer.</li>
+<li><strong>Source attribution.</strong> Every retrieved chunk carries metadata, so answers can be cited. This is often the single feature that makes RAG acceptable in regulated environments.</li>
+<li><strong>A controllable failure mode.</strong> With a good instruction like &quot;if the sources do not contain the answer, say you do not know&quot;, the system can be tuned to refuse gracefully instead of hallucinating - reducing the trust problem dramatically.</li>
+<li><strong>Lower long-term cost than fine-tuning</strong> for knowledge that changes, because re-indexing is cheap compared with retraining.</li>
+</ul>
+<p>What RAG does <em>not</em> do is make a weak model smart. The generation step is still the LLM. If the model cannot reason about the passages it was given, retrieving better passages will not save you. RAG is a knowledge layer, not an intelligence layer.</p>
+<h4>Where this course goes from here</h4>
+<p>We have laid out the <em>why</em> and a high-level <em>how</em>. The rest of the course unpacks each component you will need to build a real RAG system:</p>
+<ul>
+<li><strong>Lecture 2 - Embeddings.</strong> How text becomes vectors, and why cosine similarity gives us semantic search. We will compare OpenAI&#x27;s text-embedding-3 family, BGE, SBERT, and Korean-friendly multilingual models.</li>
+<li><strong>Lecture 3 - Vector databases.</strong> Chroma, FAISS, Pinecone, pgvector, Weaviate - what each is good for, and how ANN algorithms like HNSW and IVF trade speed for accuracy.</li>
+<li><strong>Lecture 4 - Document loading and chunking.</strong> The unglamorous step that decides whether your retrieval works at all. Fixed, sentence, recursive, and semantic chunking; chunk size and overlap; metadata for citations.</li>
+<li><strong>Lecture 5 - Building the end-to-end MVP.</strong> Putting it all together in LangChain: load, chunk, embed, store, retrieve, prompt, and respond.</li>
+</ul>
+<p>By the end you will have built a working RAG pipeline you can adapt to your own documents. For now, take with you the mental model: an LLM is a brilliant but forgetful colleague, and RAG is the act of handing them the right pages of the right book just before they answer.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A pure LLM is frozen in time, prone to hallucination, and unaware of your private domain. RAG addresses all three by retrieving relevant passages at query time and asking the LLM to answer based on them.</li>
+<li>RAG has three stages: <strong>Retrieval</strong> (semantic search over a vector database), <strong>Augmentation</strong> (injecting retrieved passages into the prompt), and <strong>Generation</strong> (the LLM produces the final answer, ideally with citations).</li>
+<li>Retrieval quality is the whole game. If the right chunk is not in the top-k results, the model never sees it - a &quot;silent failure&quot; that is hard to detect from the output alone.</li>
+<li>Long context windows do not kill RAG. They win for small, bounded data with deep reasoning, but RAG is still required at enterprise scale, for cost control, and to avoid attention dilution.</li>
+<li>Choose RAG when knowledge changes often, must be cited, or comes from private data. Choose fine-tuning when you need deep, stable expertise or a specific behavior. Use prompt engineering to steer what the model already knows. The three are complementary, not exclusive.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q1. A customer-support chatbot built on a bare LLM confidently tells a user that a discontinued government loan product is still available, even though it was removed from the program six months ago. Which LLM failure mode is primarily at work here, and what does RAG do differently to prevent it?</p></div>
+              <ul class='opts'></ul>
+              <div class='exp'><p>The bot is not lying deliberately; it simply has no information beyond its training cutoff. This is stale knowledge leading to hallucination — the model produces a confident but wrong answer because the facts changed after training. RAG solves this by retrieving current documents (e.g., the updated loan programme page) at query time and asking the LLM to answer based only on those passages. Options A, C, and D describe unrelated mechanisms: retraining model weights, compressing tokens, and input sanitisation respectively have nothing to do with grounding answers in fresh retrieved evidence.</p></div></div><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q2. In a RAG pipeline, a user question is embedded, the top-k chunks are fetched from the vector database, those chunks are inserted into a structured prompt, and finally the LLM writes the answer. Which stage of the RAG architecture is responsible for inserting the retrieved passages into the prompt before the LLM receives it?</p></div>
+              <ul class='opts'></ul>
+              <div class='exp'><p>Retrieval finds the relevant chunks; it does not modify the prompt. Generation is the LLM producing the final answer, which happens after the prompt is already built. Indexing is the offline preprocessing step (loading, chunking, embedding, storing) that happens once per document — it is not part of the live query path at all. Augmentation is the middle stage whose sole job is to take the raw retrieved evidence and assemble it into the structured prompt (with instructions such as &#x27;use only the following sources&#x27;) that tells the LLM what to reason about.</p></div></div><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q3. An engineer runs a RAG system on a large internal codebase. During a demo, the system confidently answers a question about a deprecated API with information that sounds plausible but is actually from an unrelated module. The correct answer exists in the database, but the retriever ranked it 15th out of 500 chunks and the system only passes the top 5 to the LLM. What is the technical name for this failure pattern, and why is it especially dangerous?</p></div>
+              <ul class='opts'></ul>
+              <div class='exp'><p>Catastrophic forgetting applies to fine-tuning, not retrieval. Context dilution is a concern with very long prompts, but here the prompt is short (only 5 chunks). Embedding drift is not a standard failure mode described in this lecture. Silent failure is the correct term: the right information is in the database, but the retriever failed to rank it highly enough, so it never entered the context window — and the LLM has no way to signal that it is working with incomplete evidence. This is why most production RAG engineering effort goes into improving retrieval (better chunking, reranking, hybrid search) rather than the generation step.</p></div></div><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q4. A startup has a 300-page legal contract (roughly 150,000 tokens) that changes once a year. They need the LLM to perform deep cross-section reasoning — spotting conflicts between clauses spread across many pages. Which approach is most appropriate, and why?</p></div>
+              <ul class='opts'></ul>
+              <div class='exp'><p>The lecture&#x27;s rule of thumb is: &#x27;bounded data, deep reasoning → long context; unbounded data, fact lookup → RAG.&#x27; A 300-page contract is bounded and static (updated yearly), and the task — finding cross-clause conflicts — requires the model to see the full picture, which RAG&#x27;s top-k snippets would fragment. Option A is false: long context is actually cheaper per-query when the corpus is small and stable (especially with prompt caching). Option C (fine-tuning) bakes knowledge into weights and would require retraining each time the contract is amended. Option D is practically equivalent to long context but inverts the cost advantage by adding retrieval overhead; it also does not change the core reasoning limitation of RAG.</p></div></div><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q5. A legal-tech company wants to build an AI assistant that: (1) always cites the exact regulation or case law it relied on, (2) updates its knowledge base daily as new rulings are published, and (3) responds in the firm&#x27;s formal house style with specific document-template formatting. Which combination of techniques best addresses all three requirements?</p></div>
+              <ul class='opts'></ul>
+              <div class='exp'><p>Requirement 1 (citations) and Requirement 2 (daily-updated knowledge) are squarely in RAG&#x27;s wheelhouse: retrieved chunks carry metadata for citations, and adding new rulings is as simple as re-embedding the new files. Requirement 3 (formal house style + structured templates) is exactly what fine-tuning is designed for — baking a stable behaviour into the model weights — combined with prompt engineering for precise format control. Option A fails because prompt engineering cannot add knowledge the model does not have (new daily rulings). Option B fails because fine-tuning cannot keep pace with daily knowledge changes without continuous expensive retraining, and knowledge can be lost via catastrophic forgetting. Option D fails because RAG alone does not change the model&#x27;s default writing style or enforce document templates. The lecture explicitly states the three approaches &#x27;compose well&#x27; and real systems often use all three in proportion.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=UabBYexBD4k' target='_blank'>Is RAG Still Needed? Choosing the Best Approach for LLMs</a></li><li><a href='https://www.youtube.com/watch?v=zYGDpG-pTho' target='_blank'>RAG vs Fine-Tuning vs Prompt Engineering: Optimizing AI Models</a></li></ul></div>
+        </article>
+<article id='lec2' class='lecture'>
+          <h2>02. &quot;Embedding Models and Vector Representations: Turning Meaning into Numbers&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Explain what an embedding is and how cosine similarity makes semantic search possible.</li>
+<li>Compare the characteristics, dimensions, and cost trade-offs of major embedding models such as OpenAI <code class='ic'>text-embedding-3</code>, BGE, and SBERT.</li>
+<li>Decide which embedding model to use in a multilingual setting that includes Korean.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why embeddings sit at the heart of RAG</h4>
+<p>In the previous lecture we saw that Retrieval-Augmented Generation works by fetching the <em>right</em> passages from a knowledge base and feeding them into a language model. The obvious question is: how does the retriever know which passage is &quot;right&quot;? Old-school search would match keywords. If the user asks &quot;How do I cancel my subscription?&quot; and the document literally contains &quot;cancel subscription&quot;, a keyword index finds it. But if the document says &quot;terminate your membership&quot; instead, classical keyword search misses it entirely — even though the meaning is the same.</p>
+<p>This is the gap that embeddings close. An embedding model reads a piece of text and outputs a long list of numbers — a vector — designed so that texts with similar <em>meaning</em> end up close together in that numeric space, regardless of which exact words they used. RAG retrieval is built directly on top of this idea: you embed the user&#x27;s question, embed every chunk of your documents, and return the chunks whose vectors live nearest to the question&#x27;s vector. Choose the wrong embedding model and the rest of the pipeline — vector database, chunking, prompt — cannot rescue you. So this lecture is about the layer that decides whether your RAG system <em>understands</em> the query or just matches strings.</p>
+<h4>From words to vectors: the core intuition</h4>
+<p>The simplest way to picture an embedding is to imagine plotting words on a graph. Suppose, for a moment, that an embedding has only two dimensions, so we can draw it on paper. A model trained on a large corpus of text might place the word <code class='ic'>cat</code> near the word <code class='ic'>dog</code>, place <code class='ic'>house</code> far from both, and place <code class='ic'>apple</code> near <code class='ic'>orange</code> but well away from <code class='ic'>airplane</code>. The position of each word encodes its meaning. Words used in similar contexts — &quot;the cat purred&quot;, &quot;the dog barked&quot; — land near each other because the training process pushes them together; words used in unrelated contexts drift apart.</p>
+<p>Two dimensions are not enough to capture real language. Production embedding models output vectors with hundreds or even thousands of dimensions. OpenAI&#x27;s <code class='ic'>text-embedding-3-small</code> produces 1,536-dimensional vectors by default, and <code class='ic'>text-embedding-3-large</code> produces 3,072. You cannot visualize a 3,072-dimensional space, but the principle is the same: each dimension captures some latent property that the model learned during training (perhaps &quot;animacy&quot; or &quot;formality&quot; or &quot;is-this-about-finance&quot;), and the combination of all those numbers fixes the position of the text in a vast <em>semantic space</em>.</p>
+<p>A useful mental model from one of today&#x27;s source videos: an embedding for a cat might activate dimensions like &quot;has fur&quot; and &quot;has legs&quot;; an embedding for a house would activate &quot;has a roof&quot; but not &quot;has fur&quot;; an embedding for a dog would activate many of the same dimensions as the cat. Real models do not give us tidy labels like this — the dimensions are learned, not designed — but the analogy explains why similar things cluster.</p>
+<blockquote class='callout'>
+<p>An embedding is deterministic. Feed the same text to the same model and you always get the same vector back. This is unlike a chat model such as GPT-4 or Gemini, where the same prompt can yield different answers. Embeddings behave more like a hash function: stable, repeatable, and meant for indexing.</p>
+</blockquote>
+<h4>Three properties of embeddings you must remember</h4>
+<p>Three properties matter for everything that follows.</p>
+<p>First, <strong>embeddings are dense, not sparse.</strong> Older techniques such as TF-IDF or bag-of-words produce vectors with one slot per vocabulary word, mostly filled with zeros. Modern neural embeddings produce vectors where every dimension carries a small real number. That density is what lets them encode subtle distinctions like the difference between &quot;I went to the bank to deposit money&quot; and &quot;I sat on the bank of the river&quot; — and it is also why we need specialized vector databases (next lecture) to search them efficiently.</p>
+<p>Second, <strong>embeddings are model-specific.</strong> A vector produced by OpenAI&#x27;s model has no meaningful relationship to a vector produced by Cohere&#x27;s model or BGE&#x27;s model, even if both have 1,024 dimensions. They live in different semantic spaces. This means you cannot mix and match: every chunk in your vector database must be embedded with the same model you use to embed the query at search time. If you ever switch embedding models, you must re-embed your entire corpus.</p>
+<p>Third, <strong>modern embeddings are contextual.</strong> Early techniques such as word2vec and GloVe assigned one fixed vector per word, so <code class='ic'>bank</code> always got the same vector whether the sentence was about finance or rivers. Transformer-based embedding models — which is what we use today — read the whole sentence (or paragraph, or document) and produce a vector that already reflects the surrounding context. That is why you embed <em>chunks</em>, not individual words, in a RAG pipeline.</p>
+<h4>Cosine similarity: how we measure &quot;close&quot;</h4>
+<p>If embeddings live in a high-dimensional space, we need a way to ask &quot;how close are these two vectors?&quot; The standard answer in RAG is <strong>cosine similarity</strong>.</p>
+<p>Cosine similarity ignores the <em>length</em> of each vector and only looks at the <em>angle</em> between them. Two vectors pointing in exactly the same direction have cosine similarity 1.0 (perfectly aligned). Two vectors at right angles have cosine similarity 0 (completely unrelated). Two vectors pointing in opposite directions have cosine similarity -1.0 (opposite meaning). For text embeddings in practice, almost all scores you see fall between 0 and 1; truly opposite meanings are rarer than you might expect, because almost any two pieces of natural-language text share <em>some</em> general &quot;this is human language&quot; direction.</p>
+<p>The formula, for the curious, is the dot product of the two vectors divided by the product of their magnitudes:</p>
+<p><code class='ic'>cos(A, B) = (A · B) / (||A|| × ||B||)</code></p>
+<p>But the <em>intuition</em> matters more than the formula. Cosine similarity asks: ignoring how long these arrows are, do they point in the same direction? &quot;How do I cancel my subscription?&quot; and &quot;I want to terminate my membership&quot; will point in nearly the same direction because both are aimed at the same semantic target. &quot;How do I cancel my subscription?&quot; and &quot;What is the speed of light?&quot; point in totally different directions.</p>
+<p>Two practical notes. First, many embedding models — including OpenAI&#x27;s <code class='ic'>text-embedding-3</code> family — return vectors that are already <strong>L2-normalized</strong>, meaning their length is 1. When all vectors have length 1, cosine similarity is mathematically equivalent to a simple dot product, which is faster to compute. This is why some libraries report &quot;dot product&quot; and &quot;cosine similarity&quot; interchangeably; for normalized vectors they really are the same thing.</p>
+<p>Second, cosine similarity is not the <em>only</em> distance metric. Euclidean distance and dot product are also common. For most RAG use cases with normalized embeddings, all three give very similar rankings, so cosine is the safe default. Just be consistent: use the same metric at indexing time and at query time, and use the metric your vector database is configured for.</p>
+<h4>A typical RAG retrieval flow</h4>
+<p>Here is what happens when a user asks a question, in slow motion. The flow proceeds in four steps, as shown in the diagram below.</p>
+<p>1. The user types a question such as &quot;How do I reset my password?&quot;</p>
+<p>2. The application calls the embedding model with that question and receives a vector — say, 1,536 floating-point numbers.</p>
+<p>3. The vector database compares that query vector to every chunk vector it stored at indexing time, computing cosine similarity for each, and returns the top-k most similar chunks (typically k = 3 to 10).</p>
+<p>4. Those chunks are concatenated into a prompt — &quot;Answer the question using only the context below: ...&quot; — and sent to the LLM, which generates the final answer.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    U[&quot;User question&lt;br/&gt;How do I reset my password?&quot;] --&gt; E[&quot;Embedding model&lt;br/&gt;e.g. text-embedding-3-small&quot;]
+    E --&gt; Q[&quot;Query vector&lt;br/&gt;1,536 dims&quot;]
+    Q --&gt; V[&quot;Vector database&lt;br/&gt;cosine similarity vs. all chunk vectors&quot;]
+    C[(&quot;Indexed chunk vectors&lt;br/&gt;embedded with the SAME model&quot;)] --&gt; V
+    V --&gt; K[&quot;Top-k chunks&lt;br/&gt;k = 3 to 10&quot;]
+    K --&gt; P[&quot;Prompt assembly&lt;br/&gt;question + retrieved context&quot;]
+    P --&gt; L[&quot;LLM&quot;]
+    L --&gt; A[&quot;Final answer&quot;]</div><figcaption>From a user question to an LLM answer through embedding-based retrieval</figcaption></figure>
+<p>Notice how much of the system&#x27;s quality hinges on step 2 and step 3. If the embedding model captures meaning poorly, the most relevant chunk might rank tenth instead of first, and the LLM never sees it.</p>
+<h4>A tour of major embedding models</h4>
+<p>There are dozens of embedding models on the market. We will focus on the three families you are most likely to encounter when you build your first RAG system: OpenAI&#x27;s <code class='ic'>text-embedding-3</code>, BGE from BAAI, and SBERT.</p>
+<p><strong>OpenAI <code class='ic'>text-embedding-3</code></strong> is the easy default. You call an API, send your text, and get back a vector. There are two variants: <code class='ic'>text-embedding-3-small</code> produces 1,536-dimensional vectors at roughly $0.02 per million input tokens, and <code class='ic'>text-embedding-3-large</code> produces 3,072-dimensional vectors at roughly $0.13 per million tokens. The <code class='ic'>large</code> variant scores higher on the MTEB (Massive Text Embedding Benchmark) leaderboard than the <code class='ic'>small</code> one, but <code class='ic'>small</code> is already strong enough for most production RAG systems. Both support multiple languages reasonably well, including Korean.</p>
+<p>A nice feature of <code class='ic'>text-embedding-3</code> is <strong>Matryoshka representation learning</strong>, which lets you truncate the vector to a shorter length (say, 512 or 256 dimensions) and still keep most of the quality. Shorter vectors mean smaller storage and faster search — a useful lever when your corpus grows. The trade-off is obvious: you are paying per API call and your data leaves your network, which may be a deal-breaker for some enterprises.</p>
+<p><strong>BGE (BAAI General Embedding)</strong> is an open-source family from the Beijing Academy of Artificial Intelligence. Popular versions include <code class='ic'>bge-small-en</code>, <code class='ic'>bge-base-en</code>, <code class='ic'>bge-large-en</code>, and the multilingual <code class='ic'>bge-m3</code>. BGE models consistently rank near the top of the MTEB leaderboard, often beating commercial APIs on benchmark scores. Because they are open weights, you can download them from Hugging Face and run them on your own GPU (or even CPU for the smaller variants).</p>
+<p>The <code class='ic'>bge-m3</code> model is especially interesting for our purposes: it supports more than 100 languages — Korean included — and offers dense, sparse, and multi-vector retrieval in a single model. Dimensions for BGE models typically range from 384 (small) to 1,024 (large). The upside is no API cost and full data control; the downside is that you operate the inference yourself, which means a GPU server or careful CPU batching.</p>
+<p><strong>SBERT (Sentence-BERT)</strong> is less a single model and more a <em>technique</em>: take a pre-trained BERT (or similar transformer), fine-tune it with a siamese architecture so that whole sentences produce meaningful pooled embeddings, and publish the result. The <code class='ic'>sentence-transformers</code> Python library hosts hundreds of these models, including <code class='ic'>all-MiniLM-L6-v2</code> (only 384 dimensions, extremely fast), <code class='ic'>paraphrase-multilingual-mpnet-base-v2</code> (multilingual, 768 dimensions), and many domain-specific variants. SBERT models are mature, well-documented, and small enough to run on a laptop. They tend to score below the newest BGE or OpenAI models on benchmarks, but for prototypes and modest-sized corpora they are an excellent starting point — especially <code class='ic'>all-MiniLM-L6-v2</code>, which is probably the single most widely deployed embedding model in the world.</p>
+<h4>Trade-offs: dimensions, cost, and quality</h4>
+<p>When you compare embedding models, four levers dominate the decision.</p>
+<p><strong>Dimensions</strong> affect both storage and search speed. A vector database storing 10 million chunks at 1,536 dimensions uses roughly 60 GB just for the vectors (10M × 1,536 × 4 bytes). The same corpus at 384 dimensions uses 15 GB. Search time scales similarly. So smaller is better — until you lose too much quality.</p>
+<p><strong>Cost</strong> comes in two flavors: API cost (pay per token, no hardware to manage) or infrastructure cost (free model weights, but you need GPUs to serve them at scale). For a small RAG system processing thousands of queries a day, OpenAI&#x27;s API is usually cheaper end-to-end than running your own GPU. Past tens of millions of queries, self-hosting BGE or SBERT often wins.</p>
+<p><strong>Quality</strong> is best judged on benchmarks like MTEB, but be careful: MTEB averages across many tasks and many languages, and your specific use case may behave differently. The only reliable measure is to build a small evaluation set from your <em>own</em> documents and questions, embed both with each candidate model, and measure whether the right chunks rank high. Even a hand-built set of 30 to 50 query–answer pairs is enough to spot large quality gaps.</p>
+<p><strong>Data privacy</strong> can outrank everything else. If your corpus contains personal data, medical records, or trade secrets, sending it to a third-party API may be impossible. In that case self-hosted BGE or SBERT is not a preference but a requirement.</p>
+<h4>Choosing an embedding model for Korean and other non-English data</h4>
+<p>If your RAG system needs to handle Korean — or any non-English language — you cannot just pick the top model on the English MTEB leaderboard. English-only models often perform poorly on Korean text because they were trained on corpora that were 95 percent English or more. There are three practical paths, summarized in the decision tree below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Start[&quot;Need embeddings for&lt;br/&gt;Korean or multilingual text&quot;] --&gt; Privacy{&quot;Can data leave&lt;br/&gt;your network?&quot;}
+    Privacy --&gt;|&quot;No - privacy or&lt;br/&gt;compliance constraint&quot;| SelfHost{&quot;Queries are&lt;br/&gt;100% Korean?&quot;}
+    Privacy --&gt;|&quot;Yes - API is OK&quot;| Speed{&quot;First MVP, want&lt;br/&gt;lowest friction?&quot;}
+    Speed --&gt;|&quot;Yes&quot;| API[&quot;Path 1: Multilingual API&lt;br/&gt;text-embedding-3-small&lt;br/&gt;or Cohere embed-multilingual-v3&quot;]
+    Speed --&gt;|&quot;No - want to optimize&quot;| Eval[&quot;Build a 30 to 50 pair&lt;br/&gt;evaluation set&lt;br/&gt;from your own data&quot;]
+    SelfHost --&gt;|&quot;Yes, Korean only&quot;| KoSpec[&quot;Path 3: Korean-specialized&lt;br/&gt;ko-sroberta / ko-sbert&lt;br/&gt;best on pure-Korean tasks&quot;]
+    SelfHost --&gt;|&quot;No, mixes English&lt;br/&gt;technical terms&quot;| OSS[&quot;Path 2: Open-source multilingual&lt;br/&gt;bge-m3 recommended&lt;br/&gt;or paraphrase-multilingual-mpnet&quot;]
+    Eval --&gt; Compare[&quot;A/B test candidates&lt;br/&gt;API vs bge-m3 vs Korean-specialized&quot;]
+    Compare --&gt; Pick[&quot;Pick the model with&lt;br/&gt;a clear, measurable win&quot;]</div><figcaption>Decision tree for choosing an embedding model for Korean or multilingual data</figcaption></figure>
+<p><strong>Path 1: Use a strong multilingual API.</strong> OpenAI&#x27;s <code class='ic'>text-embedding-3-small</code> and <code class='ic'>text-embedding-3-large</code> both handle Korean acceptably out of the box, as do Cohere&#x27;s <code class='ic'>embed-multilingual-v3.0</code> and Google&#x27;s Vertex AI multilingual embeddings. This is the lowest-friction option: no model selection, no GPU, no fine-tuning. It is the right choice for most teams building a first RAG MVP.</p>
+<p><strong>Path 2: Use an open-source multilingual model.</strong> <code class='ic'>bge-m3</code> is the current strongest open-source multilingual embedding model and performs very well on Korean. Older but still useful options include <code class='ic'>paraphrase-multilingual-mpnet-base-v2</code> and <code class='ic'>LaBSE</code>. Run these on your own infrastructure when data privacy or cost matter.</p>
+<p><strong>Path 3: Use a Korean-specialized model.</strong> Several Korean-focused embedding models have appeared on Hugging Face (search for <code class='ic'>ko-sroberta</code>, <code class='ic'>ko-sbert</code>, or similar). They often outperform general multilingual models on pure-Korean tasks because they were trained on Korean corpora and use a tokenizer that handles Korean morphology well. The trade-off: they may handle English-mixed queries poorly. If your documents are 100 percent Korean and your users will query in Korean only, a specialized model is a strong choice. If your queries mix Korean with English technical terms — which is common in IT and business contexts — a multilingual model is usually safer.</p>
+<p>Two practical Korean-specific pitfalls deserve mention. First, watch the <strong>tokenizer</strong>. Some English-trained models tokenize Korean character by character, which inflates token counts (and API costs) and degrades quality. Models trained on Korean text use a tokenizer that recognizes Korean syllables and subwords. Second, watch the <strong>chunk size in tokens, not characters</strong>. Korean is information-dense per character; a 500-character Korean chunk often contains far more meaning than a 500-character English chunk. We will come back to this in the chunking lecture.</p>
+<blockquote class='callout'>
+<p>Rule of thumb: if you are building your first Korean RAG and just want something that works, start with OpenAI <code class='ic'>text-embedding-3-small</code>. Once you have a working baseline, A/B test <code class='ic'>bge-m3</code> and a Korean-specialized model against your own evaluation set. Switch only if you see a clear, measurable improvement.</p>
+</blockquote>
+<h4>Putting it together</h4>
+<p>An embedding model is the bridge between human language and the vector math that makes retrieval possible. It turns a sentence into a list of numbers so that &quot;cancel my subscription&quot; lands near &quot;terminate my membership&quot; but far from &quot;speed of light&quot;. Cosine similarity gives us a way to measure that closeness as an angle between vectors. The model you pick determines the <em>geometry</em> of your semantic space — and therefore the ceiling of your RAG system&#x27;s quality.</p>
+<p>In the next lecture we will look at where those vectors actually live: vector databases, and the indexing algorithms (HNSW, IVF) that make searching millions of high-dimensional vectors in milliseconds possible.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>An embedding maps text to a high-dimensional numeric vector so that semantically similar texts land close together; this is what lets RAG retrieve by meaning rather than by exact keywords.</li>
+<li>Cosine similarity measures the angle between two vectors (1.0 = same direction, 0 = unrelated) and is the standard &quot;closeness&quot; metric for RAG retrieval; for L2-normalized embeddings it is equivalent to the dot product.</li>
+<li>Embeddings are model-specific and deterministic. Use the same model for indexing and querying, and re-embed the whole corpus if you ever switch models.</li>
+<li>OpenAI <code class='ic'>text-embedding-3</code> is the easy API default; BGE (especially <code class='ic'>bge-m3</code>) is the strongest open-source family; SBERT models are mature, small, and ideal for prototypes — pick based on dimensions, cost, quality, and data-privacy needs.</li>
+<li>For Korean or other multilingual corpora, start with a strong multilingual model (<code class='ic'>text-embedding-3-small</code> or <code class='ic'>bge-m3</code>), and only move to a Korean-specialized model if you can show a measurable win on your own evaluation set.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>IBM Technology, <em>What are Word Embeddings?</em> — https://www.youtube.com/watch?v=wgfSDrqYMJ4</li>
+<li>Google Cloud Tech, <em>What are text embeddings?</em> — https://www.youtube.com/watch?v=vlcQV4j2kTo</li>
+<li>Google for Developers, <em>Machine Learning Crash Course: Embeddings</em> — https://www.youtube.com/watch?v=my5wFNQpFO0</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q1. You compute the cosine similarity between two text chunk vectors and get a score of 0.92. A second pair of chunks returns a score of 0.07. Which statement BEST describes what these scores tell you?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>The first pair are nearly identical in meaning; the second pair are semantically unrelated.</li><li class='opt' onclick='pick(this,0,1)'>The first pair are long documents; the second pair are short snippets.</li><li class='opt' onclick='pick(this,0,2)'>The first pair were embedded with the same model; the second pair used different models.</li><li class='opt' onclick='pick(this,0,3)'>The first pair share many exact keywords; the second pair share none.</li></ul>
+              <div class='exp'><p>Cosine similarity measures the angle between two vectors in semantic space, ranging from -1 (opposite direction) through 0 (perpendicular / unrelated) to 1 (same direction / same meaning). A score of 0.92 means the two vectors point nearly in the same direction — the texts carry very similar meaning. A score of 0.07 means the vectors are nearly perpendicular — the texts are semantically unrelated. The metric deliberately ignores vector length, so document length (option B) does not affect it. Whether the same model was used (option C) is a validity concern but not what the score encodes. Keyword overlap (option D) is what TF-IDF measures, not cosine similarity on neural embeddings, which capture meaning even across different wordings.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q2. Many production RAG systems report that cosine similarity and dot-product search give identical rankings for their embedding vectors. What is the correct technical reason for this?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>Cosine similarity and dot product are always mathematically identical for any pair of vectors.</li><li class='opt' onclick='pick(this,1,1)'>Most modern embedding models return L2-normalized vectors (length = 1), which makes cosine similarity reduce to the dot product.</li><li class='opt' onclick='pick(this,1,2)'>Vector databases automatically convert dot product scores to cosine scores before returning results.</li><li class='opt' onclick='pick(this,1,3)'>Both metrics compute the Euclidean distance between vectors, so they must agree.</li></ul>
+              <div class='exp'><p>The cosine similarity formula is (A · B) / (||A|| × ||B||). When every vector is L2-normalized its magnitude ||A|| = ||B|| = 1, so the denominator becomes 1 and the formula reduces to the plain dot product A · B. Models such as OpenAI text-embedding-3 return normalized vectors by default, which is why the two metrics are interchangeable in those systems — but only for normalized vectors (option A is wrong in the general case). Vector databases do not silently convert metrics (option C), and Euclidean distance is a third, distinct metric, not the same as either cosine or dot product (option D).</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q3. A team has already indexed 2 million document chunks in a vector database using OpenAI text-embedding-3-small. They now want to switch to bge-m3 for better multilingual coverage. What must they do?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>Update only the query-time embedding call; the stored chunk vectors are compatible with any model that outputs 1,024-dimensional vectors.</li><li class='opt' onclick='pick(this,2,1)'>Re-embed all 2 million chunks with bge-m3 and replace every vector in the database, because embeddings are model-specific.</li><li class='opt' onclick='pick(this,2,2)'>Run a one-time alignment matrix to translate text-embedding-3-small vectors into bge-m3 space without re-embedding.</li><li class='opt' onclick='pick(this,2,3)'>Keep the existing vectors and add bge-m3 vectors only for newly ingested documents going forward.</li></ul>
+              <div class='exp'><p>Embeddings are model-specific: a vector produced by text-embedding-3-small and a vector produced by bge-m3 live in completely different semantic spaces, even if they happen to share the same number of dimensions. Comparing a query vector from model A against chunk vectors from model B produces meaningless similarity scores. There is no universal alignment matrix that reliably converts between arbitrary embedding spaces (option C). A hybrid approach (option D) would make the index inconsistent: queries embedded with bge-m3 could not meaningfully compare against chunks embedded with the old model. The only correct path is to re-embed the entire corpus with the new model and rebuild the index.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q4. A startup is building a RAG-based customer-support assistant for a Korean e-commerce platform. Their documents are Korean product descriptions mixed with English brand names and technical SKUs. They have no GPU infrastructure and a tight per-query cost budget. Which embedding model choice is MOST appropriate as a starting point?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>A Korean-specialized model such as ko-sroberta, because the documents are primarily Korean.</li><li class='opt' onclick='pick(this,3,1)'>OpenAI text-embedding-3-small via API, because it handles Korean acceptably, requires no GPU, and has the lowest friction for a first MVP.</li><li class='opt' onclick='pick(this,3,2)'>all-MiniLM-L6-v2 from SBERT, because its 384-dimensional vectors minimize storage costs.</li><li class='opt' onclick='pick(this,3,3)'>bge-large-en, because it ranks highest on the English MTEB leaderboard.</li></ul>
+              <div class='exp'><p>The scenario describes a first MVP with Korean + English mixed content, no GPU, and a tight budget. OpenAI text-embedding-3-small handles Korean acceptably out of the box, requires only an API call (no infrastructure), and is the lowest-friction path — exactly matching the rule of thumb stated in the lecture. Korean-specialized models (option A) may struggle with the English brand names and technical terms mixed into the documents. all-MiniLM-L6-v2 (option C) is English-focused; its multilingual performance would be unreliable for Korean text. bge-large-en (option D) is an English-only model and would perform poorly on Korean regardless of its English benchmark ranking. Once a working baseline is established, the team should A/B test bge-m3 and Korean-specialized models against their own evaluation set before switching.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q5. A healthcare company must build a RAG system over confidential patient records written entirely in Korean. Regulations prohibit sending any patient data to external APIs. Which embedding path should they choose, and why?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>OpenAI text-embedding-3-large, because it produces the highest-quality vectors and handles Korean well.</li><li class='opt' onclick='pick(this,4,1)'>Cohere embed-multilingual-v3.0 via API, because it is the strongest multilingual commercial option.</li><li class='opt' onclick='pick(this,4,2)'>A self-hosted Korean-specialized model (e.g., ko-sroberta) or bge-m3, because the data cannot leave their network and the corpus is purely Korean.</li><li class='opt' onclick='pick(this,4,3)'>all-MiniLM-L6-v2 self-hosted, because it is the smallest and easiest model to deploy on CPU.</li></ul>
+              <div class='exp'><p>Data-privacy constraints make self-hosting mandatory — options A and B both require sending data to a third-party API, which is ruled out by regulation. Given that the corpus is 100 percent Korean, a Korean-specialized model (ko-sroberta, ko-sbert) is the strongest candidate because it was trained on Korean corpora and uses a Korean-aware tokenizer, which means better morphological handling and accurate token counts. bge-m3 self-hosted is also a valid choice because it supports Korean among 100+ languages and can run on private infrastructure; it is especially useful if any English-language medical literature might be added later. all-MiniLM-L6-v2 (option D) is primarily an English model; self-hosting it would satisfy the privacy requirement but would likely deliver poor Korean retrieval quality — privacy compliance alone does not make it a good fit for this use case.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=wgfSDrqYMJ4' target='_blank'>What are Word Embeddings?</a></li><li><a href='https://www.youtube.com/watch?v=vlcQV4j2kTo' target='_blank'>What are text embeddings?</a></li><li><a href='https://www.youtube.com/watch?v=my5wFNQpFO0' target='_blank'>Machine Learning Crash Course: Embeddings</a></li></ul></div>
+        </article>
+<article id='lec3' class='lecture'>
+          <h2>03. &quot;Comparing Vector Databases - Chroma, FAISS, Pinecone, and pgvector&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Distinguish the operational models behind Chroma, FAISS, Pinecone, pgvector, and Weaviate — embedded library, managed service, and relational-database extension.</li>
+<li>Explain how approximate-nearest-neighbor (ANN) indexes such as HNSW and IVF trade accuracy for speed, and why that trade-off matters for RAG.</li>
+<li>Apply a clear set of criteria — data volume, operational burden, latency, and cost — to choose the right vector database for a given RAG project.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why a vector database, and why a separate category?</h4>
+<p>In the previous lecture you turned text into embeddings — high-dimensional vectors where semantically similar passages sit close together in space. That representation only becomes useful if you can do two things efficiently at scale: <strong>store</strong> millions of these vectors alongside their source text and metadata, and <strong>search</strong> them by similarity in tens of milliseconds. A traditional relational database can technically hold the numbers in an array column, but <code class='ic'>SELECT ... WHERE color = &#x27;orange&#x27;</code> cannot ask &quot;find the documents whose meaning is closest to this query.&quot; That mismatch between how computers store data and how humans want to query it is often called the <strong>semantic gap</strong>, and closing it is the entire reason vector databases exist as a category.</p>
+<p>A vector database is, at its core, three things glued together:</p>
+<p>1. A <strong>storage layer</strong> for vectors plus payload (the original chunk text, document IDs, page numbers, tags, timestamps).</p>
+<p>2. An <strong>index</strong> built over those vectors so similarity search does not have to scan every row.</p>
+<p>3. A <strong>query API</strong> that takes a query vector (and often metadata filters) and returns the top-k nearest neighbours with their distances.</p>
+<p>The reason this matters for RAG is that the retriever stage of your pipeline lives or dies on this component. If retrieval is slow, your whole chatbot is slow. If retrieval is inaccurate, the LLM gets the wrong context and either hallucinates or politely refuses to answer. Choosing the wrong vector store also has a long tail of operational costs — re-indexing, snapshots, scaling, monitoring — that you will pay for every week the system is in production.</p>
+<blockquote class='callout'>
+<p>The vector database is the part of RAG you will spend the most time operating. Pick something you are comfortable running for a year, not just for a weekend prototype.</p>
+</blockquote>
+<h4>The three operational models you actually have to choose between</h4>
+<p>There are dozens of vector databases on the market, and the marketing pages all sound similar. The first useful filter is not features but <strong>how the thing runs in your environment</strong>. Almost every option falls into one of three operational shapes.</p>
+<p><strong>1. Embedded library — runs inside your application process.</strong> The vector store is a Python package (or a binary linked into your app). There is no separate server, no network hop, no infrastructure to provision. Chroma in its default mode and FAISS are the two canonical examples. You import a library, hand it some vectors, and it stores them in memory and on local disk. This model is ideal for prototypes, single-process apps, notebooks, and small-to-medium corpora that fit on one machine. It is terrible for anything that needs multiple readers, horizontal scaling, or high availability — when your process dies, the index dies with it (or has to reload from disk on restart).</p>
+<p><strong>2. Standalone server — runs as its own service, like Postgres or Redis.</strong> You deploy a dedicated process (often in a container) and your app talks to it over the network. Weaviate, Qdrant, Milvus, and Chroma in server mode all fit here. You get a real database with users, persistence, backup hooks, often clustering, and an HTTP/gRPC API. You also inherit a real operational burden: somebody has to update the binary, monitor memory pressure, tune the index, and recover from disk failures. This is the right model for production workloads where retrieval is a shared service used by multiple applications.</p>
+<p><strong>3. Managed service — somebody else runs the server.</strong> You sign up, get an API key, and pay per vector stored or per query. Pinecone is the archetype; recent managed offerings from Weaviate Cloud, Qdrant Cloud, and others belong here. You trade money for operational simplicity — no servers to patch, automatic scaling, SLA-backed uptime. The trade-off is cost (a non-trivial bill at scale) and lock-in (your data lives in someone else&#x27;s cloud and the API is proprietary).</p>
+<p>There is a fourth shape worth calling out separately because it changes the conversation: <strong>the relational-database extension</strong>. pgvector is a PostgreSQL extension that adds a <code class='ic'>vector</code> column type and ANN indexing to a database your team almost certainly already runs. You are not adopting a new system; you are adding a feature to an existing one. The same logic applies to vector support in MongoDB Atlas, Elasticsearch, Redis, and SQLite (via <code class='ic'>sqlite-vec</code>). For teams whose data already lives in one of these databases, this model is often the pragmatic winner — even if a dedicated vector DB would be marginally faster.</p>
+<h4>A closer look at the five options in the title</h4>
+<p><strong>Chroma</strong> is a developer-friendly vector database written in Python with a Rust core, designed first for the embedded use case. Its API is famously short — create a client, create a collection, call <code class='ic'>collection.add(...)</code> with embeddings, metadata, and IDs, then <code class='ic'>collection.query(...)</code> for retrieval. That collection metaphor maps neatly onto a table in a relational database. Chroma persists to a local directory by default, and a server mode is available when you outgrow single-process use. It is the natural starting point for LangChain and LlamaIndex tutorials because the friction is minimal. The weak point is that Chroma is still maturing operationally — clustering, multi-tenant isolation, and very large indexes are not its strongest suit yet.</p>
+<p><strong>FAISS</strong> (Facebook AI Similarity Search) is the elder statesman. It is not really a database — it is a C++/Python library for similarity search and clustering of dense vectors. There is no server, no persistence layer, no metadata filtering out of the box. What FAISS gives you is an extraordinarily rich menu of index types (flat, IVF, HNSW, PQ, OPQ, and many combinations) and the best raw performance in the field when you tune it properly. It is what you reach for when you need to index a hundred million vectors on a single GPU box and you are willing to build the rest of the database around it yourself. Many other vector databases — including older versions of Milvus — use FAISS under the hood.</p>
+<p><strong>Pinecone</strong> is the canonical managed vector database. You create an index in the Pinecone console, get an endpoint and an API key, and your application stays vector-DB-agnostic. Pinecone handles sharding, replication, scaling, and zero-downtime upgrades. It introduced the concept of &quot;serverless&quot; vector indexes that auto-scale storage and compute independently. The downside is that Pinecone is closed-source and priced per vector and per query unit; at large volumes that bill grows noticeably. You also cannot self-host it, which is a non-starter for organisations with strict data residency rules.</p>
+<p><strong>pgvector</strong> turns PostgreSQL into a competent vector database. It adds a <code class='ic'>vector</code> data type, distance operators (<code class='ic'>&lt;-&gt;</code> for L2, <code class='ic'>&lt;=&gt;</code> for cosine, <code class='ic'>&lt;#&gt;</code> for inner product), and supports both IVF and HNSW indexes. The killer feature is that you can mix vector similarity with normal SQL in a single query — <code class='ic'>WHERE customer_id = 42 AND created_at &gt; &#x27;2025-01-01&#x27; ORDER BY embedding &lt;=&gt; $1 LIMIT 5</code>. For any team already running Postgres, this is hard to beat: you get transactions, joins, backups, replication, and access control for free. The limitation is throughput at the very top end — pgvector is excellent up to tens of millions of vectors, and gets squeezed by dedicated vector engines beyond that.</p>
+<p><strong>Weaviate</strong> is a standalone open-source vector database with a GraphQL-style API, built-in hybrid search (vector plus keyword), a module system for plugging in embedding models, and first-class multi-tenancy. It sits in the same &quot;real database server&quot; category as Qdrant and Milvus. Weaviate is a strong fit when you want to host your own production-grade vector store, you care about hybrid (keyword + vector) ranking, and you do not want to assemble the pieces yourself.</p>
+<p>The table below gives you the short version. Read it as orientation, not gospel — every one of these projects ships features quickly.</p>
+<p>| Database  | Operational model              | Index types          | Metadata filter | Hybrid search | Best fit                                                |</p>
+<p>| --------- | ------------------------------ | -------------------- | --------------- | ------------- | ------------------------------------------------------- |</p>
+<p>| Chroma    | Embedded library / server      | HNSW                 | Yes             | Limited       | Prototypes, single-app RAG, LangChain tutorials         |</p>
+<p>| FAISS     | Library only                   | Flat, IVF, HNSW, PQ  | Manual          | No            | Large-scale offline search, custom systems              |</p>
+<p>| Pinecone  | Managed cloud only             | Proprietary          | Yes             | Yes           | Teams that want zero ops and will pay for it            |</p>
+<p>| pgvector  | Postgres extension             | IVFFlat, HNSW        | Yes (full SQL)  | With extras   | Teams already on Postgres, mixed relational + vector    |</p>
+<p>| Weaviate  | Self-hosted server / cloud     | HNSW                 | Yes             | Yes (BM25)    | Production self-hosted, hybrid search, multi-tenant     |</p>
+<h4>Why you cannot ignore the index: brute force, IVF, and HNSW</h4>
+<p>All vector databases face the same algorithmic problem. Given a query vector and N stored vectors, find the k nearest under some distance metric (usually cosine similarity or L2 distance). The naive approach — compute the distance between the query and every stored vector — is called <strong>brute force</strong> or <strong>flat</strong> search. It is exact, simple, and embarrassingly parallel. It also has O(N) time complexity, which means doubling your corpus doubles your latency. At a few thousand vectors this is fine. At a few million it is a problem. At a hundred million it is a disaster.</p>
+<p>The fix is to give up exactness in exchange for speed. Algorithms in this category are called <strong>approximate nearest neighbour (ANN)</strong> methods. They do not guarantee they will return the absolute closest vectors, but they return vectors that are <em>almost certainly</em> among the closest, often in O(log N) time. For RAG, that trade is almost always worth it — your embedding model is fuzzy anyway, and the LLM does not care whether it got the 1st, 3rd, and 7th most similar chunks instead of the 1st, 2nd, and 3rd.</p>
+<p>Two ANN families dominate vector databases today.</p>
+<p><strong>IVF — Inverted File Index.</strong> During build time, IVF runs k-means clustering on your vectors and divides space into <code class='ic'>nlist</code> clusters, each with a centroid. At query time, you find the few clusters whose centroids are closest to the query vector (controlled by a parameter called <code class='ic'>nprobe</code>), and you only search inside those clusters. If you have a million vectors split into a thousand clusters and you probe ten of them, you have just reduced the search from one million distance computations to roughly ten thousand. Tuning IVF is mostly about choosing <code class='ic'>nlist</code> (how finely you partition the space) and <code class='ic'>nprobe</code> (how many partitions you check at query time). More probes mean better recall and slower queries.</p>
+<p>IVF is conceptually simple, memory-efficient, and works very well in FAISS and pgvector&#x27;s <code class='ic'>ivfflat</code> mode. Its weakness is that you need to &quot;train&quot; the index on a representative sample before you insert vectors, and the partition boundaries become stale if your data distribution changes a lot over time.</p>
+<p><strong>HNSW — Hierarchical Navigable Small World.</strong> HNSW builds a multi-layer graph where each vector is a node connected to a small number of its nearest neighbours. The bottom layer is dense and contains every vector; each higher layer is exponentially sparser and acts like an &quot;express lane&quot; through the graph. At query time you start at the top layer, greedily walk towards the query vector by following edges that reduce the distance, and drop down to the next layer once you are stuck on a local minimum. You repeat this at every layer until you arrive at the bottom and converge on the nearest neighbours.</p>
+<p>The layered structure is easier to grasp visually — the diagram below shows how a query enters at the sparse top layer and is funnelled down into the dense bottom layer where the true neighbours live.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    Q[&quot;Query vector&quot;]
+    subgraph L2[&quot;Layer 2 (sparse - express lane)&quot;]
+        A2[&quot;node&quot;]
+        B2[&quot;node&quot;]
+    end
+    subgraph L1[&quot;Layer 1 (medium density)&quot;]
+        A1[&quot;node&quot;]
+        B1[&quot;node&quot;]
+        C1[&quot;node&quot;]
+        D1[&quot;node&quot;]
+    end
+    subgraph L0[&quot;Layer 0 (dense - contains every vector)&quot;]
+        A0[&quot;node&quot;]
+        B0[&quot;node&quot;]
+        C0[&quot;node&quot;]
+        D0[&quot;node&quot;]
+        E0[&quot;node&quot;]
+        F0[&quot;node&quot;]
+        G0[&quot;node&quot;]
+        H0[&quot;nearest neighbour&quot;]
+    end
+    Q --&gt;|&quot;1. enter at top&quot;| A2
+    A2 --&gt;|&quot;2. greedy walk&quot;| B2
+    B2 --&gt;|&quot;3. drop down&quot;| C1
+    C1 --&gt;|&quot;4. greedy walk&quot;| D1
+    D1 --&gt;|&quot;5. drop down&quot;| F0
+    F0 --&gt;|&quot;6. converge&quot;| H0</div><figcaption>HNSW multi-layer graph traversal from sparse top to dense bottom</figcaption></figure>
+<p>The result is roughly logarithmic search time and excellent recall, and HNSW does not need a separate training step — you can insert vectors incrementally. Its main downsides are higher memory consumption (the graph edges live in RAM) and slower build time than IVF. HNSW is the default index in Chroma, Weaviate, and modern pgvector versions, and is increasingly the default everywhere.</p>
+<blockquote class='callout'>
+<p>Practical heuristic: if your corpus is small or you stream new vectors in continuously, prefer HNSW. If you are indexing a very large static dataset and memory is tight, IVF (often combined with product quantization, IVF-PQ) is the safer choice.</p>
+</blockquote>
+<p>Both algorithms expose tuning knobs you should know about:</p>
+<ul>
+<li><strong>HNSW parameters.</strong> <code class='ic'>M</code> (number of neighbours per node, typically 8–48) controls graph density — higher M means more recall, more memory, slower build. <code class='ic'>efConstruction</code> (typically 100–400) controls build-time search depth — higher means a better-quality graph. <code class='ic'>efSearch</code> (typically 50–500) is the query-time knob — higher means slower queries but better recall.</li>
+<li><strong>IVF parameters.</strong> <code class='ic'>nlist</code> is roughly <code class='ic'>sqrt(N)</code> as a starting point. <code class='ic'>nprobe</code> is the recall-vs-latency dial; start at 10 and tune from there.</li>
+</ul>
+<p>A pure flat (brute-force) index remains useful in two situations: tiny corpora where the algorithm overhead exceeds the savings, and offline batch jobs where you want exact recall as a ground truth to evaluate your ANN index against. Most production deployments build both — a flat index for a small evaluation set, and HNSW or IVF for the real search.</p>
+<h4>Distance metrics matter, but less than you think</h4>
+<p>Every vector database supports at least three distance functions: <strong>L2 (Euclidean)</strong>, <strong>inner product</strong>, and <strong>cosine similarity</strong>. Cosine similarity is the most common choice for text embeddings because modern embedding models (OpenAI <code class='ic'>text-embedding-3</code>, BGE, SBERT) are trained with a cosine objective and produce vectors whose magnitude does not carry meaningful information. If your embeddings are already L2-normalised, cosine similarity and inner product give the same ranking, so many systems use inner product internally for speed. The takeaway is: use whatever metric your embedding model&#x27;s documentation recommends, and do not switch metrics between indexing time and query time.</p>
+<h4>How to actually choose for your project</h4>
+<p>You have the operational models, the index algorithms, and the feature checklists. Now apply them. The questions below, in this order, will narrow your choice down quickly.</p>
+<p><strong>1. How many vectors do you really have?</strong> Be honest. Pulling a number out of the air is the most common mistake.</p>
+<ul>
+<li>Under 100k vectors: anything works. Reach for the lowest-friction option — Chroma if you are starting fresh, pgvector if you already run Postgres.</li>
+<li>100k to 10 million vectors: most options still work, but operational details start to matter. Chroma, pgvector, Weaviate, Qdrant, and Pinecone all handle this range well.</li>
+<li>10 million to 100 million vectors: you are now in the territory of dedicated engines. pgvector is feasible but you will pay for it in memory and CPU; Weaviate, Qdrant, Milvus, or Pinecone are stronger choices.</li>
+<li>Above 100 million vectors: think hard about FAISS with custom infrastructure, Milvus, or a managed offering. Sharding is now mandatory and you want a system designed for it.</li>
+</ul>
+<p><strong>2. Who runs the database, and at what cost?</strong> A team of two senior engineers can run a self-hosted Weaviate cluster; a team of two product engineers probably should not. Compute your annual cost honestly: a managed Pinecone bill of $500–$2000 per month is often cheaper than the half-FTE of operations a self-hosted cluster takes. The smaller your team, the more managed services are worth.</p>
+<p><strong>3. What does your data look like besides vectors?</strong> If every retrieval needs to filter by tenant, user, document type, or time window, you want a database with strong metadata filtering. pgvector is unbeatable here because you have full SQL. Pinecone, Weaviate, and Qdrant all support rich filtering. Pure FAISS does not — you would have to filter results after the ANN search, which is wasteful and sometimes wrong.</p>
+<p><strong>4. Do you need hybrid search?</strong> &quot;Hybrid&quot; means combining vector similarity with traditional keyword (BM25) search, then merging the rankings. Hybrid often outperforms pure vector search for queries that include proper nouns, code, error messages, or domain jargon. Weaviate, Pinecone, and Elasticsearch have first-class hybrid support; Chroma and FAISS do not.</p>
+<p><strong>5. What does your update pattern look like?</strong> If documents change constantly and you need vectors inserted and deleted live, prefer HNSW-based stores (Chroma, Weaviate, pgvector-HNSW, Pinecone). If your corpus is mostly static and rebuilt on a schedule, IVF-based stores save memory.</p>
+<p><strong>6. What are your latency and recall targets?</strong> For a chatbot, p99 retrieval latency below 100 ms with recall@10 above 0.9 is a reasonable bar. Measure these on your actual data before committing. Every vendor will quote impressive benchmarks; only your benchmark on your embeddings counts.</p>
+<p>For most readers of this course building a first RAG project, the answer is genuinely simple: <strong>start with Chroma or pgvector</strong>. Chroma if you want zero setup and you are following a LangChain tutorial verbatim; pgvector if you already operate Postgres and want one less system to learn. Migrate to a dedicated server (Weaviate, Qdrant) or a managed service (Pinecone) only once you have measured a real problem in your starting choice. Premature optimisation in your vector layer wastes weeks you could have spent improving chunking and prompting — which, in practice, matter more.</p>
+<p>The decision tree below condenses those six questions into a fast path to a sensible default — follow it top to bottom, taking the first branch that fits your situation.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Start([&quot;Choosing a vector database&quot;]) --&gt; Q1{&quot;Corpus size?&quot;}
+    Q1 --&gt;|&quot;Under 100k&quot;| Q2{&quot;Already running Postgres?&quot;}
+    Q2 --&gt;|&quot;Yes&quot;| PG1[&quot;pgvector&quot;]
+    Q2 --&gt;|&quot;No&quot;| CH1[&quot;Chroma (embedded)&quot;]
+    Q1 --&gt;|&quot;100k - 10M&quot;| Q3{&quot;Need hybrid search&lt;br/&gt;or rich metadata?&quot;}
+    Q3 --&gt;|&quot;Yes, on Postgres&quot;| PG2[&quot;pgvector + extras&quot;]
+    Q3 --&gt;|&quot;Yes, no Postgres&quot;| WV1[&quot;Weaviate or Qdrant&quot;]
+    Q3 --&gt;|&quot;No, want zero ops&quot;| PC1[&quot;Pinecone (managed)&quot;]
+    Q3 --&gt;|&quot;No, small team&quot;| CH2[&quot;Chroma server&quot;]
+    Q1 --&gt;|&quot;10M - 100M&quot;| Q4{&quot;Have ops capacity&lt;br/&gt;to self-host?&quot;}
+    Q4 --&gt;|&quot;Yes&quot;| WV2[&quot;Weaviate / Qdrant / Milvus&quot;]
+    Q4 --&gt;|&quot;No&quot;| PC2[&quot;Pinecone (managed)&quot;]
+    Q1 --&gt;|&quot;Over 100M&quot;| Q5{&quot;Need custom indexing&lt;br/&gt;on one big box?&quot;}
+    Q5 --&gt;|&quot;Yes&quot;| FA1[&quot;FAISS + custom infra&quot;]
+    Q5 --&gt;|&quot;No&quot;| MI1[&quot;Milvus or managed cloud&quot;]</div><figcaption>Decision tree for picking a vector database</figcaption></figure>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Vector databases differ first by <strong>operational model</strong> — embedded library (Chroma, FAISS), standalone server (Weaviate, Qdrant, Milvus), managed cloud (Pinecone), and relational extension (pgvector). Pick the model your team can run before you compare features.</li>
+<li>Brute-force search is O(N) and only viable for small corpora. <strong>ANN indexes</strong> trade a small amount of recall for huge speedups; <strong>HNSW</strong> (graph-based, log-time, easy to update) and <strong>IVF</strong> (cluster-based, memory-efficient, needs training) are the two algorithms you must know.</li>
+<li><strong>HNSW is becoming the default</strong> across Chroma, Weaviate, and modern pgvector. Tune <code class='ic'>M</code>, <code class='ic'>efConstruction</code>, and <code class='ic'>efSearch</code> (or <code class='ic'>nlist</code>/<code class='ic'>nprobe</code> for IVF) against your own data, not against vendor benchmarks.</li>
+<li><strong>pgvector is the pragmatic winner for teams already on Postgres</strong>, especially when retrieval must combine vector similarity with rich SQL filtering.</li>
+<li>For most first RAG projects, <strong>start with Chroma or pgvector</strong>, prove the system works end-to-end, and migrate to Weaviate/Qdrant/Pinecone only when you have measured a real bottleneck. Choosing a vector database is a multi-year operational commitment, not just a feature comparison.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q1. Your team of two product engineers is building a customer-support chatbot. You have roughly 500,000 document chunks, no dedicated DevOps capacity, and a strict requirement that data must not leave your cloud account. Which vector database choice best fits this situation?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>FAISS — it delivers the best raw performance and avoids any vendor dependency</li><li class='opt' onclick='pick(this,0,1)'>Pinecone — it is fully managed and eliminates operational burden</li><li class='opt' onclick='pick(this,0,2)'>Weaviate self-hosted on your own cloud infrastructure</li><li class='opt' onclick='pick(this,0,3)'>Chroma in embedded mode — minimal setup for a small team</li></ul>
+              <div class='exp'><p>Pinecone (B) is fully managed but stores data in a third-party cloud, violating the data-residency requirement. FAISS (A) has no built-in persistence or metadata filtering and requires significant custom engineering — wrong for a two-person product team. Chroma embedded (D) is designed for single-process, sub-100k-vector use and is not the right fit for 500k vectors in a production service. Weaviate self-hosted on your own infrastructure (C) satisfies all three constraints: it handles the 100k–10M range, gives you full control over data residency, and requires only moderate ops capacity.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q2. A RAG pipeline indexes a corpus of 2 million vectors using IVFFlat with nlist=1000 and nprobe=5. The development team notices that recall@10 is lower than expected. Which change is most likely to improve recall without rebuilding the entire index?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>Increase nlist to 5000 to create finer-grained partitions</li><li class='opt' onclick='pick(this,1,1)'>Switch the distance metric from cosine similarity to L2</li><li class='opt' onclick='pick(this,1,2)'>Increase nprobe to 20 or higher so more cluster partitions are searched at query time</li><li class='opt' onclick='pick(this,1,3)'>Reduce the embedding dimension to lower the search space</li></ul>
+              <div class='exp'><p>IVF searches only the nprobe nearest cluster centroids. With nprobe=5 out of 1000 clusters, only 0.5% of the index is examined per query, which is the direct cause of low recall. Increasing nprobe (C) probes more partitions at query time — no retraining or rebuilding required — and directly raises recall at the cost of slightly higher latency. Increasing nlist (A) would require retraining the cluster centroids, not just a query-time change, and by itself makes each cluster smaller, which can worsen recall if nprobe is not raised accordingly. Changing the distance metric (B) does not affect how many partitions are searched. Reducing embedding dimensions (D) would require re-embedding and re-indexing the entire corpus.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q3. Which of the following best explains why HNSW is preferred over IVF when a production system continuously ingests new documents throughout the day?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>HNSW uses less memory than IVF, freeing resources for new insertions</li><li class='opt' onclick='pick(this,2,1)'>HNSW does not require a training step and supports incremental insertion, while IVF partitions become stale when data distribution changes</li><li class='opt' onclick='pick(this,2,2)'>HNSW provides exact nearest-neighbour results, whereas IVF is approximate</li><li class='opt' onclick='pick(this,2,3)'>HNSW queries have O(1) time complexity, making latency independent of corpus size</li></ul>
+              <div class='exp'><p>The key distinction for continuously updated corpora is that IVF must be trained on a representative sample before vectors are inserted, and its cluster boundaries become stale as the data distribution shifts. HNSW (B) builds its graph incrementally — each new vector is simply connected to its neighbours in the existing graph without retraining. HNSW actually uses more memory than IVF (A is wrong) because graph edges must be held in RAM. Both HNSW and IVF are approximate methods, not exact (C is wrong). HNSW has roughly O(log N) query complexity, not O(1) (D is wrong).</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q4. A fintech startup already runs PostgreSQL for its transactional data. They want to add semantic search over ~5 million compliance documents, with every query filtered by client_id and date_range. Which recommendation aligns best with the six selection criteria taught in this lecture?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>Migrate to Pinecone to get managed scalability and built-in metadata filtering</li><li class='opt' onclick='pick(this,3,1)'>Use FAISS for maximum throughput, applying metadata filters manually after the ANN search</li><li class='opt' onclick='pick(this,3,2)'>Add the pgvector extension to the existing Postgres instance to combine SQL filtering with vector similarity in a single query</li><li class='opt' onclick='pick(this,3,3)'>Deploy a standalone Weaviate cluster because pgvector cannot handle metadata filtering</li></ul>
+              <div class='exp'><p>pgvector (C) is the strongest fit here for three compounding reasons: (1) the team already operates Postgres, so no new system needs to be learned or operated; (2) pgvector supports full SQL in the same query as vector similarity — WHERE client_id = $1 AND date_range ... ORDER BY embedding &lt;=&gt; $2 LIMIT 5 — which satisfies the metadata filtering requirement natively; (3) 5 million vectors is well within pgvector&#x27;s comfortable operating range. Pinecone (A) would introduce a new managed service and ongoing cost, and adds complexity when the team already has a well-operated Postgres. FAISS (B) has no built-in metadata filtering — post-hoc filtering is wasteful and can degrade recall. Weaviate (D) is incorrect as a premise: pgvector does support rich metadata filtering through standard SQL.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q5. According to the lecture, which pair of statements about brute-force (flat) vector search is accurate?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>Brute-force search is O(log N) and suitable for corpora of any size; ANN indexes are only needed above 100 million vectors</li><li class='opt' onclick='pick(this,4,1)'>Brute-force search is exact and O(N); it is useful for small corpora and as a ground-truth baseline to evaluate ANN recall, but not for large production corpora</li><li class='opt' onclick='pick(this,4,2)'>Brute-force search is approximate but fast; it should be replaced by HNSW as soon as the corpus exceeds 10,000 vectors</li><li class='opt' onclick='pick(this,4,3)'>Brute-force search requires a training step similar to IVF and cannot be used for incremental insertions</li></ul>
+              <div class='exp'><p>Brute-force (flat) search computes the exact distance between the query and every stored vector, making it perfectly accurate but O(N) in time complexity. The lecture explicitly states two valid use cases for flat indexes: tiny corpora where algorithm overhead outweighs savings, and offline batch jobs where exact recall is needed as a ground truth to benchmark ANN indexes against. This matches option B exactly. Option A misstates the complexity as O(log N) — that is the complexity of ANN methods, not flat search. Option C incorrectly calls brute-force approximate. Option D is wrong: flat search requires no training step; only IVF requires training on a representative sample.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=gl1r1XV0SLw' target='_blank'>What is a Vector Database? Powering Semantic Search &amp; AI Applications</a></li><li><a href='https://www.youtube.com/watch?v=77QH0Y2PYKg' target='_blank'>벡터 데이터베이스 검색 - 계층적 탐색 가능 소규모 세계(HNSW) 설명</a></li></ul></div>
+        </article>
+<article id='lec4' class='lecture'>
+          <h2>04. &quot;Document Loading and Chunking Strategies: chunk_size, overlap, and Metadata&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Load PDFs, HTML pages, and Markdown files into a unified <code class='ic'>Document</code> representation using LangChain loaders.</li>
+<li>Compare Fixed, Sentence, Recursive, and Semantic chunking, and tune <code class='ic'>chunk_size</code> and <code class='ic'>chunk_overlap</code> for your data.</li>
+<li>Preserve source, page, and section metadata alongside each chunk to improve retrieval quality and citation accuracy.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why chunking is the make-or-break step</h4>
+<p>In a RAG pipeline the retriever does not search &quot;documents&quot; — it searches <strong>chunks</strong>. The chunk is the unit that gets embedded, stored in the vector database, and pulled back into the prompt at query time. That means the way you split your text silently decides the ceiling of everything downstream: relevance, factual accuracy, hallucination rate, and even how trustworthy your citations look.</p>
+<p>Two failure modes show this most clearly. If chunks are <strong>too small</strong>, a single idea gets sliced across pieces and the retriever returns sub-sentences that the LLM cannot reason over — a definition ends up separated from the example that explains it. If chunks are <strong>too large</strong>, several unrelated topics get fused into one block, the embedding becomes a blurry average of all of them, and the LLM has to wade through irrelevant context to answer a narrow question. High-quality chunks produce high-quality answers; the inverse is just as reliable.</p>
+<blockquote class='callout'>
+<p>The chunking layer is not glue code — it is a retrieval design decision. Treat <code class='ic'>chunk_size</code>, <code class='ic'>chunk_overlap</code>, and the separator list as tunable hyperparameters of your RAG system, not as defaults to leave alone.</p>
+</blockquote>
+<h4>Step 1: Loading documents into a uniform shape</h4>
+<p>LangChain solves the &quot;every file format is different&quot; problem by giving every loader the same output: a list of <code class='ic'>Document</code> objects, where each document carries <code class='ic'>page_content</code> (the text) and <code class='ic'>metadata</code> (a dict). Once your raw files are in that shape, the rest of the pipeline does not care whether they came from a PDF, an HTML page, or a Markdown file.</p>
+<p>Here is the basic pattern for the three formats you will hit most often.</p>
+<pre><code>
+# Load a folder full of PDFs (one Document per page, with page metadata).
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+
+pdf_loader = PyPDFDirectoryLoader(&quot;data/manuals/&quot;)
+pdf_docs = pdf_loader.load()
+
+print(len(pdf_docs), &quot;pages loaded&quot;)
+print(pdf_docs[0].metadata)
+# -&gt; {&#x27;source&#x27;: &#x27;data/manuals/monopoly.pdf&#x27;, &#x27;page&#x27;: 0}
+print(pdf_docs[0].page_content[:200])
+</code></pre>
+<p><code class='ic'>PyPDFDirectoryLoader</code> walks a directory and emits one <code class='ic'>Document</code> per page, with the file path and page number already filled in — those two fields will become your citation key later.</p>
+<p>For web pages, the equivalent loaders strip boilerplate (nav bars, footers) before handing back text.</p>
+<pre><code>
+# Load one or more web pages as plain text.
+from langchain_community.document_loaders import WebBaseLoader
+
+web_loader = WebBaseLoader([
+    &quot;https://example.com/docs/getting-started&quot;,
+    &quot;https://example.com/docs/api&quot;,
+])
+web_docs = web_loader.load()
+
+for d in web_docs:
+    print(d.metadata.get(&quot;source&quot;), &quot;-&gt;&quot;, len(d.page_content), &quot;chars&quot;)
+</code></pre>
+<p>For Markdown, keep the two roles cleanly separated. <strong>Loading</strong> is what <code class='ic'>UnstructuredMarkdownLoader</code> does: it reads the file from disk and returns it as a <code class='ic'>Document</code>. <strong>Splitting</strong> is what <code class='ic'>MarkdownHeaderTextSplitter</code> does: it takes already-loaded Markdown text and slices it on <code class='ic'>#</code>, <code class='ic'>##</code>, <code class='ic'>###</code> headers, attaching the heading hierarchy as metadata. The splitter is not a loader — it never touches the filesystem — but its structural awareness is exactly what you want for technical docs, so it typically runs <strong>after</strong> the loader.</p>
+<pre><code>
+# Load first, then split by header — two different responsibilities.
+from langchain_community.document_loaders import UnstructuredMarkdownLoader
+from langchain_text_splitters import MarkdownHeaderTextSplitter
+
+# 1) Load the file -&gt; one Document with page_content + metadata.
+md_docs = UnstructuredMarkdownLoader(&quot;docs/architecture.md&quot;).load()
+
+# 2) Split that text on header levels and keep the heading path as metadata.
+headers_to_split_on = [(&quot;#&quot;, &quot;h1&quot;), (&quot;##&quot;, &quot;h2&quot;), (&quot;###&quot;, &quot;h3&quot;)]
+md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+md_chunks = md_splitter.split_text(md_docs[0].page_content)
+
+print(md_chunks[0].metadata)
+# -&gt; {&#x27;h1&#x27;: &#x27;Architecture&#x27;, &#x27;h2&#x27;: &#x27;Retrieval Layer&#x27;}
+</code></pre>
+<p>A practical note: loaders return wildly different document counts for the same logical content. A 30-page PDF gives you 30 documents (one per page), while a 30,000-character HTML page gives you one. Both still need a second pass — the chunker — to bring everything to a comparable, embedder-friendly size. The flow below makes the loader-vs-splitter split explicit: every file type goes through a <strong>loader</strong> first to land in the uniform <code class='ic'>Document</code> stream, then the file type decides <strong>which splitter</strong> is applied next (Markdown takes the structure-aware path, everything else takes the generic recursive path), and both paths converge at the metadata-enrichment step that the vector store will later use for filtering and citation.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    PDF[&quot;PDF files&quot;]
+    HTML[&quot;Web pages&quot;]
+    MD[&quot;Markdown files&quot;]
+
+    PDFL[&quot;LOADER&lt;br/&gt;PyPDFDirectoryLoader&quot;]
+    HTMLL[&quot;LOADER&lt;br/&gt;WebBaseLoader&quot;]
+    MDL[&quot;LOADER&lt;br/&gt;UnstructuredMarkdownLoader&quot;]
+
+    DOC[&quot;Unified Document list&lt;br/&gt;page_content + metadata&quot;]
+    ROUTE{&quot;File type?&quot;}
+    MDSPLIT[&quot;SPLITTER&lt;br/&gt;MarkdownHeaderTextSplitter&lt;br/&gt;(structure-aware)&quot;]
+    SPLIT[&quot;SPLITTER&lt;br/&gt;RecursiveCharacterTextSplitter&lt;br/&gt;(generic)&quot;]
+    ENRICH[&quot;Metadata enrichment&lt;br/&gt;source + page + chunk_id&quot;]
+    EMBED[&quot;Embedding step&lt;br/&gt;next lecture&quot;]
+
+    PDF --&gt; PDFL
+    HTML --&gt; HTMLL
+    MD --&gt; MDL
+    PDFL --&gt; DOC
+    HTMLL --&gt; DOC
+    MDL --&gt; DOC
+    DOC --&gt; ROUTE
+    ROUTE -- &quot;Markdown&quot; --&gt; MDSPLIT
+    ROUTE -- &quot;PDF / HTML / plain text&quot; --&gt; SPLIT
+    MDSPLIT --&gt; ENRICH
+    SPLIT --&gt; ENRICH
+    ENRICH --&gt; EMBED</div><figcaption>Loading-to-chunking pipeline: loaders feed Documents into one splitter each, not both</figcaption></figure>
+<h4>Step 2: The five levels of chunking</h4>
+<p>Once you have documents, you have to slice them. There is a natural progression from naive to sophisticated, and each level fixes a specific defect of the previous one.</p>
+<h5>Level 1 — Fixed-size (character) chunking</h5>
+<p>The simplest strategy: define a single separator, cut on it, and pack the pieces back together up to a length budget. LangChain calls this <code class='ic'>CharacterTextSplitter</code>. It is fast, predictable, and almost always the wrong choice for prose — but understanding exactly what it does (and does <strong>not</strong> do) is the foundation for everything that follows.</p>
+<p>The key thing to internalize: <code class='ic'>CharacterTextSplitter</code> is <strong>not</strong> a character-by-character sliding window. It splits the input on <strong>one</strong> <code class='ic'>separator</code> (default <code class='ic'>&quot;\n\n&quot;</code>, i.e. blank lines between paragraphs) and then <strong>merges</strong> those pieces back together so that each merged group stays under <code class='ic'>chunk_size</code>. Two consequences fall out of that:</p>
+<ul>
+<li>If the separator does not appear in the input at all, the split produces a single piece and you get <strong>one chunk back regardless of <code class='ic'>chunk_size</code></strong>.</li>
+<li>If your input is shorter than <code class='ic'>chunk_size</code>, you also get one chunk back — there is nothing to merge.</li>
+</ul>
+<p>A worked example with the default separator makes both the merge behavior and the size limit concrete. The text below has three paragraphs of 42, 45, and 155 characters; with <code class='ic'>chunk_size=200</code> the splitter packs whatever fits and stops when adding the next piece would overflow.</p>
+<pre><code>
+from langchain_text_splitters import CharacterTextSplitter
+
+text = (
+    &quot;Paragraph one is short and self-contained.\n\n&quot;               # 42 chars
+    &quot;Paragraph two adds one more fact for context.\n\n&quot;            # 45 chars
+    &quot;Paragraph three is noticeably longer because it walks &quot;       # part of P3
+    &quot;through an example end to end, mentions a caveat about &quot;
+    &quot;edge cases, and finishes with a short summary.&quot;               # P3 = 155 chars total
+)
+
+splitter = CharacterTextSplitter(
+    separator=&quot;\n\n&quot;,   # default — split on blank lines
+    chunk_size=200,
+    chunk_overlap=0,
+)
+chunks = splitter.split_text(text)
+for i, c in enumerate(chunks):
+    print(f&quot;[{i}] ({len(c)} chars) {c[:60]}...&quot;)
+# [0] (89 chars)  Paragraph one is short and self-contained.\n\nParagraph t...
+# [1] (155 chars) Paragraph three is noticeably longer because it walks th...
+</code></pre>
+<p>Trace it carefully. The splitter first cuts on <code class='ic'>&quot;\n\n&quot;</code> to get three pieces of length 42, 45, and 155. Then it greedily merges:</p>
+<p>1. Start with P1 (42 chars). Try to add <code class='ic'>&quot;\n\n&quot;</code> + P2: 42 + 2 + 45 = <strong>89 ≤ 200</strong>, so merge — chunk so far is 89 chars.</p>
+<p>2. Try to add <code class='ic'>&quot;\n\n&quot;</code> + P3: 89 + 2 + 155 = <strong>246 &gt; 200</strong>, so refuse. Emit the current chunk (89 chars) and start a new one with P3.</p>
+<p>3. P3 alone is 155 chars (≤ 200), so it fits as its own chunk.</p>
+<p>You get <strong>two chunks back</strong>, not three — exactly because the merger respected the 200-character budget. If you drop <code class='ic'>chunk_size</code> to 80, P1 + separator + P2 (89 chars) no longer fits, so the merger refuses to combine them and you get three chunks (one per paragraph) instead.</p>
+<p>Now contrast that with <code class='ic'>separator=&quot;&quot;</code>. People reach for this expecting a fixed-width slicer, but in <code class='ic'>CharacterTextSplitter</code> it just means &quot;the split produced one giant piece&quot; — there is no separator anywhere to cut on — so the input comes back as a single chunk even when it is much longer than <code class='ic'>chunk_size</code>. If you actually want hard fixed-width slicing of a long string, use <code class='ic'>RecursiveCharacterTextSplitter</code> (which falls back through a list of separators and will eventually split per character) or a token-based splitter like <code class='ic'>TokenTextSplitter</code>.</p>
+<p>The takeaway: <code class='ic'>CharacterTextSplitter</code> is really a <strong>single-separator merge tool</strong>, not a length enforcer. It is fine for content where the chosen separator reliably appears and the resulting pieces are roughly the size you want; for anything else, prefer the recursive splitter described in Level 3.</p>
+<h5>Level 2 — Sentence / delimiter-based chunking</h5>
+<p>A small upgrade in the same family: pick a more meaningful separator. You can configure <code class='ic'>CharacterTextSplitter</code> with <code class='ic'>separator=&quot;.&quot;</code> or <code class='ic'>&quot;\n\n&quot;</code> so the splits happen at sentence or paragraph boundaries. This stops mid-word breakage, but it introduces a new problem — a chunk may now end at a period even though the next paragraph continues the same idea, and (per Level 1) you still get nothing back if your separator does not appear in the input. The retriever can pull back the first paragraph and miss the explanation that follows.</p>
+<h5>Level 3 — Recursive character chunking (the default you should reach for first)</h5>
+<p><code class='ic'>RecursiveCharacterTextSplitter</code> is the workhorse. Instead of using one separator, it tries a <strong>list</strong> of separators in order: paragraph break, then line break, then sentence end, then space, then individual character. It packs as much text as it can into a chunk under <code class='ic'>chunk_size</code>, falling back to a finer separator only when needed.</p>
+<pre><code>
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,         # target chunk length in CHARACTERS, not tokens
+    chunk_overlap=50,       # last 50 chars of chunk N are repeated at the start of chunk N+1
+    separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],  # the default — tune for your data
+    length_function=len,
+)
+
+with open(&quot;docs/architecture.md&quot;, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+    text = f.read()
+
+chunks = splitter.split_text(text)
+print(f&quot;{len(chunks)} chunks, avg length = {sum(len(c) for c in chunks) // len(chunks)} chars&quot;)
+</code></pre>
+<p>A worked example makes the behavior concrete. Suppose your document has four paragraphs of roughly 200, 240, 600, and 300 characters, and you set <code class='ic'>chunk_size=500, chunk_overlap=0</code>:</p>
+<ul>
+<li>Paragraph 1 (200) + paragraph 2 (240) = 440 chars, fits under 500 -&gt; <strong>chunk A</strong>.</li>
+<li>Paragraph 3 alone is 600 chars, over the limit -&gt; the splitter recurses into sentences and packs them up to 500 -&gt; <strong>chunks B and C</strong>.</li>
+<li>Paragraph 4 (300) -&gt; <strong>chunk D</strong>.</li>
+</ul>
+<p>Result: four paragraphs become four chunks, and every chunk ends on a sentence or paragraph boundary. Drop <code class='ic'>chunk_size</code> to 250 and the same text produces roughly twice as many chunks, with paragraph 3 alone forced to split into three or four pieces.</p>
+<p>The fallback logic is easier to see as a flow: the splitter only descends to a finer separator when the current attempt still leaves a piece that exceeds <code class='ic'>chunk_size</code>.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    START([&quot;Input text block&quot;])
+    P{&quot;Split on paragraph&lt;br/&gt;break (\\n\\n)&quot;}
+    L{&quot;Split on line&lt;br/&gt;break (\\n)&quot;}
+    S{&quot;Split on sentence&lt;br/&gt;end (&#x27;. &#x27;)&quot;}
+    W{&quot;Split on space (&#x27; &#x27;)&quot;}
+    C[&quot;Split per character&quot;]
+    OK([&quot;Emit chunk&quot;])
+
+    START --&gt; P
+    P -- &quot;all pieces &lt;= chunk_size&quot; --&gt; OK
+    P -- &quot;some piece &gt; chunk_size&quot; --&gt; L
+    L -- &quot;all pieces &lt;= chunk_size&quot; --&gt; OK
+    L -- &quot;some piece &gt; chunk_size&quot; --&gt; S
+    S -- &quot;all pieces &lt;= chunk_size&quot; --&gt; OK
+    S -- &quot;some piece &gt; chunk_size&quot; --&gt; W
+    W -- &quot;all pieces &lt;= chunk_size&quot; --&gt; OK
+    W -- &quot;some piece &gt; chunk_size&quot; --&gt; C
+    C --&gt; OK</div><figcaption>RecursiveCharacterTextSplitter separator fallback procedure</figcaption></figure>
+<blockquote class='callout'>
+<p>The <code class='ic'>chunk_size</code> argument is measured in <strong>characters</strong>, not tokens. A safe rule of thumb for English is about 4 characters per token, so <code class='ic'>chunk_size=1000</code> is roughly 250 tokens. Plan around your embedding model&#x27;s input limit (8,192 tokens for OpenAI <code class='ic'>text-embedding-3</code>) with comfortable headroom.</p>
+</blockquote>
+<h5>Level 4 — Structure-aware splitters</h5>
+<p>For source code or marked-up text, you can do better than &quot;look for <code class='ic'>\n\n</code>&quot;. LangChain ships specialized splitters whose separator lists already understand the syntax of the language.</p>
+<pre><code>
+from langchain_text_splitters import (
+    RecursiveCharacterTextSplitter,
+    Language,
+)
+
+# Python-aware: prefers splitting at &quot;class &quot;, &quot;def &quot;, &quot;\n\n&quot; before falling back to spaces.
+py_splitter = RecursiveCharacterTextSplitter.from_language(
+    language=Language.PYTHON,
+    chunk_size=800,
+    chunk_overlap=100,
+)
+
+# JavaScript, Markdown, HTML, and others are also supported.
+js_splitter = RecursiveCharacterTextSplitter.from_language(
+    language=Language.JS,
+    chunk_size=800,
+    chunk_overlap=100,
+)
+</code></pre>
+<p>Use these whenever the document type is known. A code chunk that ends in the middle of a function body is much less useful than one that ends at a function boundary, and the structured splitter gives you that for free.</p>
+<h5>Level 5 — Semantic chunking</h5>
+<p>The strategies above split by <strong>shape</strong> (characters, separators, syntax). Semantic chunking splits by <strong>meaning</strong>: it embeds each sentence, measures the cosine distance between consecutive sentences, and starts a new chunk whenever the distance jumps above a threshold. The result is chunks that correspond to topic boundaries rather than arbitrary character counts.</p>
+<pre><code>
+# pip install langchain-experimental
+from langchain_experimental.text_splitter import SemanticChunker
+from langchain_openai import OpenAIEmbeddings
+
+semantic_splitter = SemanticChunker(
+    embeddings=OpenAIEmbeddings(model=&quot;text-embedding-3-small&quot;),
+    breakpoint_threshold_type=&quot;percentile&quot;,   # also: &quot;standard_deviation&quot;, &quot;interquartile&quot;
+    breakpoint_threshold_amount=95,           # split at the 95th-percentile distance
+)
+
+with open(&quot;docs/long_article.md&quot;, &quot;r&quot;, encoding=&quot;utf-8&quot;) as f:
+    long_text = f.read()
+
+semantic_docs = semantic_splitter.create_documents([long_text])
+for i, d in enumerate(semantic_docs[:3]):
+    print(f&quot;--- chunk {i} ({len(d.page_content)} chars) ---&quot;)
+    print(d.page_content[:120], &quot;...&quot;)
+</code></pre>
+<p>Semantic chunking shines on long, free-form documents (articles, transcripts, contracts) where topic shifts do not align with paragraph breaks. The trade-off is cost and latency: you pay for embeddings during ingestion, and the chunker is slower than the recursive splitter by orders of magnitude. A sensible pattern is to use the recursive splitter by default and switch to semantic chunking only for the corpora where retrieval quality is unacceptable.</p>
+<h4>Step 3: Tuning <code class='ic'>chunk_size</code> and <code class='ic'>chunk_overlap</code></h4>
+<p>There is no universally best value. The right setting depends on the granularity of the questions you expect, the density of your text, and the context window of your LLM. A useful starting matrix:</p>
+<p>| Content type | Typical <code class='ic'>chunk_size</code> | Typical <code class='ic'>chunk_overlap</code> | Why |</p>
+<p>|---|---|---|---|</p>
+<p>| Technical docs, API references | 500-1000 chars | 50-100 | Concise definitions; small chunks keep answers precise. |</p>
+<p>| Long-form articles, books | 1000-1500 chars | 150-200 | Ideas span multiple paragraphs; overlap preserves context. |</p>
+<p>| Source code | 800-1200 chars | 100 | Function-sized units; overlap keeps imports/signatures visible. |</p>
+<p>| Conversational transcripts | 500-800 chars | 100-150 | Speakers change topic often; smaller chunks avoid topic mixing. |</p>
+<p>| Tables / structured data | 1500-2000 chars | 0 | Row groups are atomic; overlap creates duplicate rows. |</p>
+<p>Two failure patterns to watch for:</p>
+<p>1. <strong>Too small.</strong> If the retriever returns the top 4 chunks and they are 50 characters each, the LLM has 200 characters of context — not enough to answer anything beyond a single fact. Symptom: the model says &quot;I don&#x27;t know&quot; even when the answer is in your corpus.</p>
+<p>2. <strong>Too large.</strong> If each chunk packs three unrelated topics, the embedding is an average of all of them and the retriever can no longer distinguish queries. Symptom: the same chunks come back for very different questions.</p>
+<p><code class='ic'>chunk_overlap</code> exists to soften the boundary problem. When a sentence at the end of chunk N introduces a concept that chunk N+1 elaborates on, the overlap ensures both chunks contain the bridging sentence — the retriever will surface whichever one the query lands closest to. A reasonable default is <strong>10-20% of <code class='ic'>chunk_size</code></strong>. More overlap means more redundancy in the index (slower, more expensive) but better recall on cross-boundary questions; zero overlap is fine for atomic, self-contained chunks like table rows.</p>
+<blockquote class='callout'>
+<p>Tune empirically. Build a small evaluation set of 20-30 realistic questions with known correct answers, sweep <code class='ic'>chunk_size</code> over {300, 500, 800, 1200} and <code class='ic'>chunk_overlap</code> over {0, 10%, 20%}, and measure retrieval precision. The right values are the ones that win on <strong>your</strong> data, not the ones in a blog post.</p>
+</blockquote>
+<h4>Step 4: Preserving metadata for retrieval and citation</h4>
+<p>A chunk without metadata is anonymous. The retriever can find it, but neither the LLM nor your user can tell where it came from. Two concrete benefits come from carrying metadata through the pipeline:</p>
+<ul>
+<li><strong>Filtered retrieval.</strong> &quot;Only search the 2024 product manual&quot; becomes a metadata filter (<code class='ic'>source</code> or <code class='ic'>year</code> equals X) applied before similarity search, drastically reducing noise.</li>
+<li><strong>Citations.</strong> The final answer can footnote &quot;see <em>Monopoly rules</em>, p. 7&quot; by reading <code class='ic'>metadata[&quot;source&quot;]</code> and <code class='ic'>metadata[&quot;page&quot;]</code> from the retrieved chunk.</li>
+</ul>
+<p>The good news is that LangChain loaders already attach the obvious fields (<code class='ic'>source</code>, <code class='ic'>page</code>). The job of the chunking step is to <strong>preserve</strong> that metadata when one document becomes many chunks, and to <strong>enrich</strong> it where useful.</p>
+<pre><code>
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# 1. Load — each Document already has source + page metadata.
+docs = PyPDFDirectoryLoader(&quot;data/manuals/&quot;).load()
+
+# 2. Split — split_documents() carries metadata into every child chunk.
+splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+chunks = splitter.split_documents(docs)
+
+# 3. Enrich — give each chunk a stable, human-readable ID for de-duplication.
+#    Counter resets at every new (source, page) pair so the ID stays readable.
+last_page_id: str | None = None
+chunk_index: int = 0
+for chunk in chunks:
+    source = chunk.metadata.get(&quot;source&quot;, &quot;unknown&quot;)
+    page = chunk.metadata.get(&quot;page&quot;, 0)
+    page_id = f&quot;{source}:{page}&quot;
+
+    if page_id == last_page_id:
+        chunk_index += 1          # same page as previous chunk -&gt; advance
+    else:
+        chunk_index = 0           # new page (or very first chunk) -&gt; reset
+    last_page_id = page_id
+
+    chunk.metadata[&quot;chunk_id&quot;] = f&quot;{page_id}:{chunk_index}&quot;
+
+print(chunks[0].metadata)
+# -&gt; {&#x27;source&#x27;: &#x27;data/manuals/monopoly.pdf&#x27;, &#x27;page&#x27;: 0, &#x27;chunk_id&#x27;: &#x27;data/manuals/monopoly.pdf:0:0&#x27;}
+</code></pre>
+<p>Two design choices worth highlighting:</p>
+<ul>
+<li><strong><code class='ic'>split_documents()</code> vs <code class='ic'>split_text()</code>.</strong> Always prefer <code class='ic'>split_documents()</code> when you have <code class='ic'>Document</code> objects. It propagates metadata to every output chunk automatically. <code class='ic'>split_text()</code> discards metadata because it only takes a raw string.</li>
+<li><strong>Stable chunk IDs.</strong> Composing the ID from <code class='ic'>source + page + chunk_index</code> lets you do incremental indexing — when a new version of <code class='ic'>monopoly.pdf</code> arrives, you can compute IDs for the new chunks and ask the vector store &quot;which of these IDs do you not already have?&quot; instead of rebuilding from scratch.</li>
+</ul>
+<p>For domain-specific filtering, add your own fields before indexing — for example, <code class='ic'>chunk.metadata[&quot;product&quot;] = &quot;billing&quot;</code> or <code class='ic'>chunk.metadata[&quot;lang&quot;] = &quot;en&quot;</code>. These then become first-class filters at query time:</p>
+<pre><code>
+# Restrict retrieval to a specific document subset using metadata filters.
+results = vectorstore.similarity_search(
+    query=&quot;How do refunds work for annual plans?&quot;,
+    k=4,
+    filter={&quot;product&quot;: &quot;billing&quot;},
+)
+</code></pre>
+<h4>Putting it together: a minimal end-to-end loading and chunking script</h4>
+<p>The following script ties the lecture together. It loads a folder of PDFs, splits them with the recursive splitter at sensible defaults, stamps each chunk with a stable ID, and prints a summary you can sanity-check before sending the chunks to embeddings.</p>
+<pre><code>
+from langchain_community.document_loaders import PyPDFDirectoryLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+
+def load_and_chunk(folder: str, chunk_size: int = 800, chunk_overlap: int = 100):
+    # 1) Load every PDF in the folder; metadata = source + page.
+    docs = PyPDFDirectoryLoader(folder).load()
+
+    # 2) Split with a recursive character splitter — the safe default.
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+    )
+    chunks = splitter.split_documents(docs)
+
+    # 3) Assign a stable chunk_id for incremental indexing.
+    #    Initialize the per-page counter OUTSIDE the loop so it survives
+    #    across iterations; reset it whenever the (source, page) changes.
+    last_page_id: str | None = None
+    chunk_index: int = 0
+    for c in chunks:
+        source = c.metadata.get(&quot;source&quot;, &quot;unknown&quot;)
+        page = c.metadata.get(&quot;page&quot;, 0)
+        page_id = f&quot;{source}:{page}&quot;
+
+        if page_id == last_page_id:
+            chunk_index += 1      # still on the same page
+        else:
+            chunk_index = 0       # new page (or first chunk overall)
+        last_page_id = page_id
+
+        c.metadata[&quot;chunk_id&quot;] = f&quot;{page_id}:{chunk_index}&quot;
+
+    return chunks
+
+
+if __name__ == &quot;__main__&quot;:
+    chunks = load_and_chunk(&quot;data/manuals/&quot;)
+    print(f&quot;{len(chunks)} chunks generated&quot;)
+    print(&quot;first chunk metadata:&quot;, chunks[0].metadata)
+    print(&quot;first chunk preview:&quot;)
+    print(chunks[0].page_content[:300])
+</code></pre>
+<p>It is worth tracing the counter logic once by hand, because off-by-one mistakes here silently produce duplicate <code class='ic'>chunk_id</code>s. Imagine the splitter returns three chunks for page 0 of <code class='ic'>monopoly.pdf</code>, then two chunks for page 1:</p>
+<p>1. <strong>First chunk</strong> (<code class='ic'>monopoly.pdf</code>, page 0): <code class='ic'>last_page_id</code> starts as <code class='ic'>None</code>, so <code class='ic'>page_id == last_page_id</code> is <code class='ic'>False</code>. The <code class='ic'>else</code> branch runs -&gt; <code class='ic'>chunk_index = 0</code>. ID -&gt; <code class='ic'>monopoly.pdf:0:0</code>.</p>
+<p>2. <strong>Second chunk</strong> (same page 0): <code class='ic'>page_id</code> now equals <code class='ic'>last_page_id</code>, so the <code class='ic'>if</code> branch runs -&gt; <code class='ic'>chunk_index = 1</code>. ID -&gt; <code class='ic'>monopoly.pdf:0:1</code>.</p>
+<p>3. <strong>Third chunk</strong> (same page 0): same branch -&gt; <code class='ic'>chunk_index = 2</code>. ID -&gt; <code class='ic'>monopoly.pdf:0:2</code>.</p>
+<p>4. <strong>Fourth chunk</strong> (page 1): <code class='ic'>page_id</code> differs -&gt; <code class='ic'>else</code> branch -&gt; <code class='ic'>chunk_index = 0</code>. ID -&gt; <code class='ic'>monopoly.pdf:1:0</code>.</p>
+<p>5. <strong>Fifth chunk</strong> (same page 1): <code class='ic'>if</code> branch -&gt; <code class='ic'>chunk_index = 1</code>. ID -&gt; <code class='ic'>monopoly.pdf:1:1</code>.</p>
+<p>Every chunk gets a unique, human-readable ID, and the counter resets cleanly at every page boundary. Run the script against any folder of PDFs and you will see the contract clearly: each chunk is a self-contained piece of text plus a metadata dictionary that tells the rest of the pipeline where it came from. That is the input shape the embedding step (next lecture) expects.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Chunking is not preprocessing — it is the upper bound on retrieval quality. Bad chunks make every downstream stage worse.</li>
+<li>Use LangChain loaders (<code class='ic'>PyPDFDirectoryLoader</code>, <code class='ic'>WebBaseLoader</code>, <code class='ic'>UnstructuredMarkdownLoader</code>) so every source format becomes the same <code class='ic'>Document</code> shape with <code class='ic'>page_content</code> and <code class='ic'>metadata</code>; remember that <code class='ic'>MarkdownHeaderTextSplitter</code> is a splitter, not a loader.</li>
+<li><code class='ic'>CharacterTextSplitter</code> splits on a single separator and merges back up to <code class='ic'>chunk_size</code> — it is not a fixed-width slicer. Reach for <code class='ic'>RecursiveCharacterTextSplitter</code> first as a general-purpose default, and jump to <code class='ic'>SemanticChunker</code> when topic boundaries matter more than length.</li>
+<li><code class='ic'>chunk_size</code> is measured in characters, not tokens. Tune it empirically with an evaluation set; defaults of 500-1000 characters with 10-20% overlap are reasonable starting points for prose.</li>
+<li>Always use <code class='ic'>split_documents()</code> (not <code class='ic'>split_text()</code>) so loader-supplied metadata flows into every chunk, and add a stable <code class='ic'>chunk_id</code> to enable incremental indexing and precise citations.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Inspect a loader&#x27;s output shape.</p>
+<p>Create a small in-memory text file (write two or three short paragraphs to disk as <code class='ic'>sample.txt</code>), load it with <code class='ic'>TextLoader</code>, and inspect what comes back.</p>
+<p>1. Print the number of Document objects returned.</p>
+<p>2. Print the keys present in <code class='ic'>metadata</code> of the first document.</p>
+<p>3. Print the first 200 characters of <code class='ic'>page_content</code>.</p>
+<p>Goal: understand the universal <code class='ic'>Document</code> shape (page_content + metadata) that every loader in the lecture produces.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>Call `loader.load()` — it always returns a list, even for single-document files.</li><li>Access `docs[0].metadata` as a plain Python dict; `.keys()` shows what fields the loader populated.</li><li>If you get a FileNotFoundError, make sure the path string matches exactly where you wrote the file.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>from langchain_community.document_loaders import TextLoader
+import os
+
+sample_text = (
+    &quot;Paragraph one: RAG stands for Retrieval-Augmented Generation.\n\n&quot;
+    &quot;Paragraph two: It combines a retriever with a language model.\n\n&quot;
+    &quot;Paragraph three: The retriever fetches relevant chunks; the LLM reads them.&quot;
+)
+
+with open(&quot;sample.txt&quot;, &quot;w&quot;, encoding=&quot;utf-8&quot;) as f:
+    f.write(sample_text)
+
+loader = TextLoader(&quot;sample.txt&quot;, encoding=&quot;utf-8&quot;)
+docs = loader.load()
+
+print(&quot;Number of documents:&quot;, len(docs))          # -&gt; 1
+print(&quot;Metadata keys:&quot;, list(docs[0].metadata.keys()))   # -&gt; [&#x27;source&#x27;]
+print(&quot;Content preview:&quot;, docs[0].page_content[:200])
+
+# Cleanup
+os.remove(&quot;sample.txt&quot;)
+</code></pre>
+                <div class='exp2'><p>TextLoader (like every LangChain loader) returns a list of Document objects. Each Document holds exactly two fields: <code class='ic'>page_content</code> (a plain string) and <code class='ic'>metadata</code> (a dict). For a plain text file the only metadata key is <code class='ic'>source</code> — the file path. PyPDFDirectoryLoader adds <code class='ic'>page</code> as well; WebBaseLoader adds the URL. Knowing this uniform shape is the prerequisite for every downstream step: the splitter, the embedder, and the vector store all consume Documents and expect the same two fields.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice 1: Observe how chunk_size and chunk_overlap change the split result.</p>
+<p>Using the same three-paragraph text from Task 1, apply <code class='ic'>RecursiveCharacterTextSplitter</code> twice:</p>
+<ul>
+<li><strong>Run A:</strong> <code class='ic'>chunk_size=200, chunk_overlap=0</code></li>
+<li><strong>Run B:</strong> <code class='ic'>chunk_size=200, chunk_overlap=40</code></li>
+</ul>
+<p>For each run:</p>
+<p>1. Print the number of chunks produced.</p>
+<p>2. Print each chunk&#x27;s character count and its first 60 characters.</p>
+<p>3. For Run B, verify that the last 40 characters of chunk 0 appear at the start of chunk 1 (the overlap guarantee).</p>
+<p>Goal: see concretely that <code class='ic'>chunk_overlap</code> copies a tail window from chunk N into chunk N+1, and that <code class='ic'>chunk_size</code> is measured in characters.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>Use `split_text()` here because you are working with a raw string, not a Document object.</li><li>To verify the overlap check `chunks_b[0][-40:] in chunks_b[1]` — it should be True.</li><li>If all paragraphs fit in separate chunks already, try `chunk_size=150` to force the splitter to merge the two shorter paragraphs.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+text = (
+    &quot;Paragraph one: RAG stands for Retrieval-Augmented Generation.\n\n&quot;
+    &quot;Paragraph two: It combines a retriever with a language model.\n\n&quot;
+    &quot;Paragraph three: The retriever fetches relevant chunks; the LLM reads them.&quot;
+)
+
+# ---------- Run A: no overlap ----------
+splitter_a = RecursiveCharacterTextSplitter(
+    chunk_size=200,
+    chunk_overlap=0,
+    separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],
+    length_function=len,
+)
+chunks_a = splitter_a.split_text(text)
+print(&quot;=== Run A (overlap=0) ===&quot;)
+for i, c in enumerate(chunks_a):
+    print(f&quot;  chunk {i}: {len(c)} chars | {c[:60]!r}&quot;)
+
+# ---------- Run B: 40-char overlap ----------
+splitter_b = RecursiveCharacterTextSplitter(
+    chunk_size=200,
+    chunk_overlap=40,
+    separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],
+    length_function=len,
+)
+chunks_b = splitter_b.split_text(text)
+print(&quot;\n=== Run B (overlap=40) ===&quot;)
+for i, c in enumerate(chunks_b):
+    print(f&quot;  chunk {i}: {len(c)} chars | {c[:60]!r}&quot;)
+
+# Verify overlap: the tail of chunk 0 must appear at the head of chunk 1
+if len(chunks_b) &gt;= 2:
+    tail = chunks_b[0][-40:]
+    head = chunks_b[1][:40]
+    print(&quot;\nOverlap verification:&quot;)
+    print(f&quot;  tail of chunk 0: {tail!r}&quot;)
+    print(f&quot;  head of chunk 1: {head!r}&quot;)
+    print(f&quot;  overlap present: {tail in chunks_b[1]}&quot;)
+</code></pre>
+                <div class='exp2'><p>RecursiveCharacterTextSplitter tries separators from coarsest (paragraph break) to finest (single character). With chunk_size=200 and this short text, each paragraph fits in one chunk on its own — so you get three chunks in both Run A and Run B.</p>
+<p>The visible difference is in chunk boundaries: with overlap=40 the last 40 characters of chunk 0 reappear at the beginning of chunk 1. This is the &#x27;bridging window&#x27; the lecture describes. When a query lands near a chunk boundary, at least one of the two neighbouring chunks contains the bridging sentence, so the retriever does not miss it.</p>
+<p>chunk_size is always in characters (not tokens). Roughly 4 English characters = 1 token, so chunk_size=200 ≈ 50 tokens — very small; real settings for prose are 500-1000.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice 2: Carry metadata through splitting and assign stable chunk_id.</p>
+<p>Starting from two synthetic Document objects (simulating two pages of a loaded PDF), apply <code class='ic'>RecursiveCharacterTextSplitter.split_documents()</code> and then:</p>
+<p>1. Confirm that <code class='ic'>source</code> and <code class='ic'>page</code> metadata from each parent Document are present in every child chunk.</p>
+<p>2. Add a <code class='ic'>chunk_id</code> field to every chunk using the pattern <code class='ic'>&quot;{source}:{page}:{chunk_index}&quot;</code> where <code class='ic'>chunk_index</code> resets to 0 at every new <code class='ic'>(source, page)</code> pair.</p>
+<p>3. Print the final <code class='ic'>metadata</code> dict of every chunk.</p>
+<p>Goal: practice using <code class='ic'>split_documents()</code> instead of <code class='ic'>split_text()</code> and understand the stable chunk_id assignment logic from the lecture.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>Use `splitter.split_documents(docs)` — this is the method that carries metadata.</li><li>Initialise `last_page_id = None` before the loop so the first chunk always resets the counter.</li><li>Build `page_id` as `f&quot;{source}:{page}&quot;` first, then compare it to `last_page_id` before deciding whether to increment or reset `chunk_index`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+docs = [
+    Document(
+        page_content=(
+            &quot;Page 0: The RAG pipeline has three stages.\n\n&quot;
+            &quot;First, documents are loaded and split into chunks.\n\n&quot;
+            &quot;Second, chunks are embedded and stored in a vector database.\n\n&quot;
+            &quot;Third, at query time the retriever fetches the top-k chunks &quot;
+            &quot;and the LLM generates an answer from them.&quot;
+        ),
+        metadata={&quot;source&quot;: &quot;data/rag_guide.pdf&quot;, &quot;page&quot;: 0},
+    ),
+    Document(
+        page_content=(
+            &quot;Page 1: Choosing the right chunk size is critical.\n\n&quot;
+            &quot;Chunks that are too small lose context.\n\n&quot;
+            &quot;Chunks that are too large blur the embedding signal.&quot;
+        ),
+        metadata={&quot;source&quot;: &quot;data/rag_guide.pdf&quot;, &quot;page&quot;: 1},
+    ),
+]
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=180,
+    chunk_overlap=20,
+    separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],
+    length_function=len,
+)
+
+# split_documents() propagates metadata from each parent Document into every child chunk.
+chunks = splitter.split_documents(docs)
+
+# Assign stable chunk_id: &quot;{source}:{page}:{chunk_index}&quot; with counter reset per page.
+last_page_id: str | None = None
+chunk_index: int = 0
+
+for chunk in chunks:
+    source = chunk.metadata.get(&quot;source&quot;, &quot;unknown&quot;)
+    page = chunk.metadata.get(&quot;page&quot;, 0)
+    page_id = f&quot;{source}:{page}&quot;
+
+    if page_id == last_page_id:
+        chunk_index += 1      # same page -&gt; advance counter
+    else:
+        chunk_index = 0       # new page (or very first chunk) -&gt; reset counter
+    last_page_id = page_id
+
+    chunk.metadata[&quot;chunk_id&quot;] = f&quot;{page_id}:{chunk_index}&quot;
+
+for i, chunk in enumerate(chunks):
+    print(f&quot;--- chunk {i} ---&quot;)
+    print(&quot;metadata:&quot;, chunk.metadata)
+    print(&quot;preview: &quot;, chunk.page_content[:80])
+    print()
+</code></pre>
+                <div class='exp2'><p>split_documents() is the correct method when you have Document objects because it copies the parent&#x27;s entire metadata dict into each child chunk automatically. split_text() only accepts a raw string and discards all metadata — so using it here would lose the source and page fields.</p>
+<p>The chunk_id assignment uses a single counter variable (chunk_index) that lives outside the loop. The key rule is: compare the combined (source, page) key against what you saw on the previous iteration. If it matches, increment; if it differs (new page), reset to 0. Initialising last_page_id to None means the very first chunk always hits the else branch and correctly starts at index 0.</p>
+<p>The resulting IDs (&#x27;data/rag_guide.pdf:0:0&#x27;, &#x27;:0:1&#x27;, ..., &#x27;:1:0&#x27;, ...) are deterministic and human-readable, which makes incremental re-indexing straightforward: compute the ID set for a new file version, ask the vector store which IDs are missing, and upsert only those.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Application: Build and validate a reusable load_and_chunk() function.</p>
+<p>Write a function <code class='ic'>load_and_chunk(docs, chunk_size=500, chunk_overlap=50)</code> that accepts an already-loaded list of Documents (so the function is loader-agnostic), splits them, enriches metadata with chunk_id, and returns the chunk list.</p>
+<p>Then validate the output by running the following four checks on the returned chunks:</p>
+<p>1. <strong>Size check:</strong> every chunk&#x27;s <code class='ic'>page_content</code> must be at most <code class='ic'>chunk_size + chunk_overlap</code> characters long. (A small tolerance is acceptable because the splitter may slightly exceed chunk_size when a finer separator is not available.)</p>
+<p>2. <strong>Metadata completeness:</strong> every chunk must have <code class='ic'>source</code>, <code class='ic'>page</code>, and <code class='ic'>chunk_id</code> in its metadata.</p>
+<p>3. <strong>Chunk_id uniqueness:</strong> no two chunks may share the same <code class='ic'>chunk_id</code>.</p>
+<p>4. <strong>Overlap check:</strong> for chunks that share the same <code class='ic'>source</code> and <code class='ic'>page</code>, the last <code class='ic'>chunk_overlap</code> characters of chunk N must appear somewhere in chunk N+1 (when N+1 exists on the same page).</p>
+<p>Print a PASS/FAIL summary for each check.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>Inside load_and_chunk(), the body is essentially the same as Task 3: create splitter, call split_documents(), run the counter-reset loop, return chunks.</li><li>For Check 1, the tolerance expression is `len(c.page_content) &gt; CHUNK_SIZE + CHUNK_OVERLAP`. A slightly larger upper bound accounts for the rare case where no separator is available near the boundary.</li><li>For Check 4, iterate over groups (chunks sharing the same source and page). Use `groups[n].page_content[-CHUNK_OVERLAP:]` as the expected tail and verify it appears in `groups[n+1].page_content` with the `in` operator.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from typing import List
+from collections import defaultdict
+
+
+def load_and_chunk(
+    docs: List[Document],
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+) -&gt; List[Document]:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],
+        length_function=len,
+    )
+    chunks = splitter.split_documents(docs)
+
+    last_page_id: str | None = None
+    chunk_index: int = 0
+    for chunk in chunks:
+        source = chunk.metadata.get(&quot;source&quot;, &quot;unknown&quot;)
+        page = chunk.metadata.get(&quot;page&quot;, 0)
+        page_id = f&quot;{source}:{page}&quot;
+
+        if page_id == last_page_id:
+            chunk_index += 1
+        else:
+            chunk_index = 0
+        last_page_id = page_id
+
+        chunk.metadata[&quot;chunk_id&quot;] = f&quot;{page_id}:{chunk_index}&quot;
+
+    return chunks
+
+
+# ---------- Synthetic test corpus ----------
+test_docs = [
+    Document(
+        page_content=(
+            &quot;Alpha section: this is the first paragraph of page zero.\n\n&quot;
+            &quot;It introduces the concept of retrieval-augmented generation.\n\n&quot;
+            &quot;A retriever selects the most relevant documents from a corpus.\n\n&quot;
+            &quot;The selected documents are then passed to the language model as context.&quot;
+        ),
+        metadata={&quot;source&quot;: &quot;corpus/alpha.pdf&quot;, &quot;page&quot;: 0},
+    ),
+    Document(
+        page_content=(
+            &quot;Alpha section page one: chunking strategies vary by content type.\n\n&quot;
+            &quot;Technical documentation benefits from smaller chunks of 500 to 1000 characters.\n\n&quot;
+            &quot;Long-form articles may use chunks of 1000 to 1500 characters with more overlap.&quot;
+        ),
+        metadata={&quot;source&quot;: &quot;corpus/alpha.pdf&quot;, &quot;page&quot;: 1},
+    ),
+    Document(
+        page_content=(
+            &quot;Beta document page zero: metadata enrichment improves filtered retrieval.\n\n&quot;
+            &quot;Adding a product or language field lets the vector store restrict search scope.\n\n&quot;
+            &quot;Stable chunk IDs also enable incremental indexing without full re-ingestion.&quot;
+        ),
+        metadata={&quot;source&quot;: &quot;corpus/beta.pdf&quot;, &quot;page&quot;: 0},
+    ),
+]
+
+CHUNK_SIZE = 200
+CHUNK_OVERLAP = 30
+chunks = load_and_chunk(test_docs, chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
+
+print(f&quot;Total chunks produced: {len(chunks)}\n&quot;)
+
+# ---------- Check 1: size ----------
+size_violations = [
+    (i, len(c.page_content))
+    for i, c in enumerate(chunks)
+    if len(c.page_content) &gt; CHUNK_SIZE + CHUNK_OVERLAP
+]
+if size_violations:
+    print(f&quot;FAIL Check 1 — {len(size_violations)} chunk(s) exceed size limit: {size_violations}&quot;)
+else:
+    print(&quot;PASS Check 1 — all chunks within size limit&quot;)
+
+# ---------- Check 2: metadata completeness ----------
+required_fields = {&quot;source&quot;, &quot;page&quot;, &quot;chunk_id&quot;}
+missing = [
+    (i, required_fields - set(c.metadata.keys()))
+    for i, c in enumerate(chunks)
+    if required_fields - set(c.metadata.keys())
+]
+if missing:
+    print(f&quot;FAIL Check 2 — {len(missing)} chunk(s) missing metadata fields: {missing}&quot;)
+else:
+    print(&quot;PASS Check 2 — all chunks have required metadata fields&quot;)
+
+# ---------- Check 3: chunk_id uniqueness ----------
+all_ids = [c.metadata[&quot;chunk_id&quot;] for c in chunks]
+if len(all_ids) != len(set(all_ids)):
+    duplicates = [cid for cid in set(all_ids) if all_ids.count(cid) &gt; 1]
+    print(f&quot;FAIL Check 3 — duplicate chunk_ids found: {duplicates}&quot;)
+else:
+    print(&quot;PASS Check 3 — all chunk_ids are unique&quot;)
+
+# ---------- Check 4: overlap integrity ----------
+# Group chunks by (source, page) while preserving order.
+groups: dict = defaultdict(list)
+for chunk in chunks:
+    key = (chunk.metadata[&quot;source&quot;], chunk.metadata[&quot;page&quot;])
+    groups[key].append(chunk)
+
+overlap_failures = []
+for key, group in groups.items():
+    for n in range(len(group) - 1):
+        tail = group[n].page_content[-CHUNK_OVERLAP:]
+        next_content = group[n + 1].page_content
+        if tail not in next_content:
+            overlap_failures.append((key, n))
+
+if overlap_failures:
+    print(f&quot;FAIL Check 4 — overlap missing in {len(overlap_failures)} consecutive pair(s): {overlap_failures}&quot;)
+else:
+    print(&quot;PASS Check 4 — overlap present in all consecutive same-page chunk pairs&quot;)
+</code></pre>
+                <div class='exp2'><p>This task assembles everything from the lecture into one testable unit.</p>
+<p>The function itself adds nothing new — it is the same three-step pattern (split, counter-reset, assign chunk_id) that the lecture&#x27;s end-to-end script uses, just extracted into a reusable callable that takes any Document list regardless of source format.</p>
+<p>The four validation checks mirror the four guarantees you need before sending chunks to the embedding step:</p>
+<p>1. Size check — confirms the splitter respected chunk_size. The tolerance of +chunk_overlap is realistic because the splitter can slightly overshoot when no finer separator is available.</p>
+<p>2. Metadata completeness — confirms split_documents() correctly propagated source and page, and the enrichment loop added chunk_id.</p>
+<p>3. Chunk_id uniqueness — a silent failure if the counter logic has an off-by-one bug; this check catches it.</p>
+<p>4. Overlap integrity — confirms the bridging window is actually present, not just that overlap &gt; 0 was passed to the constructor.</p>
+<p>Running these four checks on every ingestion run is a lightweight but effective quality gate before committing chunks to a production vector store.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=pIGRwMjhMaQ' target='_blank'>Chunking Strategies in RAG: Optimising Data for Advanced AI Responses</a></li><li><a href='https://www.youtube.com/watch?v=n0uPzvGTFI0' target='_blank'>LangChain: How to Properly Split your Chunks</a></li></ul></div>
+        </article>
+<article id='lec5' class='lecture'>
+          <h2>05. &quot;Building a Basic RAG Pipeline: An End-to-End MVP with LangChain&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Build an indexing pipeline with LangChain that goes from raw documents through chunking, embedding, and vector store ingestion.</li>
+<li>Take a user question, retrieve the most relevant chunks, inject them into a prompt, and call an LLM to produce a grounded answer.</li>
+<li>Run the resulting RAG MVP end-to-end and do a quick sanity check on whether the retrieval is actually helping.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why this lecture exists</h4>
+<p>For the past four lectures you have been gathering ingredients — what RAG is, how embeddings turn text into vectors, which vector database to pick, and how to chunk documents well. This lecture is where you finally cook. By the end of the next forty minutes (the reading plus typing the code), you should have a working Python program that you can point at a folder of your own documents and ask questions about them.</p>
+<p>We will use <strong>LangChain</strong> because it is the de-facto glue library for RAG in Python. It is not the only option — LlamaIndex is a very capable alternative and a lot of the same ideas carry over — but LangChain&#x27;s components map almost one-to-one onto the conceptual diagram of a RAG system, which makes it the gentlest first build.</p>
+<blockquote class='callout'>
+<p>The goal here is not a production system. It is a <em>minimum viable</em> pipeline that you can hold in your head, debug with print statements, and iterate on. Production concerns (auth, caching, evaluation, observability) come later, after you can feel where the rough edges are.</p>
+</blockquote>
+<h4>The mental model: two pipelines, one shared store</h4>
+<p>A RAG application is two pipelines that meet at a vector store.</p>
+<p>The first is the <strong>indexing pipeline</strong>. It runs whenever your knowledge base changes. Documents come in, get split into chunks, get embedded into vectors, and land in the vector store with their metadata.</p>
+<p>The second is the <strong>query pipeline</strong>. It runs every time a user asks a question. The question is embedded with the same model, the vector store returns the top-k most similar chunks, those chunks are stitched into a prompt, and an LLM writes the final answer.</p>
+<p>The shared piece — and the most common source of bugs — is the embedding model. Indexing and querying <strong>must</strong> use the exact same embedding model, or the vectors live in incompatible spaces and retrieval returns garbage.</p>
+<p>The diagram below makes the shape concrete: two pipelines running on different schedules, meeting at the same Chroma store, both depending on the same embedding model.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph IDX[&quot;Indexing pipeline (ingest.py, run on data change)&quot;]
+        direction TB
+        D[&quot;Raw documents&lt;br/&gt;PDF / MD / TXT&quot;] --&gt; L[&quot;DocumentLoader&quot;]
+        L --&gt; S[&quot;RecursiveCharacterTextSplitter&lt;br/&gt;chunks + metadata&quot;]
+        S --&gt; E1[&quot;Embedding model&lt;br/&gt;text-embedding-3-small&quot;]
+        E1 --&gt; W[&quot;Write vectors + metadata&quot;]
+    end
+
+    subgraph QRY[&quot;Query pipeline (query.py, run per request)&quot;]
+        direction TB
+        Q[&quot;User question&quot;] --&gt; E2[&quot;Embedding model&lt;br/&gt;text-embedding-3-small&quot;]
+        E2 --&gt; R[&quot;Retriever&lt;br/&gt;top-k similarity&quot;]
+        R --&gt; P[&quot;Prompt template&lt;br/&gt;context + question&quot;]
+        P --&gt; LLM[&quot;LLM&lt;br/&gt;gpt-4o-mini&quot;]
+        LLM --&gt; A[&quot;Grounded answer&quot;]
+    end
+
+    VS[(&quot;Chroma vector store&lt;br/&gt;./chroma_db&quot;)]
+    W --&gt; VS
+    VS --&gt; R
+
+    classDef shared fill:#fde68a,stroke:#b45309,color:#1f2937
+    class VS,E1,E2 shared</div><figcaption>Two pipelines meeting at a shared vector store</figcaption></figure>
+<p>The yellow nodes are the pieces both pipelines share. If the two embedding boxes are not the exact same model, the whole system silently breaks.</p>
+<h4>Setting up your environment</h4>
+<p>Create a project folder and a virtual environment. We will use OpenAI for the LLM and embeddings because it is the most predictable starting point, and Chroma as the vector store because it runs in-process with zero infrastructure.</p>
+<pre><code>
+mkdir rag-mvp &amp;&amp; cd rag-mvp
+python -m venv venv
+# Windows
+.\venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
+
+pip install langchain langchain-openai langchain-chroma langchain-community \
+            chromadb pypdf python-dotenv
+</code></pre>
+<p>Create a <code class='ic'>.env</code> file in the project root for your API key. Never commit this file.</p>
+<pre><code>
+OPENAI_API_KEY=sk-...
+</code></pre>
+<p>Make a <code class='ic'>data/</code> folder and drop a few PDFs, Markdown files, or <code class='ic'>.txt</code> files into it. For a first run, two or three documents that you genuinely know the contents of are much better than fifty you don&#x27;t — you need to be able to judge whether the answers are correct.</p>
+<blockquote class='callout'>
+<p>If you cannot use OpenAI (corporate policy, cost, offline lab), the second half of this lecture shows the same pipeline with <strong>Ollama</strong> running everything locally. The structure is identical; only the model classes change.</p>
+</blockquote>
+<h4>Step 1 — Loading documents</h4>
+<p>LangChain ships <strong>document loaders</strong> for almost every format you will encounter. A loader&#x27;s job is to read a file and produce a list of <code class='ic'>Document</code> objects, where each <code class='ic'>Document</code> has a <code class='ic'>page_content</code> string and a <code class='ic'>metadata</code> dict.</p>
+<p>For a directory of mixed files, <code class='ic'>DirectoryLoader</code> is the simplest entry point. We register one loader per extension so that PDFs, Markdown, and plain text are all picked up:</p>
+<pre><code>
+# ingest.py
+from pathlib import Path
+from langchain_community.document_loaders import (
+    DirectoryLoader,
+    PyPDFLoader,
+    TextLoader,
+)
+
+DATA_DIR = Path(&quot;data&quot;)
+
+pdf_loader = DirectoryLoader(
+    str(DATA_DIR),
+    glob=&quot;**/*.pdf&quot;,
+    loader_cls=PyPDFLoader,
+)
+md_loader = DirectoryLoader(
+    str(DATA_DIR),
+    glob=&quot;**/*.md&quot;,
+    loader_cls=TextLoader,
+    loader_kwargs={&quot;encoding&quot;: &quot;utf-8&quot;},
+)
+txt_loader = DirectoryLoader(
+    str(DATA_DIR),
+    glob=&quot;**/*.txt&quot;,
+    loader_cls=TextLoader,
+    loader_kwargs={&quot;encoding&quot;: &quot;utf-8&quot;},
+)
+
+docs = pdf_loader.load() + md_loader.load() + txt_loader.load()
+print(f&quot;Loaded {len(docs)} document fragments&quot;)
+print(&quot;Sample metadata:&quot;, docs[0].metadata)
+</code></pre>
+<p>PyPDFLoader returns one <code class='ic'>Document</code> per page and stamps <code class='ic'>source</code> and <code class='ic'>page</code> into metadata automatically. That metadata is gold — keep it. When the LLM later cites &quot;Article 335, Section 2,&quot; you want to be able to trace that back to a specific page of a specific file.</p>
+<blockquote class='callout'>
+<p>If your Markdown files have a strong heading structure (handbooks, RFCs, API docs), consider swapping <code class='ic'>TextLoader</code> for <code class='ic'>UnstructuredMarkdownLoader</code>, or pre-splitting with <code class='ic'>MarkdownHeaderTextSplitter</code>, so chunks respect section boundaries instead of cutting through them.</p>
+</blockquote>
+<h4>Step 2 — Chunking</h4>
+<p>Lecture 4 covered the theory; here is the practical default. For most prose and technical documentation, <strong><code class='ic'>RecursiveCharacterTextSplitter</code></strong> with a chunk size of around 800–1,000 characters and an overlap of about 10–15% works well enough to ship.</p>
+<pre><code>
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=150,
+    separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],
+    length_function=len,
+)
+
+chunks = splitter.split_documents(docs)
+print(f&quot;Split into {len(chunks)} chunks&quot;)
+print(&quot;First chunk preview:\n&quot;, chunks[0].page_content[:200])
+</code></pre>
+<p>The recursive splitter tries the separators in order: it first tries to split on blank lines, then single newlines, then sentence boundaries, then spaces, and only falls back to mid-word cuts as a last resort. That hierarchy is why it preserves semantic units better than a naive fixed-size splitter.</p>
+<p>Notice we used <code class='ic'>split_documents</code> rather than <code class='ic'>split_text</code>. That matters: <code class='ic'>split_documents</code> carries the parent document&#x27;s metadata onto every child chunk, so each chunk still knows which file and page it came from.</p>
+<h4>Step 3 — Embedding and storing</h4>
+<p>Now we vectorize the chunks and push them into Chroma. We point Chroma at a local directory so the index persists between runs — there is no need to re-embed every time the script starts.</p>
+<pre><code>
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+from dotenv import load_dotenv
+
+load_dotenv()
+
+embeddings = OpenAIEmbeddings(model=&quot;text-embedding-3-small&quot;)
+
+PERSIST_DIR = &quot;./chroma_db&quot;
+
+vector_store = Chroma.from_documents(
+    documents=chunks,
+    embedding=embeddings,
+    collection_name=&quot;rag_mvp&quot;,
+    persist_directory=PERSIST_DIR,
+)
+
+print(f&quot;Indexed {vector_store._collection.count()} chunks into Chroma&quot;)
+</code></pre>
+<p><code class='ic'>text-embedding-3-small</code> is a good default: 1,536 dimensions, cheap, and strong on English plus reasonable on other major languages including Korean. If you are working with mostly Korean content and want a stronger multilingual option, swap in a BGE-M3 or a multilingual-e5 model via <code class='ic'>HuggingFaceEmbeddings</code> — the rest of the pipeline does not change.</p>
+<blockquote class='callout'>
+<p>Run this script once when your data changes. Embedding costs money (or time, if local) — don&#x27;t re-embed on every query.</p>
+</blockquote>
+<h4>Step 4 — Retrieving</h4>
+<p>Querying is a one-liner once the index exists. We re-open the same persistent Chroma collection and turn it into a <strong>retriever</strong>.</p>
+<pre><code>
+# query.py
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+from dotenv import load_dotenv
+
+load_dotenv()
+
+embeddings = OpenAIEmbeddings(model=&quot;text-embedding-3-small&quot;)
+
+vector_store = Chroma(
+    collection_name=&quot;rag_mvp&quot;,
+    embedding_function=embeddings,
+    persist_directory=&quot;./chroma_db&quot;,
+)
+
+retriever = vector_store.as_retriever(
+    search_type=&quot;similarity&quot;,
+    search_kwargs={&quot;k&quot;: 4},
+)
+
+# Quick sanity check
+question = &quot;What does the policy say about expense reimbursement deadlines?&quot;
+hits = retriever.invoke(question)
+for i, doc in enumerate(hits, 1):
+    print(f&quot;--- Hit {i} (source: {doc.metadata.get(&#x27;source&#x27;)}) ---&quot;)
+    print(doc.page_content[:300])
+    print()
+</code></pre>
+<p>The <code class='ic'>k=4</code> says &quot;return the four most similar chunks.&quot; Two to six is the usual sweet spot: too few and you miss relevant context; too many and you drown the LLM in noise and burn tokens.</p>
+<blockquote class='callout'>
+<p>Before you wire up the LLM, <strong>always run this sanity check</strong>. Pick three or four questions where you already know the answer should come from a specific document. If the retriever isn&#x27;t surfacing the right chunks here, no amount of clever prompting downstream will save you. Fix retrieval first.</p>
+</blockquote>
+<h4>Step 5 — Prompt, LLM, and the full chain</h4>
+<p>Now we glue retrieval to generation. We want the LLM to answer <strong>only from the retrieved context</strong>, cite sources where it can, and admit when the context doesn&#x27;t contain the answer — the most important instruction in a RAG prompt, because it is the main lever against hallucination.</p>
+<p>We will assemble the pipeline using LangChain Expression Language (LCEL), which composes components with the <code class='ic'>|</code> operator and is the modern idiomatic style.</p>
+<pre><code>
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+
+llm = ChatOpenAI(model=&quot;gpt-4o-mini&quot;, temperature=0)
+
+prompt = ChatPromptTemplate.from_template(
+    &quot;&quot;&quot;You are a careful assistant that answers questions strictly from the provided context.
+
+Rules:
+- Use only the information in the context below.
+- If the answer is not in the context, say &quot;I don&#x27;t know based on the provided documents.&quot;
+- Quote short phrases verbatim when helpful and cite the source filename in parentheses.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:&quot;&quot;&quot;
+)
+
+def format_docs(docs):
+    formatted = []
+    for d in docs:
+        src = d.metadata.get(&quot;source&quot;, &quot;unknown&quot;)
+        page = d.metadata.get(&quot;page&quot;)
+        tag = f&quot;{src}&quot; + (f&quot;, p.{page+1}&quot; if page is not None else &quot;&quot;)
+        formatted.append(f&quot;[{tag}]\n{d.page_content}&quot;)
+    return &quot;\n\n---\n\n&quot;.join(formatted)
+
+rag_chain = (
+    {&quot;context&quot;: retriever | format_docs, &quot;question&quot;: RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
+
+answer = rag_chain.invoke(question)
+print(answer)
+</code></pre>
+<p>Read the chain definition out loud and it tells you exactly what happens: the question flows in; in parallel it goes to the retriever (which returns documents that <code class='ic'>format_docs</code> turns into a single context string) and straight through as the <code class='ic'>question</code> variable; the prompt is filled in; the LLM responds; the output parser strips it to a plain string.</p>
+<p><code class='ic'>temperature=0</code> makes the model deterministic, which is what you want for factual Q&amp;A. Higher temperatures are for creative writing, not for &quot;what does the policy say.&quot;</p>
+<p>The sequence below traces what actually happens on the wire for a single <code class='ic'>rag_chain.invoke(question)</code> call.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    autonumber
+    actor U as User
+    participant C as RAG chain (LCEL)
+    participant R as Retriever
+    participant E as Embedding API
+    participant V as Chroma store
+    participant P as Prompt template
+    participant L as LLM (gpt-4o-mini)
+
+    U-&gt;&gt;C: invoke(question)
+    C-&gt;&gt;R: forward question
+    R-&gt;&gt;E: embed(question)
+    E--&gt;&gt;R: query vector
+    R-&gt;&gt;V: similarity_search(vector, k=4)
+    V--&gt;&gt;R: top-4 chunks + metadata
+    R--&gt;&gt;C: documents
+    Note over C: format_docs joins chunks&lt;br/&gt;into a single context string
+    C-&gt;&gt;P: fill context + question
+    P--&gt;&gt;C: rendered prompt
+    C-&gt;&gt;L: chat completion
+    L--&gt;&gt;C: answer text
+    C--&gt;&gt;U: grounded answer with citations</div><figcaption>Lifecycle of a single RAG query</figcaption></figure>
+<p>Notice that the embedding call in step 3 must use the <em>same</em> model as the indexing pipeline used — that is the shared dependency the earlier diagram highlighted.</p>
+<h4>Step 6 — Running the MVP</h4>
+<p>Wrap it in a tiny REPL so you can poke at it:</p>
+<pre><code>
+if __name__ == &quot;__main__&quot;:
+    print(&quot;RAG MVP ready. Type &#x27;exit&#x27; to quit.\n&quot;)
+    while True:
+        q = input(&quot;You: &quot;).strip()
+        if q.lower() in {&quot;exit&quot;, &quot;quit&quot;}:
+            break
+        if not q:
+            continue
+        print(&quot;\nBot:&quot;, rag_chain.invoke(q), &quot;\n&quot;)
+</code></pre>
+<p>Run it:</p>
+<pre><code>
+python ingest.py   # one-time, or whenever your docs change
+python query.py    # interactive
+</code></pre>
+<p>That&#x27;s the whole MVP. Roughly seventy lines of real code, and it does end-to-end retrieval-augmented generation over your own documents.</p>
+<h4>A fully local variant with Ollama</h4>
+<p>If you cannot send data to a cloud API, the same skeleton runs on your laptop. Install [Ollama](https://ollama.ai), then pull a chat model and an embedding model:</p>
+<pre><code>
+ollama pull llama3.2
+ollama pull mxbai-embed-large
+pip install langchain-ollama
+</code></pre>
+<p>Swap two lines:</p>
+<pre><code>
+from langchain_ollama import OllamaLLM, OllamaEmbeddings
+
+embeddings = OllamaEmbeddings(model=&quot;mxbai-embed-large&quot;)
+llm = OllamaLLM(model=&quot;llama3.2&quot;)
+</code></pre>
+<p>Everything else — the loaders, splitter, Chroma store, retriever, prompt, chain — is unchanged. That swap-ability is the point of LangChain: the abstractions let you change <em>one component at a time</em> and isolate where quality changes are coming from.</p>
+<h4>Sanity-checking retrieval quality</h4>
+<p>You now have a running system, but &quot;running&quot; and &quot;good&quot; are not the same thing. A five-minute quality check goes a long way:</p>
+<p>1. <strong>Write a small eval set.</strong> Five to ten questions whose answers you already know, ideally covering different documents and different parts of each document.</p>
+<p>2. <strong>Inspect the retrieved chunks, not just the final answer.</strong> A correct-looking answer can still be a lucky guess if the retriever pulled the wrong chunks. Print the top-k for every test question and read them.</p>
+<p>3. <strong>Trace failures to a stage.</strong> If retrieval already missed, the LLM never had a chance — the fix is in chunking, embedding model, or <code class='ic'>k</code>. If retrieval was correct but the answer is wrong, the fix is in the prompt or the LLM.</p>
+<p>4. <strong>Vary one thing at a time.</strong> Change <code class='ic'>chunk_size</code> <em>or</em> <code class='ic'>k</code> <em>or</em> the embedding model — not all three at once — so you can attribute the improvement.</p>
+<p>5. <strong>Watch for the &quot;confidently wrong&quot; mode.</strong> If the model invents a number or a citation that isn&#x27;t in the context, your prompt&#x27;s &quot;say I don&#x27;t know&quot; instruction is being overridden. Tighten it, lower temperature, and consider re-ranking the retrieved chunks.</p>
+<blockquote class='callout'>
+<p>A useful diagnostic: ask a question whose answer is <em>deliberately</em> not in your documents. A healthy RAG MVP should say it doesn&#x27;t know. If it cheerfully makes something up, your guardrails need work before you show this to anyone.</p>
+</blockquote>
+<h4>Where to go next</h4>
+<p>You have a working baseline. The next natural improvements, in roughly the order they pay off, are:</p>
+<ul>
+<li><strong>Better chunking</strong> for your specific content type — Markdown-aware or code-aware splitters, larger chunks for long-form prose, smaller for FAQs.</li>
+<li><strong>Hybrid retrieval</strong> — combine vector similarity with BM25 keyword search for cases where exact terms matter (product names, error codes).</li>
+<li><strong>Re-ranking</strong> — fetch <code class='ic'>k=20</code> candidates and use a cross-encoder to re-score down to the top 4. Often a bigger quality jump than swapping the LLM.</li>
+<li><strong>Source citations in the UI</strong> — surface the <code class='ic'>metadata[&#x27;source&#x27;]</code> and page number alongside the answer so users can verify.</li>
+<li><strong>Lightweight evaluation</strong> — automate the eval set with a framework like RAGAS so you can tell whether changes actually help.</li>
+</ul>
+<p>But none of that matters until the basic loop works and you trust it. That loop is what this lecture gave you.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A RAG MVP is two pipelines around a shared vector store: an <strong>indexing</strong> pipeline (load → chunk → embed → store) you run when data changes, and a <strong>query</strong> pipeline (embed question → retrieve top-k → prompt → LLM) you run per request.</li>
+<li>LangChain&#x27;s components map directly onto those steps, so the code reads like the diagram: loader → splitter → embeddings → Chroma → retriever → prompt → LLM.</li>
+<li>Indexing and querying must use the <strong>same embedding model</strong>; mismatches silently destroy retrieval quality.</li>
+<li>The prompt&#x27;s most important job is to tell the LLM to answer <em>only</em> from the context and to say &quot;I don&#x27;t know&quot; otherwise — this is your primary defense against hallucinations.</li>
+<li>Always sanity-check retrieval (print the top-k) <strong>before</strong> blaming the LLM. Most &quot;bad RAG&quot; problems are retrieval problems.</li>
+<li>Start with cloud APIs (OpenAI + Chroma) for the cleanest first build; the same skeleton runs fully local by swapping in Ollama for the LLM and embedder.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Create a project folder called <code class='ic'>rag-mvp</code>, install the required packages, and write <code class='ic'>ingest.py</code> so that it loads all <code class='ic'>.pdf</code>, <code class='ic'>.md</code>, and <code class='ic'>.txt</code> files from a <code class='ic'>data/</code> sub-folder using LangChain document loaders. Print the total number of <code class='ic'>Document</code> fragments loaded and the metadata of the first one to confirm everything works.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>The loader class for PDFs is `PyPDFLoader`; for plain text and Markdown it is `TextLoader`. Both live in `langchain_community.document_loaders`.</li><li>Pass `loader_kwargs={&quot;encoding&quot;: &quot;utf-8&quot;}` when constructing `DirectoryLoader` for text files so non-ASCII characters in your documents don&#x27;t cause a decode error.</li><li>Call `loader.load()` on each of the three loaders and join the three lists with `+`. If `docs` is still empty, double-check that the files are actually inside the `data/` folder and that the glob patterns match their extensions.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># ingest.py
+from pathlib import Path
+from langchain_community.document_loaders import (
+    DirectoryLoader,
+    PyPDFLoader,
+    TextLoader,
+)
+
+DATA_DIR = Path(&quot;data&quot;)
+
+pdf_loader = DirectoryLoader(
+    str(DATA_DIR),
+    glob=&quot;**/*.pdf&quot;,
+    loader_cls=PyPDFLoader,
+)
+md_loader = DirectoryLoader(
+    str(DATA_DIR),
+    glob=&quot;**/*.md&quot;,
+    loader_cls=TextLoader,
+    loader_kwargs={&quot;encoding&quot;: &quot;utf-8&quot;},
+)
+txt_loader = DirectoryLoader(
+    str(DATA_DIR),
+    glob=&quot;**/*.txt&quot;,
+    loader_cls=TextLoader,
+    loader_kwargs={&quot;encoding&quot;: &quot;utf-8&quot;},
+)
+
+docs = pdf_loader.load() + md_loader.load() + txt_loader.load()
+print(f&quot;Loaded {len(docs)} document fragments&quot;)
+if docs:
+    print(&quot;Sample metadata:&quot;, docs[0].metadata)
+</code></pre>
+                <div class='exp2'><p>Each <code class='ic'>DirectoryLoader</code> is told (a) the root folder, (b) a glob pattern to select file types, and (c) which concrete loader class to delegate to. <code class='ic'>PyPDFLoader</code> returns one <code class='ic'>Document</code> per PDF page and automatically stamps <code class='ic'>source</code> and <code class='ic'>page</code> into <code class='ic'>metadata</code>. <code class='ic'>TextLoader</code> handles both <code class='ic'>.md</code> and <code class='ic'>.txt</code> because Markdown is plain text at the loader level. Concatenating the three <code class='ic'>.load()</code> results gives a single flat list regardless of how many files or file types exist in <code class='ic'>data/</code>. Printing <code class='ic'>metadata</code> of the first fragment lets you confirm the <code class='ic'>source</code> key is present — you will need that key for source citations later.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Continuing <code class='ic'>ingest.py</code>, split the loaded documents into chunks using <code class='ic'>RecursiveCharacterTextSplitter</code> (chunk size 1000, overlap 150), then embed the chunks with <code class='ic'>text-embedding-3-small</code> and persist them into a local Chroma collection called <code class='ic'>rag_mvp</code> at <code class='ic'>./chroma_db</code>. Print the total number of chunks indexed. Make sure the <code class='ic'>.env</code> file with <code class='ic'>OPENAI_API_KEY</code> is loaded before the embedding call.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>Use `splitter.split_documents(docs)` not `splitter.split_text(...)`. The former propagates metadata; the latter does not.</li><li>If `load_dotenv()` is called before `OpenAIEmbeddings(...)`, it will find the key in `.env` automatically. If you get an `AuthenticationError`, check that `.env` exists in the same folder where you run the script and that the key starts with `sk-`.</li><li>After running the script, you should see a `chroma_db/` directory appear in your project folder. If the directory exists but `_collection.count()` returns 0, the `from_documents` call likely failed silently — wrap it in a try/except and print the exception to diagnose.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># add to ingest.py (after the loading section from Task 1)
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
+from dotenv import load_dotenv
+
+load_dotenv()
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=1000,
+    chunk_overlap=150,
+    separators=[&quot;\n\n&quot;, &quot;\n&quot;, &quot;. &quot;, &quot; &quot;, &quot;&quot;],
+    length_function=len,
+)
+
+chunks = splitter.split_documents(docs)
+print(f&quot;Split into {len(chunks)} chunks&quot;)
+
+embeddings = OpenAIEmbeddings(model=&quot;text-embedding-3-small&quot;)
+
+PERSIST_DIR = &quot;./chroma_db&quot;
+
+vector_store = Chroma.from_documents(
+    documents=chunks,
+    embedding=embeddings,
+    collection_name=&quot;rag_mvp&quot;,
+    persist_directory=PERSIST_DIR,
+)
+
+print(f&quot;Indexed {vector_store._collection.count()} chunks into Chroma&quot;)
+</code></pre>
+                <div class='exp2'><p><code class='ic'>split_documents</code> (not <code class='ic'>split_text</code>) is the correct method here because it carries the parent document&#x27;s <code class='ic'>metadata</code> onto every child chunk. Without this, every chunk loses its <code class='ic'>source</code> and <code class='ic'>page</code> keys and you cannot cite sources later. The <code class='ic'>separators</code> list makes the splitter recursive: it tries blank lines first, then single newlines, then sentence-ending periods, then spaces, and only cuts mid-word as a last resort — this is what keeps semantic units intact. <code class='ic'>Chroma.from_documents</code> both creates the collection and writes all the vectors in one call; the <code class='ic'>persist_directory</code> argument tells Chroma to save to disk so you do not have to re-embed on every run. Run <code class='ic'>ingest.py</code> once, verify the count printed matches roughly (number of docs × average doc length / 1000), then do not run it again until your source documents change.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Create <code class='ic'>query.py</code>. Re-open the persisted Chroma collection, build a similarity retriever with <code class='ic'>k=4</code>, write a <code class='ic'>format_docs</code> helper that tags each retrieved chunk with its source file and page number, then assemble a full RAG chain using LCEL (<code class='ic'>|</code> operator) that goes: retriever → format_docs → prompt → LLM → StrOutputParser. Use the system prompt from the lecture that instructs the model to answer only from context and say &#x27;I don&#x27;t know&#x27; if the answer is absent. Finally, wrap the chain in a REPL loop so the user can type questions interactively.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>When re-opening an existing Chroma collection use `Chroma(collection_name=..., embedding_function=..., persist_directory=...)` — not `Chroma.from_documents`. The `from_documents` class method creates a new collection (or overwrites the existing one); the constructor opens an existing one.</li><li>In `format_docs`, `page` is 0-indexed when it comes from `PyPDFLoader`, so print it as `page + 1` to show the human-readable page number.</li><li>If `rag_chain.invoke(q)` raises a `KeyError` about `context` or `question`, check that your prompt template uses exactly those two variable names `{context}` and `{question}` and that the dict keys in the LCEL chain match them exactly.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># query.py
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_chroma import Chroma
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+from dotenv import load_dotenv
+
+load_dotenv()
+
+embeddings = OpenAIEmbeddings(model=&quot;text-embedding-3-small&quot;)
+
+vector_store = Chroma(
+    collection_name=&quot;rag_mvp&quot;,
+    embedding_function=embeddings,
+    persist_directory=&quot;./chroma_db&quot;,
+)
+
+retriever = vector_store.as_retriever(
+    search_type=&quot;similarity&quot;,
+    search_kwargs={&quot;k&quot;: 4},
+)
+
+def format_docs(docs):
+    formatted = []
+    for d in docs:
+        src = d.metadata.get(&quot;source&quot;, &quot;unknown&quot;)
+        page = d.metadata.get(&quot;page&quot;)
+        tag = f&quot;{src}&quot; + (f&quot;, p.{page + 1}&quot; if page is not None else &quot;&quot;)
+        formatted.append(f&quot;[{tag}]\n{d.page_content}&quot;)
+    return &quot;\n\n---\n\n&quot;.join(formatted)
+
+llm = ChatOpenAI(model=&quot;gpt-4o-mini&quot;, temperature=0)
+
+prompt = ChatPromptTemplate.from_template(
+    &quot;&quot;&quot;You are a careful assistant that answers questions strictly from the provided context.
+
+Rules:
+- Use only the information in the context below.
+- If the answer is not in the context, say \&quot;I don&#x27;t know based on the provided documents.\&quot;
+- Quote short phrases verbatim when helpful and cite the source filename in parentheses.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:&quot;&quot;&quot;
+)
+
+rag_chain = (
+    {&quot;context&quot;: retriever | format_docs, &quot;question&quot;: RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
+
+if __name__ == &quot;__main__&quot;:
+    print(&quot;RAG MVP ready. Type &#x27;exit&#x27; to quit.\n&quot;)
+    while True:
+        q = input(&quot;You: &quot;).strip()
+        if q.lower() in {&quot;exit&quot;, &quot;quit&quot;}:
+            break
+        if not q:
+            continue
+        print(&quot;\nBot:&quot;, rag_chain.invoke(q), &quot;\n&quot;)
+</code></pre>
+                <div class='exp2'><p>The LCEL chain <code class='ic'>{&quot;context&quot;: retriever | format_docs, &quot;question&quot;: RunnablePassthrough()} | prompt | llm | StrOutputParser()</code> executes as follows: the dict at the start is a <code class='ic'>RunnableParallel</code> — both branches run simultaneously. The left branch sends the question to the retriever, gets back a list of <code class='ic'>Document</code> objects, and pipes them through <code class='ic'>format_docs</code> to produce a context string. The right branch lets the raw question string pass through unchanged via <code class='ic'>RunnablePassthrough</code>. Both values are merged into a dict with keys <code class='ic'>context</code> and <code class='ic'>question</code>, which fills in the two placeholders in the prompt template. The completed prompt goes to the LLM; <code class='ic'>StrOutputParser</code> strips the AIMessage wrapper and returns a plain string. <code class='ic'>temperature=0</code> is essential for factual Q&amp;A: it makes the model deterministic and discourages creative fabrication. The <code class='ic'>format_docs</code> function adds <code class='ic'>[source, p.N]</code> tags before each chunk so the LLM can include proper citations in its answer and so you can trace any claim back to a page in a specific file.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Without changing any loader, splitter, Chroma, retriever, or prompt code, replace the OpenAI LLM and embeddings with Ollama equivalents (<code class='ic'>llama3.2</code> for the chat model, <code class='ic'>mxbai-embed-large</code> for embeddings). Create <code class='ic'>ingest_local.py</code> and <code class='ic'>query_local.py</code> by copying the originals and making only the two lines that differ. Delete the <code class='ic'>chroma_db/</code> folder before running <code class='ic'>ingest_local.py</code> so the new embedding vectors are stored in a clean collection. Verify the REPL still works and answers questions from your documents.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>Install `langchain-ollama` (`pip install langchain-ollama`) and make sure the Ollama daemon is running (`ollama serve`) before you run the scripts.</li><li>You must delete (or rename) the `chroma_db/` folder before running `ingest_local.py`. If the old OpenAI vectors are still there, the retriever will compare `mxbai-embed-large` query vectors against `text-embedding-3-small` document vectors and return meaningless results.</li><li>If `OllamaLLM` is not found, check your `langchain-ollama` version. In some versions the class is `ChatOllama` from `langchain_community.chat_models`. Both work; just make sure you import the right one and that the REPL call `rag_chain.invoke(q)` still returns a plain string.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># ingest_local.py  (only the changed lines shown; everything else is identical to ingest.py)
+# pip install langchain-ollama
+# ollama pull mxbai-embed-large
+
+from langchain_ollama import OllamaEmbeddings   # &lt;-- changed
+# ... (all loader and splitter code unchanged) ...
+
+embeddings = OllamaEmbeddings(model=&quot;mxbai-embed-large&quot;)  # &lt;-- changed
+
+# Chroma.from_documents call is unchanged
+
+
+# query_local.py  (only the changed lines shown; everything else is identical to query.py)
+# ollama pull llama3.2
+
+from langchain_ollama import OllamaEmbeddings, OllamaLLM  # &lt;-- changed
+
+embeddings = OllamaEmbeddings(model=&quot;mxbai-embed-large&quot;)  # &lt;-- changed
+llm = OllamaLLM(model=&quot;llama3.2&quot;)                         # &lt;-- changed
+
+# retriever, format_docs, prompt, rag_chain, and REPL are all unchanged
+</code></pre>
+                <div class='exp2'><p>This task makes the key architectural point concrete: LangChain&#x27;s abstractions let you swap one component at a time without touching the rest of the pipeline. The only things that must change together are the embedding model in <code class='ic'>ingest_local.py</code> and the embedding model in <code class='ic'>query_local.py</code> — they must stay in sync because vectors produced by <code class='ic'>mxbai-embed-large</code> live in a different geometric space than vectors produced by <code class='ic'>text-embedding-3-small</code>. Deleting <code class='ic'>chroma_db/</code> before re-ingesting ensures you are not mixing vectors from two different embedding models in the same collection (a silent but fatal mistake). The loaders, splitter, retriever, prompt template, and REPL are completely agnostic to which model produced the vectors — that is exactly why the abstraction exists.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 5. Run two targeted checks to verify the MVP is behaving correctly.</p>
+<p><strong>Check A — Retrieval sanity:</strong> Before invoking the full RAG chain, call <code class='ic'>retriever.invoke(question)</code> directly with a question whose answer you know comes from a specific document. Print all returned chunks (source, page, first 300 characters). Confirm that at least one of the top-4 chunks comes from the expected document.</p>
+<p><strong>Check B — Guardrail test:</strong> Ask the RAG chain a question whose answer is deliberately <em>not</em> in any of your documents (e.g., &#x27;What is the boiling point of nitrogen?&#x27;). The expected response is a variant of &#x27;I don&#x27;t know based on the provided documents.&#x27; If the chain instead fabricates an answer, identify which part of the prompt controls this and suggest one concrete fix.</p></div>
+              
+              <details><summary>Hint</summary><ul><li>For Check A, pick a question with a specific, verifiable answer — a policy number, a product name, a date — rather than a vague topic question. Specific questions make it immediately obvious whether the right chunk was retrieved.</li><li>For Check B, choose a question that is common world knowledge but genuinely absent from your documents. &#x27;What is the boiling point of nitrogen?&#x27; is good because no business document is likely to contain it, so any answer the model gives must be fabricated from training data.</li><li>If the guardrail fails (model answers from world knowledge), wrap the &#x27;I don&#x27;t know&#x27; instruction in a separate `SystemMessage` using `ChatPromptTemplate.from_messages([(&#x27;system&#x27;, &#x27;...&#x27;), (&#x27;human&#x27;, &#x27;{context}\n\nQuestion: {question}&#x27;)])`. System-role instructions carry more weight than instructions embedded in the human turn.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Check A — example output interpretation (actual output depends on your data)
+# If the retriever returns 4 chunks and at least 1 comes from the file you expect,
+# retrieval is working. If none match, the issue is likely:
+#   - chunk_size too large (relevant text is buried inside a big chunk)
+#   - wrong embedding model used at ingest time vs query time
+#   - k is too small (try k=6 or k=8 temporarily)
+
+hits = retriever.invoke(test_question_a)
+for i, doc in enumerate(hits, 1):
+    print(f&quot;--- Hit {i} (source: {doc.metadata.get(&#x27;source&#x27;)}, page: {doc.metadata.get(&#x27;page&#x27;)}) ---&quot;)
+    print(doc.page_content[:300])
+    print()
+
+# Check B — expected output:
+# &quot;I don&#x27;t know based on the provided documents.&quot;
+#
+# If the model instead answers correctly from world knowledge, the guardrail is leaking.
+# Concrete fixes:
+#   1. Make the instruction more explicit:
+#      &quot;Do NOT use any knowledge from your training data.
+#       If the answer is absent from the context, say exactly:
+#       &#x27;I don&#x27;t know based on the provided documents.&#x27;&quot;
+#   2. Add a second enforcement sentence:
+#      &quot;Treat the context as your only source of truth.&quot;
+#   3. Use a system message (ChatPromptTemplate with SystemMessage) instead of
+#      embedding the rule in the human turn — LLMs tend to follow system-role
+#      instructions more reliably.
+
+response_b = rag_chain.invoke(test_question_b)
+print(&quot;Guardrail test response:&quot;, response_b)
+# A passing result: the response contains &#x27;don&#x27;t know&#x27; or &#x27;not in the&#x27; etc.
+# A failing result: the model states the boiling point (-195.8 °C) from training data.
+</code></pre>
+                <div class='exp2'><p>Running retrieval in isolation (Check A) before blaming the LLM is the single most important diagnostic habit in RAG development. The lecture states it directly: &#x27;If the retriever isn&#x27;t surfacing the right chunks here, no amount of clever prompting downstream will save you. Fix retrieval first.&#x27; Printing the top-k chunks lets you confirm the signal is present before you even involve the LLM. Check B tests the &#x27;confidently wrong&#x27; failure mode: a RAG system that ignores the context restriction and draws on parametric (training-time) knowledge will hallucinate on questions that are in its training data but not in your documents. The fix is always in the prompt — either by making the restriction sentence more explicit, adding a second reinforcing sentence, or moving the rule to the system role where models tend to obey it more reliably. <code class='ic'>temperature=0</code> reduces but does not eliminate this risk, which is why the prompt instruction is the primary guardrail.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=E4l91XKQSgw' target='_blank'>How to Build a Local AI Agent With Python (Ollama, LangChain &amp; RAG)</a></li><li><a href='https://www.youtube.com/watch?v=cDn7bf84LsM' target='_blank'>LangChain RAG: Optimizing AI Models for Accurate Responses</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

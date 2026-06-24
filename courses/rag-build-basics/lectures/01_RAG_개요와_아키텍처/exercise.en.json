@@ -1,0 +1,61 @@
+{
+  "lecture_no": 1,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "A customer-support chatbot built on a bare LLM confidently tells a user that a discontinued government loan product is still available, even though it was removed from the program six months ago. Which LLM failure mode is primarily at work here, and what does RAG do differently to prevent it?",
+      "choices": [
+        "Catastrophic forgetting — RAG periodically retrains the model on new data to keep weights current.",
+        "Hallucination caused by stale knowledge — RAG retrieves up-to-date passages at query time so the LLM answers from current evidence instead of frozen memory.",
+        "Context-window overflow — RAG compresses documents before sending them to the model, reducing the chance of outdated tokens being included.",
+        "Prompt injection — RAG sanitises user input before it reaches the LLM, preventing the model from being misled by malicious queries."
+      ],
+      "answer": 1,
+      "explanation": "The bot is not lying deliberately; it simply has no information beyond its training cutoff. This is stale knowledge leading to hallucination — the model produces a confident but wrong answer because the facts changed after training. RAG solves this by retrieving current documents (e.g., the updated loan programme page) at query time and asking the LLM to answer based only on those passages. Options A, C, and D describe unrelated mechanisms: retraining model weights, compressing tokens, and input sanitisation respectively have nothing to do with grounding answers in fresh retrieved evidence."
+    },
+    {
+      "question": "In a RAG pipeline, a user question is embedded, the top-k chunks are fetched from the vector database, those chunks are inserted into a structured prompt, and finally the LLM writes the answer. Which stage of the RAG architecture is responsible for inserting the retrieved passages into the prompt before the LLM receives it?",
+      "choices": [
+        "Retrieval, because it selects which chunks are relevant to the query.",
+        "Generation, because the LLM implicitly decides which context to attend to.",
+        "Augmentation, because it stitches the raw retrieved evidence into the prompt template that grounds the LLM's response.",
+        "Indexing, because documents are embedded and stored with their metadata during this offline phase."
+      ],
+      "answer": 2,
+      "explanation": "Retrieval finds the relevant chunks; it does not modify the prompt. Generation is the LLM producing the final answer, which happens after the prompt is already built. Indexing is the offline preprocessing step (loading, chunking, embedding, storing) that happens once per document — it is not part of the live query path at all. Augmentation is the middle stage whose sole job is to take the raw retrieved evidence and assemble it into the structured prompt (with instructions such as 'use only the following sources') that tells the LLM what to reason about."
+    },
+    {
+      "question": "An engineer runs a RAG system on a large internal codebase. During a demo, the system confidently answers a question about a deprecated API with information that sounds plausible but is actually from an unrelated module. The correct answer exists in the database, but the retriever ranked it 15th out of 500 chunks and the system only passes the top 5 to the LLM. What is the technical name for this failure pattern, and why is it especially dangerous?",
+      "choices": [
+        "Catastrophic forgetting — the model's weights were overwritten during fine-tuning, erasing knowledge of the relevant module.",
+        "Context dilution — the context window is too large, causing the model to ignore relevant tokens in the middle.",
+        "Silent failure — the correct chunk exists in the store but was not retrieved, so the model generates a confident but incomplete answer with no external signal that something was missed.",
+        "Embedding drift — the embedding model produces different vectors for the same text on each run, making similarity scores unreliable."
+      ],
+      "answer": 2,
+      "explanation": "Catastrophic forgetting applies to fine-tuning, not retrieval. Context dilution is a concern with very long prompts, but here the prompt is short (only 5 chunks). Embedding drift is not a standard failure mode described in this lecture. Silent failure is the correct term: the right information is in the database, but the retriever failed to rank it highly enough, so it never entered the context window — and the LLM has no way to signal that it is working with incomplete evidence. This is why most production RAG engineering effort goes into improving retrieval (better chunking, reranking, hybrid search) rather than the generation step."
+    },
+    {
+      "question": "A startup has a 300-page legal contract (roughly 150,000 tokens) that changes once a year. They need the LLM to perform deep cross-section reasoning — spotting conflicts between clauses spread across many pages. Which approach is most appropriate, and why?",
+      "choices": [
+        "RAG, because it is always cheaper than long-context processing regardless of document size.",
+        "Long-context (full document in the prompt), because the data set is small and bounded and the task requires cross-document reasoning that RAG's snippet-based retrieval would fragment.",
+        "Fine-tuning, because the model needs to memorise the contract's clauses in its weights for reliable cross-reference.",
+        "RAG with top-k = 150 chunks, because increasing k to cover the full document gives the same result as long context at lower cost."
+      ],
+      "answer": 1,
+      "explanation": "The lecture's rule of thumb is: 'bounded data, deep reasoning → long context; unbounded data, fact lookup → RAG.' A 300-page contract is bounded and static (updated yearly), and the task — finding cross-clause conflicts — requires the model to see the full picture, which RAG's top-k snippets would fragment. Option A is false: long context is actually cheaper per-query when the corpus is small and stable (especially with prompt caching). Option C (fine-tuning) bakes knowledge into weights and would require retraining each time the contract is amended. Option D is practically equivalent to long context but inverts the cost advantage by adding retrieval overhead; it also does not change the core reasoning limitation of RAG."
+    },
+    {
+      "question": "A legal-tech company wants to build an AI assistant that: (1) always cites the exact regulation or case law it relied on, (2) updates its knowledge base daily as new rulings are published, and (3) responds in the firm's formal house style with specific document-template formatting. Which combination of techniques best addresses all three requirements?",
+      "choices": [
+        "Prompt engineering only — well-crafted few-shot examples can teach the model to cite sources, adopt a formal tone, and stay current.",
+        "Fine-tuning only — training on the firm's document corpus will embed citations, style, and up-to-date knowledge simultaneously.",
+        "RAG for fresh facts and citations + fine-tuning for house style + prompt engineering for template formatting.",
+        "RAG only — once retrieval is accurate, the LLM can naturally adopt any style and format the application needs."
+      ],
+      "answer": 2,
+      "explanation": "Requirement 1 (citations) and Requirement 2 (daily-updated knowledge) are squarely in RAG's wheelhouse: retrieved chunks carry metadata for citations, and adding new rulings is as simple as re-embedding the new files. Requirement 3 (formal house style + structured templates) is exactly what fine-tuning is designed for — baking a stable behaviour into the model weights — combined with prompt engineering for precise format control. Option A fails because prompt engineering cannot add knowledge the model does not have (new daily rulings). Option B fails because fine-tuning cannot keep pace with daily knowledge changes without continuous expensive retraining, and knowledge can be lost via catastrophic forgetting. Option D fails because RAG alone does not change the model's default writing style or enforce document templates. The lecture explicitly states the three approaches 'compose well' and real systems often use all three in proportion."
+    }
+  ]
+}

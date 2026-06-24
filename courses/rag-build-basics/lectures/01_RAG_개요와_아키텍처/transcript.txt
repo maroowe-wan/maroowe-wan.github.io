@@ -1,0 +1,138 @@
+## Video 1: Is RAG Still Needed? Choosing the Best Approach for LLMs
+https://www.youtube.com/watch?v=UabBYexBD4k
+
+There's a fundamental truth about LLMs, large language models. They are frozen in time. They know everything about our world up until their training cutoff date and absolutely nothing about what happened 5 minutes ago. Nor do they know anything about your private data, your internal wikis, your proprietary codebase. And if we do want an LLM to know any of that stuff, well, we have to solve the problem of context injection. How do we get the right data into the model at the right time?
+
+And there have been two very different ways to handle this. Now, the first is really what we can think of as the engineering approach. It's RAG, retrieval augmented generation. So here we've got an LLM and we've also got an input prompt from the user. Now ahead of time we take some of the documents that we want to give to this LLM. So these are documents that could be PDFs or code files or entire books and we chunk them. We break them up into smaller chunks and we pass them through to an embedding model and the embedding model takes those chunks and it turns them into vectors and those vectors are then stored in a dedicated vector database.
+
+Now when a user asks a question, it performs a semantic search to retrieve the most relevant chunks and then inject them into the context window. So now the context window has the user prompt, but it also has all of these chunks that we have taken from the vector database and together this forms the context window. Now this works but it does rely on something. It relies on the hope that your retrieval logic actually found the right information in the vector database.
+
+Now the second approach is really a bit more of a brute force approach and that one is called long context. Now this is really the model native solution because you skip the database here and you skip the embedding model. All you do is you take your documents and you just well you put them straight into the context window and then you let the model's attention mechanism actually do the heavy lifting of finding the answer. Now for a long time this kind of brute force method wasn't really much of an option because initially context windows were tiny. Early LLMs had context windows that could maybe store what like 4K of tokens. You couldn't fit a novel in there, let alone a corporate knowledge base. You basically had to use RAG.
+
+But today's models have much larger context windows. Some of them have, you know, a million tokens plus. And to put that into perspective, a million tokens is roughly 700,000 words, and you could fit the entire Lord of the Rings series into the prompt and still have room for The Hobbit. So this massive jump in capacity forces us to ask a difficult question about our architecture. Because if we can simply command A, command C, command V, all of our documentation into the models context window, do we really need the overhead of embedding models and vector data stores? Is RAG becoming an unnecessary complexity layer?
+
+Well, if we accept that we can fit whatever data we need into the context window, then the argument for doing so basically boils down to one word: simplicity. And let me give you three reasons why stuffing the context window directly may indeed be the way to go.
+
+Reason number one is collapsing the infrastructure. A production RAG system well, it is quite heavy. You need a chunking strategy which is like fixed size maybe or sliding window or recursive. You decide. You're going to need a embedding model to encode the data. You need a vector database to store it. You're going to need a reranker to sort the results. You need to keep all the vectors in sync with your source data. It's basically a lot of moving parts, a lot of places for things to break. And long context offers what we might call well just simply the no stack stack. You remove the database, you remove the embeddings, you remove the retrieval logic. The architecture simplifies down to getting the data and just well sending it to the model.
+
+Reason number two is the retrieval lottery. Now, RAG introduces a critical point of failure here, the retrieval step itself, because when a user asks a question, RAG looks at mathematical representations of the data, which are stored in vectors. And vectors are basically just like a really long series of numbers in an array. And it tries to find the closest match. That's semantic search. But semantic search is probabilistic and for all manner of reasons, the retrieval might fail to find the relevant document. And we actually have a name for this. It's called silent failure. The answer well, it existed in the data, but the LLM never saw it because the retrieval step didn't return the right results. With long context, there is no retrieval step. The model gets to see everything.
+
+Reason number three that is well, I think we're going to call this the whole book problem. A RAG is fundamentally designed to retrieve what exists. It relies on finding a semantic match between your query and a specific snippet of text in your database. But what if the answer lies in what's not in the database? So, so let's say you have a set of product requirements stored as a document and you've also got a set of release notes stored as a document and then we ask which security requirements were omitted from the final release.
+
+Now using RAG when you query for omitted security requirements the vector search looks for chunks discussing well security and requirements. It retrieves snippets from the requirements doc. It retrieves snippets from the release notes, but it cannot retrieve the gap between them. And because RAG only shows the model a few isolated snapshots, the model never sees the full picture required to spot the missing pieces. The model really needs both of these documents in full to perform the comparison, which is exactly what long context does by dumping the whole book, the full requirements doc and the full release notes into the context window.
+
+So, is RAG dead? Is the vector database destined for the museum of things we needed in 2024? Well, not quite because while long context wins on simplicity, RAG still has a place. And I got another three reasons to support that.
+
+Reason number one is the rereading text. Now, long context creates a massive compute inefficiency. So, if we take a manual, let's say this is like a 500 page manual, and we've got to turn this into tokens. Well, that's something like 250k of tokens. And we need to do that every time we make a user query and we put this document in the prompt. You're basically requiring the model to process that manual every time. Now, RAG also has to process that manual, but it only pays that processing cost once at indexing time. Now, prompt caching that can partially offset some of this for static data, but for dynamic data streams where content changes frequently, you are stuck paying the full tax on every request.
+
+Reason number two is the needle in the haystack problem. Now, there's a an intuitive assumption that if data is in the context window, the model's probably going to use it, but research suggests otherwise. Because as we start with a context window and then it grows and it continues to grow and now we're at like 500,000 tokens, well, the model's attention mechanism can get a bit diluted. If you ask a specific question about a single paragraph that's buried in, let's say, the middle of a 2,000 page document, well, the model often fails to retrieve it or it hallucinates details from the surrounding text. But with RAG, we're giving the model less noise. So by retrieving, say only the top five relevant chunks, RAG has removed the haystack and presents the model with just the needles. It forces the model to focus on the signal and not the noise.
+
+And then reason number three, well that is the infinite data set. Now a context window of millions of tokens sounds great but in the scheme of enterprise data that's really just a drop in the bucket. I mean an enterprise data lake that's probably measured in terabytes or or maybe even petabytes. So if you want an infinite data set that stores everything, you really do need to have a retrieval layer to filter information down to something that fits into the LLM context window.
+
+So where does this leave us? Well, if your problem involves a bounded data set and requires complex global reasoning like analyzing a specific legal contract or summarizing a book, I think long context is the way to go. It simplifies the stack and it improves the reasoning. But if you're navigating the infinite data set of enterprise knowledge, the vector database remains the only viable warehouse for your data. But how about you? Are you team long context, team RAG, maybe a bit of both? Let me know in the comments.
+
+
+## Video 2: RAG vs Fine-Tuning vs Prompt Engineering: Optimizing AI Models
+https://www.youtube.com/watch?v=zYGDpG-pTho
+
+Remember how back in the day people would Google themselves, you type your name into a search engine and you see what it knows about you? Well, the modern equivalent of that is to do the same thing with a chatbot. So when I ask a large language model, who is Martin Keen? Well, the response varies greatly depending upon which model I'm asking, because different models, they have different training data sets, they have a different knowledge cutoff dates. So what a given model knows about me, well, it differs greatly.
+
+But how could we improve the model's answer? Well, there's three ways. So let's start with a model here, and we're gonna see how we can improve its responses.
+
+Well, the first thing it could do is it could go out and it could perform a search, a search for new data that either wasn't in its training data set, or it was just data that became available after the model finished training, and then it could incorporate those results from the search back into its answer. That is called RAG or Retrieval Augmented Generation. That's one method. Or we could pick a specialized model, a model that's been trained on, let's say, transcripts of these videos. That would be an example of something called fine tuning. Or we could ask the model a query that better specifies what we're looking for. So maybe the LLM already knows plenty about the Martin Keens of the world, but let's tell the model that we're referring to the Martin keen who works at IBM, rather than the Martin Keen that founded Keen Shoes. That is an example of prompt engineering.
+
+Three ways to get better outputs out of large language models, each with their pluses and minuses. Let's start with RAG. So let's break it down. First there's retrieval. So retrieval of external up-to-date information. Then there's augmentation. That's augmentation of the original prompt with the retrieved information added in. And then finally there's generation. That's generation of a response based on all of this enriched context.
+
+So we can think of it like this. So we start with a query and the query comes in to a large language model. Now, what RAG is gonna do is it's first going to go searching through a corpus of information. So we have this corpus here full of some sort of data. Now, perhaps, that's your organization's documents. So it might be spreadsheets, PDFs, internal wikis, you know, stuff like that. But unlike a typical search engine that just matches keywords, RAG converts both your question, the query, and all of the documents into something called vector embeddings. So these are all converted into vectors, essentially turning words and phrases into long lists of numbers that capture their meaning.
+
+So when you ask a query like, what was our company's revenue growth last quarter? Well, RAG will find documents that are mathematically similar in meaning to your question, even if they don't use the exact same words. So it might find documents mentioning fourth quarter performance or quarterly sales. Those don't contain the keyword revenue growth, but they are semantically similar.
+
+Now, once RAG finds the relevant information, it adds this information back into your original query before passing it to the language model. So instead of the model just kind of guessing based on its training data, it can now generate a response that incorporates your actual facts and figures. So this makes RAG particularly valuable when you are looking for information that is up to date, and it's also very valuable when you need in to add in information that is domain specific as well.
+
+But there are some costs to this. One cost would be the cost of performance for performing all of this, because you have this retrieval step here, and that adds latency to each query compared to a simple prompt to a model. There are also costs related to just kind of the processing of this as well. So if we think about what we're having to do here, we've got documents that need to be vector embeddings, and we need to store these vector embedding in a database. All of this adds to processing costs, it adds to infrastructure costs to make this solution work.
+
+All right, next up, fine tuning. So remember how we discussed getting better answers about me by training a model specifically on, let's say, my video transcripts. Well, that is fine tuning in action. So what we do with fine tuning is we take a model, but specifically an existing model and that existing model has broad knowledge. And then we're gonna give it additional specialized training on a focused data set. So this is now specialized to what we want to develop particular expertise on.
+
+Now, during fine tuning, we're updating the model's internal parameters through additional training. So the model starts out with some weights here, like this, and those weights were optimized during its initial pre-training. And as we fine tune, we're making small adjustments here to the model's weights using this specialized data set. So this is being incorporated.
+
+Now this process typically uses supervised learning where we provide input-output pairs that demonstrate the kind of responses we want. So for example, if we're fine-tuning for technical support, we might provide thousands of examples of customer queries, and those would be paired with correct technical responses. The model adjusts its weights through back propagation to minimize the difference between its predicted outputs and the targeted responses. So we're not just teaching the model new facts here, we're actually modifying how it processes information. The model is learning to recognize domain-specific patterns.
+
+So, fine-tuning shows its strength when you particularly need a model that has very deep domain expertise. That's what we can really add in with fine tuning, and also, it's much faster, specifically at inference time. So when we are putting the queries in, it's faster than RAG because it doesn't need to search through external data, and because the knowledge is kind of baked into the model's weights, you don't need to maintain a separate vector database.
+
+But there's some downsides as well. Well, there's certainly issues here with the training complexity of all of this. You're going to need thousands of high quality training examples. There are also issues with computational cost. The computational cost for training this model can be substantial and is going to require a whole bunch of GPUs. And there's also challenges related to maintenance as well because unlike RAG where you can easily add new documents to your knowledge base at any point, updating a fine-tune model requires another round of training and then perhaps most importantly of all there is a risk of something called catastrophic forgetting. Now that's when the model loses some of its general capabilities while it's busy learning these specialized ones.
+
+So finally let's explore prompt engineering. Now specifying Martin Keen who works at IBM versus Martin Keene who founded Keene Shoes, that's prompt engineering, but at its most basic. Prompt engineering goes far beyond simple clarification.
+
+So let's think about when we input a prompt, the model receives this prompt and it processes it through a series of layers, and these layers are essentially tension mechanisms and each one focuses on different aspects of your prompt text that came in. And by including specific elements in your prompt, so examples or context or how you want the format to look, you're directing the model's attention to relevant patterns it learned during training. So for example, telling a model to think about this step-by-step, that activates patterns it learnt from training data where methodical reasoning led to accurate results.
+
+So a well-engineered prompt can transform a model's output without any additional training or without data retrieval. So take an example of a prompt. Let's say we say, is this code secure? Not a very good prompt. An engineered prompt, it might read a bit more like this. It's much more detailed. Now we haven't changed the model, we haven't added new data, we've just better activated its existing capabilities.
+
+Now I think the benefits to this are pretty obvious. One is that we don't need to change any of our back-end infrastructure here because there are no infrastructure changes at all in order to prompt better, it's all on the user. There's also the benefit that by doing this, you get to see immediate responses and immediate results to what you do. We don't have to add in new training data or any kind of data processing.
+
+But of course there are some limitations to this as well. Prompt engineering is as much an art as it is a science. So there is certainly a good amount of trial and error in this sort of process to find effective prompts, and you're also limited in what you can do here, you're limited to existing knowledge because you're not able to actually add anything else in here. No additional amount of prompt engineering is going to teach it truly new information. You're not going to the model anything that's outdated in the model.
+
+So we've talked about now RAG as being one option and we talked about fine tuning as being another one. And now, just now, we've talked about prompt engineering as well and I've really talked about those as three different distinct things here, but they're commonly used actually in combination. We might use all three together. So consider a legal AI system. RAG, that could retrieve specific cases and recent court decisions. The prompt engineering part, that could make sure that we follow proper legal document formats by asking for it. And then fine-tuning, that can help the model master firm-specific policies.
+
+I mean, basically, we can think of it like this. We can think that prompt engineering offers flexibility and immediate results, but it can't extend knowledge. RAG, that can extend knowledge, it provides up-to-date information, but with computational overhead. And then fine-tuning, that enables deep domain expertise, but it requires significant resources and maintenance. Basically, it comes down to picking the methods that work for you. You know, we've, we sure come a long way from vanity searching on Google.
+
+
+## Video 3: RAG 누구든지 이해시켜 드릴게요! | AI 필수 지식
+https://www.youtube.com/watch?v=ucH_N3jPQ0E
+
+ChatGPT와 같은 이런 LLM들은 거의 대부분의 문제는 잘 해결해 주지만 몇 가지의 한계점으로 인해서 해결해 주지 못하는 그런 문제도 있습니다.
+
+이번 영상에서는 RAG라는 프레임워크를 통해서 LLM의 이런 문제점들을 해결하는 방식을 설명을 해드리려고 하는데요. 이 RAG가 뭔지 궁금하시거나 프롬프트 엔지니어링 다음 스텝으로 LLM을 좀 더 효율적으로 활용해보고 싶으신 분들은 이번 영상을 끝까지 시청해 주세요. 정말 누구든지 이해하기 쉽게 영상을 준비했습니다.
+
+RAG라는 것은 Retrieval-Augmented Generation이라는 단어인데요. 한국어로 설명하자면은 검색 증강 생성이라는 의미입니다.
+
+먼저 이 검색 증강과 생성을 나누어서 일단 생성 부분부터 설명해드리도록 하겠습니다. 프롬프트라는 것을 작성을 해 가지고 질문을 하게 되잖아요. 그러면 그 해당 LLM은 프롬프트라는 것으로 답변을 생성해서 응답으로 텍스트를 저희에게 전달시켜 주게 됩니다. 이게 바로 이 제너레이션이라는 것이고요.
+
+하지만 제가 초반 영상에서 말씀드린 것처럼 항상 모든 답변에서 정답을 얘기해 주는 것은 아닙니다. 대부분은 정답을 얘기해 주지만 가끔은 의도치 않은 그런 답변이 나오기도 하거든요.
+
+그 문제점에 대해서 여러분들이 이해가 가기 쉽게 제가 얼마 전에 친구와 나눴던 이야기를 예시로 들어드리면서 설명을 해드리도록 하겠습니다.
+
+얼마 전에 제 친구가 저한테 물었거든요. 이제 집을 사야 되는데 정부에서 나온 저금리 대출 아는 게 있냐. 이렇게 물어봤습니다. 그래서 저는 예전에 기사에서 봤던 게 생각나가지고 특례보금자리론이라는 것을 친구에게 추천을 해 줬거든요. 그러니까 친구에게 예전에 내가 기사에서 봤는데 그 특례보금자리론이라는 게 굉장히 금리도 낮고 좋다더라라고 이렇게 답변을 했습니다.
+
+그런데 사실 제 답변에서 몇 가지 문제점들이 있습니다. 문제는 최신 정보의 부재입니다. 기사를 본 게 이번 년도가 아니고 작년에 봤었거든요. 그래서 이 대출이 지금은 변경되었을 수도 있습니다. 실제로 이 특례보금자리론이라는 것은 24년 1월 29일에 폐지가 되었고 1월 30일부터 보금자리론이라는 것으로 변경이 되었습니다.
+
+그리고 두 번째 문제는 출처의 부정확함입니다. 제가 이제 기사에서 봤다고 얘기를 해 주긴 했지만 작년에 봤던 기사가 어떤 기사인지도 잘 생각이 안 나고 기사 자체도 믿을만한 기사인지 제가 증명할 방법이 없습니다.
+
+이 두 가지 문제점은 LLM에서도 동일하게 발생되는 그런 문제점인데요. 그러니까 LLM이 풀어야 할 도전 과제입니다.
+
+만약에 제가 친구에게 답변을 주기 전에 이 보도자료나 금융기관 웹사이트를 참고를 했다면 어떻게 됐을까요. 그러면은 특례보금자리론이 아니라 새롭게 개편된 보금자리론이라고 정확하게 답변을 해 줄 수가 있게 되었을 겁니다. 그리고 이 보금자리론이라는 답변은 제가 보도자료에서 찾아보고 답변을 한 그런 답변이기 때문에 출처를 명확하게 제시를 해줄 수도 있겠죠. 굉장히 믿을만한 답변이라고 할 수가 있습니다.
+
+자 그럼 제가 지금까지 말씀드린 이 예시 문제를 통해서 실제 LLM에서는 어떻게 이게 동작을 하는지를 설명을 해드리도록 할게요.
+
+만약에 같은 질문에 대해서 유저가 LLM에게 질문을 한다고 가정해 보겠습니다. 이렇게 사용자가 저금리 대출을 추천해줘라고 질문을 하게 되면은 LLM은 자기가 학습한 지식 내부에서 저금리 대출에 대한 정보를 사용자에게 전달해 주게 될 것입니다. 근데 여기서 이 LLM은 작년에 학습이 되었다고 가정해 볼게요. 특례보금자리론이라는 상품을 답변을 해주게 될 겁니다. 하지만 이건 이미 개편되고 사라진 그런 대출 상품이었죠.
+
+그렇지만 이 LLM은 사용자가 눈치채지도 못하게 이 특례보금자리론에 대한 답변을 굉장히 그럴싸하게 답변을 해주게 됩니다. 우리는 그 정보가 진짜인지 가짜인지 눈치채기가 굉장히 힘들어 지겠죠. 이런 현상을 할루시네이션 현상이라고 합니다.
+
+그래서 우리는 이런 문제를 해결하기 위해서 이 검색 증강이라는 프레임워크를 적용을 시켜야 됩니다.
+
+검색 증강이라는 것을 적용시키려면 추가적인 지식을 학습시킬 수 있는 그런 데이터베이스를 하나 추가를 시켜줘야 되는데요. 그 데이터베이스를 벡터 데이터베이스라고 부르게 됩니다.
+
+이 벡터 데이터베이스에는 여러 가지 다큐먼트들이 들어가게 되거든요. 이 다큐먼트는 굉장히 퍼블릭하게 공개되어 있는 인터넷상에 막 돌아다니는 그런 데이터일 수도 있고 아니면 나만 알고 있는 정보, 우리 회사에서만 쓰고 있는 정보, 그런 프라이빗한 정보일 수도 있습니다.
+
+아무튼 이렇게 벡터 데이터베이스를 추가를 시키고 이 데이터베이스에 학습시킬 그런 다큐먼트들을 임베딩 벡터라는 것으로 저장을 시켜 주게 됩니다.
+
+유저가 이렇게 동일한 질문을 했을 때 LLM이 바로 답변 하는게 아니라 벡터 데이터베이스에 한번 검색이라는 것을 하게 됩니다. 그리고 그 벡터 데이터베이스에 이 저금리 대출에 대한 검색 결과가 있다면 그 결과를 가지고 LLM에게 전달을 시켜 주고 LLM은 유저에게 벡터 데이터베이스에서 나온 결과를 답변해 주게 됩니다. 그러면 여기서는 이 보금자리론이라는 것을 답변을 해주게 되겠죠.
+
+전체적인 타임라인을 한번 정리를 시켜 드리도록 하겠습니다. 먼저 이 검색 증강을 적용시킨 게 아니고 단순히 생성 모델을 사용한다고 한다면 이 유저는 프롬프트라는 것을 작성을 해서 질문을 하게 되겠죠. 그러면 LLM은 이미 학습된 데이터에서 답변을 해 주게 됩니다. 이게 바로 일반적인 제너레이션 모델의 동작 방식이구요.
+
+하지만 저희가 RAG 프레임워크를 사용한다고 하면은 생성 모델은 인스트럭션, 즉 지시 사항을 전달해 주게 됩니다. 이 지시사항에는 이런 내용들이 포함이 됩니다. DB를 먼저 검색하고 유저 프롬프트와 결합해서 답변해라는 이런 지시사항을 인스트럭션에다가 넣어주게 됩니다.
+
+이렇게 지시사항을 작성해주면은 LLM 기존에 알고 있던 정보 내에서만 답변하는 게 아니라 새롭게 추가된 데이터베이스를 먼저 검색을 하게 되고 그리고 나서 이 유저의 질문이 담긴 프롬프트와 결합을 시켜서 이렇게 되면 이제는 학습된 데이터에서 답변하는 게 아니라 벡터 데이터베이스에서 검색한 문서 내용과 유저 프롬프트와 결합한 답변이 생성이 되게 됩니다.
+
+그리고 또 LLM이 왜 이런 답변을 했는지에 대해서도 그 출처를 명확하게 제시를 해 줄 수가 있게 되거든요. 이 출처를 제시해 줄 수 있게 된 이유는 임베딩 벡터라는 것으로 저장을 시킨다고 했잖아요. 그렇기 때문에 그 임베딩 벡터가 데이터베이스에서 어떤 부분에서 왔는지를 LLM이 이제 대답을 해 줄 수가 있게 된 것입니다.
+
+자 이렇게 제가 앞서 말씀드린 이 두 가지 문제점을 검색 증강을 통해서 어떻게 해결해 가는지를 보여 드렸습니다. 첫 번째 도전과제였던 최신 정보의 부재 문제를 해결했습니다.
+
+이 RAG를 적용시키면 새로운 정보가 생길 때마다 LLM 자체를 학습시키는 게 아니라 이 벡터 데이터베이스만 학습을 시켜 주면은 됩니다. 이렇게 되면은 비용을 굉장히 절약할 수가 있거든요.
+
+LLM을 학습 시키는 것은 비용이 굉장히 많이 들어가는 작업 중에 하나입니다. 이 LLM 자체가 모델이 굉장히 크기 때문에 한번 학습할 때 비용이 많이 드는데 근데 저희가 벡터DB를 만들고 이 벡터DB를 학습시키면 이 벡터DB는 상대적으로 용량이 적기 때문에 학습되는 비용 자체가 적어집니다. 만약에 학습 시켜야 되는 그런 새로운 정보가 생겼을 때 이 벡터 DB에다가 그런 정보들을 그냥 하나씩 학습을 시켜 주면 되는 그런 구조로.
+
+출처의 부정확함이었는데요. 이 두 번째 문제도 역시 RAG를 적용시켜서 해결이 되었죠. 이제 벡터 데이터베이스에 추가 학습시킨 데이터가 있기 때문에 유저가 질문을 하고 거기에 대한 답변을 생성했을 때 그 답변이 어떤 데이터베이스에서 왔는지를 저희가 증거를 제시해 줄 수가 있게 되었습니다.
+
+이를 통해서 LLM의 문제점 중 하나인 할루시네이션을 방지해 줄 수가 있게 되겠죠. 그러니까 LLM에게 너한테 질문을 할 건데 네가 아는 내용이면 답변하고 모르는 내용이면 모르겠습니다라고 답변해라고 그렇게 명령을 인스트럭션을 내려 줄 수가 있게 된 것입니다.
+
+이렇게 LLM에게 이 RAG라는 프레임워크가 왜 필요한지 그리고 이것을 어떻게 적용시키는지에 대해서 설명을 해 드렸는데요. 앞으로 이 RAG를 직접 구축하는 방법이나 활용하는 방법에 대해서도 영상에서 자세히 소개시켜 드리려고 하니까 궁금하신 분들은 구독이나 알림 설정을 꼭 해 두시면 좋을 것 같습니다. 영상에 대해서 궁금한 부분은 댓글에다 남겨주시면 제가 자세하게 답변해 드리도록 하고요. 저는 다음 영상에서 더 좋은 주제로 찾아뵙도록 하겠습니다.

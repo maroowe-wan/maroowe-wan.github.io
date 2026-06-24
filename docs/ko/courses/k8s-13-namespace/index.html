@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Namespace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-13-namespace/index.html'>EN</a></div>
+  <h1>K8S-Namespace</h1>
+  <div class="sub">쿠버네티스 중급1(ConfigMap/Secret, PV/PVC, Probes·롤링업데이트·롤백, requests/limits·HPA, Ingress)을 마친 학습자. 실무 운영 역량을 더 넓히려는 중급 학습자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. Namespace와 멀티테넌시 - 리소스 격리와 사용량 제한</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Namespace와 멀티테넌시 - 리소스 격리와 사용량 제한 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>Namespace로 클러스터를 논리적으로 분리하고 멀티테넌시를 구성하는 방법을 이해한다</li>
+<li>ResourceQuota로 네임스페이스 전체의 리소스 총량을 제한한다</li>
+<li>LimitRange로 Pod·컨테이너의 기본값과 상·하한을 강제해본다</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 클러스터를 나눠야 하나</h4>
+<p>지금까지는 마치 클러스터에 나 혼자 있는 것처럼 Pod와 Deployment를 만들어 왔다. 하지만 실무 클러스터는 보통 <strong>여러 팀, 여러 환경이 함께 쓰는 공유 자원</strong>이다. 개발팀·데이터팀·CI 잡이 같은 노드를 나눠 쓰고, dev·staging·prod 환경이 한 클러스터 안에 공존하기도 한다.</p>
+<p>이때 아무 칸막이 없이 모두가 같은 공간에 오브젝트를 쏟아 넣으면 어떻게 될까?</p>
+<ul>
+<li><strong>이름이 충돌한다.</strong> A팀의 <code class='ic'>web</code> 서비스와 B팀의 <code class='ic'>web</code> 서비스가 한 공간에서 부딪힌다.</li>
+<li><strong>누가 무엇을 만들었는지 뒤섞인다.</strong> <code class='ic'>kubectl get pods</code> 한 번에 모든 팀의 Pod가 한 화면에 쏟아진다.</li>
+<li><strong>한 팀이 클러스터 자원을 독식한다.</strong> 누군가 실수로 Pod를 수백 개 띄우면, 다른 팀의 Pod가 자원 부족으로 뜨지 못한다.</li>
+</ul>
+<p>쿠버네티스는 이 문제를 <strong>Namespace(네임스페이스)</strong> 로 해결한다. 네임스페이스는 하나의 물리 클러스터를 여러 개의 <strong>가상 클러스터(virtual cluster)</strong> 로 논리적으로 쪼개는 칸막이다. 컨테이너가 하나의 OS 위에서 여러 애플리케이션을 격리하듯, 네임스페이스는 하나의 클러스터 위에서 여러 오브젝트 그룹을 격리한다.</p>
+<blockquote class='callout'>
+<p>네임스페이스 격리는 &quot;논리적 격리&quot;이지 컨테이너처럼 강한 격리가 아니다. 권한만 있으면 다른 네임스페이스의 오브젝트에 접근할 수 있다. 진짜 보안 경계는 다음 강의에서 배울 RBAC과 NetworkPolicy로 함께 세운다.</p>
+</blockquote>
+<h4>기본 제공 네임스페이스와 멀티테넌시</h4>
+<p>쿠버네티스는 설치 시 네 개의 네임스페이스를 기본으로 갖는다.</p>
+<pre><code>
+kubectl get namespace   # 줄여서 kubectl get ns
+</code></pre>
+<p>| 네임스페이스 | 용도 |</p>
+<p>|------|------|</p>
+<p>| <code class='ic'>default</code> | 네임스페이스를 지정하지 않은 오브젝트가 들어가는 기본 공간 |</p>
+<p>| <code class='ic'>kube-system</code> | 쿠버네티스 시스템이 만든 오브젝트(스케줄러, DNS 등) |</p>
+<p>| <code class='ic'>kube-public</code> | 클러스터 전체에 공개적으로 읽혀야 하는 리소스용 |</p>
+<p>| <code class='ic'>kube-node-lease</code> | 노드 하트비트(생존 신호) 성능 개선용 lease 오브젝트 |</p>
+<p><code class='ic'>default</code>는 부엌 서랍 같은 공간이라 아무거나 던져 넣기 쉽지만, 실무에서는 팀·환경별로 네임스페이스를 따로 만들어 쓰는 것이 정석이다. 이렇게 한 클러스터를 여러 사용자 그룹이 격리된 채로 나눠 쓰는 구조를 <strong>멀티테넌시(multi-tenancy)</strong> 라고 한다. 각 테넌트(입주자)는 자기 네임스페이스 안에서 독립된 리소스·정책·제약을 갖는다.</p>
+<p>멀티테넌트 클러스터의 전체 그림은 다음과 같다. 아래 구성도처럼 하나의 물리 클러스터 안에 팀별 네임스페이스가 칸막이로 나뉘고, 각 네임스페이스에 사용량 제한 규칙(ResourceQuota·LimitRange)이 걸린다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph CLUSTER[&quot;하나의 물리 쿠버네티스 클러스터&quot;]
+        direction LR
+        subgraph NSDEV[&quot;네임스페이스: dev&quot;]
+            QD[&quot;ResourceQuota 팀 총량 상한&quot;]
+            LD[&quot;LimitRange 개별 기본값·상하한&quot;]
+            PD[&quot;Pod / Service / ConfigMap&quot;]
+            QD --- PD
+            LD --- PD
+        end
+        subgraph NSPROD[&quot;네임스페이스: prod&quot;]
+            QP[&quot;ResourceQuota 팀 총량 상한&quot;]
+            LP[&quot;LimitRange 개별 기본값·상하한&quot;]
+            PP[&quot;Pod / Service / ConfigMap&quot;]
+            QP --- PP
+            LP --- PP
+        end
+        subgraph NSSYS[&quot;네임스페이스: kube-system&quot;]
+            SYS[&quot;스케줄러 / DNS 등 시스템 오브젝트&quot;]
+        end
+    end
+    A[&quot;개발팀&quot;] --&gt; NSDEV
+    B[&quot;운영팀&quot;] --&gt; NSPROD</div><figcaption>멀티테넌트 클러스터 구성도 - 팀별 네임스페이스 격리와 사용량 제한</figcaption></figure>
+<h4>네임스페이스 만들고 다루기</h4>
+<p>네임스페이스도 하나의 쿠버네티스 오브젝트이므로 <code class='ic'>create</code>/<code class='ic'>delete</code>로 다룬다.</p>
+<pre><code>
+kubectl create namespace dev      # 명령형 생성
+</code></pre>
+<p>또는 매니페스트로 선언한다.</p>
+<pre><code>
+# namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+</code></pre>
+<pre><code>
+kubectl apply -f namespace.yaml
+</code></pre>
+<p>핵심 차이는 <strong>이제 거의 모든 명령에 어느 네임스페이스인지 알려줘야 한다</strong>는 점이다. <code class='ic'>-n</code>(또는 <code class='ic'>--namespace</code>) 플래그를 붙인다.</p>
+<pre><code>
+kubectl get pods -n dev                # dev 네임스페이스의 Pod만 조회
+kubectl run web --image=nginx -n dev   # dev 안에 Pod 생성
+kubectl get pods --all-namespaces      # 전체 네임스페이스 한꺼번에 보기 (-A 로 축약)
+</code></pre>
+<p>매번 <code class='ic'>-n dev</code>를 치기 번거롭다면, <strong>현재 컨텍스트의 기본 네임스페이스를 바꿔</strong> 이후 명령에 자동 적용되게 할 수 있다.</p>
+<pre><code>
+kubectl config set-context --current --namespace=dev
+# 이제 -n 없이 실행해도 dev 네임스페이스를 사용한다
+</code></pre>
+<blockquote class='callout'>
+<p>네임스페이스를 삭제하면 그 안의 모든 오브젝트가 함께 삭제된다. <code class='ic'>kubectl delete ns dev</code> 한 줄로 dev 안의 Pod·Service·ConfigMap이 전부 사라지므로 운영 네임스페이스에는 각별히 주의한다.</p>
+</blockquote>
+<h4>ResourceQuota — 네임스페이스 전체의 총량 제한</h4>
+<p>네임스페이스로 칸막이를 쳤어도 자원 독식 문제는 아직 남아 있다. dev 팀이 Pod를 무한정 띄우면 여전히 클러스터 전체가 마비된다. 그래서 <strong>네임스페이스 단위로 쓸 수 있는 자원의 총량에 상한</strong>을 거는 것이 <code class='ic'>ResourceQuota</code>다.</p>
+<p>중급1에서 배운 Pod 하나하나의 <code class='ic'>requests</code>/<code class='ic'>limits</code>를 떠올려 보자. 그것이 <strong>개별 Pod의 자원 요청·상한</strong>이었다면, ResourceQuota는 <strong>네임스페이스 전체에 걸린 예산(budget)</strong> 이다. &quot;dev 팀은 통틀어 CPU 2코어, 메모리 2Gi, Pod 10개까지&quot;처럼 합산 사용량의 천장을 정한다.</p>
+<pre><code>
+# resource-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-quota
+  namespace: dev
+spec:
+  hard:
+    requests.cpu: &quot;2&quot;          # 이 네임스페이스 Pod들의 CPU request 합 ≤ 2코어
+    requests.memory: 2Gi       # 메모리 request 합 ≤ 2Gi
+    limits.cpu: &quot;4&quot;            # CPU limit 합 ≤ 4코어
+    limits.memory: 4Gi         # 메모리 limit 합 ≤ 4Gi
+    pods: &quot;10&quot;                # Pod 개수 ≤ 10개
+</code></pre>
+<pre><code>
+kubectl apply -f resource-quota.yaml
+kubectl describe quota dev-quota -n dev   # 현재 사용량/한도 확인
+</code></pre>
+<p><code class='ic'>hard</code>는 절대 넘을 수 없는 상한이다. CPU·메모리뿐 아니라 <code class='ic'>pods</code>, <code class='ic'>services</code>, <code class='ic'>persistentvolumeclaims</code>, <code class='ic'>secrets</code>, <code class='ic'>configmaps</code> 같은 오브젝트 <strong>개수</strong>도 제한할 수 있다.</p>
+<p>쿼터를 초과하는 순간 어떤 일이 벌어질까? <strong>새 Pod 생성이 거부된다.</strong> 한도가 CPU 2코어인데 3코어를 요청하는 Pod를 만들어 직접 확인해 보자. 요청량은 매니페스트의 <code class='ic'>resources.requests</code>로 명시하고 <code class='ic'>kubectl apply</code>로 적용한다.</p>
+<pre><code>
+# big-pod.yaml — CPU request 3코어를 요청해 쿼터(2코어)를 일부러 초과시킨다
+apiVersion: v1
+kind: Pod
+metadata:
+  name: big
+  namespace: dev
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      resources:
+        requests:
+          cpu: &quot;3&quot;        # 쿼터 한도(requests.cpu=2)를 넘는 요청
+        limits:
+          cpu: &quot;3&quot;
+</code></pre>
+<pre><code>
+kubectl apply -f big-pod.yaml
+# Error from server (Forbidden): error when creating &quot;big-pod.yaml&quot;: pods &quot;big&quot; is forbidden:
+# exceeded quota: dev-quota, requested: requests.cpu=3, used: requests.cpu=0, limited: requests.cpu=2
+</code></pre>
+<blockquote class='callout'>
+<p>예전 강의·문서에서 보이는 <code class='ic'>kubectl run big --image=nginx --requests=cpu=3</code> 방식은 더 이상 동작하지 않는다. <code class='ic'>--requests</code>/<code class='ic'>--limits</code> 플래그는 kubectl 1.18에서 deprecated, 1.21에서 완전히 제거되어 지금 실행하면 <code class='ic'>unknown flag: --requests</code> 에러가 난다. 자원 요청·상한은 위처럼 매니페스트의 <code class='ic'>resources</code>에 적고 <code class='ic'>kubectl apply</code>로 적용하는 것이 현재 표준이다.</p>
+</blockquote>
+<p>10개 한도에서 Pod 11개를 한꺼번에 만들면, 한도에 닿기 전까지만 생성되고 나머지는 쿼터 초과로 실패한다. 이렇게 쿠버네티스는 한 팀이 자원을 독식해 다른 팀을 굶기는 상황을 미리 차단한다.</p>
+<blockquote class='callout'>
+<p>ResourceQuota에 <code class='ic'>requests.cpu</code>나 <code class='ic'>limits.memory</code> 같은 <strong>연산 자원</strong>을 한 번이라도 걸면, 그 네임스페이스의 모든 컨테이너는 해당 항목을 <strong>반드시 명시</strong>해야 한다. requests/limits를 빠뜨린 Pod는 생성이 거부된다. 이 함정을 메워 주는 것이 바로 다음에 볼 LimitRange다.</p>
+</blockquote>
+<h4>LimitRange — 개별 Pod·컨테이너의 기본값과 상·하한</h4>
+<p>ResourceQuota를 걸었더니 새로운 문제가 생긴다. 개발자가 매니페스트에서 requests/limits 쓰는 걸 깜빡하면 Pod가 아예 안 뜬다. 매번 모든 개발자가 자원 값을 정확히 적기를 기대하기는 어렵다.</p>
+<p><code class='ic'>LimitRange</code>는 이 빈틈을 메운다. 비유하자면 <strong>출장 호텔 예약 규칙</strong>과 같다. 직원이 호텔을 직접 고르되 &quot;1박 최대 5만 원, 미지정 시 기본 3만 원&quot;이라는 규칙을 회사가 정해 두는 것이다. LimitRange는 네임스페이스 안 <strong>개별 컨테이너·Pod</strong>에 대해 세 가지를 강제한다.</p>
+<ul>
+<li><strong>기본값(default / defaultRequest)</strong>: 사용자가 requests/limits를 안 적으면 자동으로 채워 넣는다.</li>
+<li><strong>최댓값(max)</strong>: 컨테이너 하나가 요청할 수 있는 상한.</li>
+<li><strong>최솟값(min)</strong>: 컨테이너 하나가 최소한 요청해야 하는 하한.</li>
+</ul>
+<pre><code>
+# limit-range.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: dev
+spec:
+  limits:
+    - type: Container
+      default:              # limits 미지정 시 적용될 기본 상한
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:       # requests 미지정 시 적용될 기본 요청량
+        cpu: 250m
+        memory: 256Mi
+      max:                  # 컨테이너 하나의 최대 허용치
+        cpu: &quot;1&quot;
+        memory: 1Gi
+      min:                  # 컨테이너 하나의 최소 요청치
+        cpu: 100m
+        memory: 128Mi
+</code></pre>
+<pre><code>
+kubectl apply -f limit-range.yaml
+kubectl describe limitrange dev-limits -n dev
+</code></pre>
+<p>이제 requests/limits를 <strong>하나도 적지 않은</strong> Pod를 dev에 만들어 보자.</p>
+<pre><code>
+kubectl run test --image=nginx -n dev
+kubectl describe pod test -n dev | grep -A4 Limits
+</code></pre>
+<p>분명 자원을 지정하지 않았는데, describe 결과에는 컨테이너에 <code class='ic'>requests: cpu=250m, memory=256Mi</code>, <code class='ic'>limits: cpu=500m, memory=512Mi</code>가 <strong>자동으로 채워져 있다.</strong> LimitRange의 기본값이 입혀진 것이다. 덕분에 ResourceQuota가 요구하는 &quot;requests/limits 필수&quot; 조건도 자연히 충족된다.</p>
+<p>반대로 <code class='ic'>max</code>를 넘는 컨테이너(예: CPU 2코어)나 <code class='ic'>min</code>에 못 미치는 컨테이너는 생성이 거부된다. 너무 크게도, 너무 작게도 잡지 못하게 상·하한으로 가둔다.</p>
+<h4>ResourceQuota와 LimitRange는 짝이다</h4>
+<p>두 오브젝트는 적용 범위가 다르고, 함께 써야 완성된다. 그 차이를 분명히 정리하자.</p>
+<p>| 구분 | ResourceQuota | LimitRange |</p>
+<p>|------|---------------|------------|</p>
+<p>| 적용 범위 | <strong>네임스페이스 전체</strong>의 합산 총량 | <strong>개별 컨테이너·Pod</strong> 하나하나 |</p>
+<p>| 역할 | 총 예산 상한 (천장) | 기본값 채우기 + 개별 상·하한 |</p>
+<p>| 비유 | 팀 전체 예산 | 1인당 지출 규칙 |</p>
+<p>| 막는 시점 | 합산이 한도를 넘는 Pod 생성 | 값 누락·상하한 위반 Pod 생성 |</p>
+<p>실무 권장 패턴은 <strong>둘을 함께 거는 것</strong>이다. LimitRange로 모든 Pod에 합리적인 기본값과 상·하한을 강제하면, 개발자가 자원 값을 빠뜨려도 안전하게 채워지고, 그 위에서 ResourceQuota가 네임스페이스 총량을 지킨다. 그러면 개발자든 데이터 사이언티스트든 CI 잡이든 누구나 공정한 몫을 받는, 안전한 멀티테넌트 클러스터가 완성된다.</p>
+<p>전형적인 구성 순서는 아래 흐름과 같다. 네임스페이스를 만들고 → LimitRange로 1인당 규칙을 깔고 → ResourceQuota로 팀 예산을 건 뒤 → 그 안에서 워크로드를 배포한다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    A[&quot;네임스페이스 생성&lt;br/&gt;kubectl create ns dev&quot;] --&gt; B[&quot;LimitRange 적용&lt;br/&gt;개별 기본값·상하한&quot;]
+    B --&gt; C[&quot;ResourceQuota 적용&lt;br/&gt;네임스페이스 총량&quot;]
+    C --&gt; D[&quot;워크로드 배포&lt;br/&gt;Pod·Deployment&quot;]
+    D --&gt; E[&quot;사용량 모니터링&lt;br/&gt;describe quota&quot;]</div><figcaption>멀티테넌트 네임스페이스 구성 순서</figcaption></figure>
+<pre><code>
+kubectl create ns dev
+kubectl apply -f limit-range.yaml      # 개별 기본값·상하한
+kubectl apply -f resource-quota.yaml   # 네임스페이스 총량
+kubectl describe quota dev-quota -n dev   # 운영 중 사용량 모니터링
+</code></pre>
+<h3>핵심 요약</h3>
+<ul>
+<li><strong>Namespace</strong>는 하나의 물리 클러스터를 여러 가상 클러스터로 나누는 논리적 칸막이로, 팀·환경별 멀티테넌시의 기본 단위다. 거의 모든 명령에 <code class='ic'>-n</code> 플래그가 필요하며, <code class='ic'>set-context</code>로 기본 네임스페이스를 바꿀 수 있다.</li>
+<li><strong>ResourceQuota</strong>는 네임스페이스 전체의 자원·오브젝트 총량에 상한(<code class='ic'>hard</code>)을 거는 예산이다. 한도를 넘는 Pod 생성은 거부되어 한 팀의 자원 독식을 막는다.</li>
+<li>ResourceQuota로 연산 자원을 제한하면 그 네임스페이스의 모든 컨테이너는 requests/limits를 반드시 명시해야 한다.</li>
+<li><strong>LimitRange</strong>는 개별 컨테이너·Pod에 기본값(default/defaultRequest)과 상·하한(max/min)을 강제한다. 값을 빠뜨린 Pod에 기본값을 자동으로 채워 ResourceQuota의 필수 조건을 메워 준다.</li>
+<li>둘은 짝이다. ResourceQuota는 &quot;팀 예산&quot;, LimitRange는 &quot;1인당 규칙&quot;. 함께 걸어야 공정하고 안전한 멀티테넌트 클러스터가 된다.</li>
+</ul>
+<h3>출처</h3>
+<ul>
+<li>Google Cloud Tech, &quot;Namespaces in Kubernetes&quot; — https://www.youtube.com/watch?v=plB3kyZLHe8</li>
+<li>Techi Nik, &quot;Kubernetes LimitRange Explained | Default Resource Limits &amp; Requests + Resource Quota Demo&quot; — https://www.youtube.com/watch?v=tyoaLuaVyuQ</li>
+<li>Techi Nik, &quot;What Happens When You Don&#x27;t Use Kubernetes Resource Quotas?&quot; — https://www.youtube.com/watch?v=dYLRW0DZVGk</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 1. 명령형으로 team-a 네임스페이스를 생성하라.</p>
+<p>2. YAML 매니페스트(ns-team-b.yaml)를 작성해 team-b 네임스페이스를 선언형으로 생성하라.</p>
+<p>3. kubectl get ns 로 두 네임스페이스가 모두 보이는지 확인한다.</p>
+<p>4. team-a 안에 nginx 이미지로 web-pod 라는 Pod를 생성하라. (kubectl run 사용, -n 플래그 활용)</p>
+<p>5. kubectl get pods -n team-a 로 Pod가 Running 상태인지 확인한다.</p>
+<p>6. kubectl config set-context --current --namespace=team-a 로 기본 네임스페이스를 team-a 로 바꾼 뒤, -n 없이 kubectl get pods 를 실행해 동일한 결과가 나오는지 확인한다.</p>
+<p>7. 실습이 끝나면 기본 네임스페이스를 default 로 되돌린다.</p></div>
+              <pre class='starter'><code># 1. 명령형으로 team-a 생성
+kubectl create namespace ____
+
+# 2. ns-team-b.yaml 작성 (빈칸을 채워라)
+apiVersion: v1
+kind: ____
+metadata:
+  name: ____
+
+# 3. 선언형 적용
+kubectl apply -f ns-team-b.yaml
+
+# 4. team-a 안에 Pod 생성
+kubectl run web-pod --image=nginx ____ team-a
+
+# 5. 확인
+kubectl get pods ____ team-a
+
+# 6. 기본 네임스페이스 변경
+kubectl config set-context --current ____=team-a
+kubectl get pods   # -n 없이
+
+# 7. 원복
+kubectl config set-context --current --namespace=default</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl create namespace 와 kind: Namespace 는 동일한 결과를 낸다. YAML의 kind 값은 대소문자를 정확히 지켜야 한다 — &#x27;namespace&#x27; 가 아닌 &#x27;Namespace&#x27;.</li><li>kubectl run 에는 -n &lt;이름&gt; 또는 --namespace=&lt;이름&gt; 형식을 쓴다. --namespace team-a 처럼 = 없이 공백으로도 동작한다.</li><li>set-context 변경 후 kubectl config view --minify | grep namespace 로 기본 네임스페이스가 실제로 바뀌었는지 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. 명령형으로 team-a 생성
+kubectl create namespace team-a
+
+# 2. ns-team-b.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-b
+
+# 선언형 적용
+kubectl apply -f ns-team-b.yaml
+
+# 3. 전체 네임스페이스 확인
+kubectl get ns
+# team-a, team-b 가 Active 상태로 보여야 한다
+
+# 4. team-a 안에 Pod 생성
+kubectl run web-pod --image=nginx -n team-a
+
+# 5. Pod 상태 확인
+kubectl get pods -n team-a
+# NAME      READY   STATUS    RESTARTS   AGE
+# web-pod   1/1     Running   0          ...
+
+# 6. 기본 네임스페이스 변경 후 -n 없이 동일 결과 확인
+kubectl config set-context --current --namespace=team-a
+kubectl get pods
+# web-pod 가 동일하게 보인다
+
+# 7. 기본 네임스페이스 원복
+kubectl config set-context --current --namespace=default</code></pre>
+                <div class='exp2'><p>Namespace는 v1 API의 최상위 오브젝트이며 kubectl create namespace 또는 YAML manifest로 생성한다. 네임스페이스가 다르면 같은 이름의 오브젝트도 충돌 없이 공존한다. -n 플래그는 명령 단위로 대상 네임스페이스를 지정하고, set-context --namespace 는 현재 컨텍스트의 기본 네임스페이스를 변경해 이후 모든 명령에 자동 적용한다. 실습 후 반드시 default 로 원복해야 이후 단계에서 혼란이 없다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 1. 아래 사양으로 limit-range.yaml 을 작성해 team-a 에 적용하라.</p>
+<ul>
+<li>type: Container</li>
+<li>defaultRequest: cpu=100m, memory=128Mi</li>
+<li>default(limits): cpu=300m, memory=256Mi</li>
+<li>min: cpu=50m, memory=64Mi</li>
+<li>max: cpu=500m, memory=512Mi</li>
+</ul>
+<p>2. kubectl describe limitrange dev-limits -n team-a 로 설정값을 확인한다.</p>
+<p>3. resources 블록 없이 Pod(no-resources-pod)를 team-a 에 생성한다. (이미지: nginx)</p>
+<p>4. kubectl describe pod no-resources-pod -n team-a 의 Limits / Requests 섹션을 확인해 LimitRange 기본값이 자동으로 채워졌는지 확인한다.</p>
+<p>5. CPU limit 을 600m 으로 설정한 Pod 매니페스트(over-limit-pod.yaml)를 작성하고 kubectl apply 로 생성을 시도해 거부 에러를 확인한다.</p></div>
+              <pre class='starter'><code># 1. limit-range.yaml (빈칸을 채워라)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: team-a
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: ____
+        memory: ____
+      default:
+        cpu: ____
+        memory: ____
+      min:
+        cpu: ____
+        memory: ____
+      max:
+        cpu: ____
+        memory: ____
+
+# 적용
+kubectl apply -f limit-range.yaml
+
+# 3. resources 없이 Pod 생성 (매니페스트 방식)
+# no-resources-pod.yaml (resources 블록 없음)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-resources-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# 5. over-limit-pod.yaml (max 초과)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: over-limit-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: ____
+        limits:
+          cpu: ____   # max(500m)를 넘기도록 600m 으로 설정</code></pre>
+              <details><summary>힌트</summary><ul><li>LimitRange의 default 는 limits 기본값이고, defaultRequest 는 requests 기본값이다. 두 필드는 별개이므로 둘 다 작성해야 한다. default 만 쓰면 requests 가 채워지지 않아 ResourceQuota와 함께 쓸 때 문제가 생긴다.</li><li>kubectl describe pod no-resources-pod -n team-a | grep -A6 Limits 처럼 grep 을 활용하면 Limits/Requests 섹션만 빠르게 볼 수 있다. 출력이 없다면 Pod 이름이나 네임스페이스를 다시 확인한다.</li><li>over-limit-pod 에러 메시지에 &#x27;maximum cpu usage per Container is 500m&#x27; 문구가 보이면 성공이다. 에러가 보이지 않고 Pod가 생성된다면 limit-range.yaml 의 max.cpu 값이 실제로 적용된 LimitRange에 반영되어 있는지 kubectl describe limitrange dev-limits -n team-a 로 재확인한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># limit-range.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: team-a
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: 300m
+        memory: 256Mi
+      min:
+        cpu: 50m
+        memory: 64Mi
+      max:
+        cpu: 500m
+        memory: 512Mi
+
+# 적용
+kubectl apply -f limit-range.yaml
+
+# 설정 확인
+kubectl describe limitrange dev-limits -n team-a
+
+# no-resources-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-resources-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# 생성 및 기본값 확인
+kubectl apply -f no-resources-pod.yaml
+kubectl describe pod no-resources-pod -n team-a | grep -A6 &#x27;Limits\|Requests&#x27;
+# 기대 출력:
+#   Limits:
+#     cpu:     300m
+#     memory:  256Mi
+#   Requests:
+#     cpu:     100m
+#     memory:  128Mi
+
+# over-limit-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: over-limit-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 600m
+        limits:
+          cpu: 600m
+
+# 생성 시도 — 거부 확인
+kubectl apply -f over-limit-pod.yaml
+# 기대 에러:
+# Error from server (Forbidden): error when creating &quot;over-limit-pod.yaml&quot;: pods &quot;over-limit-pod&quot; is forbidden:
+# [maximum cpu usage per Container is 500m, but limit is 600m]</code></pre>
+                <div class='exp2'><p>LimitRange는 네임스페이스에 적용되는 입장 규칙이다. resources 블록을 전혀 적지 않은 Pod가 생성되면 kube-apiserver가 어드미션 단계에서 LimitRange의 defaultRequest/default 값을 자동으로 삽입한다. 따라서 kubectl describe pod 에 명시하지 않았던 requests/limits 값이 나타나는 것이 정상이다. max 를 초과하는 컨테이너는 동일한 어드미션 단계에서 즉시 거부되며 Pod 오브젝트 자체가 생성되지 않는다. 이 두 가지 동작(자동 주입 + 상한 거부)이 LimitRange의 핵심이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 1. 아래 사양으로 resource-quota.yaml 을 작성해 team-a 에 적용하라.</p>
+<ul>
+<li>requests.cpu: 500m</li>
+<li>requests.memory: 512Mi</li>
+<li>limits.cpu: 1 (1코어)</li>
+<li>limits.memory: 1Gi</li>
+<li>pods: 3</li>
+</ul>
+<p>2. kubectl describe quota team-quota -n team-a 로 사용량/한도를 확인한다.</p>
+<p>3. CPU request 를 600m 으로 요청하는 Pod 매니페스트(big-cpu-pod.yaml)를 작성하고 kubectl apply 로 생성을 시도해 exceeded quota 에러를 확인한다. (resources 블록에 requests.cpu=600m 명시)</p>
+<p>4. 2단계에서 만든 no-resources-pod 는 LimitRange 기본값(requests.cpu=100m)이 적용된 상태다. describe quota 로 현재 사용 중인 requests.cpu 가 100m 으로 집계되는지 확인한다.</p>
+<p>5. 정상 범위 Pod(small-pod-1, small-pod-2)를 추가로 생성해 pods 한도(3개)에 도달시킨 뒤, 4번째 Pod 생성이 거부되는 에러를 확인한다.</p></div>
+              <pre class='starter'><code># 1. resource-quota.yaml (빈칸을 채워라)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: ____
+    requests.memory: ____
+    limits.cpu: ____
+    limits.memory: ____
+    pods: ____
+
+# 3. big-cpu-pod.yaml — requests.cpu=600m 으로 쿼터(500m)를 초과시킨다
+apiVersion: v1
+kind: Pod
+metadata:
+  name: big-cpu-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: ____      # 쿼터 한도(500m)를 넘도록 설정
+          memory: 128Mi
+        limits:
+          cpu: ____
+          memory: 256Mi
+
+# 5. small-pod-1.yaml (LimitRange 기본값 범위 내)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: small-pod-1
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi</code></pre>
+              <details><summary>힌트</summary><ul><li>big-cpu-pod.yaml 에서 requests.cpu 를 현재 쿼터의 used + 새 요청이 hard 를 초과하도록 설정해야 에러가 재현된다. 현재 used 는 no-resources-pod 의 100m 이므로, 새 요청이 400m 이상이면 합산이 500m 을 넘는다. 확실하게 재현하려면 600m 이상으로 설정한다.</li><li>ResourceQuota 적용 전에 이미 존재하는 Pod에는 쿼터가 소급 적용되지 않는다. 하지만 기존 Pod의 requests/limits 값은 새 쿼터의 Used 집계에 포함된다. describe quota 의 Used 컬럼으로 확인한다.</li><li>pods 한도 초과 에러를 확인하려면 현재 네임스페이스에 정확히 3개의 Pod가 Running 또는 Pending 상태여야 한다. kubectl get pods -n team-a 로 개수를 확인한 뒤 시도한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># resource-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: 500m
+    requests.memory: 512Mi
+    limits.cpu: &quot;1&quot;
+    limits.memory: 1Gi
+    pods: &quot;3&quot;
+
+# 적용 및 확인
+kubectl apply -f resource-quota.yaml
+kubectl describe quota team-quota -n team-a
+# 기대 출력 (no-resources-pod가 이미 있으므로):
+# Resource          Used   Hard
+# --------          ----   ----
+# limits.cpu        300m   1
+# limits.memory     256Mi  1Gi
+# pods              1      3
+# requests.cpu      100m   500m
+# requests.memory   128Mi  512Mi
+
+# big-cpu-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: big-cpu-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 600m
+          memory: 128Mi
+        limits:
+          cpu: 600m
+          memory: 256Mi
+
+# 생성 시도 — exceeded quota 확인
+kubectl apply -f big-cpu-pod.yaml
+# 기대 에러:
+# Error from server (Forbidden): error when creating &quot;big-cpu-pod.yaml&quot;: pods &quot;big-cpu-pod&quot; is forbidden:
+# exceeded quota: team-quota, requested: requests.cpu=600m, used: requests.cpu=100m, limited: requests.cpu=500m
+
+# small-pod-1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: small-pod-1
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+# small-pod-2.yaml (small-pod-1 과 동일 스펙, name 만 변경)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: small-pod-2
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+# 두 Pod 생성 (no-resources-pod 포함 총 3개로 한도 도달)
+kubectl apply -f small-pod-1.yaml
+kubectl apply -f small-pod-2.yaml
+
+# 4번째 Pod 생성 시도 — pods 한도 초과 확인
+kubectl run extra-pod --image=nginx -n team-a
+# 기대 에러:
+# Error from server (Forbidden): pods &quot;extra-pod&quot; is forbidden:
+# exceeded quota: team-quota, requested: pods=1, used: pods=3, limited: pods=3
+
+# 사용량 재확인
+kubectl describe quota team-quota -n team-a</code></pre>
+                <div class='exp2'><p>ResourceQuota의 hard 필드는 네임스페이스 전체 Pod들의 requests/limits 합산과 오브젝트 개수에 천장을 건다. 이미 생성된 no-resources-pod 의 LimitRange 기본값(requests.cpu=100m)도 쿼터 사용량으로 집계된다는 점이 핵심이다. exceeded quota 에러 메시지는 &#x27;requested / used / limited&#x27; 세 값을 함께 보여 주므로 현재 얼마나 사용 중인지 즉시 파악할 수 있다. requests.cpu 와 같은 연산 자원 쿼터가 걸린 네임스페이스에서는 모든 컨테이너가 requests/limits 를 반드시 명시해야 하는데, LimitRange의 기본값이 이 조건을 자동으로 충족시켜 준다. 이것이 두 오브젝트를 함께 사용하는 이유다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. team-b 네임스페이스에 아래 순서로 멀티테넌트 환경을 완성하라.</p>
+<p>1. LimitRange (tb-limits) 적용</p>
+<ul>
+<li>defaultRequest: cpu=200m, memory=256Mi</li>
+<li>default(limits): cpu=400m, memory=512Mi</li>
+<li>max: cpu=800m, memory=1Gi</li>
+<li>min: cpu=100m, memory=128Mi</li>
+</ul>
+<p>2. ResourceQuota (tb-quota) 적용</p>
+<ul>
+<li>requests.cpu: 800m</li>
+<li>requests.memory: 1Gi</li>
+<li>limits.cpu: 2 (2코어)</li>
+<li>limits.memory: 2Gi</li>
+<li>pods: 4</li>
+</ul>
+<p>3. resources 블록 없는 Pod 3개(app-1, app-2, app-3)를 team-b 에 생성한다. (이미지: nginx)</p>
+<p>4. kubectl describe quota tb-quota -n team-b 로 현재 사용량을 확인한다.</p>
+<ul>
+<li>requests.cpu Used 가 200m * 3 = 600m 에 가까운지 확인 (LimitRange 기본값이 자동 적용된 결과)</li>
+</ul>
+<p>5. 4번째 Pod(app-4)를 resources 블록 없이 생성 시도한다. 3개의 Pod가 이미 LimitRange 기본값(requests.cpu=200m)으로 600m 을 사용 중이므로, app-4 의 200m 을 더하면 800m 한도에 도달한다.</p>
+<ul>
+<li>정확히 한도에 닿으므로 app-4 는 생성될 수 있다. 생성 후 Used 가 800m 인지 확인한다.</li>
+</ul>
+<p>6. 5번째 Pod(app-5)를 생성 시도해 exceeded quota 에러를 확인한다 (pods 한도 4개 도달 또는 requests.cpu 800m 한도 도달 중 먼저 걸리는 쪽).</p>
+<p>7. kubectl describe quota tb-quota -n team-b 최종 출력을 캡처해 Used/Hard 값을 정리한다.</p></div>
+              <pre class='starter'><code># 1. tb-limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tb-limits
+  namespace: team-b
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 200m
+        memory: 256Mi
+      default:
+        cpu: 400m
+        memory: 512Mi
+      max:
+        cpu: 800m
+        memory: 1Gi
+      min:
+        cpu: 100m
+        memory: 128Mi
+
+# 2. tb-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tb-quota
+  namespace: team-b
+spec:
+  hard:
+    requests.cpu: 800m
+    requests.memory: 1Gi
+    limits.cpu: &quot;2&quot;
+    limits.memory: 2Gi
+    pods: &quot;4&quot;
+
+# 3. app-1.yaml (resources 블록 없음 — 나머지 app-2, app-3 도 동일 구조)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-1
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+      # resources 블록 의도적으로 생략</code></pre>
+              <details><summary>힌트</summary><ul><li>tb-quota 를 적용하기 전에 tb-limits 를 먼저 적용해야 한다. 순서가 바뀌면 resources 없는 Pod가 tb-quota 의 필수 명시 조건에 걸려 바로 거부된다. LimitRange → ResourceQuota 순서가 중요하다.</li><li>app-4 는 requests.cpu 한도(800m)에 정확히 닿으므로 생성이 허용된다. 한도를 &#x27;초과&#x27;해야 거부되고 &#x27;동일&#x27;하면 허용된다. app-5 는 pods 한도(4개)가 이미 꽉 찼으므로 requests.cpu 보다 pods 한도에 먼저 걸린다.</li><li>kubectl describe quota tb-quota -n team-b 출력의 Used/Hard 두 컬럼을 나란히 비교하면 어떤 자원이 병목인지 한눈에 보인다. CI/CD 파이프라인 트러블슈팅 시에도 이 명령이 첫 번째 점검 수단이다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># tb-limits.yaml 적용
+kubectl apply -f tb-limits.yaml
+
+# tb-quota.yaml 적용
+kubectl apply -f tb-quota.yaml
+
+# app-1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-1
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# app-2.yaml (name 만 app-2 로 변경, 나머지 동일)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-2
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# app-3.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-3
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# 3개 Pod 생성
+kubectl apply -f app-1.yaml
+kubectl apply -f app-2.yaml
+kubectl apply -f app-3.yaml
+
+# 4. 사용량 확인
+kubectl describe quota tb-quota -n team-b
+# 기대 출력:
+# Resource          Used   Hard
+# --------          ----   ----
+# limits.cpu        1200m  2
+# limits.memory     1536Mi 2Gi
+# pods              3      4
+# requests.cpu      600m   800m
+# requests.memory   768Mi  1Gi
+
+# 5. app-4 생성 (requests.cpu 600m + 200m = 800m, 한도 정확히 도달)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-4
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+kubectl apply -f app-4.yaml
+# 생성 성공 (800m == 800m 한도에 정확히 닿으므로 허용)
+
+kubectl describe quota tb-quota -n team-b
+# requests.cpu Used: 800m  Hard: 800m  (한도 100% 사용)
+# pods         Used: 4     Hard: 4     (한도 100% 사용)
+
+# 6. app-5 생성 시도 — exceeded quota 확인
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-5
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+kubectl apply -f app-5.yaml
+# 기대 에러 (pods 한도 또는 requests.cpu 한도 중 먼저 걸리는 쪽):
+# Error from server (Forbidden): pods &quot;app-5&quot; is forbidden:
+# exceeded quota: tb-quota, requested: pods=1, used: pods=4, limited: pods=4
+
+# 7. 최종 사용량 확인
+kubectl describe quota tb-quota -n team-b</code></pre>
+                <div class='exp2'><p>이 응용 실습은 &#x27;네임스페이스 생성 → LimitRange → ResourceQuota → 워크로드 배포 → 사용량 모니터링&#x27; 이라는 실무 구성 순서를 end-to-end 로 체험하는 것이 목적이다. 핵심 관찰 포인트는 두 가지다. 첫째, resources 블록 없는 Pod 3개가 아무 오류 없이 생성되는 것은 LimitRange가 defaultRequest(cpu=200m)를 자동으로 채워 ResourceQuota의 &#x27;연산 자원 필수 명시&#x27; 조건을 투명하게 충족시켜 주기 때문이다. 둘째, 한도에 도달했을 때 초과하는 Pod 1개만 정확히 거부된다 — 이것이 팀 간 공정한 자원 배분을 보장하는 메커니즘이다. 실무에서는 이 구성을 Helm chart 나 Kustomize 로 패키징해 새 팀·환경마다 일관되게 적용한다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=plB3kyZLHe8' target='_blank'>Namespaces in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=tyoaLuaVyuQ' target='_blank'>Kubernetes LimitRange Explained | Default Resource Limits &amp; Requests + Resource Quota Demo</a></li><li><a href='https://www.youtube.com/watch?v=dYLRW0DZVGk' target='_blank'>What Happens When You Don&#x27;t Use Kubernetes Resource Quotas?</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

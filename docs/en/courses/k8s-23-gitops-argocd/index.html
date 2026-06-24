@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-GitOps-ArgoCD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-23-gitops-argocd/index.html'>한국어</a></div>
+  <h1>K8S-GitOps-ArgoCD</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. GitOps and ArgoCD — Declarative Continuous Delivery</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. GitOps and ArgoCD — Declarative Continuous Delivery </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand GitOps principles and the concept of &quot;Git as the single source of truth&quot;</li>
+<li>Configure an ArgoCD Application to synchronize a Git repository with cluster state</li>
+<li>Observe drift detection, self-heal, and automated sync behavior in action</li>
+</ul>
+<h3>Overview</h3>
+<h4>From Push to Pull — What GitOps Changes</h4>
+<p>Think about a traditional CI/CD pipeline. After a build succeeds, the pipeline pushes the result directly into the cluster via <code class='ic'>kubectl apply</code> or <code class='ic'>helm upgrade</code>. This push-based approach has structural problems: the CI system must hold cluster admin credentials (a security risk), the true current state of the cluster lives only in some pipeline log, and any change made with <code class='ic'>kubectl edit</code> goes completely unrecorded.</p>
+<p>GitOps inverts this flow. The core principles are:</p>
+<p>1. <strong>Declarative</strong> — The entire desired state of the system is expressed as declarative manifests.</p>
+<p>2. <strong>Git as the single source of truth</strong> — Those manifests live in Git, which becomes the one authoritative record of desired state.</p>
+<p>3. <strong>Automated pull</strong> — An agent running inside the cluster watches Git for changes and reconciles cluster state to match. The cluster pulls from Git; CI no longer pushes into the cluster.</p>
+<p>4. <strong>Continuous reconciliation</strong> — The agent continuously compares &quot;actual state&quot; against &quot;declared state in Git&quot; and automatically closes any gap it finds.</p>
+<p>Principles 3 and 4 should sound familiar — they are exactly the <strong>reconciliation loop</strong> from the previous lecture. GitOps extends the controller pattern to cover deployments as a whole. The only difference is that the desired state lives in a Git repository rather than a Custom Resource in etcd.</p>
+<h4>CI Doesn&#x27;t Go Away — Its Responsibility Shifts</h4>
+<p>A common misconception is worth addressing head-on: <strong>&quot;the cluster pulls from Git&quot; does not mean CI disappears.</strong> CI remains essential in a GitOps workflow; what changes is the <em>final step</em> of what CI does.</p>
+<ul>
+<li><strong>Build and test remain CI&#x27;s job</strong> — compile sources, run tests, build container images, and push them to a registry.</li>
+<li><strong>What changes is &quot;what comes next.&quot;</strong> In the old model, CI deployed the artifact directly to the cluster (push). In GitOps, CI&#x27;s job ends when it commits the new image tag (e.g., <code class='ic'>web:v1.4.2</code>) back to the <strong>Git manifest repository</strong>. ArgoCD then detects that commit and applies it to the cluster via pull.</li>
+</ul>
+<p>In other words, CI&#x27;s responsibility shifts <strong>from &quot;push to cluster&quot; to &quot;push to Git.&quot;</strong> As a result, CI no longer needs cluster admin credentials (a security win), and every deployment passes through a single, auditable path: CI (build / test / image push) → Git (manifest update) → CD (ArgoCD pulls and applies).</p>
+<p>The sequence below shows this flow: CI pushes a new image tag to Git, Git notifies ArgoCD via webhook, and the in-cluster agent pulls the updated manifests and applies them.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant Dev as 개발자/CI
+    participant Git as &quot;Git 저장소 (정본)&quot;
+    participant Agent as ArgoCD 에이전트
+    participant Cluster as 클러스터
+    Dev-&gt;&gt;Git: 매니페스트/이미지 태그 변경 PR 머지
+    Git-&gt;&gt;Agent: webhook 알림 (변경 발생, 권장 기본)
+    Note over Git,Agent: webhook 유실 대비 약 3분 주기 폴링이 보조로 함께 동작
+    Agent-&gt;&gt;Git: 최신 매니페스트 가져오기
+    Git--&gt;&gt;Agent: 원하는 상태
+    Agent-&gt;&gt;Cluster: 현재 상태 조회
+    Cluster--&gt;&gt;Agent: 실제 상태
+    Agent-&gt;&gt;Agent: 차이 비교 (Sync 상태)
+    Agent-&gt;&gt;Cluster: 차이를 Git 상태로 적용</div><figcaption>GitOps webhook-based sync flow</figcaption></figure>
+<blockquote class='callout'>
+<p>The most practical benefit of GitOps is <strong>auditability and rollback</strong>. Every change is a Git commit, so &quot;who changed what, when, and why&quot; is preserved in the PR history. When something goes wrong, a single <code class='ic'>git revert</code> restores the previous state. Managing cluster state as version-controlled code rather than ad-hoc manual changes — that is the essence of GitOps.</p>
+</blockquote>
+<h4>How ArgoCD Detects Changes — Webhook First, Polling as Fallback</h4>
+<p>In the diagram above, synchronization is triggered by a Git webhook notification. <strong>In production, this webhook-based approach is the recommended default.</strong> It is worth understanding the difference clearly.</p>
+<ul>
+<li><strong>Git webhook (recommended)</strong> — You register ArgoCD&#x27;s endpoint as a webhook on GitHub, GitLab, or your Git host of choice. The moment a commit is pushed, the Git server sends ArgoCD an immediate notification. ArgoCD starts syncing that Application right away, making propagation nearly instantaneous. This is the standard setup for production.</li>
+<li><strong>Periodic polling (fallback / safety net)</strong> — ArgoCD also polls Git roughly every three minutes by default. This serves as a <strong>safety net</strong> for cases where a webhook event is missed or webhooks have not been configured. Relying on polling alone means changes can take up to a full poll interval to be reflected.</li>
+</ul>
+<blockquote class='callout'>
+<p>In short: a webhook is &quot;notify me the moment something changes (event-driven),&quot; while polling is &quot;I&#x27;ll check periodically on my own.&quot; The recommended configuration is to use webhooks for fast propagation and keep polling as a backup in case a webhook event is dropped. That is why the sequence diagram above shows the webhook as the primary path and polling as the secondary.</p>
+</blockquote>
+<p>Regardless of what triggers a sync, the reconciliation logic is the same: compare the declared state in Git against the actual state in the cluster, and close any gap.</p>
+<h4>Installing ArgoCD and Configuring an Application</h4>
+<p>ArgoCD is the leading GitOps implementation. It runs as a controller inside your cluster, watches a designated Git repository, and continuously applies the desired state. The quickest way to get started is to apply the official <code class='ic'>install.yaml</code> directly.</p>
+<pre><code>
+kubectl create namespace argocd
+kubectl apply -n argocd -f \
+  https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+</code></pre>
+<blockquote class='callout'>
+<p>Applying <code class='ic'>install.yaml</code> directly is fine for learning and experimentation, but in production the preferred approach is the <strong>official ArgoCD Helm chart or a Kustomize-based installation</strong>, which makes it easy to version-control and customize the configuration. A common pattern is &quot;self-managed&quot; ArgoCD (app-of-apps), where the ArgoCD installation itself is tracked in Git and managed by ArgoCD — GitOps all the way down.</p>
+</blockquote>
+<p>The central concept in ArgoCD is the <strong>Application</strong> CRD. It declares &quot;which path in which Git repository to sync, into which cluster and namespace, and how.&quot;</p>
+<pre><code>
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/our-org/k8s-manifests.git
+    targetRevision: main          # branch or tag to track
+    path: apps/web                # path to manifests (Helm / Kustomize / plain YAML)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: web
+  syncPolicy:
+    automated:
+      prune: true                 # remove resources deleted from Git
+      selfHeal: true              # auto-correct any drift
+    syncOptions:
+      - CreateNamespace=true
+</code></pre>
+<p>Once you <code class='ic'>kubectl apply</code> this Application, ArgoCD immediately reads the Git repository and deploys to the cluster. Verify that the Application shows <strong>Synced / Healthy</strong> in the ArgoCD UI or with <code class='ic'>argocd app get web-app</code>. ArgoCD accepts plain YAML, Helm charts, and Kustomize overlays as sources, so you can reuse existing assets.</p>
+<blockquote class='callout'>
+<p>The example above uses <code class='ic'>spec.project: default</code> for simplicity, but in production you should create separate <strong>AppProjects</strong> per team or purpose. AppProjects let you restrict which Git repositories, clusters, and namespaces each Application can target, giving you fine-grained access control and a bounded blast radius.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>The example also tracks the <code class='ic'>main</code> branch directly for simplicity. Real-world organizations, however, <strong>promote</strong> changes through environments. A common pattern is to give each environment its own path or overlay (e.g., Kustomize <code class='ic'>overlays/dev</code>, <code class='ic'>overlays/staging</code>, <code class='ic'>overlays/prod</code>) or a separate Application, and have CI promote a validated image tag from dev → staging → prod through pull requests. &quot;Deploy this image to production&quot; becomes &quot;merge the PR that bumps the tag in the production manifest.&quot; This image promotion pipeline is what GitOps looks like in day-to-day operations.</p>
+</blockquote>
+<blockquote class='callout'>
+<p><strong>Having a production Application track a development branch like <code class='ic'>main</code> is dangerous.</strong> With <code class='ic'>targetRevision: main</code>, every commit a developer pushes to <code class='ic'>main</code> instantly becomes a production deployment candidate. Unvalidated changes can flow all the way to production on a single webhook event, making it hard to control &quot;what goes out and when&quot; and widening the blast radius of any incident. In practice: (1) pin the production Application&#x27;s <code class='ic'>targetRevision</code> to an <strong>environment-specific branch (<code class='ic'>release/prod</code>) or an immutable version tag (<code class='ic'>v1.4.2</code>)</strong> to isolate the development and production flows, or (2) ensure that production manifests can only be updated via a <strong>dedicated promotion PR</strong> that requires review and approval. Either way, the key is to align your branching strategy (Git-flow, trunk-based, etc.) consistently with each Application&#x27;s <code class='ic'>targetRevision</code>, so that &quot;goes to production&quot; always means a deliberate, intentional promotion.</p>
+</blockquote>
+<h4>Drift, Self-Heal, and Prune</h4>
+<p>ArgoCD tracks two kinds of state: <strong>Sync status</strong> (does the cluster match Git?) and <strong>Health status</strong> (are the resources operating correctly?). The most important concept here is <strong>drift</strong>.</p>
+<p>Drift occurs when the actual cluster state diverges from what is declared in Git. If someone runs <code class='ic'>kubectl edit deployment web</code> and sets <code class='ic'>replicas</code> to 5, but Git says 3, ArgoCD marks that Application as <strong>OutOfSync</strong>.</p>
+<p>With <code class='ic'>selfHeal: true</code> enabled, ArgoCD automatically reconciles the cluster back to the Git state (replicas: 3). Any manual change made outside of Git is effectively rejected. Let&#x27;s observe this directly.</p>
+<pre><code>
+# Git declares replicas: 3 — let&#x27;s manually scale to 5
+kubectl scale deployment web -n web --replicas=5
+# A moment later, ArgoCD rolls it back to 3
+kubectl get deployment web -n web -w
+</code></pre>
+<p><code class='ic'>prune: true</code> handles the opposite direction: when a resource is <strong>deleted</strong> from Git, ArgoCD removes it from the cluster as well. Without pruning, removed resources linger in the cluster as orphans. You generally want pruning on to maintain GitOps consistency — though it is prudent to start with manual pruning in production so you can review the impact before enabling full automation.</p>
+<p>The day-to-day workflow in a GitOps setup is straightforward: to change a deployment, you open a <strong>PR against Git</strong> rather than touching the cluster directly. When the PR merges, ArgoCD detects the change (via webhook) and applies it. If something breaks, you revert the PR. Because you never directly touch the cluster, you never need to hand CI admin credentials.</p>
+<blockquote class='callout'>
+<p>Self-heal is powerful, but a common gotcha is making a quick <code class='ic'>kubectl edit</code> for debugging and watching ArgoCD immediately undo it. During incident investigation, you can temporarily disable automated sync for the affected Application — but the better long-term habit is to <strong>always make changes through Git</strong>, which is what GitOps intends.</p>
+</blockquote>
+<h3>Key Takeaways</h3>
+<ul>
+<li>GitOps flips deployment from push to pull. An agent inside the cluster watches Git and reconciles desired state on its own.</li>
+<li>CI does not disappear. It still handles build, test, and image push — but its final step changes from &quot;deploy directly to the cluster&quot; to &quot;commit the new image tag to the Git manifest repository.&quot; ArgoCD handles the actual application via pull.</li>
+<li>The four principles: declarative, Git as single source of truth, automated pull, continuous reconciliation (auto-closing the gap between desired and actual state). This extends the controller reconciliation loop to cover the entire deployment lifecycle.</li>
+<li>ArgoCD change detection: <strong>Git webhooks are the recommended default</strong> — syncing fires immediately on push. <strong>Periodic polling (roughly every 3 minutes) is the fallback safety net</strong> for missed or unconfigured webhooks.</li>
+<li>The ArgoCD Application CRD declares &quot;which Git path to sync into which cluster/namespace.&quot; It supports Helm, Kustomize, and plain YAML. In production, use AppProjects for access isolation and environment-specific overlays to implement a dev → staging → prod promotion pipeline.</li>
+<li><strong>Having a production Application track a development branch like <code class='ic'>main</code> is risky</strong> — every commit becomes an immediate production deployment candidate. Pin production to an environment-specific branch (<code class='ic'>release/prod</code>) or an immutable version tag, or gate production manifest changes behind a promotion PR with required review. Keep your branching strategy and <code class='ic'>targetRevision</code> consistently aligned.</li>
+<li>Drift is the OutOfSync state where the cluster diverges from Git. <code class='ic'>selfHeal</code> automatically restores manual changes back to the Git state; <code class='ic'>prune</code> removes resources from the cluster when they are deleted from Git.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Install ArgoCD in your cluster and access the UI. After installation, verify the Pod status in the argocd namespace, then expose argocd-server via NodePort or port-forward and log in with the initial admin password.</p></div>
+              <pre class='starter'><code># 1. Install ArgoCD
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# 2. Wait for all Pods to reach Running state
+kubectl get pods -n argocd -w
+
+# 3. Expose argocd-server locally via port-forward
+kubectl port-forward svc/argocd-server -n argocd ___:443
+# Access https://localhost:&lt;port&gt;
+
+# 4. Retrieve the initial admin password
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath=&#x27;{.data.password}&#x27; | base64 -d
+
+# 5. Log in via argocd CLI (optional)
+argocd login localhost:___  --username admin --password &lt;password above&gt; --insecure</code></pre>
+              <details><summary>Hint</summary><ul><li>If port-forward fails with &#x27;bind: address already in use&#x27;, try a different port (e.g., 9090).</li><li>All operations are available through the browser UI without installing the argocd CLI. The CLI is useful for automation and scripting.</li><li>If the initial admin password Secret is missing, find the argocd-server Pod name and run: kubectl -n argocd exec -it argocd-server-xxx -- argocd admin initial-password</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1~2. Installation (run the commands above)
+
+# 3. port-forward (run in background or a separate terminal)
+kubectl port-forward svc/argocd-server -n argocd 8080:443 &amp;
+# Access https://localhost:8080 in a browser
+
+# 4. Initial admin password
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath=&#x27;{.data.password}&#x27; | base64 -d
+# Example output: XkYjPqR4mN2vL8wZ  (different every installation)
+
+# 5. CLI login
+argocd login localhost:8080 --username admin --password $(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=&#x27;{.data.password}&#x27; | base64 -d) --insecure
+# &#x27;admin:login&#x27; logged in successfully
+
+# 6. Verify connected cluster
+argocd cluster list
+# SERVER                                  NAME        STATUS
+# https://kubernetes.default.svc          in-cluster  Successful</code></pre>
+                <div class='exp2'><p>ArgoCD is a Kubernetes-native GitOps tool that uses a Git repository as the single source of truth for cluster state. Installation creates several components: argocd-server (API/UI), argocd-repo-server (Git integration), argocd-application-controller (sync controller), and argocd-dex-server (authentication). Port-forward is a quick way to access a service in a local development environment. In production, use an Ingress or LoadBalancer Service instead.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Create an ArgoCD Application pointing to Kubernetes manifests in a public GitHub repository (or a local Git server). Set the sync policy to &#x27;manual&#x27; and perform the first manual sync to verify the application is deployed to the cluster.</p></div>
+              <pre class='starter'><code># Using the official ArgoCD example repository
+# https://github.com/argoproj/argocd-example-apps
+# Path: guestbook/ (Deployment + Service)
+
+# Write the Application manifest
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: ___   # HEAD or a specific branch/tag/commit
+    path: ___             # path to manifests in the repository (guestbook)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ___        # target namespace for deployment
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    # no &#x27;automated&#x27; here (manual sync)
+
+# Apply
+kubectl apply -f guestbook-app.yaml
+
+# Check Application status
+kubectl get applications -n argocd
+
+# Perform manual sync
+argocd app sync ___</code></pre>
+              <details><summary>Hint</summary><ul><li>If GitHub is not accessible, clone the repository and use a file:// URL as the local path, or use a local Gitea server.</li><li>Clicking the &#x27;Sync&#x27; button in the UI has the same effect as argocd app sync.</li><li>If Health Status shows Degraded, check kubectl get pods -n guestbook for Pod status first.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Create the Application
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+EOF
+# application.argoproj.io/guestbook created
+
+# Check status (OutOfSync before sync)
+kubectl get applications -n argocd
+# NAME        SYNC STATUS   HEALTH STATUS
+# guestbook   OutOfSync     Missing
+
+# Perform manual sync
+argocd app sync guestbook
+# Or with kubectl:
+# kubectl patch application guestbook -n argocd --type=merge -p &#x27;{&quot;operation&quot;:{&quot;sync&quot;:{}}}&#x27;
+
+# Status after sync
+kubectl get applications -n argocd
+# NAME        SYNC STATUS   HEALTH STATUS
+# guestbook   Synced        Healthy
+
+# Verify deployed resources
+kubectl get all -n guestbook</code></pre>
+                <div class='exp2'><p>An ArgoCD Application declares which path in a Git repository to deploy to which namespace in the cluster. Without syncPolicy.automated, the Application operates in manual sync mode. OutOfSync means the Git source and cluster state differ; Synced means they match. Health status reflects whether the actual resources (Deployment, Pods, etc.) are operating normally. In GitOps, a Git commit — not a kubectl apply — is the trigger for deployment.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core Practice] Practice ArgoCD self-healing and drift detection. Enable automated syncPolicy (selfHeal: true, prune: true) on the Application, then manually change a resource in the cluster to introduce drift. Observe ArgoCD automatically reverting the cluster back to the Git state.</p></div>
+              <pre class='starter'><code># 1. Enable automated syncPolicy
+kubectl patch application guestbook -n argocd \
+  --type=merge \
+  -p &#x27;{
+    &quot;spec&quot;: {
+      &quot;syncPolicy&quot;: {
+        &quot;automated&quot;: {
+          &quot;selfHeal&quot;: ___,    # true: auto-recover changes that differ from Git
+          &quot;prune&quot;: ___         # true: auto-delete resources absent from Git
+        }
+      }
+    }
+  }&#x27;
+
+# 2. Introduce drift: manually change replicas of guestbook-ui
+kubectl scale deployment guestbook-ui -n guestbook --replicas=5
+
+# 3. Watch for OutOfSync then automatic recovery
+kubectl get deployment guestbook-ui -n guestbook -w
+
+# 4. Review drift history detected by ArgoCD
+argocd app history guestbook</code></pre>
+              <details><summary>Hint</summary><ul><li>The default selfHeal check interval is 3 minutes (180 seconds). Adjust it with the timeout.reconciliation key in the argocd-cm ConfigMap.</li><li>prune: true is a powerful setting. When enabling it in production for the first time, use ArgoCD UI&#x27;s &#x27;Diff&#x27; feature to review resources that will be deleted.</li><li>If you want immediate sync on drift detection, check the &#x27;server.disable.auth&#x27; setting in the argocd-cmd-params-cm ConfigMap.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Enable selfHeal + prune
+kubectl patch application guestbook -n argocd \
+  --type=merge \
+  -p &#x27;{&quot;spec&quot;:{&quot;syncPolicy&quot;:{&quot;automated&quot;:{&quot;selfHeal&quot;:true,&quot;prune&quot;:true}}}}&#x27;
+
+# 2. Introduce drift (force replicas to 5)
+kubectl scale deployment guestbook-ui -n guestbook --replicas=5
+
+# 3. Watch auto-recovery (within seconds to tens of seconds)
+kubectl get deployment guestbook-ui -n guestbook -w
+# NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+# guestbook-ui   5/5     5            5           5m   &lt;-- briefly 5
+# guestbook-ui   1/1     1            1           5m   &lt;-- ArgoCD restores Git value (1)
+
+# 4. Application status
+argocd app get guestbook
+# Sync Status: Synced
+# Health Status: Healthy
+
+# 5. Sync history
+argocd app history guestbook
+# ID   DATE                           REVISION
+# 0    2024-01-01 00:00:00 +0000 UTC  HEAD (xxxx)
+# 1    2024-01-01 00:01:00 +0000 UTC  HEAD (xxxx)   &lt;-- self-heal sync
+
+# 6. Test prune: create an extra resource directly
+kubectl create configmap extra-config -n guestbook --from-literal=key=val
+# After a few seconds ArgoCD auto-deletes it (not in Git)
+kubectl get configmap -n guestbook</code></pre>
+                <div class='exp2'><p>With selfHeal: true, ArgoCD compares cluster state against Git state every 3 minutes (default) and automatically synchronizes any drift it finds. Changing replicas via kubectl scale is reverted by ArgoCD back to the Git value. prune: true removes resources from the cluster that no longer exist in Git. Together these two settings implement the GitOps guarantee that &#x27;Git is the sole source of truth for the cluster.&#x27; All changes must now flow through a Git commit.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Application] Practice deploying an ArgoCD Application across multiple environments (dev/prod). Create two Applications pointing to different paths (or branches) in the same Git repository. After pushing a manifest change to the dev path in Git, confirm that only the dev Application becomes OutOfSync.</p></div>
+              <pre class='starter'><code># Prerequisite: fork argocd-example-apps or use a local Git server
+# Here we simulate with different paths
+
+# dev Application (guestbook path)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: ___          # dev environment path
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-dev
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    automated:
+      selfHeal: true
+
+---
+# prod Application (helm-guestbook path — simulates a different deployment unit)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: ___          # prod environment path
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    # no automated (prod requires manual approval)
+
+# Check both Applications simultaneously
+kubectl get applications -n argocd</code></pre>
+              <details><summary>Hint</summary><ul><li>The helm-guestbook path is the same app packaged as a Helm chart. ArgoCD supports plain YAML, Helm, and Kustomize natively.</li><li>In real teams, it is recommended to restrict sync permissions on the prod Application to specific roles using ArgoCD RBAC.</li><li>Use argocd app diff &lt;name&gt; to preview the diff between Git and the cluster before syncing.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Create both Applications
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-dev
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    automated:
+      selfHeal: true
+EOF
+
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook-prod
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: helm-guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+EOF
+
+# Sync both Applications
+argocd app sync guestbook-dev
+argocd app sync guestbook-prod
+
+# Check status
+kubectl get applications -n argocd
+# NAME             SYNC STATUS   HEALTH STATUS
+# guestbook-dev    Synced        Healthy
+# guestbook-prod   Synced        Healthy
+
+# Drift on dev only: guestbook-dev reverts via selfHeal
+# prod has no automated sync, so it stays OutOfSync
+kubectl scale deployment -n guestbook-prod --replicas=3 --all
+kubectl get applications -n argocd
+# NAME             SYNC STATUS   HEALTH STATUS
+# guestbook-dev    Synced        Healthy
+# guestbook-prod   OutOfSync     Healthy  &lt;-- prod requires manual sync
+
+# Clean up
+argocd app delete guestbook guestbook-dev guestbook-prod
+kubectl delete namespace guestbook guestbook-dev guestbook-prod</code></pre>
+                <div class='exp2'><p>In a multi-environment (dev/prod) GitOps pattern, dev typically uses automated selfHeal for rapid feedback, while prod uses manual sync to require a review and approval step before any change takes effect. Using ArgoCD&#x27;s App of Apps pattern or ApplicationSet allows you to manage dozens of environments and clusters as code. Separating environments by directory structure (or branch) in a Git repository enables declarative management of multiple environments from a single ArgoCD instance.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=f5EpcWp0THw' target='_blank'>What is GitOps, How GitOps works and Why it&#x27;s so useful</a></li><li><a href='https://www.youtube.com/watch?v=MeU5_k9ssrs' target='_blank'>ArgoCD Tutorial for Beginners | GitOps CD for Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=Yb3_4PZX0B0' target='_blank'>Let&#x27;s do GitOps in Kubernetes! ArgoCD Tutorial</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,0 +1,61 @@
+{
+  "lecture_no": 3,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "Your team of two product engineers is building a customer-support chatbot. You have roughly 500,000 document chunks, no dedicated DevOps capacity, and a strict requirement that data must not leave your cloud account. Which vector database choice best fits this situation?",
+      "options": [
+        "FAISS — it delivers the best raw performance and avoids any vendor dependency",
+        "Pinecone — it is fully managed and eliminates operational burden",
+        "Weaviate self-hosted on your own cloud infrastructure",
+        "Chroma in embedded mode — minimal setup for a small team"
+      ],
+      "answer_index": 2,
+      "explanation": "Pinecone (B) is fully managed but stores data in a third-party cloud, violating the data-residency requirement. FAISS (A) has no built-in persistence or metadata filtering and requires significant custom engineering — wrong for a two-person product team. Chroma embedded (D) is designed for single-process, sub-100k-vector use and is not the right fit for 500k vectors in a production service. Weaviate self-hosted on your own infrastructure (C) satisfies all three constraints: it handles the 100k–10M range, gives you full control over data residency, and requires only moderate ops capacity."
+    },
+    {
+      "question": "A RAG pipeline indexes a corpus of 2 million vectors using IVFFlat with nlist=1000 and nprobe=5. The development team notices that recall@10 is lower than expected. Which change is most likely to improve recall without rebuilding the entire index?",
+      "options": [
+        "Increase nlist to 5000 to create finer-grained partitions",
+        "Switch the distance metric from cosine similarity to L2",
+        "Increase nprobe to 20 or higher so more cluster partitions are searched at query time",
+        "Reduce the embedding dimension to lower the search space"
+      ],
+      "answer_index": 2,
+      "explanation": "IVF searches only the nprobe nearest cluster centroids. With nprobe=5 out of 1000 clusters, only 0.5% of the index is examined per query, which is the direct cause of low recall. Increasing nprobe (C) probes more partitions at query time — no retraining or rebuilding required — and directly raises recall at the cost of slightly higher latency. Increasing nlist (A) would require retraining the cluster centroids, not just a query-time change, and by itself makes each cluster smaller, which can worsen recall if nprobe is not raised accordingly. Changing the distance metric (B) does not affect how many partitions are searched. Reducing embedding dimensions (D) would require re-embedding and re-indexing the entire corpus."
+    },
+    {
+      "question": "Which of the following best explains why HNSW is preferred over IVF when a production system continuously ingests new documents throughout the day?",
+      "options": [
+        "HNSW uses less memory than IVF, freeing resources for new insertions",
+        "HNSW does not require a training step and supports incremental insertion, while IVF partitions become stale when data distribution changes",
+        "HNSW provides exact nearest-neighbour results, whereas IVF is approximate",
+        "HNSW queries have O(1) time complexity, making latency independent of corpus size"
+      ],
+      "answer_index": 1,
+      "explanation": "The key distinction for continuously updated corpora is that IVF must be trained on a representative sample before vectors are inserted, and its cluster boundaries become stale as the data distribution shifts. HNSW (B) builds its graph incrementally — each new vector is simply connected to its neighbours in the existing graph without retraining. HNSW actually uses more memory than IVF (A is wrong) because graph edges must be held in RAM. Both HNSW and IVF are approximate methods, not exact (C is wrong). HNSW has roughly O(log N) query complexity, not O(1) (D is wrong)."
+    },
+    {
+      "question": "A fintech startup already runs PostgreSQL for its transactional data. They want to add semantic search over ~5 million compliance documents, with every query filtered by client_id and date_range. Which recommendation aligns best with the six selection criteria taught in this lecture?",
+      "options": [
+        "Migrate to Pinecone to get managed scalability and built-in metadata filtering",
+        "Use FAISS for maximum throughput, applying metadata filters manually after the ANN search",
+        "Add the pgvector extension to the existing Postgres instance to combine SQL filtering with vector similarity in a single query",
+        "Deploy a standalone Weaviate cluster because pgvector cannot handle metadata filtering"
+      ],
+      "answer_index": 2,
+      "explanation": "pgvector (C) is the strongest fit here for three compounding reasons: (1) the team already operates Postgres, so no new system needs to be learned or operated; (2) pgvector supports full SQL in the same query as vector similarity — WHERE client_id = $1 AND date_range ... ORDER BY embedding <=> $2 LIMIT 5 — which satisfies the metadata filtering requirement natively; (3) 5 million vectors is well within pgvector's comfortable operating range. Pinecone (A) would introduce a new managed service and ongoing cost, and adds complexity when the team already has a well-operated Postgres. FAISS (B) has no built-in metadata filtering — post-hoc filtering is wasteful and can degrade recall. Weaviate (D) is incorrect as a premise: pgvector does support rich metadata filtering through standard SQL."
+    },
+    {
+      "question": "According to the lecture, which pair of statements about brute-force (flat) vector search is accurate?",
+      "options": [
+        "Brute-force search is O(log N) and suitable for corpora of any size; ANN indexes are only needed above 100 million vectors",
+        "Brute-force search is exact and O(N); it is useful for small corpora and as a ground-truth baseline to evaluate ANN recall, but not for large production corpora",
+        "Brute-force search is approximate but fast; it should be replaced by HNSW as soon as the corpus exceeds 10,000 vectors",
+        "Brute-force search requires a training step similar to IVF and cannot be used for incremental insertions"
+      ],
+      "answer_index": 1,
+      "explanation": "Brute-force (flat) search computes the exact distance between the query and every stored vector, making it perfectly accurate but O(N) in time complexity. The lecture explicitly states two valid use cases for flat indexes: tiny corpora where algorithm overhead outweighs savings, and offline batch jobs where exact recall is needed as a ground truth to benchmark ANN indexes against. This matches option B exactly. Option A misstates the complexity as O(log N) — that is the complexity of ANN methods, not flat search. Option C incorrectly calls brute-force approximate. Option D is wrong: flat search requires no training step; only IVF requires training on a representative sample."
+    }
+  ]
+}

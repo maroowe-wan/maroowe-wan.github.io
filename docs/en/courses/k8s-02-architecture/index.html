@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-02-architecture/index.html'>한국어</a></div>
+  <h1>K8S-Architecture</h1>
+  <div class="sub">Absolute beginners to Kubernetes who have a basic familiarity with containers and Docker · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Kubernetes Architecture - Control Plane and Worker Nodes</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Kubernetes Architecture - Control Plane and Worker Nodes </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Distinguish the roles of a cluster, the control plane (formerly called &quot;master&quot;), and worker nodes</li>
+<li>Understand what each core component — API Server, Scheduler, etcd, kubelet — is responsible for</li>
+<li>Trace the sequence of steps a user command goes through inside the cluster</li>
+</ul>
+<h3>Lecture</h3>
+<h4>Why You Need to Understand the Architecture</h4>
+<p>In Lecture 1 we learned that &quot;Kubernetes automatically places containers and restarts them when they crash.&quot; But if you do not understand what that &quot;automatically&quot; actually means, you will be at a loss whenever something goes wrong. When a Pod fails to start, which component has stopped doing its job?</p>
+<p>Kubernetes is not a magic black box — it is <strong>a system of many small programs (processes) that communicate and cooperate with each other</strong>. Once you have this structure clear in your mind, every hands-on exercise that follows becomes much easier. This lecture has no commands to run, but it lays the most important conceptual foundation for everything ahead.</p>
+<p>Think of a Kubernetes cluster as <strong>a large logistics company</strong>. There are warehouses (worker nodes) where workers actually move and stack goods, and there is a central control room (the control plane) that tells those workers what to do, where, and how many.</p>
+<h4>Cluster, Control Plane, and Worker Nodes</h4>
+<p>Let&#x27;s start with the big picture.</p>
+<ul>
+<li><strong>Cluster</strong>: The overall system that groups multiple machines (servers) together to run containerized applications. Think of it as the entire company. An organization might run several clusters simultaneously — one for production, one for testing, and so on.</li>
+<li><strong>Node</strong>: A single machine that makes up the cluster. It can be a cloud virtual machine (e.g., EC2), a physical server, or even your laptop.</li>
+</ul>
+<p>Nodes are divided into two types based on their role:</p>
+<ul>
+<li><strong>Control Plane (formerly called &quot;master&quot;)</strong>: The <strong>brain</strong> that manages the entire cluster and makes decisions. It receives user requests, decides where to run each container, stores the cluster&#x27;s state data, and responds to failures. It does not run your applications directly — it is the command-and-control layer.</li>
+<li><strong>Worker Node</strong>: The <strong>workfloor</strong> where your applications actually <strong>run</strong>. It receives instructions from the control plane and starts and maintains containers.</li>
+</ul>
+<blockquote class='callout'>
+<p>In production environments, if the brain goes down the entire cluster is at risk, so the control plane is typically distributed across multiple nodes to ensure high availability. For testing purposes, it is perfectly fine to run both the control plane and workers on a single machine.</p>
+</blockquote>
+<p>One important fact: <strong>worker nodes do not run containers directly — they run units called Pods.</strong> If Docker&#x27;s smallest unit is a container, Kubernetes&#x27; smallest deployable unit is a Pod. A Pod contains one or more containers, and to scale up an application you simply run more Pods. (Pods are covered in detail in Lecture 3.)</p>
+<h4>The 4 Core Components of the Control Plane</h4>
+<p>Inside the control room (control plane) there are four programs, each with a distinct role.</p>
+<p><strong>1. API Server (the front desk)</strong></p>
+<p>The <strong>sole entry point</strong> for every request entering the cluster. When you issue a command with <code class='ic'>kubectl</code> (the Kubernetes CLI) or through the dashboard, you are actually talking to the API Server. Even the components on worker nodes communicate exclusively through the API Server. As the front desk, it also handles <strong>authentication (verifying who you are) and authorization (verifying what you are allowed to do)</strong>, as well as validating that requests are properly formed.</p>
+<p><strong>2. etcd (the company ledger)</strong></p>
+<p>A <strong>key-value store</strong> that holds all of the cluster&#x27;s state data. Which nodes exist, which Pods are running where, what the user has requested — every &quot;current fact&quot; is recorded in etcd. This is why etcd is called the cluster&#x27;s <strong>single source of truth</strong>. When you create a Pod, that information is written to etcd; when you delete it, it is removed from etcd.</p>
+<p><strong>3. Scheduler (the placement coordinator)</strong></p>
+<p>Decides <strong>which worker node a newly created Pod should run on</strong>. Rather than simply finding any open slot, the Scheduler considers the CPU and memory a Pod requires, the available resources on each node, and any constraints such as &quot;keep this Pod near that Pod,&quot; then picks the most suitable node. It solves what is essentially a bin-packing problem — fitting multiple applications optimally onto a limited set of servers.</p>
+<p><strong>4. Controller Manager (the floor supervisor)</strong></p>
+<p>A set of background processes that continuously tries to <strong>bring the system back to the user&#x27;s desired state</strong>. For example, if you declared via a Deployment or ReplicaSet that &quot;3 Pods must be running&quot; and one dies, the controller detects this and creates new Pod objects to restore the count. There are dedicated controllers for each resource type — a Node Controller that detects downed nodes, a Deployment Controller that manages rollouts, and so on. Kubernetes&#x27; self-healing capability lives here.</p>
+<blockquote class='callout'>
+<p>The Controller Manager&#x27;s job is to ensure the declared number of Pod <em>objects</em> exist — it does not directly start a Pod on a specific node. A Pod created by the controller starts out in a Pending state with no node assigned; it is only after the Scheduler selects a node that the kubelet on that node actually starts it.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>When running in a cloud environment, a Cloud Controller Manager is added to delegate cloud-specific tasks — such as provisioning virtual machines for nodes — to the cloud provider (AWS, GCP, or Azure).</p>
+</blockquote>
+<h4>The 3 Core Components of a Worker Node</h4>
+<p>Each worker node (workfloor) runs three programs that together keep Pods running.</p>
+<p><strong>1. kubelet (the on-site crew leader)</strong></p>
+<p>An agent that runs on every worker node. It communicates with the control plane (API Server) to receive instructions about which Pods to run on its node, and takes responsibility for keeping those Pods alive and healthy. Think of it as the liaison connecting a node to the brain.</p>
+<p><strong>2. Container Runtime (the container execution engine)</strong></p>
+<p>The software that actually runs containers. It pulls images from a registry, starts and stops containers, and manages their resources. Docker comes to mind first, but it is only one of several available runtimes. Kubernetes can work with any runtime — containerd, CRI-O, and others — as long as it conforms to the standard <strong>CRI (Container Runtime Interface)</strong>. The kubelet directs this runtime to carry out actual execution.</p>
+<p><strong>3. kube-proxy (the network traffic director)</strong></p>
+<p>Manages the network rules on each node so that traffic — from inside and outside the cluster — is correctly routed and load-balanced to the right Pod.</p>
+<p>The full cluster layout described above is summarized in the diagram below. Check where the control plane&#x27;s four components and the worker node&#x27;s three components each belong, and notice that <strong>all communication arrows ultimately point to the API Server</strong>. The Scheduler, Controller Manager, and each node&#x27;s kubelet all <strong>watch</strong> (maintain a persistent subscription to) the API Server; when something changes, the API Server pushes that information back through those subscriptions. In other words, components reach out to the API Server, and the API Server sends back responses and events — the direction of connection runs from the components toward the API Server.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    User[&quot;사용자 (kubectl)&quot;]
+
+    subgraph Cluster[&quot;쿠버네티스 클러스터&quot;]
+        subgraph CP[&quot;컨트롤 플레인 (두뇌)&quot;]
+            API[&quot;API Server&lt;br/&gt;유일한 정문·인증&quot;]
+            ETCD[&quot;etcd&lt;br/&gt;상태 저장소&quot;]
+            SCH[&quot;Scheduler&lt;br/&gt;노드 배치 결정&quot;]
+            CM[&quot;Controller Manager&lt;br/&gt;자가 치유&quot;]
+        end
+
+        subgraph W1[&quot;워커 노드 1&quot;]
+            KL1[&quot;kubelet&quot;]
+            CR1[&quot;Container Runtime&quot;]
+            KP1[&quot;kube-proxy&quot;]
+            POD1[&quot;Pod&quot;]
+        end
+
+        subgraph W2[&quot;워커 노드 2&quot;]
+            KL2[&quot;kubelet&quot;]
+            CR2[&quot;Container Runtime&quot;]
+            KP2[&quot;kube-proxy&quot;]
+            POD2[&quot;Pod&quot;]
+        end
+    end
+
+    User --&gt;|명령 요청| API
+    API &lt;--&gt;|상태 읽기·쓰기| ETCD
+    SCH --&gt;|watch·결정 쓰기| API
+    CM --&gt;|watch·결정 쓰기| API
+    KL1 --&gt;|watch·상태 보고| API
+    KL2 --&gt;|watch·상태 보고| API
+    API -.-&gt;|변경 이벤트 응답| SCH
+    API -.-&gt;|변경 이벤트 응답| KL1
+    API -.-&gt;|변경 이벤트 응답| KL2
+    KL1 --&gt;|실행 지시| CR1
+    KL2 --&gt;|실행 지시| CR2
+    CR1 --&gt;|컨테이너 실행| POD1
+    CR2 --&gt;|컨테이너 실행| POD2</div><figcaption>Kubernetes cluster architecture — all components watch the API Server in a hub-and-spoke model</figcaption></figure>
+<h4>How a User Command Is Processed</h4>
+<p>Now let&#x27;s see how these components work together. Follow a &quot;create a Pod&quot; request as it moves through the cluster. <strong>The key point is that every communication passes through the API Server.</strong> The flow goes like this:</p>
+<p>1. The user sends a &quot;run this container as a Pod&quot; request to the <strong>API Server</strong> via <code class='ic'>kubectl</code>.</p>
+<p>2. The API Server verifies authentication, authorization, and request format, then writes the Pod information to <strong>etcd</strong>. At this point the Pod is in a <strong>Pending</strong> state — no node has been assigned yet.</p>
+<p>3. The <strong>Scheduler</strong> notices the unassigned Pending Pod, analyzes resource availability across worker nodes, picks the best fit, and writes that binding decision back to the API Server (which in turn saves it to etcd).</p>
+<p>4. The <strong>kubelet</strong> on the selected worker node has been continuously watching the API Server. When it sees a Pod assigned to its node, it takes over and starts the Pod.</p>
+<p>5. The kubelet instructs the node&#x27;s <strong>Container Runtime</strong> to pull the image and launch the container — the Pod comes up.</p>
+<p>6. The kubelet reports &quot;this Pod is now Running&quot; back to the API Server, and that state change is saved to etcd. Now when the user runs <code class='ic'>kubectl get pod</code>, they see &quot;Running.&quot;</p>
+<p>Here is how to summarize the control plane&#x27;s division of labor in a single sentence: <strong>the Controller Manager ensures &quot;what and how many&quot; Pod objects exist, the Scheduler decides &quot;where&quot; each Pod goes, and the kubelet handles &quot;actually running&quot; it.</strong> That is why the Controller Manager does not appear in the single Pod creation flow above — we explicitly created one Pod, so there is nothing for the Controller Manager to count or reconcile. Instead, the Scheduler assigns a node directly, and the kubelet on that node starts the Pod on its own.</p>
+<p>The Controller Manager steps in under different circumstances: when a Deployment or ReplicaSet declares &quot;keep N Pods running,&quot; it <strong>creates Pod objects</strong> to fill any shortfall. Crucially, the controller only creates the Pod <em>objects</em> to meet the declared count — it does not decide which node they go to. Those newly created Pods are also born in a Pending state with no node assigned, and they must go through <strong>steps 3–6 above (Scheduler assigns a node → kubelet starts the Pod)</strong> before they come up on any node. The Scheduler is a mandatory gate that every Pod, regardless of how it was created, must pass through.</p>
+<p>Here is a critical detail about how watching works. Rather than the Scheduler and kubelet repeatedly polling the API Server asking &quot;any new work?&quot;, they each set up a persistent <strong>watch</strong> subscription at startup. Whenever something relevant changes, the API Server pushes the event to them. That is why the arrows in the diagram represent a continuous subscription stream rather than one-off queries.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as 사용자(kubectl)
+    participant API as API Server
+    participant ETCD as etcd
+    participant SCH as Scheduler
+    participant KL as kubelet
+    participant CR as Container Runtime
+
+    Note over SCH,KL: 시작 시 API Server에 watch(지속 구독)를 걸어 둠
+    SCH-&gt;&gt;API: watch 구독 시작(미배치 Pod 감시)
+    KL-&gt;&gt;API: watch 구독 시작(내 노드 Pod 감시)
+
+    U-&gt;&gt;API: 1. Pod 실행 요청
+    API-&gt;&gt;API: 2. 인증·인가·형식 검증
+    API-&gt;&gt;ETCD: 2. Pod 정보 기록
+    API--&gt;&gt;SCH: 3. 미배치 Pod 이벤트 푸시
+    SCH-&gt;&gt;API: 3. 최적 노드 선정 결과 쓰기(바인딩)
+    API--&gt;&gt;KL: 4. 내 노드 배정 Pod 이벤트 푸시
+    KL-&gt;&gt;CR: 5. 컨테이너 실행 지시
+    CR--&gt;&gt;KL: 5. Pod 실행 완료
+    KL-&gt;&gt;API: 6. 상태 보고(Running)
+    API-&gt;&gt;ETCD: 6. 상태 변화 저장
+    U-&gt;&gt;API: kubectl get pod
+    API--&gt;&gt;U: Running</div><figcaption>Pod creation request flowing through the cluster in 6 steps — watch-based event delivery</figcaption></figure>
+<p>One more scenario worth thinking through. What happens if a Pod launched via a Deployment suddenly crashes? The <strong>Controller Manager</strong> detects that &quot;the desired state (N Pods running) no longer matches the current state (N-1 Pods)&quot; and creates a new Pod object to fill the gap. That new Pod is born in a Pending state with no node assigned, so it takes exactly the same path: <strong>the Scheduler assigns a node (step 3) → the kubelet starts and reports the Pod (steps 4–6)</strong>. This is how the cluster heals itself without any manual intervention.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A <strong>cluster</strong> is a collection of nodes, split into the <strong>control plane</strong> (makes decisions) and <strong>worker nodes</strong> (run applications).</li>
+<li>Control plane&#x27;s 4 components: <strong>API Server</strong> (sole entry point · authentication), <strong>etcd</strong> (single source of truth for cluster state), <strong>Scheduler</strong> (decides which node a Pod runs on), <strong>Controller Manager</strong> (self-healing — ensures the declared number of Pod objects exists).</li>
+<li>Worker node&#x27;s 3 components: <strong>kubelet</strong> (watches the API Server and directly starts/maintains Pods on its node), <strong>Container Runtime</strong> (actually runs containers), <strong>kube-proxy</strong> (network routing).</li>
+<li>Worker nodes run <strong>Pods</strong>, not bare containers.</li>
+<li>Every request and every internal message <strong>must go through the API Server</strong>. A single Pod creation flows: API Server → etcd → Scheduler (node assignment) → kubelet on that node (starts the Pod) → Container Runtime.</li>
+<li>The control plane&#x27;s division of labor: <strong>Controller Manager</strong> (&quot;what and how many&quot; Pod objects exist) → <strong>Scheduler</strong> (&quot;where&quot; each Pod goes) → <strong>kubelet</strong> (&quot;actually running&quot; it). Pods created by the Controller Manager also start out Pending with no node assigned and must pass through the <strong>Scheduler&#x27;s node-assignment step</strong> before the kubelet can start them — the Scheduler is a mandatory gate for every Pod, no matter how it was created.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q1. Which statement best describes the difference in roles between the control plane and worker nodes?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>The control plane directly runs the user&#x27;s application containers, while worker nodes decide which node to place containers on.</li><li class='opt' onclick='pick(this,0,1)'>The control plane acts as the brain that manages the entire cluster and makes decisions, while actual application Pods run on worker nodes.</li><li class='opt' onclick='pick(this,0,2)'>Both the control plane and worker nodes can run Pods, and the role difference is determined by the amount of resources each holds.</li><li class='opt' onclick='pick(this,0,3)'>The control plane alone, without any worker nodes, can serve containerized applications normally.</li></ul>
+              <div class='exp'><p>Correct answer (B): The control plane handles &#x27;instruction and management,&#x27; while worker nodes handle &#x27;execution.&#x27; The control plane components (API Server, etcd, Scheduler, Controller Manager) do not directly run application containers — they decide what to run and where, and coordinate accordingly. Actual Pods run exclusively on worker nodes. (A) The roles are reversed — this is incorrect. (C) The control plane does not run app Pods in production, and roles are determined by design, not resource size. (D) Without worker nodes there are no nodes to actually run containers on, so applications cannot be served.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q2. Which statement about etcd is correct?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>etcd directly receives kubectl commands from users and acts as the cluster&#x27;s front gate by handling authentication and authorization.</li><li class='opt' onclick='pick(this,1,1)'>etcd is the scheduling engine that calculates which worker node a Pod should be placed on.</li><li class='opt' onclick='pick(this,1,2)'>etcd is a key-value store that holds all of the cluster&#x27;s state data and serves as the cluster&#x27;s single source of truth.</li><li class='opt' onclick='pick(this,1,3)'>etcd runs on each worker node and acts as an agent responsible for container health checks and execution.</li></ul>
+              <div class='exp'><p>Correct answer (C): etcd is a key-value store that holds all cluster state data — the list of nodes, Pod placement information, user declarations, and more — and is called the &#x27;single source of truth.&#x27; When a Pod is created, it is recorded in etcd; when deleted, it is removed from etcd. (A) Receiving all requests and handling authentication/authorization is the role of the API Server. (B) Deciding the placement node is the role of the Scheduler. (D) Running on each worker node and being responsible for container execution is the role of kubelet.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q3. The Scheduler has decided to place a particular Pod on worker node A. After that decision, which component actually runs the container? (analytical)</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>The Scheduler directly instructs worker node A&#x27;s Container Runtime to start the container.</li><li class='opt' onclick='pick(this,2,1)'>The Controller Manager selects worker node A and then commands kubelet to run the container.</li><li class='opt' onclick='pick(this,2,2)'>Worker node A&#x27;s kubelet watches the API Server, discovers the Pod assigned to its node, and instructs the Container Runtime to start it.</li><li class='opt' onclick='pick(this,2,3)'>The API Server directly calls worker node A&#x27;s Container Runtime to start the container.</li></ul>
+              <div class='exp'><p>Correct answer (C): The Scheduler&#x27;s role ends at &#x27;deciding (binding) which node to use&#x27; — it does not perform the actual execution. The binding decision is written to etcd via the API Server. After that, the kubelet on the assigned node continuously watches the API Server, discovers the Pod bound to its node, and instructs the node&#x27;s Container Runtime to pull the image and start the container. (A) The Scheduler does not contact nodes directly. (B) The Controller Manager does not appear in this single-Pod creation flow; it creates Pod objects when a Deployment or similar resource needs to maintain a replica count. (D) The API Server relays and validates requests and writes data to etcd — it does not call the Container Runtime directly.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q4. When a user requests Pod creation via kubectl, which sequence is correct?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>kubectl → Scheduler → API Server → etcd → kubelet → Container Runtime</li><li class='opt' onclick='pick(this,3,1)'>kubectl → API Server → etcd write → Scheduler (node decision) → kubelet (execution order) → Container Runtime</li><li class='opt' onclick='pick(this,3,2)'>kubectl → kubelet → Container Runtime → API Server → etcd → Scheduler</li><li class='opt' onclick='pick(this,3,3)'>kubectl → etcd → API Server → Scheduler → Controller Manager → kubelet</li></ul>
+              <div class='exp'><p>Correct answer (B): Every request must go through the API Server as the first gate. The flow is: (1) kubectl sends a request to the API Server → (2) API Server validates authentication, authorization, and format, then writes Pod information to etcd → (3) Scheduler finds the unscheduled Pod, selects the optimal node (binding), notifies the API Server, and the binding is also recorded in etcd → (4) The kubelet on that node watches the API Server and discovers its Pod → (5) kubelet instructs the Container Runtime to execute → Pod starts. (A) If the Scheduler comes before the API Server, authentication and authorization would be bypassed — incorrect. (C) kubelet and Container Runtime cannot come before etcd and Scheduler. (D) The Controller Manager is not involved in a single Pod creation flow.</p></div></div><div class='quiz' data-ans='2'>
+              <div class='q'><p>Q5. You are running 3 Pods via a Deployment. One worker node suddenly goes down and a Pod is lost. When Kubernetes automatically recovers that Pod on another node, which component is the first to &#x27;create the missing Pod object&#x27;? (applied)</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>Scheduler — it calculates the optimal position among the remaining nodes and immediately reschedules the Pod.</li><li class='opt' onclick='pick(this,4,1)'>kubelet — it detects the dead Pod and creates a new Pod object on its own.</li><li class='opt' onclick='pick(this,4,2)'>Controller Manager — it detects the gap between the declared replica count (3) and the actual count (2), and creates the missing Pod object.</li><li class='opt' onclick='pick(this,4,3)'>etcd — it automatically reconciles the difference between the stored desired state and current state to recreate the Pod.</li></ul>
+              <div class='exp'><p>Correct answer (C): The Controller Manager (ReplicaSet controller) continuously monitors the difference between the desired state (3 Pods) and the current state (2 Pods). When it detects a discrepancy, it creates as many new Pod objects as needed to close the gap. Those Pod objects then follow the normal flow — the Scheduler assigns a node and the kubelet on that node actually starts them. (A) The Scheduler &#x27;decides&#x27; on a node when a Pod object already exists; it does not create Pod objects. (B) kubelet&#x27;s role is to run and maintain Pods assigned to its node — it is not the entity that creates new Pod objects. (D) etcd is purely a storage layer; it does not take any action on its own.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=TlHvYWVUZyc' target='_blank'>Kubernetes Explained in 6 Minutes | k8s Architecture</a></li><li><a href='https://www.youtube.com/watch?v=vZ9gEqeddxQ' target='_blank'>Day 2 | Kubernetes Architecture explained</a></li><li><a href='https://www.youtube.com/watch?v=VQUZF6k6g88' target='_blank'>Kubernetes architecture: Nodes and control plane</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

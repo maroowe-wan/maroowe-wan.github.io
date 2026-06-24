@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-StatefulSet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-11-statefulset/index.html'>EN</a></div>
+  <h1>K8S-StatefulSet</h1>
+  <div class="sub">쿠버네티스 중급1(ConfigMap/Secret, PV/PVC, Probes·롤링업데이트·롤백, requests/limits·HPA, Ingress)을 마친 학습자. 실무 운영 역량을 더 넓히려는 중급 학습자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. StatefulSet과 상태있는 워크로드 - 안정적 ID와 순서 보장</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. StatefulSet과 상태있는 워크로드 - 안정적 ID와 순서 보장 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>Deployment로는 부족한 상태있는(stateful) 워크로드의 요구사항을 이해한다</li>
+<li>Headless Service로 각 Pod에 안정적인 네트워크 ID가 부여되는 원리와 순서 보장(Ordered) 동작을 설명한다</li>
+<li>volumeClaimTemplates로 Pod마다 전용 PVC를 자동 생성하는 StatefulSet을 배포해본다</li>
+</ul>
+<h3>본문</h3>
+<h4>Stateless와 Stateful, 무엇이 다른가</h4>
+<p>중급1까지 우리는 주로 <strong>Deployment</strong>로 애플리케이션을 굴려 왔다. 웹 서버나 API처럼 특정 Pod에 정체성이 없는 워크로드라면 Deployment는 거의 완벽하다. Pod 하나가 죽으면 쿠버네티스가 똑같은 Pod를 새로 띄우고, Service가 들어오는 요청을 살아있는 Pod 중 아무 곳에나 분배한다. 우리는 &quot;어느 Pod가 처리했는지&quot; 신경 쓸 필요가 없다. 이런 워크로드를 <strong>stateless(상태 없는)</strong> 워크로드라고 부른다. 저장할 데이터가 없거나, 잠깐 끊겨도 별 탈이 없는 종류다.</p>
+<p>문제는 데이터베이스, Kafka, Redis, 분산 스토리지처럼 <strong>데이터를 디스크에 계속 쌓는 워크로드</strong>다. 이런 <strong>stateful(상태 있는)</strong> 워크로드는 Pod 하나하나가 &quot;자기만의 데이터와 역할&quot;을 가진다. <code class='ic'>mysql-0</code>은 쓰기를 담당하는 마스터고, <code class='ic'>mysql-1</code>은 그 데이터를 복제받는 읽기 전용이라면, 이 둘은 결코 교체 가능한 부품이 아니다. 그런데 Deployment는 정확히 그 &quot;교체 가능성&quot;을 전제로 설계되어 있다.</p>
+<h4>Deployment로 데이터베이스를 돌리면 벌어지는 일</h4>
+<p>stateful 워크로드를 Deployment로 억지로 돌려 보면, 다음 세 가지 벽에 차례로 부딪힌다.</p>
+<p><strong>1) 이름이 매번 바뀐다.</strong> Deployment가 만드는 Pod 이름은 <code class='ic'>myapp-7d9f8c-abcde</code>처럼 무작위 해시가 붙는다. Pod가 재생성되면 이름도 통째로 바뀐다. 그런데 데이터베이스 클러스터에서는 &quot;복제본은 마스터 주소를 알아야 한다.&quot; 주소가 매번 바뀌면 클러스터 구성 자체가 불가능하다.</p>
+<p><strong>2) 모든 복제본이 단 하나의 볼륨을 공유한다.</strong> 이것이 Deployment의 근본적인 설계 한계다. Deployment는 Pod 템플릿에 정의된 <strong>하나의 PVC(스토리지 요청)를 모든 복제본이 똑같이 공유</strong>하도록 만들어졌다. 즉 &quot;Pod마다 다른 데이터&quot;라는 개념 자체가 없다. 복제본을 2개 이상으로 늘리면, 대부분의 기본 스토리지가 <code class='ic'>ReadWriteOnce(RWO, 한 노드에만 마운트 가능)</code> 모드여서 두 번째 Pod가 같은 볼륨을 못 잡고 생성 단계에서 멈춘다. 다만 이 RWO 충돌은 어디까지나 설계 한계가 드러나는 <strong>증상</strong>일 뿐 근본 원인이 아니다.</p>
+<blockquote class='callout'>
+<p>흔한 오해: &quot;그럼 <code class='ic'>ReadWriteMany(RWX, 여러 노드 동시 마운트)</code> 스토리지를 쓰면 Deployment로 DB를 돌려도 되겠네?&quot; 아니다. 그러면 충돌은 안 나지만 <strong>모든 복제본이 하나의 디스크에 동시에 쓰면서</strong> 데이터가 깨진다. 게다가 Deployment에는 여전히 안정적 ID와 시작 순서 보장이 없다. 스토리지 접근 모드를 바꾼다고 해결될 문제가 아니라는 뜻이다.</p>
+</blockquote>
+<p><strong>3) 시작 순서를 통제할 수 없다.</strong> Deployment는 복제본을 <strong>동시에</strong> 띄운다. 하지만 DB 클러스터는 &quot;마스터가 먼저 떠야 복제본이 그 마스터를 보고 붙는다&quot;는 순서가 있다. 동시에 띄우면 복제본이 아직 없는 마스터를 찾다가 실패한다.</p>
+<blockquote class='callout'>
+<p>핵심: stateful 워크로드는 (1) 안정적인 이름, (2) Pod별 전용 스토리지, (3) 예측 가능한 시작·종료 순서, 이 세 가지를 요구한다. Deployment는 셋 다 보장하지 않는다. 바로 이 틈을 메우려고 나온 컨트롤러가 <strong>StatefulSet</strong>이다.</p>
+</blockquote>
+<h4>StatefulSet이 주는 세 가지 보장</h4>
+<p>StatefulSet은 Deployment처럼 &quot;Pod 여러 개를 원하는 개수만큼 유지&quot;하는 컨트롤러지만, 위 세 요구사항을 정확히 충족하도록 설계되었다.</p>
+<p><strong>안정적인 식별자(stable identity).</strong> StatefulSet의 Pod는 무작위 이름이 아니라 <code class='ic'>이름-순번</code> 형식의 고정 이름을 갖는다. 복제본이 3개면 <code class='ic'>web-0</code>, <code class='ic'>web-1</code>, <code class='ic'>web-2</code>다. <code class='ic'>web-1</code>이 죽었다 살아나도 다시 <code class='ic'>web-1</code>이다. 다른 노드로 재배치되어도 같은 이름과 같은 볼륨을 그대로 들고 간다. 즉 Pod에 <strong>영구적인 정체성</strong>이 생긴다.</p>
+<p><strong>Pod별 전용 스토리지.</strong> <code class='ic'>volumeClaimTemplates</code>라는 &quot;PVC 설계도&quot;를 정의하면, StatefulSet이 Pod마다 별도의 PVC를 자동으로 찍어낸다. <code class='ic'>web-0</code>은 <code class='ic'>data-web-0</code>, <code class='ic'>web-1</code>은 <code class='ic'>data-web-1</code>을 갖는 식이다. Pod가 재생성되어도 자기 번호에 해당하는 볼륨을 다시 붙이므로 데이터가 보존된다. (Deployment가 모든 복제본에 하나의 PVC를 공유하던 것과 정확히 반대다.)</p>
+<p><strong>순서 보장(ordered).</strong> 기본 동작에서 StatefulSet은 Pod를 <strong>순번대로 하나씩</strong> 생성한다. <code class='ic'>web-0</code>이 완전히 Ready 상태가 된 뒤에야 <code class='ic'>web-1</code>을 만든다. 삭제·축소는 반대로 <strong>높은 번호부터</strong> 역순으로 진행한다(<code class='ic'>web-2</code> → <code class='ic'>web-1</code> → <code class='ic'>web-0</code>). 마스터(0번)를 마지막까지 살려두려는 자연스러운 동작이다. 아래 흐름도처럼 생성과 삭제가 정확히 거울처럼 반대 방향으로 진행된다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph CREATE[&quot;생성: 낮은 번호부터 하나씩&quot;]
+        direction LR
+        C0[&quot;web-0 생성&lt;br/&gt;Ready 대기&quot;] --&gt; C1[&quot;web-1 생성&lt;br/&gt;Ready 대기&quot;] --&gt; C2[&quot;web-2 생성&lt;br/&gt;Ready 대기&quot;]
+    end
+    subgraph DELETE[&quot;삭제·축소: 높은 번호부터 역순&quot;]
+        direction LR
+        D2[&quot;web-2 종료&quot;] --&gt; D1[&quot;web-1 종료&quot;] --&gt; D0[&quot;web-0 종료&quot;]
+    end
+    CREATE -.-&gt;|&quot;반대 방향&quot;| DELETE</div><figcaption>StatefulSet의 순서 보장 동작 (생성은 0번부터, 삭제는 역순)</figcaption></figure>
+<h4>안정적인 네트워크 ID와 Headless Service</h4>
+<p>여기서 가장 중요한 개념이 <strong>Headless Service(헤드리스 서비스)</strong>다. 보통의 Service는 자기 앞으로 하나의 가상 IP(ClusterIP)를 갖고, 요청이 오면 뒤에 있는 Pod 중 하나로 <strong>로드밸런싱</strong>해 넘긴다. stateless라면 이게 정답이지만, &quot;마스터에게만 쓰기를 보내야 하는&quot; 상황에서는 치명적이다. 쓰기 요청이 엉뚱하게 읽기 복제본으로 가면 안 되기 때문이다.</p>
+<p>Headless Service는 이 로드밸런싱을 끈다. 매니페스트에서 <code class='ic'>clusterIP: None</code>으로 선언하면 가상 IP를 받지 않고, DNS 조회 시 <strong>개별 Pod 각각의 DNS 레코드</strong>를 돌려준다. 그 결과 각 Pod는 다음과 같은 고정 DNS 주소를 얻는다.</p>
+<pre><code>
+&lt;Pod이름&gt;.&lt;서비스이름&gt;.&lt;네임스페이스&gt;.svc.cluster.local
+예) web-0.nginx.default.svc.cluster.local
+</code></pre>
+<p><code class='ic'>web-0</code>이 다른 노드로 옮겨가 IP가 바뀌어도 이 DNS 이름은 변하지 않는다. 그래서 복제본은 &quot;마스터는 <code class='ic'>mysql-0.mysql</code>이다&quot;라고 코드에 박아두고 직접 연결할 수 있다. 참고로 Headless Service는 각 Pod의 A 레코드(이름→IP)뿐 아니라 SRV 레코드까지 만들어 주어, 일부 클라이언트가 포트 정보까지 DNS로 찾을 수 있게 한다.</p>
+<p>StatefulSet과 Headless Service, Pod, 전용 PVC가 어떻게 맞물리는지 전체 구조는 아래 구성도와 같다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    HS[&quot;Headless Service&lt;br/&gt;nginx&lt;br/&gt;clusterIP: None&quot;]
+    SS[&quot;StatefulSet&lt;br/&gt;web (replicas 3)&quot;]
+    VCT[&quot;volumeClaimTemplates&lt;br/&gt;PVC 설계도 &#x27;data&#x27;&quot;]
+
+    SS --&gt;|&quot;serviceName으로 연결&quot;| HS
+    SS --&gt;|&quot;순번대로 Pod 생성&quot;| P0
+    SS --&gt;|&quot;순번대로 Pod 생성&quot;| P1
+    SS --&gt;|&quot;순번대로 Pod 생성&quot;| P2
+    SS --&gt;|&quot;Pod마다 PVC 발급&quot;| VCT
+
+    subgraph PODS[&quot;고정 이름을 가진 Pod들&quot;]
+        direction TB
+        P0[&quot;Pod web-0&quot;]
+        P1[&quot;Pod web-1&quot;]
+        P2[&quot;Pod web-2&quot;]
+    end
+
+    HS -.-&gt;|&quot;web-0.nginx 레코드&quot;| P0
+    HS -.-&gt;|&quot;web-1.nginx 레코드&quot;| P1
+    HS -.-&gt;|&quot;web-2.nginx 레코드&quot;| P2
+
+    P0 --&gt; V0[&quot;PVC data-web-0&quot;]
+    P1 --&gt; V1[&quot;PVC data-web-1&quot;]
+    P2 --&gt; V2[&quot;PVC data-web-2&quot;]
+    VCT -.-&gt;|&quot;설계도로 자동 생성&quot;| V0
+    VCT -.-&gt;|&quot;설계도로 자동 생성&quot;| V1
+    VCT -.-&gt;|&quot;설계도로 자동 생성&quot;| V2</div><figcaption>StatefulSet + Headless Service + Pod별 PVC 구성도</figcaption></figure>
+<h4>직접 배포해보기</h4>
+<p>이제 학습 목표 3번을 실습한다. minikube 같은 실습 클러스터가 떠 있고, 동적 프로비저닝(PVC 요청 시 볼륨이 자동 생성됨)이 가능한 기본 StorageClass가 있다고 가정한다(중급1에서 다룬 내용).</p>
+<p><strong>1) 먼저 Headless Service를 만든다.</strong> StatefulSet보다 Service를 먼저 두는 것이 정석이다. 각 Pod의 DNS 레코드를 이 Service가 책임지기 때문이다.</p>
+<pre><code>
+# web-headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx          # Pod DNS의 가운데 부분이 된다: web-0.nginx
+spec:
+  clusterIP: None      # 이 한 줄이 Headless로 만드는 핵심
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+</code></pre>
+<p><strong>2) StatefulSet을 정의한다.</strong> Deployment YAML과 거의 같지만 두 가지가 다르다. <code class='ic'>serviceName</code>으로 위 Headless Service를 가리키고, 맨 아래에 <code class='ic'>volumeClaimTemplates</code>로 Pod별 PVC 설계도를 둔다.</p>
+<pre><code>
+# web-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: nginx          # 어떤 Headless Service를 쓸지 (DNS 연결)
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+              name: web
+          volumeMounts:
+            - name: data            # 아래 템플릿의 이름과 일치해야 함
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:             # Pod마다 PVC를 자동 생성하는 &#x27;설계도&#x27;
+    - metadata:
+        name: data
+      spec:
+        accessModes: [&quot;ReadWriteOnce&quot;]
+        resources:
+          requests:
+            storage: 1Gi
+</code></pre>
+<p><code class='ic'>volumeClaimTemplates</code>는 <code class='ic'>volumes</code>가 아니라 <strong>템플릿(설계도)</strong>이라는 점이 핵심이다. 쿠버네티스는 이 한 장의 설계도를 보고 Pod마다 PVC를 따로 찍어낸다. 여기서 각 Pod가 자기 전용 PVC를 갖기 때문에, Deployment에서 문제가 됐던 &quot;단일 볼륨 공유&quot;가 원천적으로 일어나지 않는다.</p>
+<p><strong>3) 적용하고 순서대로 떠오르는 모습을 관찰한다.</strong></p>
+<pre><code>
+kubectl apply -f web-headless-svc.yaml
+kubectl apply -f web-statefulset.yaml
+
+# -w(watch)로 지켜보면 web-0이 Running이 된 뒤에야 web-1이 생기는 순서를 볼 수 있다
+kubectl get pods -l app=nginx -w
+</code></pre>
+<p>이름이 <code class='ic'>web-0</code>, <code class='ic'>web-1</code>, <code class='ic'>web-2</code>로 고정되어 순서대로 뜨는 것을 확인한다.</p>
+<p><strong>4) Pod별 전용 PVC가 자동 생성되었는지 확인한다.</strong></p>
+<pre><code>
+kubectl get pvc
+# data-web-0   Bound   ...
+# data-web-1   Bound   ...
+# data-web-2   Bound   ...
+</code></pre>
+<p>PVC 이름이 <code class='ic'>&lt;템플릿이름&gt;-&lt;Pod이름&gt;</code> 규칙(<code class='ic'>data-web-0</code>)으로 만들어진 것을 볼 수 있다. Pod마다 독립된 1Gi 볼륨을 갖게 된 것이다.</p>
+<p><strong>5) 안정적 식별자와 데이터 보존을 검증한다.</strong> <code class='ic'>web-1</code>에만 표시 파일을 남긴 뒤 Pod를 삭제해 보자. 단, 삭제 직후 Pod가 다시 <code class='ic'>Ready</code> 상태가 되기 전에 다음 명령을 실행하면 실패하므로, <code class='ic'>kubectl wait</code>로 재기동을 기다린 뒤 확인하는 것이 안전하다.</p>
+<pre><code>
+kubectl exec web-1 -- sh -c &#x27;echo &quot;I am web-1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl delete pod web-1                          # 재생성되면서 다시 web-1로 떠야 한다
+kubectl wait --for=condition=ready pod/web-1      # 재기동·Ready 될 때까지 대기(중요)
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt   # 여전히 &quot;I am web-1&quot;
+</code></pre>
+<p>이름도 그대로 <code class='ic'>web-1</code>이고, 같은 PVC(<code class='ic'>data-web-1</code>)가 다시 붙으면서 파일이 남아 있는 것을 확인할 수 있다. 이것이 Deployment와 결정적으로 다른 지점이다.</p>
+<h4>알아두면 좋은 운영 포인트</h4>
+<ul>
+<li><strong>순서가 필요 없으면 병렬로.</strong> 50개 Pod를 하나씩 순서대로 띄우면 너무 느릴 수 있다. 순서 보장이 불필요하면 <code class='ic'>spec.podManagementPolicy: Parallel</code>로 두어 동시에 띄울 수 있다.</li>
+<li><strong>PVC는 자동으로 지워지지 않는다.</strong> StatefulSet을 삭제하거나 복제본을 줄여도 <code class='ic'>volumeClaimTemplates</code>로 만들어진 PVC는 데이터 보호를 위해 남는다. 정리할 때는 곧장 <code class='ic'>kubectl delete pvc</code>부터 치지 말고, <strong>반드시 데이터를 백업·확인한 뒤 수동으로</strong> 삭제한다. PVC를 지우면 그에 묶인 볼륨과 데이터가 영구히 사라지므로, 운영 클러스터에서는 무엇을 지우는지 한 번 더 검증하는 절차를 둔다.</li>
+<li><strong>stateless에도 쓸 수 있다.</strong> 데이터 저장이 목적이 아니더라도, &quot;각 인스턴스에 고정된 이름이 필요한&quot; 경우(일부 분산 시스템)에는 StatefulSet을 쓰기도 한다.</li>
+</ul>
+<h3>핵심 요약</h3>
+<ul>
+<li>stateful 워크로드는 안정적인 이름, Pod별 전용 스토리지, 예측 가능한 시작·종료 순서를 요구하는데 Deployment는 셋 다 보장하지 못한다. 특히 Deployment는 <strong>모든 복제본이 단 하나의 PVC를 공유</strong>하도록 설계되어 있어 Pod별 데이터를 다룰 수 없다(RWO 충돌은 증상일 뿐, RWX로 바꿔도 해결되지 않는다). 이를 위해 <strong>StatefulSet</strong>을 쓴다.</li>
+<li>StatefulSet의 Pod는 <code class='ic'>이름-순번</code>(예: <code class='ic'>web-0</code>)으로 고정되며, 재생성·재배치되어도 같은 이름과 같은 볼륨을 유지한다.</li>
+<li><strong>Headless Service</strong>(<code class='ic'>clusterIP: None</code>)는 로드밸런싱 대신 Pod별 DNS 레코드(<code class='ic'>web-0.nginx.&lt;ns&gt;.svc.cluster.local</code>)를 제공해 특정 Pod를 직접 가리키게 한다.</li>
+<li>기본 동작은 <strong>순서 보장</strong>: 생성은 0번부터 하나씩, 축소·삭제는 높은 번호부터 역순. 순서가 불필요하면 <code class='ic'>podManagementPolicy: Parallel</code>.</li>
+<li><code class='ic'>volumeClaimTemplates</code>는 Pod마다 PVC를 자동 생성(<code class='ic'>data-web-0</code> 규칙)하며, StatefulSet 삭제 후에도 PVC는 데이터 보호를 위해 남는다. 정리할 때는 백업 후 수동 삭제가 원칙이다.</li>
+</ul>
+<h3>출처</h3>
+<ul>
+<li>Anton Putra, &quot;Kubernetes Deployment vs. StatefulSet vs. DaemonSet&quot; — https://www.youtube.com/watch?v=30KAInyvY_o</li>
+<li>Raghav Dua, &quot;Deploy a production Database in Kubernetes&quot; — https://www.youtube.com/watch?v=UDXnyh0vtXw</li>
+<li>Google Cloud Tech, &quot;What are stateful workloads?&quot; — https://www.youtube.com/watch?v=yROFvZiV5cU</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 아래 두 Service를 각각 생성하라.</p>
+<p>Service A (일반): name=nginx-normal, selector=app:nginx, port 80, type 생략(ClusterIP 기본값)</p>
+<p>Service B (Headless): name=nginx-headless, selector=app:nginx, port 80, clusterIP: None</p>
+<p>생성 후 kubectl get svc 로 CLUSTER-IP 컬럼 값을 비교하고, 두 Service의 차이를 설명한다.</p></div>
+              <pre class='starter'><code># nginx-normal-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-normal
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+
+---
+# nginx-headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-headless
+spec:
+  clusterIP: ____    # Headless로 만드는 핵심 한 줄
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web</code></pre>
+              <details><summary>힌트</summary><ul><li>clusterIP 필드는 Service spec 바로 아래에 위치한다. selector 나 ports 와 같은 레벨이다.</li><li>kubectl get svc 출력에서 CLUSTER-IP 컬럼이 None 으로 표시되면 정상이다. 값이 IP 주소로 나오면 clusterIP: None 이 제대로 들어갔는지 다시 확인한다.</li><li>이미 만들어진 Service의 clusterIP 는 변경이 불가능하다. 수정이 필요하면 kubectl delete svc nginx-headless 로 지우고 다시 apply 한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># nginx-normal-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-normal
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+
+# nginx-headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-headless
+spec:
+  clusterIP: None
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+
+# 적용
+kubectl apply -f nginx-normal-svc.yaml
+kubectl apply -f nginx-headless-svc.yaml
+
+# 비교 확인
+kubectl get svc nginx-normal nginx-headless
+# 기대 출력 예:
+# NAME             TYPE        CLUSTER-IP      PORT(S)   AGE
+# nginx-normal     ClusterIP   10.96.xxx.xxx   80/TCP    10s
+# nginx-headless   ClusterIP   None            80/TCP    8s</code></pre>
+                <div class='exp2'><p>clusterIP: None 한 줄이 Headless Service의 전부다. 일반 Service는 iptables/IPVS 규칙과 함께 가상 IP(ClusterIP)를 받아 로드밸런서로 동작한다. Headless Service는 가상 IP 대신 DNS에 개별 Pod 각각의 A 레코드를 등록한다. StatefulSet이 이 Service를 사용하면 web-0.nginx-headless.default.svc.cluster.local 처럼 Pod별 고정 DNS 주소가 생겨 특정 Pod를 직접 가리킬 수 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 1단계에서 만든 nginx-headless Service를 활용하는 StatefulSet 매니페스트(web-statefulset.yaml)를 작성하라.</p>
+<ul>
+<li>name: web, replicas: 3, serviceName: nginx-headless</li>
+<li>컨테이너: nginx:1.25, 포트 80, /usr/share/nginx/html 에 data 볼륨 마운트</li>
+<li>volumeClaimTemplates: name=data, accessModes=ReadWriteOnce, storage=1Gi</li>
+</ul>
+<p>적용 후 아래 두 가지를 확인한다.</p>
+<p>(a) kubectl get pods -l app=nginx -w 로 Pod가 순서대로 생성되는 것을 관찰한다.</p>
+<p>(b) kubectl get pvc 로 data-web-0, data-web-1, data-web-2 PVC 3개가 자동 생성되었는지 확인한다.</p></div>
+              <pre class='starter'><code># web-statefulset.yaml (빈칸을 채워라)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: ____          # Headless Service 이름
+  replicas: ____
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+              name: web
+          volumeMounts:
+            - name: ____      # volumeClaimTemplates 의 name 과 일치해야 함
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+    - metadata:
+        name: ____
+      spec:
+        accessModes: [&quot;____&quot;]
+        resources:
+          requests:
+            storage: ____</code></pre>
+              <details><summary>힌트</summary><ul><li>volumeMounts.name 과 volumeClaimTemplates[].metadata.name 은 반드시 동일한 문자열이어야 한다. 둘이 다르면 Pod 생성 시 volume not found 오류가 발생한다.</li><li>kubectl get pvc 에서 STATUS 가 Pending 으로 머물면 StorageClass 가 없거나 동적 프로비저닝이 비활성화된 것이다. kubectl get storageclass 로 기본(default) StorageClass 가 있는지 확인한다. minikube 환경에서는 minikube start 후 자동으로 standard StorageClass 가 생성된다.</li><li>kubectl get pods -l app=nginx -w 에서 web-0 이 Running 이 되기 전에 web-1 이 나타나면 StatefulSet 이 아니라 Deployment 를 잘못 만든 것이다. apiVersion 이 apps/v1 이고 kind 가 StatefulSet 인지 재확인한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># web-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: nginx-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+              name: web
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [&quot;ReadWriteOnce&quot;]
+        resources:
+          requests:
+            storage: 1Gi
+
+# 적용
+kubectl apply -f web-statefulset.yaml
+
+# (a) 순서 보장 관찰 (다른 터미널에서 실행)
+kubectl get pods -l app=nginx -w
+# 기대 출력 예:
+# NAME    READY   STATUS              AGE
+# web-0   0/1     ContainerCreating   2s
+# web-0   1/1     Running             8s   &lt;- web-0 Ready 후에만
+# web-1   0/1     ContainerCreating   9s
+# web-1   1/1     Running             15s  &lt;- web-1 Ready 후에만
+# web-2   0/1     ContainerCreating   16s
+# web-2   1/1     Running             22s
+
+# (b) PVC 자동 생성 확인
+kubectl get pvc
+# 기대 출력 예:
+# NAME        STATUS   VOLUME       CAPACITY   ACCESS MODES
+# data-web-0  Bound    pvc-xxxxxxx  1Gi        RWO
+# data-web-1  Bound    pvc-xxxxxxx  1Gi        RWO
+# data-web-2  Bound    pvc-xxxxxxx  1Gi        RWO</code></pre>
+                <div class='exp2'><p>StatefulSet spec 에서 volumeClaimTemplates 는 volumes 가 아니라 &#x27;설계도(template)&#x27;다. 쿠버네티스가 이 설계도를 보고 Pod를 만들 때마다 &lt;템플릿이름&gt;-&lt;Pod이름&gt; 규칙으로 PVC를 자동 발급한다. watch 출력에서 직접 확인할 수 있듯, web-0 이 Running·Ready 상태가 된 뒤에야 web-1 생성이 시작된다. 이것이 Deployment와 가장 다른 순서 보장(Ordered) 동작이다. serviceName 은 DNS 레코드 생성을 위해 반드시 기존 Headless Service 이름과 정확히 일치해야 한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 1. kubectl exec 로 web-1 컨테이너 안에 파일을 만든다.</p>
+<ul>
+<li>/usr/share/nginx/html/id.txt 에 &#x27;I am web-1&#x27; 을 기록한다.</li>
+</ul>
+<p>2. kubectl delete pod web-1 로 Pod를 삭제한다.</p>
+<p>3. kubectl get pods -l app=nginx -w 로 web-1 이 재생성되어 다시 Running 이 되는 것을 확인한다.</p>
+<p>4. kubectl exec 로 재생성된 web-1 의 /usr/share/nginx/html/id.txt 를 읽어 내용이 유지되는지 확인한다.</p>
+<p>5. 같은 방법으로 web-0 의 /usr/share/nginx/html/id.txt 를 읽어 파일이 없음을 확인한다 (web-0 에는 쓰지 않았으므로).</p></div>
+              <pre class='starter'><code># 1. web-1 에 표시 파일 기록
+kubectl exec web-1 -- sh -c &#x27;____&#x27;
+
+# 파일이 기록되었는지 바로 확인
+kubectl exec web-1 -- cat ____
+
+# 2. Pod 삭제
+kubectl delete pod ____
+
+# 3. 재생성 관찰
+kubectl get pods -l app=nginx -w
+
+# 4. 재생성된 web-1 의 데이터 보존 확인
+kubectl exec web-1 -- cat ____
+
+# 5. web-0 에는 파일이 없어야 함
+kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl exec 에서 sh -c &#x27;...&#x27; 를 사용할 때 리다이렉션( &gt; )이 포함된 명령은 반드시 따옴표로 전체를 감싸야 한다. 감싸지 않으면 리다이렉션이 로컬 쉘에서 처리된다.</li><li>web-1 삭제 후 kubectl get pods 에 web-1 이 보이지 않는 짧은 순간이 있을 수 있다. -w 플래그로 watch 하면 Terminating → ContainerCreating → Running 전환을 놓치지 않고 볼 수 있다.</li><li>4번 단계에서 cat 출력이 비어 있다면 Web-1 이 재생성되면서 아직 컨테이너가 완전히 준비되지 않았을 수 있다. kubectl get pod web-1 에서 STATUS 가 Running 이고 READY 가 1/1 인지 확인한 뒤 다시 exec 한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. web-1 에 표시 파일 기록
+kubectl exec web-1 -- sh -c &#x27;echo &quot;I am web-1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+
+# 기록 직후 확인
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
+# 출력: I am web-1
+
+# 2. Pod 삭제
+kubectl delete pod web-1
+# 출력: pod &quot;web-1&quot; deleted
+
+# 3. 재생성 관찰
+kubectl get pods -l app=nginx -w
+# 출력 예:
+# web-0   1/1   Running             ...
+# web-1   0/1   Terminating         ...
+# web-1   0/1   ContainerCreating   ...
+# web-1   1/1   Running             ...
+
+# 4. 재생성된 web-1 의 데이터 보존 확인
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
+# 기대 출력: I am web-1  (삭제 전과 동일)
+
+# 5. web-0 에는 파일이 없어야 함
+kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt
+# 기대 출력: cat: can&#x27;t open &#x27;/usr/share/nginx/html/id.txt&#x27;: No such file or directory
+# -&gt; web-0 의 data-web-0 볼륨은 별개이므로 파일이 없는 것이 정상</code></pre>
+                <div class='exp2'><p>StatefulSet 이 web-1 을 재생성할 때 반드시 data-web-1 PVC를 다시 붙인다. PVC 에 저장된 파일은 Pod 수명과 무관하게 볼륨에 그대로 남아 있으므로 id.txt 가 보존된다. 반면 web-0 에는 파일을 기록하지 않았으므로 data-web-0 볼륨에는 id.txt 가 없다. 이 두 결과를 함께 확인함으로써 Pod별 볼륨이 완전히 분리되어 있음을 증명할 수 있다. Deployment 에서는 재생성된 Pod가 같은 볼륨을 보장받지 못하므로 데이터 보존을 이런 방식으로 기대할 수 없다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. 1. web-0, web-1, web-2 각각에 서로 다른 파일을 기록한다.</p>
+<ul>
+<li>web-0: echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt</li>
+<li>web-1: echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt</li>
+<li>web-2: echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt</li>
+</ul>
+<p>2. kubectl scale statefulset web --replicas=1 로 축소한다. kubectl get pods -l app=nginx -w 로 web-2 → web-1 순서로 종료되는 것을 확인한다.</p>
+<p>3. kubectl get pvc 로 StatefulSet 축소 후에도 PVC 3개가 모두 남아 있는지 확인한다.</p>
+<p>4. kubectl scale statefulset web --replicas=3 으로 다시 확장한다.</p>
+<p>5. 재생성된 web-1, web-2 에서 각각 id.txt 를 읽어 축소 전에 기록했던 pod1, pod2 값이 복구되었는지 확인한다.</p></div>
+              <pre class='starter'><code># 1. 각 Pod 에 표시 파일 기록
+kubectl exec web-0 -- sh -c &#x27;echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-1 -- sh -c &#x27;echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-2 -- sh -c &#x27;echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+
+# 2. replicas 1로 축소 (다른 터미널에서 watch 동시 실행 권장)
+kubectl scale statefulset web --replicas=____
+kubectl get pods -l app=nginx -w
+
+# 3. PVC 잔존 확인
+kubectl get pvc
+
+# 4. replicas 3으로 재확장
+kubectl scale statefulset web --replicas=____
+
+# 5. 재생성 후 데이터 복구 확인
+kubectl exec web-1 -- cat ____
+kubectl exec web-2 -- cat ____</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl scale 후 watch 에서 종료 순서가 web-1 → web-2 (낮은 번호부터) 라면 StatefulSet 이 아닌 Deployment 를 잘못 조회하고 있을 가능성이 크다. kubectl get statefulset 으로 web StatefulSet 이 존재하는지 확인한다.</li><li>재확장 후 kubectl exec web-1 이 &#x27;error: pod not found&#x27; 오류를 내면 Pod 가 아직 Running 상태가 아닌 것이다. kubectl get pod web-1 로 상태를 확인하고 READY 1/1 이 된 뒤 다시 시도한다.</li><li>5번에서 id.txt 내용이 비어 있거나 다른 값이 나오면 kubectl get pvc data-web-1 -o yaml 에서 spec.volumeName 을 확인한다. PVC 가 축소 전과 동일한 볼륨을 가리키고 있어야 데이터가 복구된다. minikube 환경에서는 hostPath 볼륨이라 PVC 재연결 후 데이터가 그대로 남는 것을 쉽게 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. 각 Pod 에 표시 파일 기록
+kubectl exec web-0 -- sh -c &#x27;echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-1 -- sh -c &#x27;echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-2 -- sh -c &#x27;echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+
+# 2. replicas 1로 축소
+kubectl scale statefulset web --replicas=1
+
+# 축소 watch (역순 종료 확인)
+kubectl get pods -l app=nginx -w
+# 기대 출력 예:
+# web-2   1/1   Terminating   ...  &lt;- 가장 먼저 종료
+# web-2   0/1   Terminating   ...
+# web-2         (사라짐)
+# web-1   1/1   Terminating   ...  &lt;- 그 다음 종료
+# web-1   0/1   Terminating   ...
+# web-1         (사라짐)
+# web-0   1/1   Running       ...  &lt;- web-0 만 남음
+
+# 3. PVC 잔존 확인 (StatefulSet이 삭제하지 않음)
+kubectl get pvc
+# 기대 출력: data-web-0, data-web-1, data-web-2 모두 Bound 유지
+
+# 4. replicas 3으로 재확장
+kubectl scale statefulset web --replicas=3
+
+# 재생성 완료 대기
+kubectl wait pod -l app=nginx --for=condition=Ready --timeout=120s
+
+# 5. 데이터 복구 확인
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
+# 기대 출력: pod1
+
+kubectl exec web-2 -- cat /usr/share/nginx/html/id.txt
+# 기대 출력: pod2
+
+# web-0 도 동일하게 확인
+kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt
+# 기대 출력: pod0</code></pre>
+                <div class='exp2'><p>StatefulSet 축소는 가장 높은 번호(web-2)부터 역순으로 하나씩 종료한다. 이 순서는 마스터 역할을 하는 0번 Pod를 마지막까지 보호하기 위한 설계다. volumeClaimTemplates 로 만들어진 PVC는 데이터 보호를 위해 StatefulSet 축소 또는 삭제 시에도 자동으로 지워지지 않는다. 따라서 재확장 시 web-1, web-2 는 기존 data-web-1, data-web-2 를 그대로 다시 마운트해 이전 데이터를 복구할 수 있다. PVC를 완전히 정리하려면 kubectl delete pvc data-web-0 data-web-1 data-web-2 처럼 직접 삭제해야 한다(데이터가 영구 삭제되므로 주의).</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=UDXnyh0vtXw' target='_blank'>Deploy a production Database in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=yROFvZiV5cU' target='_blank'>What are stateful workloads?</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

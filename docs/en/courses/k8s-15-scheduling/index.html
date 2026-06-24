@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Scheduling</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-15-scheduling/index.html'>한국어</a></div>
+  <h1>K8S-Scheduling</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 1 (ConfigMap/Secret, PV/PVC, Probes, rolling updates and rollback, requests/limits and HPA, Ingress) and want to broaden their real-world cluster operations skills. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Scheduling Control - Affinity and Taints/Tolerations</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Scheduling Control - Affinity and Taints/Tolerations </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand how the scheduler places Pods onto nodes, and recognize situations where explicit placement control is needed</li>
+<li>Express placement rules using nodeSelector and Node/Pod Affinity and Anti-Affinity</li>
+<li>Configure scheduling hands-on: use Taints to restrict nodes and Tolerations to grant exceptions</li>
+</ul>
+<h3>Content</h3>
+<h4>How the Scheduler Places a Pod onto a Node</h4>
+<p>One of Kubernetes&#x27; greatest strengths is that it abstracts away individual servers. You simply create a Pod without worrying about which machine it runs on, and the <strong>scheduler (kube-scheduler)</strong> — built into the cluster — examines the current CPU and memory state of each node and decides where to place it.</p>
+<p>This decision happens in two phases.</p>
+<p>1. <strong>Filtering (Predicates)</strong> — Hard constraints that cannot be violated are used to eliminate candidate nodes. For example, if a Pod requests 2 CPU and 4 Gi of memory, any node that cannot satisfy those requirements is removed from consideration entirely. The nodes that survive are called <strong>feasible nodes</strong>.</p>
+<p>2. <strong>Scoring (Priorities)</strong> — The remaining feasible nodes are ranked by score. <strong>Soft preferences</strong> — such as spreading workloads evenly across nodes — are factored in here. The node with the highest score is selected; ties are broken randomly.</p>
+<p>The final act of recording the chosen node on the Pod object is called <strong>binding</strong>. Until then, the Pod floats in a Pending state with no assigned node, and the scheduler continuously watches for such unscheduled Pods. The flow is illustrated in the diagram below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A[&quot;Pending Pod detected&quot;] --&gt; B[&quot;Filtering&lt;br/&gt;Eliminate nodes that fail hard constraints&quot;]
+    B --&gt; C{&quot;Any feasible&lt;br/&gt;nodes?&quot;}
+    C --&gt;|&quot;No&quot;| D[&quot;Remain Pending&quot;]
+    D --&gt; B
+    C --&gt;|&quot;Yes (feasible nodes)&quot;| E[&quot;Scoring&lt;br/&gt;Rank nodes by soft preferences&quot;]
+    E --&gt; F[&quot;Select highest-scoring node&lt;br/&gt;(random tiebreak)&quot;]
+    F --&gt; G[&quot;Binding&lt;br/&gt;Record chosen node on the Pod&quot;]
+    G --&gt; H[&quot;Pod runs on the node&quot;]</div><figcaption>Scheduler pod placement flow (Filtering → Scoring → Binding)</figcaption></figure>
+<blockquote class='callout'>
+<p>The key distinction: <strong>filtering enforces rules that cannot be broken; scoring reflects preferences that can be.</strong> Every placement rule you write ultimately belongs to one of these two phases.</p>
+</blockquote>
+<h4>Why You Need to Give the Scheduler Extra Instructions</h4>
+<p>The default scheduler is smart, but it has no knowledge of your <strong>business intent</strong>. Real-world clusters contain nodes with very different characteristics.</p>
+<ul>
+<li><strong>Spot nodes</strong> — cheap, but can be reclaimed at any time. Only interruption-tolerant workloads should run here.</li>
+<li><strong>GPU nodes</strong> — designed for machine learning jobs. These are expensive; letting arbitrary Pods land on them is wasteful.</li>
+<li><strong>Local SSD nodes</strong> — reserved for I/O-intensive workloads like Kafka that demand disk performance.</li>
+<li><strong>ARM (Graviton) nodes</strong> — cost-effective, but only images built for that architecture will run on them.</li>
+</ul>
+<p>Without explicit guidance, the default scheduler might place an ordinary web Pod on a GPU node, or put two replicas of a critical service on the same node — so that when that node fails, the entire service goes down. That is why we express <strong>placement rules</strong> explicitly.</p>
+<p>Kubernetes offers two broad categories of control. One is a <strong>&quot;pull&quot; approach — attracting Pods toward specific nodes</strong> (nodeSelector, Affinity). The other is a <strong>&quot;push&quot; approach — having nodes repel Pods</strong> (Taints/Tolerations). Both start with <strong>labels attached to nodes</strong>.</p>
+<pre><code>
+# View all labels currently on nodes (there are many built-in labels)
+kubectl get nodes --show-labels
+
+# Manually add a label to a node (in production, use Terraform or similar tools for bulk application)
+kubectl label nodes &lt;node-name&gt; disktype=ssd
+kubectl label nodes &lt;node-name&gt; price=spot
+</code></pre>
+<blockquote class='callout'>
+<p>In production, labels are not applied to nodes one by one by hand. On cloud platforms, they are assigned in bulk at node-group creation time using tools like Terraform or eksctl. Manual labeling is for learning and testing.</p>
+</blockquote>
+<h4>nodeSelector — The Simplest Pull</h4>
+<p>This is the oldest and simplest approach. Add a single key-value entry to the PodSpec, and the Pod will only be placed on nodes that carry <strong>all</strong> of those labels.</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ssd-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ssd-app }
+  template:
+    metadata:
+      labels: { app: ssd-app }
+    spec:
+      nodeSelector:
+        disktype: ssd        # place only on nodes with the disktype=ssd label
+      containers:
+        - name: app
+          image: nginx
+</code></pre>
+<p>Check which node the Pod landed on using <code class='ic'>-o wide</code>.</p>
+<pre><code>
+kubectl get pods -o wide
+</code></pre>
+<p>nodeSelector is powerful but <strong>inflexible</strong>. It cannot express &quot;this label OR that label&quot; (OR) or &quot;nodes without this label&quot; (NOT). If no node satisfies the constraint, the Pod gets stuck in Pending. A typo in the label name has the same effect — use <code class='ic'>describe</code> to diagnose the cause.</p>
+<pre><code>
+kubectl describe pod &lt;pod-name&gt;
+# Look for a message like &quot;didn&#x27;t match Pod&#x27;s node affinity/selector&quot; in the Events section
+</code></pre>
+<h4>Node Affinity — A More Expressive Pull</h4>
+<p>Node Affinity does the same job as nodeSelector — placing Pods based on node labels — but with far greater expressiveness. The names are long, but the structure is straightforward once you understand it. There are two types.</p>
+<ul>
+<li><code class='ic'>requiredDuringSchedulingIgnoredDuringExecution</code> — <strong>Hard constraint.</strong> If no node matches, the Pod stays Pending. (= Filtering phase)</li>
+<li><code class='ic'>preferredDuringSchedulingIgnoredDuringExecution</code> — <strong>Soft preference.</strong> Honored when possible; if not, the Pod is placed on another available node. (= Scoring phase)</li>
+</ul>
+<p>The <code class='ic'>IgnoredDuringExecution</code> suffix means <strong>&quot;this rule is not re-evaluated for Pods that are already running.&quot;</strong> If a node&#x27;s labels change or are removed after a Pod is scheduled there, the running Pod is not evicted. The rule is evaluated only at scheduling time.</p>
+<p>Here is the earlier nodeSelector example rewritten as a hard Node Affinity rule.</p>
+<pre><code>
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: disktype
+                operator: In        # In, NotIn, Exists, DoesNotExist, Gt, Lt
+                values: [&quot;ssd&quot;]
+</code></pre>
+<p>Listing multiple values inside <code class='ic'>values</code> is an <strong>OR</strong> within that list (either <code class='ic'>ssd</code> or <code class='ic'>nvme</code> will match). By contrast, listing multiple entries under <code class='ic'>matchExpressions</code> is an <strong>AND</strong> — every condition must be satisfied. If a node does not carry all of those labels, the Pod will be stuck Pending, so be careful.</p>
+<p>A soft preference uses <code class='ic'>weight</code> (1–100) to express the strength of preference. Nodes that score higher are preferred, but failing to match does not cause Pending.</p>
+<pre><code>
+spec:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          preference:
+            matchExpressions:
+              - key: price
+                operator: In
+                values: [&quot;spot&quot;]   # prefer cheaper spot nodes when available
+</code></pre>
+<blockquote class='callout'>
+<p>Production recommendation: favor Node Affinity over nodeSelector, and default to <code class='ic'>preferred</code> (soft) within Node Affinity. Hard constraints can reduce availability by leaving Pods stuck in Pending when resources are scarce.</p>
+</blockquote>
+<h4>Pod Affinity / Anti-Affinity — Placement Based on Pod Relationships</h4>
+<p>You can also base placement decisions on <strong>the labels of other Pods</strong> rather than node labels. There are two motivations.</p>
+<ul>
+<li><strong>Anti-Affinity (spread apart)</strong> — Distribute Pods of the same role across different nodes. If one node fails or is drained, replicas on other nodes remain alive. Commonly used for workloads like Nginx Ingress controllers that must never all go down together.</li>
+<li><strong>Affinity (co-locate)</strong> — Place Pods that communicate frequently on the same node to reduce latency. Example: scheduling Kafka and ZooKeeper on the same node.</li>
+</ul>
+<p>A concept you must understand here is <strong>topologyKey</strong> — the <strong>label key on nodes that defines what counts as &quot;same&quot; and &quot;different&quot; for the purposes of the rule</strong>. The most common value is <code class='ic'>kubernetes.io/hostname</code> (node-level granularity); using <code class='ic'>topology.kubernetes.io/zone</code> shifts the boundary to availability zones.</p>
+<p>A common misunderstanding: topologyKey does not require all nodes to share the same <strong>value</strong> for that label. Instead, the scheduler groups nodes whose label value is identical into a single <strong>topology domain</strong> (for example, nodes with the same hostname are in the same domain, nodes in the same zone are in the same zone domain), and then evaluates whether two Pods land in the same or different domains. For this to work, <strong>candidate nodes must actually carry that label key</strong>. If a node is missing the key entirely, the scheduler cannot determine which domain it belongs to and simply <strong>excludes it from that rule&#x27;s evaluation</strong> — no error is raised. This is why using labels that Kubernetes automatically applies to every node, like <code class='ic'>kubernetes.io/hostname</code>, is the safest choice.</p>
+<p>Here is an Anti-Affinity example that spreads two replicas across different nodes.</p>
+<pre><code>
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels: { app: web }   # reject any node that already has an app=web Pod
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: web
+          image: nginx
+</code></pre>
+<p>Using <code class='ic'>required</code> means that if there are fewer nodes than replicas, the excess Pods get stuck in Pending. If spreading is a preference rather than a hard requirement, switch to <code class='ic'>preferred</code> — this allows co-location when no other option is available.</p>
+<p>Swapping <code class='ic'>podAntiAffinity</code> for <code class='ic'>podAffinity</code> reverses the logic, pulling Pods with matching labels onto the same node. One important caveat: Affinity and Anti-Affinity evaluate Pods within <strong>the same namespace by default</strong>. To evaluate across namespaces, add <code class='ic'>namespaceSelector: {}</code> (an empty object matches all namespaces).</p>
+<blockquote class='callout'>
+<p>Pod Affinity is computationally expensive for the scheduler. Use it thoughtfully in large clusters with hundreds of nodes.</p>
+</blockquote>
+<h4>Taints and Tolerations — Nodes That Repel Pods</h4>
+<p>Everything covered so far has been about &quot;pulling&quot; Pods toward nodes. <strong>A Taint is the opposite — the node pushes Pods away.</strong> It is used to prevent arbitrary Pods from landing on special-purpose nodes like GPU instances or spot nodes.</p>
+<p>Once a Taint is applied to a node, only Pods that carry a matching <strong>Toleration</strong> are permitted to run there. Think of it as a lock (Taint) and a key (Toleration).</p>
+<p>A Taint takes the form <code class='ic'>key=value:effect</code>. There are three effects.</p>
+<ul>
+<li><code class='ic'>NoSchedule</code> — Pods without a matching Toleration are <strong>not scheduled</strong> on this node (existing Pods are unaffected).</li>
+<li><code class='ic'>PreferNoSchedule</code> — Pods are steered away from this node when possible, but may still be placed here if no alternatives exist (soft).</li>
+<li><code class='ic'>NoExecute</code> — New Pods without a Toleration are blocked <strong>and existing Pods on this node that lack a Toleration are evicted</strong>.</li>
+</ul>
+<pre><code>
+# Apply a Taint to a node
+kubectl taint nodes &lt;node-name&gt; dedicated=gpu:NoSchedule
+
+# Verify the Taint
+kubectl describe node &lt;node-name&gt; | grep -i taint
+
+# Remove a Taint (append a hyphen after the key)
+kubectl taint nodes &lt;node-name&gt; dedicated=gpu:NoSchedule-
+</code></pre>
+<p>To allow a desired Pod to run on that tainted node, add a Toleration to the Pod.</p>
+<pre><code>
+spec:
+  tolerations:
+    - key: &quot;dedicated&quot;
+      operator: &quot;Equal&quot;
+      value: &quot;gpu&quot;
+      effect: &quot;NoSchedule&quot;
+  containers:
+    - name: gpu-job
+      image: my-ml-image
+</code></pre>
+<p>There is one common misconception worth addressing directly.</p>
+<blockquote class='callout'>
+<p>A Toleration is a <strong>permission</strong> — &quot;this Pod is allowed on this node&quot; — not a directive. A Pod with only a Toleration can land on a GPU node or on any ordinary node. If you want a Pod to be <strong>bound exclusively</strong> to the GPU node, you need Toleration (to withstand the repulsion) <strong>plus</strong> Node Affinity or nodeSelector (to actively attract the Pod there).</p>
+</blockquote>
+<p>The most familiar example of a Taint is the <strong>control plane (master) node</strong>. Kubernetes applies a Taint to control-plane nodes by default to prevent general workloads from running there (though single-node environments like minikube may not enforce this).</p>
+<p>Logging and monitoring agents (e.g., Fluent Bit) sometimes need to run on <strong>every node regardless of Taints</strong>. For those cases, a broad catch-all Toleration can be used.</p>
+<pre><code>
+spec:
+  tolerations:
+    - operator: &quot;Exists&quot;   # tolerates all Taints without specifying key/value/effect
+</code></pre>
+<h4>Summary of the Three Control Mechanisms</h4>
+<p>| Mechanism | Direction | Basis | When the condition cannot be met |</p>
+<p>|-----------|-----------|-------|----------------------------------|</p>
+<p>| nodeSelector | Pod selects a node (pull) | Node labels (AND only) | Pod stays Pending |</p>
+<p>| Node Affinity | Pod selects a node (pull) | Node labels (AND/OR/soft) | <code class='ic'>required</code> → Pending; <code class='ic'>preferred</code> → placed elsewhere |</p>
+<p>| Pod Affinity / Anti-Affinity | Co-locate or spread Pods | Other Pods&#x27; labels + topologyKey | <code class='ic'>required</code> → Pending; <code class='ic'>preferred</code> → relaxed |</p>
+<p>| Taints / Tolerations | Node repels Pods (push) | Node Taint ↔ Pod Toleration | Pod cannot be placed on that node without a matching Toleration |</p>
+<p>The key distinction is <strong>direction</strong>. Affinity-based mechanisms are a &quot;pull&quot; — the Pod wants to go somewhere. Taints are a &quot;push&quot; — the node refuses to accept Pods. As shown in the diagram below, the two directions work in opposite ways. To run a truly dedicated node, you need <strong>both together</strong>: Taint to block outside Pods, Affinity to attract your Pods in.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph PULL[&quot;Pull — Pod selects a node&quot;]
+        direction LR
+        P1[&quot;Pod&lt;br/&gt;(nodeSelector / Affinity)&quot;] --&gt;|&quot;I want to go to this node&quot;| N1[&quot;Target Node&quot;]
+    end
+    subgraph PUSH[&quot;Push — Node blocks Pods&quot;]
+        direction LR
+        N2[&quot;Node (Taint applied)&quot;] -.-&gt;|&quot;Rejected without Toleration&quot;| P2[&quot;Pod with no Toleration&quot;]
+        P3[&quot;Pod with Toleration&quot;] --&gt;|&quot;Withstands the repulsion and lands&quot;| N2
+    end
+    PULL --- COMBO[&quot;Dedicated Node&lt;br/&gt;= Taint (block outsiders) + Affinity (attract our Pods)&quot;]
+    PUSH --- COMBO</div><figcaption>Pull (Affinity) vs. push (Taint/Toleration) — direction comparison</figcaption></figure>
+<h3>Key Takeaways</h3>
+<ul>
+<li>The scheduler decides placement in three steps: <strong>Filtering (hard constraints narrow the candidate list) → Scoring (soft preferences rank the candidates) → Binding</strong>. Every placement rule you write plugs into one of these two phases.</li>
+<li><strong>nodeSelector</strong> is the simplest option but supports only AND/hard conditions. <strong>Node Affinity</strong> adds OR/NOT and soft preferences (<code class='ic'>preferred</code> + <code class='ic'>weight</code>), making it the standard choice in production. The <code class='ic'>IgnoredDuringExecution</code> suffix means the rule is evaluated only at scheduling time, not while the Pod is running.</li>
+<li>Use <strong>Pod Anti-Affinity</strong> to spread replicas across nodes or zones for higher availability; use <strong>Pod Affinity</strong> to co-locate frequently communicating Pods to reduce latency. The reference point is the labels of other Pods combined with <strong>topologyKey</strong>. topologyKey requires that candidate nodes carry that label key — nodes missing the key are simply excluded from the rule evaluation (no error), which is why using a Kubernetes-assigned key like <code class='ic'>kubernetes.io/hostname</code> is safest.</li>
+<li><strong>Taints (on nodes)</strong> repel Pods; <strong>Tolerations (on Pods)</strong> withstand that repulsion. The three effects are <code class='ic'>NoSchedule</code>, <code class='ic'>PreferNoSchedule</code>, and <code class='ic'>NoExecute</code>. A Toleration is permission, not a forced placement directive — for a truly dedicated node, always pair Taint with Affinity.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>Anton Putra, &quot;Kubernetes Node Selector vs Node Affinity vs Pod Affinity vs Taints &amp; Tolerations&quot; — https://www.youtube.com/watch?v=rX4v_L0k4Hc</li>
+<li>Anton Putra, &quot;Kubernetes Affinity and Anti Affinity vs NodeSelector (Examples)&quot; — https://www.youtube.com/watch?v=DKLMzDD3xqA</li>
+<li>Microsoft Azure, &quot;How the Kubernetes scheduler works&quot; — https://www.youtube.com/watch?v=rDCWxkvPlAw</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. 1. List all nodes in the cluster and inspect their current labels.</p>
+<p>2. Choose one node and attach the label disktype=ssd to it.</p>
+<p>3. Write a Pod manifest (nodeselector-pod.yaml) with a nodeSelector targeting disktype=ssd nodes, then deploy it.</p>
+<ul>
+<li>Image: nginx:1.25</li>
+</ul>
+<p>4. Run kubectl get pod -o wide to confirm the Pod is running on the labeled node.</p>
+<p>5. Deliberately change the label to one that does not exist (disktype=nvme), create a second Pod, and confirm it enters Pending state. Use kubectl describe pod to find the event message.</p>
+<p>6. After the exercise, remove the disktype label from the first node.</p></div>
+              <pre class='starter'><code># 1. List nodes and their labels
+kubectl get nodes --show-labels
+
+# 2. Attach the disktype=ssd label (replace &lt;node-name&gt; with the actual node name from above)
+kubectl label nodes &lt;node-name&gt; disktype=ssd
+
+# 3. nodeselector-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ssd-pod
+spec:
+  nodeSelector:
+    ____: ____
+  containers:
+    - name: web
+      image: nginx:1.25
+
+# 5. Pod for Pending test (nodeselector-pending.yaml)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nvme-pod
+spec:
+  nodeSelector:
+    disktype: ____   # fill in a value that does not exist
+  containers:
+    - name: web
+      image: nginx:1.25</code></pre>
+              <details><summary>Hint</summary><ul><li>Find the node name in the NAME column of kubectl get nodes, then use that exact name with kubectl label nodes &lt;node-name&gt;. In a single-node minikube environment, the node is typically named &#x27;minikube&#x27;.</li><li>The indentation under nodeSelector is 4 spaces relative to spec. Each entry follows the format &#x27;key: value&#x27;; multiple entries are all ANDed together.</li><li>If the NODE column in kubectl get pod -o wide shows &lt;none&gt; or STATUS is Pending, read the Events section of kubectl describe pod &lt;name&gt; to find the message left by the scheduler.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. List nodes
+kubectl get nodes --show-labels
+
+# 2. Attach the label (replace with your actual node name, e.g. minikube or node1)
+kubectl label nodes minikube disktype=ssd
+
+# Verify the label was applied
+kubectl get node minikube --show-labels | grep disktype
+
+# 3. nodeselector-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ssd-pod
+spec:
+  nodeSelector:
+    disktype: ssd
+  containers:
+    - name: web
+      image: nginx:1.25
+
+# Apply
+kubectl apply -f nodeselector-pod.yaml
+
+# 4. Verify placement
+kubectl get pod ssd-pod -o wide
+# The NODE column must show the node you labeled with disktype=ssd
+
+# 5. Pending test
+kubectl apply -f - &lt;&lt;EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nvme-pod
+spec:
+  nodeSelector:
+    disktype: nvme
+  containers:
+    - name: web
+      image: nginx:1.25
+EOF
+
+kubectl get pod nvme-pod   # STATUS: Pending
+kubectl describe pod nvme-pod
+# Look for a message similar to this in the Events section:
+# &quot;0/1 nodes are available: 1 node(s) didn&#x27;t match Pod&#x27;s node affinity/selector.&quot;
+
+# 6. Clean up
+kubectl delete pod ssd-pod nvme-pod
+kubectl label nodes minikube disktype-   # remove label: append a hyphen after the key</code></pre>
+                <div class='exp2'><p>nodeSelector is the simplest node-selection mechanism available in a PodSpec. Only nodes that carry every specified key=value label are considered candidates; if no node satisfies the constraint, the Pod cannot leave Pending state. The &#x27;didn&#x27;t match Pod&#x27;s node affinity/selector&#x27; message in the Events section of kubectl describe pod tells you the scheduler found zero feasible nodes during the filtering phase. The rule for removing a label is to append a hyphen (-) after the key: kubectl label nodes &lt;node&gt; disktype-.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. 1. Attach the label environment=production to a node.</p>
+<p>2. Write a hard Node Affinity Pod manifest (node-affinity-hard.yaml).</p>
+<ul>
+<li>operator: In, values: [&quot;production&quot;]</li>
+<li>Image: nginx:1.25</li>
+<li>Deploy and verify which node the Pod was placed on.</li>
+</ul>
+<p>3. Remove the environment label from the node.</p>
+<p>4. Write a soft Node Affinity Pod manifest (node-affinity-soft.yaml).</p>
+<ul>
+<li>preferredDuringSchedulingIgnoredDuringExecution, weight: 80</li>
+<li>Same environment=production preference condition</li>
+<li>Deploy and confirm the Pod reaches Running even without the label present.</li>
+</ul>
+<p>5. Compare the placement results of both Pods using kubectl get pod -o wide.</p></div>
+              <pre class='starter'><code># 1. Attach the label
+kubectl label nodes &lt;node-name&gt; environment=production
+
+# 2. node-affinity-hard.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: affinity-hard-pod
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: environment
+                operator: ____
+                values:
+                  - ____
+  containers:
+    - name: web
+      image: nginx:1.25
+
+# 4. node-affinity-soft.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: affinity-soft-pod
+spec:
+  affinity:
+    nodeAffinity:
+      ____:
+        - weight: ____
+          preference:
+            matchExpressions:
+              - key: environment
+                operator: In
+                values:
+                  - production
+  containers:
+    - name: web
+      image: nginx:1.25</code></pre>
+              <details><summary>Hint</summary><ul><li>Under requiredDuringSchedulingIgnoredDuringExecution, the structure is nodeSelectorTerms (array) → matchExpressions (array). Under preferredDuringSchedulingIgnoredDuringExecution, the structure jumps directly to weight and preference, so the indentation levels differ between the two forms.</li><li>Valid operator values: In (matches any value in the list), NotIn (matches none of the values), Exists (key must be present), DoesNotExist (key must be absent). For a simple &#x27;label equals this value&#x27; check, use In with a single-element values list.</li><li>It is expected behavior for the hard-constraint Pod to remain Running after the label is removed. That is exactly what IgnoredDuringExecution means. Creating a new Pod after removing the label will produce Pending, which demonstrates the rule.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Attach the label
+kubectl label nodes minikube environment=production
+
+# 2. node-affinity-hard.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: affinity-hard-pod
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: environment
+                operator: In
+                values:
+                  - production
+  containers:
+    - name: web
+      image: nginx:1.25
+
+kubectl apply -f node-affinity-hard.yaml
+kubectl get pod affinity-hard-pod -o wide   # Running, confirm placement on labeled node
+
+# 3. Remove the label
+kubectl label nodes minikube environment-
+
+# 4. node-affinity-soft.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: affinity-soft-pod
+spec:
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          preference:
+            matchExpressions:
+              - key: environment
+                operator: In
+                values:
+                  - production
+  containers:
+    - name: web
+      image: nginx:1.25
+
+kubectl apply -f node-affinity-soft.yaml
+
+# 5. Compare
+kubectl get pod affinity-hard-pod affinity-soft-pod -o wide
+# affinity-hard-pod: was placed before the label was removed, so it stays Running
+#   (IgnoredDuringExecution — the rule is not re-evaluated for already-running Pods)
+# affinity-soft-pod: Running on a node without the label
+#   (preferred is a hint, not a requirement — Pod is placed elsewhere if no match)
+
+# Clean up
+kubectl delete pod affinity-hard-pod affinity-soft-pod</code></pre>
+                <div class='exp2'><p>requiredDuringSchedulingIgnoredDuringExecution participates in the scheduler&#x27;s filtering phase (hard constraint). If no node satisfies the condition, the Pod stays Pending. preferredDuringSchedulingIgnoredDuringExecution participates in the scoring phase (soft preference) and uses weight to express preference strength. When the preferred node is unavailable, the Pod is placed on another node and reaches Running. The IgnoredDuringExecution suffix means &#x27;do not re-apply this rule to Pods that are already running.&#x27; Removing the label after scheduling therefore does not evict an already-running Pod. In production, use preferred as the default for better availability, and reserve required for workloads that must be isolated to a specific node group (e.g., GPU-only, compliance requirements).</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. 1. Write a Deployment manifest (anti-affinity-deploy.yaml) with replicas: 2 and a required podAntiAffinity condition.</p>
+<ul>
+<li>Selector/labels: app=web-ha</li>
+<li>topologyKey: kubernetes.io/hostname</li>
+<li>Image: nginx:1.25</li>
+</ul>
+<p>2. After applying, use kubectl get pod -o wide to check the placement status of both Pods.</p>
+<ul>
+<li>In a single-node environment, observe that the second Pod goes Pending.</li>
+</ul>
+<p>3. Run kubectl describe pod &lt;Pending-Pod&gt; to find the Anti-Affinity violation message.</p>
+<p>4. Change required to preferred (weight: 100), update the Deployment, and confirm the previously Pending Pod becomes Running.</p></div>
+              <pre class='starter'><code># anti-affinity-deploy.yaml (fill in the blanks)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-ha
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-ha
+  template:
+    metadata:
+      labels:
+        app: web-ha
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: ____    # reject co-location with Pods that share this label
+              topologyKey: ____
+      containers:
+        - name: web
+          image: nginx:1.25</code></pre>
+              <details><summary>Hint</summary><ul><li>The required structure: podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution contains array items with labelSelector and topologyKey directly. The preferred structure wraps these inside weight and podAffinityTerm, so the indentation levels are different — be careful.</li><li>kubernetes.io/hostname is a built-in label automatically applied to every node. Run kubectl get node minikube --show-labels | grep hostname to see the actual value.</li><li>Find the Pending Pod quickly with kubectl get pod | grep Pending. In the Events output, look for a line containing &#x27;anti-affinity&#x27; to pinpoint the cause immediately.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># anti-affinity-deploy.yaml — required version
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-ha
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-ha
+  template:
+    metadata:
+      labels:
+        app: web-ha
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: web-ha
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: web
+          image: nginx:1.25
+
+kubectl apply -f anti-affinity-deploy.yaml
+kubectl get pod -o wide
+# Single-node environment: first Pod Running, second Pod Pending
+
+# Find the Pending Pod name, then describe it
+kubectl describe pod &lt;Pending-Pod-name&gt;
+# Expected event message:
+# &quot;0/1 nodes are available: 1 node(s) didn&#x27;t match pod anti-affinity rules.&quot;
+
+# Switch required -&gt; preferred (edit the file and re-apply)
+# Replace this block in anti-affinity-deploy.yaml:
+#   requiredDuringSchedulingIgnoredDuringExecution:
+#     - labelSelector: ...
+# with:
+#   preferredDuringSchedulingIgnoredDuringExecution:
+#     - weight: 100
+#       podAffinityTerm:
+#         labelSelector:
+#           matchLabels:
+#             app: web-ha
+#         topologyKey: kubernetes.io/hostname
+
+# Complete preferred version:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-ha
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-ha
+  template:
+    metadata:
+      labels:
+        app: web-ha
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: web-ha
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: web
+          image: nginx:1.25
+
+kubectl apply -f anti-affinity-deploy.yaml
+kubectl get pod -o wide
+# Both Pods Running (co-located on the same node if only one node is available)
+
+# Clean up
+kubectl delete deployment web-ha</code></pre>
+                <div class='exp2'><p>The labelSelector in podAntiAffinity means &#x27;avoid any node that already has a Pod with this label.&#x27; topologyKey: kubernetes.io/hostname interprets &#x27;same&#x27; as &#x27;same node (hostname).&#x27; Switching topologyKey to topology.kubernetes.io/zone spreads Pods across availability zones instead. With required, if the cluster has fewer nodes than replicas, the extra Pods get stuck in Pending. With preferred, the rule becomes &#x27;place on a different node if possible, but co-locate if no other option exists,&#x27; which resolves the Pending state. When node failure resilience is the goal, use required on a multi-node cluster. For local development environments with a single node, use preferred.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. 1. Apply both a dedicated=gpu label and a dedicated=gpu:NoSchedule Taint to a node simultaneously.</p>
+<p>2. Deploy a plain Pod (no-toleration-pod.yaml) onto the tainted node and confirm it is rejected.</p>
+<p>3. Deploy a Pod with only a Toleration (toleration-only-pod.yaml).</p>
+<ul>
+<li>Toleration: key=dedicated, operator=Equal, value=gpu, effect=NoSchedule</li>
+<li>On a multi-node cluster, observe that the scheduler may still place it on a non-GPU node.</li>
+</ul>
+<p>4. Write a Pod (gpu-pod.yaml) that combines a Toleration with Node Affinity (required, targeting the dedicated=gpu label).</p>
+<ul>
+<li>key: dedicated, operator: In, values: [&quot;gpu&quot;]</li>
+<li>After deploying, confirm it runs exclusively on the node with the GPU label.</li>
+</ul>
+<p>5. Remove the Taint and clean up.</p></div>
+              <pre class='starter'><code># 1. Prepare the node (replace &lt;node-name&gt; with your actual node name)
+kubectl label nodes &lt;node-name&gt; dedicated=gpu
+kubectl taint nodes &lt;node-name&gt; dedicated=gpu:NoSchedule
+
+# Verify the Taint
+kubectl describe node &lt;node-name&gt; | grep -i taint
+
+# 2. no-toleration-pod.yaml — plain Pod (blocked by the Taint)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-toleration-pod
+spec:
+  containers:
+    - name: app
+      image: nginx:1.25
+
+# 3. toleration-only-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: toleration-only-pod
+spec:
+  tolerations:
+    - key: &quot;____&quot;
+      operator: &quot;____&quot;
+      value: &quot;____&quot;
+      effect: &quot;____&quot;
+  containers:
+    - name: app
+      image: nginx:1.25
+
+# 4. gpu-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod
+spec:
+  tolerations:
+    - key: &quot;dedicated&quot;
+      operator: &quot;Equal&quot;
+      value: &quot;gpu&quot;
+      effect: &quot;NoSchedule&quot;
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: ____
+                operator: In
+                values:
+                  - ____
+  containers:
+    - name: app
+      image: nginx:1.25</code></pre>
+              <details><summary>Hint</summary><ul><li>Applying a Taint: kubectl taint nodes &lt;node&gt; &lt;key&gt;=&lt;value&gt;:&lt;effect&gt; (e.g., dedicated=gpu:NoSchedule). Removing it: append a hyphen at the end — dedicated=gpu:NoSchedule-. Omitting the colon (:) before the effect will produce an error.</li><li>If toleration-only-pod lands on the GPU node in a single-node environment, that is expected — it is the only available candidate. On a multi-node cluster, the scheduler may choose a non-GPU node instead, which illustrates that a Toleration is not a forced placement directive.</li><li>In gpu-pod, the key, value, and effect in the Toleration must exactly match the Taint on the node, including case. Run kubectl describe node &lt;name&gt; | grep Taint to double-check the Taint values before writing the Toleration.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Prepare the node
+kubectl label nodes minikube dedicated=gpu
+kubectl taint nodes minikube dedicated=gpu:NoSchedule
+
+# Verify the Taint
+kubectl describe node minikube | grep -i taint
+# Expected output: Taints: dedicated=gpu:NoSchedule
+
+# 2. Deploy a plain Pod — blocked by the Taint
+kubectl apply -f no-toleration-pod.yaml
+kubectl get pod no-toleration-pod
+# STATUS: Pending
+kubectl describe pod no-toleration-pod
+# Events: &quot;0/1 nodes are available: 1 node(s) had untolerated taint {dedicated: gpu}.&quot;
+
+# 3. Pod with Toleration only
+apiVersion: v1
+kind: Pod
+metadata:
+  name: toleration-only-pod
+spec:
+  tolerations:
+    - key: &quot;dedicated&quot;
+      operator: &quot;Equal&quot;
+      value: &quot;gpu&quot;
+      effect: &quot;NoSchedule&quot;
+  containers:
+    - name: app
+      image: nginx:1.25
+
+kubectl apply -f toleration-only-pod.yaml
+kubectl get pod toleration-only-pod -o wide
+# Single-node environment: lands on the GPU node (minikube) — only candidate available
+# Multi-node environment: may be placed on a non-GPU node — a Toleration is permission, not a directive
+
+# 4. Pod with Toleration + Node Affinity — pinned exclusively to the GPU node
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod
+spec:
+  tolerations:
+    - key: &quot;dedicated&quot;
+      operator: &quot;Equal&quot;
+      value: &quot;gpu&quot;
+      effect: &quot;NoSchedule&quot;
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: dedicated
+                operator: In
+                values:
+                  - gpu
+  containers:
+    - name: app
+      image: nginx:1.25
+
+kubectl apply -f gpu-pod.yaml
+kubectl get pod gpu-pod -o wide
+# The NODE column must show the node labeled dedicated=gpu
+
+# 5. Clean up
+kubectl delete pod no-toleration-pod toleration-only-pod gpu-pod
+kubectl taint nodes minikube dedicated=gpu:NoSchedule-   # remove Taint: append hyphen
+kubectl label nodes minikube dedicated-                   # remove label</code></pre>
+                <div class='exp2'><p>The Taint (lock) and Toleration (key) relationship: a NoSchedule Taint on a node completely blocks any Pod that lacks a matching Toleration during the filtering phase. To remove a Taint, run kubectl taint nodes &lt;name&gt; &lt;key&gt;=&lt;value&gt;:&lt;effect&gt;- with a trailing hyphen. An important misconception to avoid: a Toleration grants permission — &#x27;this Pod may run on this node&#x27; — but does not force it there. A Pod with only a Toleration is free to land on any ordinary node that has no Taint. To create a truly dedicated node for expensive resources like GPUs, you need both Taint (to block outside Pods) and Node Affinity (to actively pull your Pods onto that node). Using the NoExecute effect adds another dimension: it also evicts existing Pods on the node that lack a Toleration, so check the impact carefully before applying it to a running node.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=rX4v_L0k4Hc' target='_blank'>Kubernetes Node Selector vs Node Affinity vs Pod Affinity vs Tains &amp; Tolerations</a></li><li><a href='https://www.youtube.com/watch?v=DKLMzDD3xqA' target='_blank'>Kubernetes Affinity and Anti Affinity vs NodeSelector (Examples)</a></li><li><a href='https://www.youtube.com/watch?v=rDCWxkvPlAw' target='_blank'>How the Kubernetes scheduler works</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

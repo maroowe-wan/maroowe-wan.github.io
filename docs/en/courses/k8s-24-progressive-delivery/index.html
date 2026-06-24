@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-ProgressiveDelivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-24-progressive-delivery/index.html'>한국어</a></div>
+  <h1>K8S-ProgressiveDelivery</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Progressive Delivery — Canary, Blue-Green, and PodDisruptionBudget</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Progressive Delivery — Canary, Blue-Green, and PodDisruptionBudget </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the differences between Canary, Blue-Green, and other progressive deployment strategies and when to apply each</li>
+<li>Use Argo Rollouts to split traffic progressively and deploy a new version in stages</li>
+<li>Explain how a PodDisruptionBudget (PDB) preserves availability during deployments and node drains</li>
+</ul>
+<h3>Content</h3>
+<h4>Why RollingUpdate Alone Is Not Enough</h4>
+<p>The default <code class='ic'>RollingUpdate</code> strategy replaces old Pods with new ones one at a time. While this achieves zero downtime, it has real limitations. Once the rollout begins, <strong>all users gradually start receiving the new version</strong>, and if the new version contains a bug, the tools for precisely controlling or stopping traffic are limited. By the time an issue surfaces, a significant portion of users may already be affected.</p>
+<p><strong>Progressive Delivery</strong> adds two capabilities on top of this. It provides <strong>fine-grained control</strong> over the fraction of traffic routed to the new version, and it <strong>automatically advances or rolls back</strong> based on observed metrics such as error rate and latency. The two primary strategies are Canary and Blue-Green.</p>
+<ul>
+<li><strong>Blue-Green</strong> — Both the old version (Blue) and the new version (Green) are <strong>deployed in full simultaneously</strong>. Once validation is complete, all traffic is switched to Green at once. Rollback is instant — just flip the switch back to Blue. The trade-off is that twice the resources are needed briefly, and all traffic hits the new version at the moment of cutover.</li>
+<li><strong>Canary</strong> — A small fraction (e.g., 5%) of the new version is deployed and a slice of traffic is sent to it. If no issues arise, the percentage is gradually increased: 10% → 25% → 50% → 100%. Real users validate the new version safely, so risk is kept tightly controlled — but this requires stage management and a traffic-splitting mechanism.</li>
+</ul>
+<blockquote class='callout'>
+<p><strong>Choosing between them:</strong> Use Blue-Green when <strong>instant full cutover and fast rollback</strong> are the priority; use Canary when you want to <strong>validate with real users incrementally</strong> and minimize risk. Blue-Green fits cases where two versions cannot coexist (e.g., schema migrations); Canary is well-suited for rolling out stateless web services.</p>
+</blockquote>
+<h4>Implementing Canary with Argo Rollouts</h4>
+<p>The standard Deployment resource cannot handle this level of fine-grained control. <strong>Argo Rollouts</strong> provides a <code class='ic'>Rollout</code> CRD and controller that replaces Deployment, letting you manage Canary and Blue-Green deployments declaratively. The migration is minimal: keep nearly everything the same, change <code class='ic'>kind: Deployment</code> to <code class='ic'>kind: Rollout</code>, and add a <code class='ic'>strategy</code> block.</p>
+<p>Before configuring a Canary, there is one important fact you must understand. Argo Rollouts&#x27; Canary has <strong>two distinct modes</strong>, and the <code class='ic'>steps</code> keywords available differ between them.</p>
+<ul>
+<li><strong>Replica-based Canary — out of the box (no traffic provider).</strong> Without an external traffic provider like Istio or NGINX, traffic is approximated using the <strong>ratio of new-version Pod counts</strong>. In this mode, use <strong><code class='ic'>setCanaryScale</code></strong> (not <code class='ic'>setWeight</code>) to progressively increase &quot;what fraction of Pods run the new version.&quot; Traffic is distributed by the Service&#x27;s default load balancing across those Pods, so the ratio is an <strong>approximation</strong>.</li>
+<li><strong>Weight-based Canary — requires a traffic provider.</strong> To specify an <strong>exact request percentage</strong> with <code class='ic'>setWeight: 20</code>, the Rollout must be integrated with a traffic provider such as Istio, NGINX Ingress, SMI, or ALB. <code class='ic'>setWeight</code> instructs the provider to send exactly 20% of requests to the new version — <strong>it does not work in isolation without that integration.</strong></li>
+</ul>
+<blockquote class='callout'>
+<p>A common pitfall: writing <code class='ic'>setWeight</code> without a connected traffic provider means the weight does not take effect as intended. <strong>In environments without an external mesh or ingress controller, start with <code class='ic'>setCanaryScale</code></strong>, then move to <code class='ic'>setWeight</code> once a traffic provider is in place. That is the correct progression.</p>
+</blockquote>
+<p>Here is a replica-based Canary example that works in a <strong>default environment (no traffic provider)</strong>:</p>
+<pre><code>
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: web
+spec:
+  replicas: 5
+  selector:
+    matchLabels: { app: web }
+  template:                       # identical to a Deployment Pod template
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: our-org/web:v2
+  strategy:
+    canary:
+      steps:
+        - setCanaryScale:         # progressively increase the fraction of new-version Pods
+            weight: 20            # roughly 20% of all Pods run v2
+        - pause: { duration: 5m } # observe for 5 minutes
+        - setCanaryScale:
+            weight: 50
+        - pause: {}               # indefinite pause → wait for manual promotion
+        - setCanaryScale:
+            weight: 100
+</code></pre>
+<p><code class='ic'>pause: {}</code> (no duration) is a <strong>gate that waits for manual human approval</strong>. An operator reviews metrics and then advances the rollout.</p>
+<p>If precise traffic splitting is needed and a provider like Istio is integrated, use <code class='ic'>setWeight</code> in the same position (this is the form used together with Istio in the next lecture):</p>
+<pre><code>
+  strategy:
+    canary:
+      trafficRouting:             # requires an integrated traffic provider
+        istio:
+          virtualService: { name: web-vsvc }
+      steps:
+        - setWeight: 20           # the mesh routes exactly 20% of requests to v2
+        - pause: { duration: 5m }
+        - setWeight: 50
+        - pause: {}
+        - setWeight: 100
+</code></pre>
+<p>The flowchart below shows how the <code class='ic'>steps</code> definition incrementally increases the new-version share, and how each stage can pause or roll back. The flow is identical whether you use <code class='ic'>setCanaryScale</code> (replica ratio) or <code class='ic'>setWeight</code> (exact request ratio with a traffic provider) — only the mechanism that enforces the percentage differs.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    S[&quot;Deployment start: v2 launched&quot;] --&gt; W20[&quot;20% stage: setCanaryScale or setWeight 20&quot;]
+    W20 --&gt; P1[&quot;pause: observe for 5 minutes&quot;]
+    P1 --&gt; C1{&quot;Metrics healthy?&quot;}
+    C1 --&gt;|&quot;Issue detected&quot;| RB[&quot;abort → immediate rollback (v1 100%)&quot;]
+    C1 --&gt;|&quot;Healthy&quot;| W50[&quot;50% stage: expand to 50&quot;]
+    W50 --&gt; P2[&quot;pause: waiting for operator approval&quot;]
+    P2 --&gt; C2{&quot;Promote?&quot;}
+    C2 --&gt;|&quot;abort&quot;| RB
+    C2 --&gt;|&quot;promote&quot;| W100[&quot;100% stage: cutover complete&quot;]</div><figcaption>Canary Staged Traffic Transition Flow — setCanaryScale / setWeight</figcaption></figure>
+<pre><code>
+# Watch status in real time (kubectl plugin)
+kubectl argo rollouts get rollout web --watch
+# Advance past a manual pause
+kubectl argo rollouts promote web
+# Roll back immediately if an issue is detected
+kubectl argo rollouts abort web
+</code></pre>
+<p>Going further, attaching an <code class='ic'>analysis</code> step causes Prometheus (or another metrics source) to be automatically evaluated at each stage. If the error rate exceeds a threshold, the rollout <strong>rolls back without human intervention</strong>. This is the fully realized form of progressive delivery.</p>
+<h4>Traffic Splitting — Who Actually Guarantees the Percentage?</h4>
+<p>To summarize the two mechanisms for achieving &quot;send only 20% to the new version&quot;:</p>
+<ul>
+<li><strong>Replica-ratio based (default, <code class='ic'>setCanaryScale</code>)</strong> — Approximates the ratio using Pod counts. With 5 Pods and 1 running the new version, roughly 20% of traffic goes there. No additional infrastructure required, but the result is not precise (it assumes uniform request distribution across Pods).</li>
+<li><strong>Traffic provider integration (<code class='ic'>setWeight</code> + <code class='ic'>trafficRouting</code>)</strong> — Integrates with Istio, NGINX Ingress, SMI, etc. to enforce the <strong>exact percentage</strong>. <code class='ic'>setWeight: 20</code> guarantees that exactly 20% of requests go to the new version, enforced by the mesh or ingress controller.</li>
+</ul>
+<p>For precise Canary delivery, combining Argo Rollouts with a service mesh like Istio (the next lecture&#x27;s topic) is the natural approach. Rollouts orchestrates the stages; the mesh enforces accurate traffic splitting.</p>
+<h4>PodDisruptionBudget — A Safety Net Against Voluntary Disruptions</h4>
+<p>Separately from deployments and rollouts, <strong>voluntary disruptions</strong> happen regularly during normal operations: <code class='ic'>kubectl drain</code> for node upgrades, node removal by the Cluster Autoscaler, Pod eviction by VPA, and so on. If too many Pods from a service are taken down simultaneously, availability can collapse momentarily.</p>
+<p>A <strong>PodDisruptionBudget (PDB)</strong> declares &quot;during voluntary disruption, always keep at least N Pods (or allow at most M to be disrupted) for this workload.&quot;</p>
+<pre><code>
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-pdb
+spec:
+  minAvailable: 3              # at least 3 must remain running at all times
+  # alternatively: maxUnavailable: 1   # at most 1 may be down at once
+  selector:
+    matchLabels:
+      app: web
+</code></pre>
+<p>With this PDB in place, Kubernetes will not drain all <code class='ic'>web</code> Pods from a node at once during a drain operation. Instead, it <strong>serializes evictions to maintain at least 3 running at all times</strong>. Eviction requests that would violate the constraint are temporarily rejected.</p>
+<blockquote class='callout'>
+<p>Important: A PDB only protects against <strong>voluntary</strong> disruptions. <strong>Involuntary</strong> disruptions such as hardware failures are not covered (those are handled by replica count and node distribution). Also, setting a PDB too tightly — for example, <code class='ic'>minAvailable</code> equal to the total replica count — can permanently block node drains and freeze cluster maintenance. Always leave headroom. Progressive delivery protects &quot;availability during deployment&quot;; PDB protects &quot;availability during operations.&quot; The two work as a pair.</p>
+</blockquote>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Progressive delivery provides fine-grained traffic control and metric-driven advance/rollback, addressing the limitations of RollingUpdate.</li>
+<li>Blue-Green deploys both versions simultaneously and switches all traffic at once (instant rollback, 2× resources); Canary expands incrementally from a small fraction (controlled risk, requires stage management).</li>
+<li>Argo Rollouts&#x27; Canary has two modes. <strong>Without a traffic provider, use <code class='ic'>setCanaryScale</code> (replica-ratio approximation)</strong>; with Istio, NGINX, or similar integrated, use <strong><code class='ic'>setWeight</code> (exact request percentage)</strong>. <code class='ic'>setWeight</code> does not work without a connected traffic provider.</li>
+<li>Control flow with <code class='ic'>promote</code>/<code class='ic'>abort</code>; add <code class='ic'>analysis</code> for automatic metric-based rollback.</li>
+<li>A PodDisruptionBudget guarantees a minimum number of available Pods during voluntary disruptions such as node drains and autoscaler scale-down. It does not protect against involuntary failures, and being too restrictive can block maintenance operations.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Create a PodDisruptionBudget (PDB) and observe how it restricts Pod eviction when you run kubectl drain. Create a Deployment, set PDB with minAvailable: 2, then on a single-node cluster try a drain and observe the resulting message.</p></div>
+              <pre class='starter'><code># 1. Test Deployment (replicas: 3)
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdb-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pdb-demo
+  template:
+    metadata:
+      labels:
+        app: pdb-demo
+    spec:
+      containers:
+      - name: app
+        image: nginx
+EOF
+
+# 2. Create the PDB
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-demo-pdb
+spec:
+  minAvailable: ___     # minimum Pods to keep
+  selector:
+    matchLabels:
+      app: ___
+
+# 3. Check PDB status
+kubectl get pdb
+kubectl describe pdb pdb-demo-pdb
+
+# 4. Get the node name (minikube)
+kubectl get nodes
+
+# 5. Attempt to drain the node (observe PDB violation)
+kubectl drain ___ --ignore-daemonsets --delete-emptydir-data</code></pre>
+              <details><summary>Hint</summary><ul><li>If the drain command blocks, press Ctrl+C to interrupt it and run kubectl uncordon &lt;node-name&gt; to restore the node.</li><li>You can use maxUnavailable instead of minAvailable. maxUnavailable: 1 means &#x27;allow at most 1 Pod to be unavailable at a time&#x27;.</li><li>Run kubectl get pdb -o wide to see the ALLOWED DISRUPTIONS column and know in real time how many more Pods can be taken down.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 2. Create the PDB
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-demo-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: pdb-demo
+EOF
+
+# 3. Check PDB status
+kubectl get pdb
+# NAME           MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+# pdb-demo-pdb   2               N/A               1                     10s
+# ALLOWED DISRUPTIONS=1: only 1 of the current 3 Pods may be evicted
+
+kubectl describe pdb pdb-demo-pdb
+# Status:
+#   Disruptions Allowed:  1
+#   Current Healthy:      3
+#   Desired Healthy:      2
+#   Expected Pods:        3
+
+# 4. Drain node (minikube single-node example)
+kubectl drain minikube --ignore-daemonsets --delete-emptydir-data
+# evicting pod default/pdb-demo-xxxx
+# error when evicting pods/&quot;pdb-demo-xxxx&quot;: Cannot evict pod as it would violate
+#   the pod&#x27;s disruption budget. (cannot remove more than 1 on a single-node cluster)
+# Or: 1 Pod is removed and the next eviction blocks
+
+# 5. Restore the node with uncordon
+kubectl uncordon minikube
+
+# Clean up
+kubectl delete deploy pdb-demo
+kubectl delete pdb pdb-demo-pdb</code></pre>
+                <div class='exp2'><p>A PodDisruptionBudget guarantees a minimum number of available Pods during voluntary disruptions such as drain operations and rolling updates. With minAvailable: 2, only 1 of the 3 Pods may be evicted at once. The ALLOWED DISRUPTIONS column reflects this. PDB does not apply to involuntary disruptions (node failures). During rolling updates, PDB also applies alongside maxUnavailable to ensure zero-downtime deployments.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Install Argo Rollouts and create a Rollout object using the Canary deployment strategy. Define canary steps that progressively shift traffic from 20% to 50% to 100%, pausing at each stage for manual approval before proceeding.</p></div>
+              <pre class='starter'><code># 1. Install Argo Rollouts
+kubectl create namespace argo-rollouts
+kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+
+# Install the kubectl argo rollouts plugin (optional)
+# https://argoproj.github.io/argo-rollouts/installation/
+
+# 2. Rollout object (Canary strategy)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: canary-demo
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+        - setWeight: ___    # Step 1: 20% traffic to canary
+        - pause: {}         # wait for manual approval
+        - setWeight: ___    # Step 2: 50%
+        - pause:
+            duration: ___   # auto-wait 30 seconds
+        - setWeight: 100    # Step 3: 100% cutover complete
+  selector:
+    matchLabels:
+      app: canary-demo
+  template:
+    metadata:
+      labels:
+        app: canary-demo
+    spec:
+      containers:
+      - name: app
+        image: argoproj/rollouts-demo:blue    # v1
+        ports:
+        - containerPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canary-demo-svc
+spec:
+  selector:
+    app: canary-demo
+  ports:
+  - port: 80
+    targetPort: 8080</code></pre>
+              <details><summary>Hint</summary><ul><li>Without the kubectl argo rollouts plugin, check status with kubectl get rollout canary-demo -o yaml | grep -A20 &#x27;status:&#x27;</li><li>If a problem occurs during a canary deployment, kubectl argo rollouts abort canary-demo immediately rolls back to the stable version.</li><li>The exact percentage of setWeight is approximated by the replica count. With 5 replicas, setWeight: 20 gives 1 Pod (20%), setWeight: 40 gives 2 Pods (40%, rounded).</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Create the Rollout
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: canary-demo
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+        - setWeight: 20
+        - pause: {}
+        - setWeight: 50
+        - pause:
+            duration: 30
+        - setWeight: 100
+  selector:
+    matchLabels:
+      app: canary-demo
+  template:
+    metadata:
+      labels:
+        app: canary-demo
+    spec:
+      containers:
+      - name: app
+        image: argoproj/rollouts-demo:blue
+        ports:
+        - containerPort: 8080
+EOF
+
+# Check Rollout status
+kubectl argo rollouts get rollout canary-demo --watch
+# Or: kubectl get rollout canary-demo -n default
+
+# Update to new version (start canary with yellow image)
+kubectl argo rollouts set image canary-demo app=argoproj/rollouts-demo:yellow
+
+# Status: 1 Pod (20%) is yellow, 4 Pods are blue, pausing at step 1
+kubectl argo rollouts get rollout canary-demo
+# NAME           KIND       STATUS        STEP  SET-WEIGHT  READY  DESIRED  UP-TO-DATE  AVAILABLE
+# canary-demo    Rollout    ॥ Paused      1/5   20          5      5        1           5
+
+# Manual approval (advance to next step)
+kubectl argo rollouts promote canary-demo
+# 50% step proceeds, then auto-waits 30 seconds
+
+# Second promote
+kubectl argo rollouts promote canary-demo
+# 100% cutover complete</code></pre>
+                <div class='exp2'><p>Argo Rollouts&#x27; Canary strategy executes the steps defined in the steps list in order. setWeight controls the percentage of traffic routed to canary Pods; with 5 replicas and setWeight: 20, 1 canary Pod is created (20%). pause: {} waits indefinitely until a promote command is issued. pause: {duration: 30} auto-advances after 30 seconds. This staged traffic shifting is the core of progressive delivery — at each step metrics can be reviewed and an abort command can roll back if issues are found.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Application] Combine a Rollout with a PDB to guarantee a minimum number of available Pods even during a Canary deployment. Create a PDB with minAvailable: 4 for a Rollout with 5 replicas. During a Canary deployment, attempt a kubectl drain to observe how the PDB constrains both the deployment and the drain simultaneously.</p></div>
+              <pre class='starter'><code># 1. Create a PDB linked to the Rollout
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: canary-demo-pdb
+spec:
+  minAvailable: ___    # keep 4 of 5 always available
+  selector:
+    matchLabels:
+      app: canary-demo
+
+# 2. Check PDB status after creation
+kubectl get pdb canary-demo-pdb
+
+# 3. Start a new version (begin canary deployment)
+kubectl argo rollouts set image canary-demo app=argoproj/rollouts-demo:green
+
+# 4. Attempt drain while canary is in progress (observe PDB constraint)
+kubectl get nodes
+kubectl drain ___ --ignore-daemonsets --delete-emptydir-data --timeout=20s
+
+# 5. Complete or abort the canary
+kubectl argo rollouts abort canary-demo
+
+# 6. Clean up
+kubectl delete rollout canary-demo
+kubectl delete pdb canary-demo-pdb
+kubectl delete service canary-demo-svc
+kubectl delete namespace argo-rollouts</code></pre>
+              <details><summary>Hint</summary><ul><li>Having ALLOWED DISRUPTIONS at 0 blocking a drain is a situation that occurs frequently in production. You can use the --pod-selector flag to exclude specific Pods, or --disable-eviction (force delete), but neither is recommended.</li><li>kubectl argo rollouts undo reverts the rollout to the previous stable version. After an abort you must also run undo to fully restore the previous state.</li><li>PDB can use a percentage: minAvailable: &#x27;80%&#x27; keeps at least 80% of all Pods available at all times.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create the PDB
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: canary-demo-pdb
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app: canary-demo
+EOF
+
+# 2. PDB status
+kubectl get pdb canary-demo-pdb
+# NAME             MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+# canary-demo-pdb  4               N/A               1                     5s
+
+# 3. Start canary (green image)
+kubectl argo rollouts set image canary-demo app=argoproj/rollouts-demo:green
+# 1 of 5 is now green (canary), 4 are yellow (stable)
+
+kubectl get pdb canary-demo-pdb
+# ALLOWED DISRUPTIONS: 0  &lt;-- during canary replacement the budget may reach 0
+
+# 4. Attempt drain during canary (double constraint)
+kubectl drain minikube --ignore-daemonsets --delete-emptydir-data --timeout=20s
+# error: unable to drain node &quot;minikube&quot; due to error:
+#   Cannot evict pod as it would violate the pod&#x27;s disruption budget
+
+# 5. Roll back with abort
+kubectl argo rollouts abort canary-demo
+# Rollout is aborted, you should manually sync the Rollout or use the --force flag to override
+kubectl argo rollouts undo canary-demo
+
+# 6. Clean up
+kubectl delete rollout canary-demo
+kubectl delete pdb canary-demo-pdb
+kubectl delete service canary-demo-svc</code></pre>
+                <div class='exp2'><p>Using PDB together with a Canary deployment provides double protection for service availability. When both a canary Pod replacement (voluntary disruption) and a node drain (also voluntary) happen simultaneously, the PDB&#x27;s ALLOWED DISRUPTIONS reaches 0 and both operations are blocked. In practice, schedule drain operations during a maintenance window, or set minAvailable low enough relative to replicas to allow both deployment and infrastructure maintenance to proceed concurrently.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hIL0E2gLkf8' target='_blank'>Argo Rollouts Demo</a></li><li><a href='https://www.youtube.com/watch?v=84Ky0aPbHvY' target='_blank'>Argo Rollouts - Canary Deployments Made Easy In Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=6zWfVqkKuyI' target='_blank'>Kubernetes Deployment strategies | Canary Deployment | Argo rollout</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

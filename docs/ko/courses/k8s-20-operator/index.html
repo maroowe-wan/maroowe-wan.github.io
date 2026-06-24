@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Operator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-20-operator/index.html'>EN</a></div>
+  <h1>K8S-Operator</h1>
+  <div class="sub">중급2까지 마친 학습자 (RBAC·스케줄링·NetworkPolicy·Helm·모니터링을 이미 아는 수준) · 총 1강</div>
+  <ul><li><a href='#lec1'>01. Operator 패턴과 컨트롤러 — 운영 지식을 코드로</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Operator 패턴과 컨트롤러 — 운영 지식을 코드로 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>조정 루프(reconciliation loop)와 컨트롤러가 desired state를 유지하는 동작 원리를 이해한다</li>
+<li>기존 Operator를 설치하고, 커스텀 리소스 변경 시 컨트롤러가 반응하는 과정을 관찰할 수 있다</li>
+<li>Operator SDK와 Operator 성숙도 모델 등 Operator 개발의 핵심 개념을 설명할 수 있다</li>
+</ul>
+<h3>본문</h3>
+<h4>컨트롤러: 쿠버네티스를 움직이는 심장</h4>
+<p>지난 강의에서 CRD는 &quot;데이터 모델만 등록할 뿐 아무 동작도 하지 않는다&quot;고 했다. 동작을 일으키는 주체가 바로 <strong>컨트롤러</strong>다. 사실 쿠버네티스 전체가 컨트롤러의 집합이다. Deployment를 만들면 Deployment 컨트롤러가 ReplicaSet을 만들고, ReplicaSet 컨트롤러가 Pod를 만든다. 여러분이 <code class='ic'>replicas: 3</code>이라 선언하면 Pod가 정확히 3개 유지되는 것은, 누군가 끊임없이 &quot;현재 상태가 선언한 상태와 같은가&quot;를 확인하기 때문이다.</p>
+<p>이 끊임없는 확인-수정 과정이 <strong>조정 루프(reconciliation loop)</strong>다. 컨트롤러는 단 하나의 질문을 반복한다.</p>
+<p>1. <strong>observe</strong> — 지금 클러스터의 실제 상태(actual state)는 어떤가?</p>
+<p>2. <strong>diff</strong> — 사용자가 선언한 desired state와 무엇이 다른가?</p>
+<p>3. <strong>act</strong> — 그 차이를 메우기 위해 무엇을 만들거나 지우거나 고쳐야 하는가?</p>
+<p>이 루프가 끝나면 다시 처음으로 돌아온다. Pod 하나가 죽으면 actual ≠ desired가 되고, 다음 루프에서 컨트롤러가 새 Pod를 만들어 차이를 0으로 되돌린다. 명령형 스크립트가 아니라 <strong>선언형(declarative)</strong> 모델인 이유가 여기 있다. 우리는 &quot;무엇을 하라&quot;가 아니라 &quot;어떤 상태이길 원한다&quot;만 말하고, 차이를 메우는 일은 컨트롤러에게 맡긴다.</p>
+<p>아래 흐름도는 컨트롤러가 actual과 desired가 같아질 때까지 observe → diff → act를 무한 반복하는 모습을 나타낸다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    O[&quot;observe: 실제 상태 관찰&quot;] --&gt; D{&quot;diff: desired와 같은가?&quot;}
+    D --&gt;|&quot;같음&quot;| W[&quot;대기 후 다음 루프&quot;]
+    D --&gt;|&quot;다름&quot;| A[&quot;act: 생성/수정/삭제로 차이 보정&quot;]
+    A --&gt; O
+    W --&gt; O</div><figcaption>컨트롤러 조정 루프 (observe → diff → act)</figcaption></figure>
+<blockquote class='callout'>
+<p>조정 루프는 멱등(idempotent)해야 한다. 같은 입력으로 몇 번을 돌려도 결과가 같아야 한다는 뜻이다. 컨트롤러는 수백 번 재실행되므로, &quot;이미 만들어져 있으면 건너뛴다&quot;처럼 현재 상태를 먼저 읽고 차이만 보정하는 식으로 작성해야 한다. &quot;무조건 생성&quot;하는 코드는 중복·충돌을 일으킨다.</p>
+</blockquote>
+<h4>Operator: 운영 지식을 컨트롤러에 담다</h4>
+<p>빌트인 컨트롤러는 Pod·ReplicaSet 같은 범용 리소스만 안다. 하지만 PostgreSQL 클러스터를 운영한다고 생각해 보자. 마스터 승격, 백업 스케줄, 장애 시 페일오버, 버전 업그레이드 — 이런 건 사람 DBA의 머릿속 운영 지식이다. <strong>Operator는 이 운영 지식을 커스텀 컨트롤러 코드로 옮긴 것</strong>이다.</p>
+<p>구성은 단순하다. <strong>Operator = CRD + 그 CRD를 감시하는 커스텀 컨트롤러</strong>. 예를 들어 <code class='ic'>PostgresCluster</code>라는 CRD를 정의하고, 사용자가 <code class='ic'>spec.replicas: 3, version: 15</code>라고 선언하면, Operator의 컨트롤러가 StatefulSet·Service·Secret·백업 CronJob을 알아서 만들고, 마스터가 죽으면 복제본을 승격시킨다. 사용자는 DB 내부 운영을 몰라도 되고, &quot;원하는 상태&quot;만 YAML로 선언한다.</p>
+<p>흐름은 다음과 같다. 사용자가 CR을 생성/수정 → API 서버가 etcd에 저장하고 watch 이벤트 발생 → Operator의 컨트롤러가 이벤트를 받아 조정 루프 실행 → 실제 리소스를 desired에 맞춤. 이 watch-react-reconcile 사이클이 Operator 동작의 본질이다.</p>
+<p>아래 시퀀스는 사용자가 CR을 적용했을 때 watch 이벤트가 Operator를 깨워 부수 리소스를 만들기까지의 과정을 보여 준다.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as 사용자
+    participant API as API 서버
+    participant E as etcd
+    participant OP as Operator 컨트롤러
+    U-&gt;&gt;API: PostgresCluster CR 적용
+    API-&gt;&gt;E: CR 저장
+    API--&gt;&gt;OP: watch 이벤트 전달
+    OP-&gt;&gt;OP: 조정 루프 실행 (observe/diff/act)
+    OP-&gt;&gt;API: StatefulSet/Service/Secret 생성 요청
+    API-&gt;&gt;E: 부수 리소스 저장
+    Note over OP: 상태 변화마다 루프 재실행</div><figcaption>Operator의 watch-react-reconcile 사이클</figcaption></figure>
+<h4>기존 Operator 설치하고 관찰하기</h4>
+<p>직접 코드를 짜기 전에, 잘 만들어진 Operator가 어떻게 반응하는지 관찰하는 것이 가장 빠른 학습이다. cert-manager를 예로 들자.</p>
+<pre><code>
+# 1) cert-manager Operator 설치 (CRD + 컨트롤러가 함께 배포됨)
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set installCRDs=true
+
+# 2) Operator가 등록한 CRD 확인
+kubectl get crd | grep cert-manager
+# certificates.cert-manager.io, issuers.cert-manager.io ...
+
+# 3) 컨트롤러 Pod와 로그 확인
+kubectl get pods -n cert-manager
+kubectl logs -n cert-manager deploy/cert-manager -f
+</code></pre>
+<blockquote class='callout'>
+<p>CRD를 함께 설치하는 플래그는 cert-manager 버전에 따라 이름이 다르니 주의하라. 위 <code class='ic'>--set installCRDs=true</code>가 가장 널리 통용되는 방식이고, 일부 최신 차트에서는 <code class='ic'>--set crds.enabled=true</code>(여기에 <code class='ic'>crds.keep=true</code>로 삭제 시 CRD 보존까지 제어)를 쓴다. 어느 쪽이든 의도는 같다 — <strong>Helm이 CRD를 함께 배포하게 만드는 것</strong>. 설치 전 <code class='ic'>helm show values jetstack/cert-manager | grep -i crd</code>로 그 차트가 어떤 키를 쓰는지 확인하는 습관이 안전하다.</p>
+</blockquote>
+<p>이제 CR(예: <code class='ic'>Certificate</code> 또는 자체 서명 <code class='ic'>Issuer</code>)을 하나 만든 뒤, 위 로그 창을 지켜보라. CR을 <code class='ic'>apply</code>하는 즉시 컨트롤러 로그에 조정 메시지가 찍히고, 곧이어 인증서가 담긴 Secret이 자동 생성된다.</p>
+<pre><code>
+kubectl apply -f selfsigned-issuer.yaml
+kubectl apply -f my-certificate.yaml
+kubectl get certificate          # READY 컬럼이 True로 바뀌는 과정 관찰
+kubectl get secret               # 컨트롤러가 만든 TLS Secret 등장
+</code></pre>
+<p>여기서 핵심 관찰 포인트는, <strong>여러분은 Secret을 직접 만들지 않았다</strong>는 점이다. CR 하나를 선언했을 뿐인데 컨트롤러가 조정 루프를 돌려 부수 리소스를 만들어 냈다. CR을 삭제하면 다시 루프가 돌아 관련 리소스를 정리한다. 이것이 컨트롤러가 desired state를 유지하는 모습이다.</p>
+<h4>Operator SDK와 성숙도 모델</h4>
+<p>직접 Operator를 만들 때는 보통 프레임워크를 쓴다. <strong>Operator SDK</strong>(및 그 기반인 controller-runtime, Kubebuilder)는 watch 등록, 큐잉, 재시도, 클라이언트 캐시 같은 반복 작업을 대신 처리해 주고, 여러분은 <code class='ic'>Reconcile()</code> 함수 안의 비즈니스 로직만 채우면 된다. Go가 가장 일반적이지만, Ansible·Helm 기반 Operator도 SDK가 지원한다(Helm 차트를 그대로 Operator로 감싸는 방식).</p>
+<p>Operator의 성숙도는 흔히 <strong>5단계 capability model</strong>로 설명한다.</p>
+<p>1. <strong>Basic Install</strong> — CR로 설치·기본 설정만 자동화</p>
+<p>2. <strong>Seamless Upgrades</strong> — 애플리케이션·Operator 버전 업그레이드 자동화</p>
+<p>3. <strong>Full Lifecycle</strong> — 백업·복구·장애 조치 등 라이프사이클 관리</p>
+<p>4. <strong>Deep Insights</strong> — 메트릭·알림·로그 등 관측성 통합</p>
+<p>5. <strong>Auto Pilot</strong> — 오토스케일링·자동 튜닝·이상 감지까지 무인 운영</p>
+<p>레벨이 올라갈수록 사람 DBA/운영자의 지식이 더 많이 코드로 옮겨진 것이다. OperatorHub에 가면 수많은 Operator가 이 등급으로 분류돼 있어, 도입 전 성숙도를 가늠하는 기준이 된다.</p>
+<blockquote class='callout'>
+<p>모든 것을 Operator로 만들 필요는 없다. 단순 배포는 Helm/Kustomize로 충분하다. Operator는 &quot;스테이트풀하고, 사람의 지속적 운영 판단이 필요한&quot; 애플리케이션(데이터베이스, 메시지 큐, 모니터링 스택 등)에서 진가를 발휘한다.</p>
+</blockquote>
+<h3>핵심 요약</h3>
+<ul>
+<li>컨트롤러는 observe → diff → act의 조정 루프를 무한 반복하며 actual state를 desired state에 수렴시킨다. 이 멱등한 루프가 선언형 모델의 핵심이다.</li>
+<li>Operator = CRD + 커스텀 컨트롤러. 사람의 운영 지식(설치·업그레이드·페일오버 등)을 코드로 옮긴 패턴이다.</li>
+<li>기존 Operator(예: cert-manager)를 설치하고 CR을 적용하면, 컨트롤러가 watch로 반응해 부수 리소스를 자동 생성·정리하는 과정을 직접 관찰할 수 있다. CRD 동반 설치 플래그(<code class='ic'>installCRDs=true</code> 또는 최신 차트의 <code class='ic'>crds.enabled=true</code>)는 차트 버전에 맞춰 확인한다.</li>
+<li>Operator SDK(controller-runtime/Kubebuilder)는 watch·큐·재시도 같은 배관을 대신 처리해 Reconcile 로직에 집중하게 해 준다.</li>
+<li>성숙도 모델(Basic Install → Auto Pilot 5단계)로 Operator의 자동화 수준을 가늠한다. 스테이트풀·운영 집약 애플리케이션에 가장 적합하다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. [워밍업] cert-manager를 Helm으로 설치하고 설치 결과를 확인하라. cert-manager는 TLS 인증서를 자동 발급·갱신하는 Operator의 대표적 예다. 설치 후 cert-manager 네임스페이스에 생성된 컨트롤러 Pod를 확인하고, cert-manager가 등록한 CRD 목록을 조회하라.</p></div>
+              <pre class='starter'><code># 1. cert-manager Helm 리포지토리 추가
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+# 2. cert-manager 설치 (CRD 포함)
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --version v1.14.0 \
+  --set installCRDs=true
+
+# 3. 컨트롤러 Pod 확인 (모두 Running이 될 때까지 대기)
+kubectl get pods -n ___
+
+# 4. cert-manager가 등록한 CRD 확인
+kubectl get crd | grep ___</code></pre>
+              <details><summary>힌트</summary><ul><li>helm install 후 Pod가 뜨는 데 1~2분이 걸릴 수 있다. kubectl get pods -n cert-manager -w 로 실시간 상태 변화를 관찰할 수 있다.</li><li>installCRDs=true 대신 --set crds.enabled=true 를 쓰는 최신 버전도 있다. helm show values jetstack/cert-manager 로 사용 가능한 값을 확인하라.</li><li>인터넷이 안 되는 환경이라면 kind나 k3d 클러스터에서 로컬 레지스트리를 구성하거나, OCI 아카이브를 사용해야 한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1 &amp; 2. Helm 설치 (위 명령 그대로 실행)
+
+# 3. cert-manager Pod 확인
+kubectl get pods -n cert-manager
+# NAME                                       READY   STATUS    RESTARTS   AGE
+# cert-manager-xxxx                          1/1     Running   0          60s
+# cert-manager-cainjector-xxxx               1/1     Running   0          60s
+# cert-manager-webhook-xxxx                  1/1     Running   0          60s
+
+# 4. cert-manager CRD 목록
+kubectl get crd | grep cert-manager
+# NAME                                             CREATED AT
+# certificaterequests.cert-manager.io              ...
+# certificates.cert-manager.io                     ...
+# challenges.acme.cert-manager.io                  ...
+# clusterissuers.cert-manager.io                   ...
+# issuers.cert-manager.io                          ...
+# orders.acme.cert-manager.io                      ...</code></pre>
+                <div class='exp2'><p>cert-manager는 Operator 패턴의 교과서적 예다. Helm으로 설치하면 세 가지 컨트롤러 Pod가 생성된다. cert-manager(핵심 컨트롤러), cainjector(CA 인젝터), webhook(검증 웹훅)이다. 또한 Certificate, Issuer, ClusterIssuer 등 여러 CRD가 등록된다. 이 CRD들이 Operator의 &#x27;도메인 특화 API&#x27; 역할을 한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. [핵심 실습] cert-manager의 SelfSigned Issuer와 Certificate 커스텀 리소스를 생성해 컨트롤러가 실제 TLS 인증서(Secret)를 자동으로 생성하는 조정 루프를 관찰하라. Certificate 상태가 Ready: True가 되면 생성된 Secret의 tls.crt, tls.key 내용을 확인하라.</p></div>
+              <pre class='starter'><code># 1. SelfSigned Issuer 생성
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: default
+spec:
+  selfSigned: {}
+
+---
+# 2. Certificate 커스텀 리소스 생성
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: my-tls-cert
+  namespace: default
+spec:
+  secretName: my-tls-secret    # 생성될 Secret 이름
+  duration: 2160h               # 90일
+  dnsNames:
+    - example.com
+    - www.example.com
+  issuerRef:
+    name: ___                   # 위에서 만든 Issuer 이름
+    kind: Issuer
+
+# 3. Certificate 상태 관찰 (Ready: True가 될 때까지)
+kubectl get certificate my-tls-cert -w
+
+# 4. 생성된 Secret 확인
+kubectl get secret ___
+kubectl describe secret ___</code></pre>
+              <details><summary>힌트</summary><ul><li>Certificate의 Ready 상태는 kubectl get certificate -o wide 또는 kubectl describe certificate my-tls-cert 의 Conditions 섹션에서 확인할 수 있다.</li><li>인증서 발급 실패 시 kubectl describe certificate 의 Events 섹션에 오류 메시지가 기록된다.</li><li>조정 루프는 인증서가 만료 임박 시(duration의 2/3 경과 시점)에도 자동으로 갱신을 트리거한다. 이것이 수동 인증서 관리보다 우월한 이유다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 파일 저장 및 적용
+kubectl apply -f issuer.yaml
+# issuer.cert-manager.io/selfsigned-issuer created
+
+kubectl apply -f certificate.yaml
+# certificate.cert-manager.io/my-tls-cert created
+
+# 조정 루프 관찰 (수 초 내에 Ready: True 전환)
+kubectl get certificate my-tls-cert -w
+# NAME          READY   SECRET          AGE
+# my-tls-cert   False   my-tls-secret   2s
+# my-tls-cert   True    my-tls-secret   5s   &lt;-- 컨트롤러가 인증서 발급 완료
+
+# 생성된 Secret 확인
+kubectl get secret my-tls-secret
+# NAME            TYPE                DATA   AGE
+# my-tls-secret   kubernetes.io/tls   3      10s
+
+kubectl describe secret my-tls-secret
+# Data
+# ====
+# ca.crt:   xxxx bytes
+# tls.crt:  xxxx bytes
+# tls.key:  xxxx bytes
+
+# 인증서 내용 확인 (base64 디코딩)
+kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep -E &#x27;Subject:|DNS:&#x27;</code></pre>
+                <div class='exp2'><p>Certificate 커스텀 리소스를 생성하면 cert-manager 컨트롤러가 조정 루프(reconciliation loop)를 실행한다. 현재 상태(Secret 없음, Ready: False)와 원하는 상태(유효한 TLS Secret, Ready: True)를 비교해 인증서를 발급하고 Secret을 생성한다. 이것이 Operator 패턴의 핵심이다. 사용자는 &#x27;무엇을 원하는지(Certificate 선언)&#x27;만 기술하고, 컨트롤러가 &#x27;어떻게 만들지(CSR 생성, 서명, Secret 저장)&#x27;를 자동으로 처리한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. [응용] 이미 생성된 Certificate의 dnsNames에 &#x27;api.example.com&#x27;을 추가 수정하라. kubectl edit 또는 kubectl apply로 변경 후, 컨트롤러가 인증서를 자동으로 재발급해 Secret이 갱신되는 조정 루프를 관찰하라. 갱신 전후 tls.crt 의 Subject Alternative Names(SAN)을 비교하라.</p></div>
+              <pre class='starter'><code># 방법 1: kubectl edit으로 직접 편집
+kubectl edit certificate my-tls-cert
+# dnsNames에 &#x27;api.example.com&#x27; 추가 후 저장
+
+# 방법 2: 수정된 YAML 파일로 apply
+# certificate.yaml의 dnsNames 섹션 수정:
+#   dnsNames:
+#     - example.com
+#     - www.example.com
+#     - api.example.com    # 추가
+# kubectl apply -f certificate.yaml
+
+# 변경 반영 관찰
+kubectl get certificate my-tls-cert -w
+
+# 갱신 후 SAN 확인
+kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep DNS</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl edit 사용 시 저장 단축키는 에디터마다 다르다. vi는 &#x27;:wq&#x27;, nano는 &#x27;Ctrl+X → Y → Enter&#x27;다.</li><li>변경 후 즉시 kubectl describe certificate my-tls-cert 를 실행하면 Events 섹션에서 컨트롤러가 재발급을 트리거한 이유를 확인할 수 있다.</li><li>실습 정리: kubectl delete certificate my-tls-cert &amp;&amp; kubectl delete issuer selfsigned-issuer &amp;&amp; kubectl delete secret my-tls-secret</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># kubectl edit으로 편집 (vi/nano 에디터 열림)
+kubectl edit certificate my-tls-cert
+# dnsNames 섹션을 아래와 같이 수정 후 저장:
+#   dnsNames:
+#     - example.com
+#     - www.example.com
+#     - api.example.com
+
+# 컨트롤러가 변경 감지 후 재발급 시작 (잠시 False로 전환되었다가 다시 True)
+kubectl get certificate my-tls-cert -w
+# NAME          READY   SECRET          AGE
+# my-tls-cert   True    my-tls-secret   2m
+# my-tls-cert   False   my-tls-secret   2m   &lt;-- 재발급 중
+# my-tls-cert   True    my-tls-secret   2m   &lt;-- 재발급 완료
+
+# 갱신된 인증서의 SAN 확인
+kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep DNS
+# DNS:example.com, DNS:www.example.com, DNS:api.example.com  &lt;-- 3개로 늘어남</code></pre>
+                <div class='exp2'><p>Operator 패턴에서 컨트롤러는 커스텀 리소스의 변경을 watch하다가 desired state와 actual state가 달라지면 자동으로 조정을 수행한다. dnsNames 변경을 감지한 cert-manager 컨트롤러는 기존 인증서를 폐기하고 새 SAN이 포함된 인증서를 재발급한다. 사용자는 YAML 한 줄을 고치는 것만으로 복잡한 PKI 재발급 과정을 자동화할 수 있다. 이것이 &#x27;운영 지식을 코드로&#x27; 표현하는 Operator 패턴의 핵심 가치다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=ha3LjlD6g7g' target='_blank'>Kubernetes Operator explained in 10 minutes</a></li><li><a href='https://www.youtube.com/watch?v=i9V4oCa5f9I' target='_blank'>Kubernetes Operators Explained</a></li><li><a href='https://www.youtube.com/watch?v=q7b23612pSc' target='_blank'>Writing Kubernetes Controllers</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

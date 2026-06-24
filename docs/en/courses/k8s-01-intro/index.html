@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Intro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-01-intro/index.html'>한국어</a></div>
+  <h1>K8S-Intro</h1>
+  <div class="sub">Absolute beginners to Kubernetes who have a basic familiarity with containers and Docker · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. What Is Kubernetes - Why Container Orchestration Matters</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. What Is Kubernetes - Why Container Orchestration Matters </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the limitations of running services with containers alone (scaling, failure recovery, and deployment)</li>
+<li>Explain in your own words what problems Kubernetes solves and why it matters</li>
+<li>Grasp the concept of orchestration through an everyday analogy</li>
+</ul>
+<h3>Lecture</h3>
+<h4>Why Does This Matter?</h4>
+<p>You have probably heard things like &quot;we need to move to Kubernetes&quot; or &quot;let&#x27;s adopt containers.&quot; But if you follow along without understanding <em>why</em>, you will quickly get lost in a maze of jargon. In this lecture, we will set aside commands and config files for now and start with the most fundamental question: <strong>&quot;What problem did Kubernetes actually come to solve?&quot;</strong> Getting this foundation right makes every concept you learn afterward click into place naturally.</p>
+<h4>A Quick Refresher on Containers</h4>
+<p>Let&#x27;s start with a one-line definition of a <strong>container</strong>. A container is a <em>self-contained, runnable unit that bundles an application together with everything it needs to run — code, libraries, and configuration.</em></p>
+<p>Here is an analogy. Imagine a landlord renting out space in a building. If every new tenant required a full renovation before moving in, that would be exhausting. Now picture tenants arriving with a <strong>fully furnished shipping container</strong> that they simply slot into the building — no construction needed, and when they leave, they just take the box with them. That is exactly how containers work. Where the old approach of <strong>virtual machines (VMs)</strong> was like building out a new floor for every tenant, containers are lightweight, portable boxes you can move around with ease.</p>
+<blockquote class='callout'>
+<p>Containers largely eliminated the classic &quot;it works on my machine&quot; problem, because you ship the entire runtime environment along with the application.</p>
+</blockquote>
+<h4>One Container Is Easy — But What About Hundreds?</h4>
+<p>This is where the real challenge begins. Modern applications are rarely monolithic. Instead, they are broken into small, focused services — a pattern known as <strong>microservices</strong>. An e-commerce site, for example, might have a frontend rendering the UI, a backend handling orders, and a separate database — all running independently. As traffic grows, you need to scale specific services (say, just the frontend), and your container count can quickly climb into the hundreds or even thousands.</p>
+<p>Now imagine managing all those containers, spread across multiple servers, by hand. You would have to:</p>
+<ul>
+<li>Decide by hand which container to place on which server</li>
+<li>Wake up in the middle of the night to restart any container that crashes</li>
+<li>Manually scale replicas up when traffic spikes and back down when it eases</li>
+<li>Carefully swap containers one by one during deployments to avoid downtime</li>
+<li>Wire up networking between containers so they can find and talk to each other</li>
+</ul>
+<p>You can get by with scripts and homegrown tooling for a while, but at scale this quickly becomes unmanageable. <strong>This is precisely where container orchestration comes in.</strong></p>
+<h4>Orchestration — The Conductor Analogy</h4>
+<p>The word <strong>orchestration</strong> comes from the orchestra. Even with dozens of skilled musicians (containers), without a <strong>conductor</strong> to coordinate them, the result is noise, not music. A container orchestration tool acts as that conductor.</p>
+<p>Here is another analogy. Imagine you own several buildings. Each building already has a tool installed that can create and run containers — that tool is <strong>Docker</strong>, the most widely used platform for building and running containers. At first this worked fine, but as your portfolio grew you found yourself rushing from building to building, telling each one exactly what to run and where. You need a smart <strong>general manager</strong> to handle it all. That general manager&#x27;s name is <strong>Kubernetes</strong>.</p>
+<p>Now you only have to give the manager the big picture: &quot;Keep three frontend instances running and two backend instances up at all times.&quot; Kubernetes figures out where to place them, and whenever one dies it quietly brings up a replacement to keep the count right. You do not micromanage every step, because Kubernetes remembers your <strong>desired state</strong> and continuously drives reality toward it.</p>
+<p>The flowchart below shows how Kubernetes compares your declared desired state with what is actually running, and acts whenever the two diverge. This continuous loop is the heart of declarative management.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    A[&quot;User declares desired state&lt;br/&gt;e.g. keep 3 frontends&quot;] --&gt; B[Kubernetes stores the state]
+    B --&gt; C{Compare with current state}
+    C --&gt;|Match| D[Keep as-is and keep watching]
+    C --&gt;|Missing or crashed| E[Automatically create new container]
+    C --&gt;|Excess| F[Remove surplus container]
+    D --&gt; C
+    E --&gt; C
+    F --&gt; C</div><figcaption>Kubernetes reconciliation loop — continuously aligning reality with the declared desired state</figcaption></figure>
+<h4>The Core Value Kubernetes Delivers</h4>
+<p>Kubernetes is an open-source container orchestration platform originally built at Google. It is runtime-agnostic — it does not care whether you are using Docker or another technology — and it works across physical servers, VMs, and cloud environments alike. Its value comes down to four pillars:</p>
+<blockquote class='callout'>
+<p>One common misconception worth clearing up: many people assume &quot;Kubernetes runs on top of Docker,&quot; but that is not quite accurate. Kubernetes connects to container runtimes through a standard interface called the <strong>CRI (Container Runtime Interface)</strong>, and the most common runtimes today are <strong>containerd</strong> and <strong>CRI-O</strong>. The older mechanism that plugged Docker directly into Kubernetes (called dockershim) was removed in Kubernetes 1.24. That said, <strong>images built with Docker are standard OCI-compliant images and continue to work perfectly</strong> — so your Docker-based build workflow does not need to change.</p>
+</blockquote>
+<p>1. <strong>Self-healing and high availability</strong> — When a container or node goes down, Kubernetes automatically restarts it or reschedules it on a healthy node, minimizing downtime. It always strives to maintain the declared replica count.</p>
+<p>2. <strong>Scalability</strong> — When traffic increases, Kubernetes scales replicas up; when traffic drops, it scales them back down. It evaluates available resources across nodes and picks the most efficient placement. This smart placement decision is called <strong>scheduling</strong>.</p>
+<p>3. <strong>Service discovery and load balancing</strong> — Containers come and go, and their IP addresses change with them. Kubernetes places a stable, fixed endpoint in front of a group of containers so that other services always connect to the same address, with traffic distributed evenly across healthy instances.</p>
+<p>4. <strong>Declarative configuration and state management</strong> — This foundational principle underpins the other three. In Kubernetes you do not specify <em>how</em> to do something; you declare <em>what the end result should look like</em>. That declared configuration is stored in <strong>etcd</strong>, the cluster&#x27;s data store, and Kubernetes controllers continuously compare actual state against it, correcting any drift. This mechanism is formally called <strong>Desired State Reconciliation</strong>, and its core unit of work is the <strong>reconciliation loop</strong>. If a node goes down or a container crashes and the actual state drifts from the declaration, the controllers automatically restore the system to the declared configuration. Backing up etcd lets you restore the <strong>cluster&#x27;s configuration state</strong> (which resources should be running and how) to the last declared snapshot — though this restores <em>configuration</em> only, not application data, as explained next.</p>
+<blockquote class='callout'>
+<p>Important: What Kubernetes automatically restores is the <em>configuration state</em> declared in etcd — which apps to run, how many replicas, and so on. It does <strong>not</strong> restore your <strong>application data</strong> (database contents, user-uploaded files, etc.). Protecting data requires separate solutions such as persistent volume backups or database-level backups. &quot;The app comes back, but the data can still be gone&quot; is a distinction you must internalize early.</p>
+</blockquote>
+<h4>How Developers and Operators See the System Differently</h4>
+<p>One more perspective worth covering. <strong>Developers</strong> and <strong>operators</strong> look at the same system through very different lenses. Developers focus on what is <em>inside</em> the container — their code, dependencies, and whether the app behaves correctly. Operators look at the bigger picture: which server to deploy on, how to scale, how to expose services externally, and how to detect and respond to failures.</p>
+<p>As the diagram below shows, developers focus on the top layer — their containers — while Kubernetes takes ownership of the operational layer, governing the sprawl of containers spread across many servers.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph DEV[&quot;Developer&#x27;s view — inside the container&quot;]
+        D1[My code]
+        D2[Library dependencies]
+        D3[Correct behavior]
+    end
+    subgraph K8S[&quot;Kubernetes — operational automation layer&quot;]
+        K1[Scheduling and placement]
+        K2[Scaling up and down]
+        K3[Self-healing]
+        K4[External exposure and networking]
+    end
+    subgraph OPS[&quot;Infrastructure the operator is responsible for&quot;]
+        N1[Server node 1]
+        N2[Server node 2]
+        N3[Server node 3]
+    end
+    DEV --&gt; K8S
+    K8S --&gt; OPS</div><figcaption>Developer and operator perspectives — and the Kubernetes layer bridging them</figcaption></figure>
+<p>Kubernetes automates most of the operational burden. Developers can stay focused on their containers, while operations teams govern hundreds of containers through <strong>declared rules</strong> rather than manual intervention. Interestingly, as operations become codified through declarations, developers naturally become involved in deployment and scaling decisions too. This blurring of the line between development (Dev) and operations (Ops) is exactly why <strong>DevOps</strong> culture spread so rapidly alongside Kubernetes. The growing prominence of roles like <strong>SRE (Site Reliability Engineer)</strong> reflects the same trend — designing for reliability on top of this kind of automated operational foundation.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Containers are a lightweight, portable unit that bundles an app with its entire runtime environment. But when hundreds of containers span multiple servers, managing them by hand quickly becomes impossible.</li>
+<li><strong>Container orchestration</strong> solves this problem. The de facto standard — created by Google and released as open source — is <strong>Kubernetes</strong>.</li>
+<li>Like the conductor of an orchestra (or a building&#x27;s general manager), Kubernetes lets you declare a desired state and handles placement, replication, self-healing, and networking automatically.</li>
+<li>The four core pillars are: self-healing and high availability, scalability and smart scheduling, service discovery and load balancing, and the foundation that holds them all together — <strong>declarative configuration</strong>. Kubernetes uses <strong>Desired State Reconciliation</strong> to continuously align the cluster with what is declared in etcd. Application <strong>data</strong>, however, must be protected through a <strong>separate backup solution</strong>.</li>
+<li>With this &quot;why&quot; understood, the internal architecture covered in the next lecture will make intuitive sense.</li>
+</ul>
+          <section class='ex'><h3>📝 Quiz</h3><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q1. When operating a microservice environment with containers, what problems arise from managing hundreds of containers manually? Select the most appropriate answer based on the lecture content.</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,0,0)'>Container image builds slow down, reducing developer productivity</li><li class='opt' onclick='pick(this,0,1)'>Operators must manually handle decisions such as which server to place each container on, restarting crashed containers, and adjusting replicas as traffic changes</li><li class='opt' onclick='pick(this,0,2)'>Containers consume more server resources than virtual machines</li><li class='opt' onclick='pick(this,0,3)'>Bugs inside container code become difficult to detect automatically</li></ul>
+              <div class='exp'><p>The correct answer is option 2. The lecture lists the specific problems that arise when managing hundreds of containers by hand: deciding which server to place each container on, manually restarting crashed containers, manually adjusting replica counts as traffic fluctuates, achieving zero-downtime deployments, and wiring up inter-container networking. Option 1 refers to build speed, which is unrelated to orchestration. Option 3 is the opposite of the truth — containers are far lighter than VMs. Option 4 is a code quality concern that falls outside the scope of what orchestration tools address.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q2. Which of the following best describes Kubernetes&#x27; &#x27;desired state&#x27; management model?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,1,0)'>Operators issue commands directly to each individual container following a fixed procedure</li><li class='opt' onclick='pick(this,1,1)'>The user declares a target state, and Kubernetes continuously compares it against the current state and reconciles automatically</li><li class='opt' onclick='pick(this,1,2)'>Whenever a container crashes, Kubernetes sends an alert and waits for an administrator to manually decide whether to recover it</li><li class='opt' onclick='pick(this,1,3)'>Once a container configuration is deployed, it is locked in place to guarantee stability</li></ul>
+              <div class='exp'><p>The correct answer is option 2. The core of Kubernetes is declarative management. The user simply declares the desired outcome — for example, &#x27;three frontend instances, two backend instances&#x27; — and Kubernetes continuously compares the current state against that declaration, automatically correcting any deviation. The reconciliation loop (flowchart) in the lecture visualizes this. Option 1 describes the imperative approach, which is exactly the problem Kubernetes was designed to eliminate. Option 3 describes manual recovery after an alert, which is the opposite of self-healing. Option 4 contradicts the fact that Kubernetes dynamically adjusts state.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q3. Read the following scenario and select the most appropriate action Kubernetes would take.</p>
+<p>[Scenario] At 2 a.m., a surge in event traffic causes one of the frontend containers in a shopping mall service to go down due to overload. The current specification declares that three frontend instances must always be maintained.</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,2,0)'>Kubernetes detects the state change, sends an SMS to the on-call operator, and waits for approval before acting</li><li class='opt' onclick='pick(this,2,1)'>Kubernetes detects the downed container, automatically creates a new one, and if traffic continues to surge, brings up additional replicas to restore the count to three</li><li class='opt' onclick='pick(this,2,2)'>Kubernetes shuts down the entire frontend service and redeploys it in a stable environment</li><li class='opt' onclick='pick(this,2,3)'>Kubernetes collects logs from the downed container, stores them in a database, and stands by</li></ul>
+              <div class='exp'><p>The correct answer is option 2. This question tests your understanding of how two core Kubernetes values — self-healing and scalability — operate in a real failure scenario. Kubernetes remembers the desired state (three frontend instances) and, when reality diverges (one instance down), immediately creates a new container to restore the count to three. This happens automatically, without human intervention, regardless of the time of day. Option 1 requires human approval, which defeats the purpose of automation. Option 3 involves an unnecessary full shutdown, which is at odds with the high-availability goal. Option 4 only collects logs without taking corrective action — that is not self-healing.</p></div></div><div class='quiz' data-ans='0'>
+              <div class='q'><p>Q4. Why does the lecture use the analogy of Kubernetes as a &#x27;general building manager&#x27; and Docker as &#x27;the specialist at each building&#x27;?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,3,0)'>Because Docker operates at the level of a single server running containers, while Kubernetes coordinates containers distributed across many servers as a unified whole</li><li class='opt' onclick='pick(this,3,1)'>Because Docker is an outdated technology that Kubernetes has completely replaced</li><li class='opt' onclick='pick(this,3,2)'>Because Kubernetes can independently create and run containers without Docker</li><li class='opt' onclick='pick(this,3,3)'>Because Docker handles networking and security while Kubernetes is solely responsible for storage</li></ul>
+              <div class='exp'><p>The correct answer is option 1. The analogy in the lecture — &#x27;a specialist (Docker) was assigned to each building, but as buildings multiplied, a general manager (Kubernetes) became necessary&#x27; — illustrates that Docker is a tool for managing containers on a single host, while Kubernetes is a higher-level layer that orchestrates containers spread across tens or hundreds of servers (nodes). Option 2 is factually incorrect; Docker remains widely used as a container runtime, and Kubernetes supports Docker and other runtimes. Option 3 may be partially true in some configurations but does not capture the core intent of the analogy (single vs. multi-server management). Option 4 describes a role division that is never mentioned in the lecture.</p></div></div><div class='quiz' data-ans='1'>
+              <div class='q'><p>Q5. Which of the following best explains the fundamental reason why Kubernetes&#x27; &#x27;service discovery and load balancing&#x27; feature is necessary?</p></div>
+              <ul class='opts'><li class='opt' onclick='pick(this,4,0)'>To centrally manage the version information of container images</li><li class='opt' onclick='pick(this,4,1)'>Because containers get a new IP address every time they die and are recreated, making it impossible for other services to reliably reach them without a stable, fixed endpoint</li><li class='opt' onclick='pick(this,4,2)'>To prevent conflicts when multiple developers deploy code to the same container simultaneously</li><li class='opt' onclick='pick(this,4,3)'>To collect real-time memory usage data from inside containers for performance analysis</li></ul>
+              <div class='exp'><p>The correct answer is option 2. The lecture explains that &#x27;containers die and are replaced frequently, and their IP addresses change each time.&#x27; Because of this dynamic nature, Kubernetes places a stable, fixed endpoint (a Service object) in front of containers so that clients can always connect to the same address — even as the underlying containers are replaced — and so that incoming traffic is distributed evenly. Option 1 relates to image registry management and has nothing to do with service discovery. Option 3 is a deployment conflict concern, which is a separate CI/CD domain. Option 4 describes the role of monitoring and observability tooling, not service discovery.</p></div></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=kBF6Bvth0zw' target='_blank'>Container Orchestration Explained</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

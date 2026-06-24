@@ -1,0 +1,75 @@
+## 영상 1: Chunking Strategies in RAG: Optimising Data for Advanced AI Responses (https://www.youtube.com/watch?v=pIGRwMjhMaQ)
+
+This video explores chunking strategies in RAG applications from beginner to advanced level. Chunking is the first critical step where data is divided into chunks, converted to embeddings, and stored in a vector database.
+
+The importance of chunking cannot be overstated. If text is split with less relevance, it produces inaccurate answers. High quality chunks produce high quality answers. For example, fixed size chunking of 50 characters can break words like "mountains" into incomplete fragments like "mo" or "fascinating" into "Fascinate". Dividing text by commas or full stops also fails to provide clear answers, and dividing by full stops or paragraphs might miss related subsequent paragraphs.
+
+The solution involves different levels of chunking strategies:
+
+Character splitting: The first step is to define the number of character size and divide accordingly. Manual splitting can be done by defining chunks and dividing text based on the number of characters. However, this doesn't give accurate results as words get broken. LangChain provides CharacterTextSplitter which automatically divides text based on characters. With overlap, the more overlap you add, the better the large language model can identify relationships between chunks.
+
+Recursive character text splitting: This method provides characters such as a new line that automatically get used as a splitter. With a higher chunk size like 450 characters, chunks become much better than before and automatically terminate at paragraph or chunk boundaries. This is comparatively better but still not fully optimized.
+
+Document-based splitting: Different languages and document types require different splitting strategies. Markdown text splitter, Python text splitter, and JavaScript text splitter can be used. These split based on document structure rather than just character count.
+
+Semantic chunking: This method uses embeddings to identify if two sentences are related to each other. By converting chunks to embeddings and calculating the distance between them, you can determine whether chunks are related and group or split accordingly. This is done using semantic chunker from LangChain experimental with OpenAI embeddings.
+
+Agentic chunking: The fifth and most advanced level has two types - proportion-based chunking and grouping. In proportion-based chunking, a chunk is automatically split but each line or chunk can stand on its own and provide complete meaning. This uses a large language model to process text into propositions. The system then groups these meaningful chunks together automatically using categories and summarization.
+
+When you pass the grouped information to the large language model, you are more likely to get better answers. This is the most optimized version of chunking strategy.
+
+
+## 영상 2: LangChain: How to Properly Split your Chunks (https://www.youtube.com/watch?v=n0uPzvGTFI0)
+
+This video explains the recursive character text splitter in LangChain and how text splitting works under the hood. The key distinction is that chunk size is defined by the number of characters, not by the number of tokens.
+
+The recursive character text splitter works by first dividing text into paragraphs, then into sentences, then into words, and finally into characters. Initially, it checks if each paragraph exceeds the given chunk size. If a paragraph is smaller than the chunk size, it is kept. If a paragraph is larger, it is further divided into sentences and multiple sentences are combined to create another chunk while staying within the chunk size.
+
+When chunk size is set to 500 characters with no overlap, the text is divided into chunks. If you had four paragraphs total, you might get three chunks because the first paragraph combined with the second paragraph equals 438 characters total, which is less than the chunk size limit of 500. Multiple paragraphs can be combined as long as the total does not exceed the chunk size.
+
+When chunk size is reduced to 250 characters, you get more chunks. Each chunk ends with a period indicating a complete sentence. The first paragraph becomes one chunk, then the system tries to combine it with the second paragraph which has more than 400 characters. Since this exceeds the chunk size of 250, it must further subdivide the paragraph into smaller chunks by looking at sentences.
+
+When chunk size is further reduced to 50 characters, you get many more chunks with variation in sizes. The system starts dividing sentences based on characters, creating situations where only one word is left in a chunk. This can result in sub-sentences being returned.
+
+The chunk size is important for information retrieval systems based on embeddings. If you return only four chunks with a very small chunk size, you might be returning sub-sentences and may not be able to extract meaningful information. You need to select chunk size based on the data you are working with.
+
+It's not always the case that having a large chunk size is the solution. If you define a large chunk size and all different topics are put together in a single chunk, it might confuse the LLM that is looking at this data and deriving information from it. Close attention must be paid to what these chunks contain when returned by semantic search performed by an embedding model.
+
+The default list can be modified based on your own applications and needs. Understanding how text splitting works under the hood helps you make better decisions about chunk sizes for your specific use case.
+
+
+## 영상 3: Python RAG Tutorial (with Local LLMs): AI For Your PDFs (https://www.youtube.com/watch?v=2TJxpyO3ei4)
+
+This tutorial demonstrates building a Python RAG application that can answer questions about PDF documents using natural language. The application can answer questions like "How do you build a hotel in Monopoly?" with answers and source references from the PDFs.
+
+Overview of how the system works:
+
+First, you have source data which is PDF files. This data is divided into small pieces or chunks. Each chunk is converted to embeddings. The embeddings are stored in a vector database. When a question is asked, the query is converted to embeddings, which allows retrieving the most relevant items from the database. Those items are used together in a prompt to get the final response from the LLM.
+
+Preparing data:
+
+You need to prepare documents you want to use as source material. PDFs can be downloaded online and placed in a folder. Using the PDF document loader from LangChain, you can load documents from the folder. When you print a loaded document, you see an object containing the text content of each page with metadata like page number and source information.
+
+The next problem is that each document or each page of a PDF is probably too large. You need to divide it into smaller pieces using the recursive text splitter. After applying it to documents, each piece becomes much smaller, which is useful for indexing and storing data.
+
+Creating embeddings and vector database:
+
+For each chunk, you need to create embeddings which act like database keys. It's important to use exactly the same embedding function for both creating the database and querying the database, otherwise the system won't work properly. LangChain includes various embedding functions. For completely local operation, you could use Ollama embeddings after installing Ollama and running an embedding model, but testing showed that local 4GB models didn't produce embeddings good enough for RAG applications.
+
+To build the vector database, chunks are divided and an embedding function is used. Each chunk is assigned a unique ID using source file path plus page number plus chunk number on that page. This approach allows you to detect if a chunk is already in the database and only add new ones instead of rebuilding the entire database.
+
+Querying and generating responses:
+
+When querying the system, you load the embedding function and database, retrieve relevant chunks using semantic search with the top K most relevant chunks, and create a prompt combining context from those chunks with the actual question. The LLM then generates an answer based on this prompt. Using local Ollama server with a model like Mistral that requires only 4GB provides reasonable results.
+
+The quality of responses depends on several factors - the source material itself, how the text is divided into chunks, and which LLM model is used for the final response.
+
+Testing and evaluation:
+
+To evaluate RAG application quality, you can write unit tests with sample questions and expected answers. However, strict equality comparison doesn't work since there are multiple ways to express the same answer. Instead, you can use an LLM to judge if the actual response matches the expected response by semantic meaning.
+
+Create a prompt template asking the LLM if two responses are equivalent in meaning. Query the RAG app with your test question, format a prompt with the question, expected answer, and actual answer, call the LLM to get its judgment, and use its response as an assertion in your test.
+
+You can write many test cases this way and quickly see how your application performs, especially after updating code, source documents, or LLM models. Testing both positive cases and negative cases is recommended to ensure the LLM evaluation is working correctly. You can also set thresholds like 80% or 90% passing test cases if having all tests pass seems too strict.
+
+This approach allows you to build a RAG system that can handle PDF documents, update the vector database with new entries without rebuilding from scratch, and systematically test the quality of AI-generated responses.

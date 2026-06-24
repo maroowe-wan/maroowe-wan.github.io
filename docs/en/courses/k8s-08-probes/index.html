@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Probes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-08-probes/index.html'>한국어</a></div>
+  <h1>K8S-Probes</h1>
+  <div class="sub">Learners who are already familiar with Kubernetes fundamentals — Pods, Deployments, Services, and YAML manifests — and want to take the next step toward production-grade operations and deployment reliability. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Health Checks (Probes) and Zero-Downtime Deployment — Rolling Updates &amp; Rollback Strategies</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Health Checks (Probes) and Zero-Downtime Deployment — Rolling Updates &amp; Rollback Strategies </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Distinguish the role and differences among Liveness, Readiness, and Startup Probes</li>
+<li>Understand how maxSurge and maxUnavailable control rolling update behavior</li>
+<li>Practice rolling back a failed deployment with <code class='ic'>kubectl rollout</code> and managing revision history</li>
+</ul>
+<h3>Content</h3>
+<h4>Why Health Checks and Deployment Strategies Matter</h4>
+<p>Running a Pod was covered in the introductory course. In production, however, the real challenge is keeping containers healthy and swapping in new versions — <strong>without ever taking the service down</strong>.</p>
+<p>A running process does not automatically mean a &quot;healthy&quot; container. Just as a person who is physically moving is not necessarily healthy, a container must be able to <strong>respond correctly to requests</strong> to be considered healthy. Kubernetes provides <strong>Probes</strong> — self-healing mechanisms that handle this automatically, so engineers do not have to monitor containers around the clock. When deploying a new version, <strong>rolling updates</strong> guarantee zero downtime, and if something goes wrong, a <strong>rollback</strong> restores the previous state instantly.</p>
+<p>These three concepts — Probes, rolling updates, and rollbacks — are the focus of this lecture.</p>
+<h4>1. Three Types of Probes: Liveness · Readiness · Startup</h4>
+<p>A Probe <strong>periodically diagnoses</strong> the state of a container and triggers automatic action by Kubernetes based on the result. There are three types, each with a distinct remediation behavior.</p>
+<p><strong>Liveness Probe</strong> — &quot;Is this container still alive? Does it need a restart?&quot;</p>
+<ul>
+<li>If a container enters a deadlock or becomes unresponsive, the Liveness Probe <strong>restarts the container</strong>.</li>
+<li>The goal is self-healing: recovering from transient errors or hangs through a restart.</li>
+<li>A Liveness Probe does exactly <strong>one thing: trigger a restart</strong>. When failures accumulate beyond <code class='ic'>failureThreshold</code>, kubelet kills the container and starts a new one.</li>
+</ul>
+<p>A common point of confusion is the relationship between Liveness Probe failures and <code class='ic'>CrashLoopBackOff</code>. Let&#x27;s be precise about this.</p>
+<blockquote class='callout'>
+<p><strong>Liveness Probe failure ≠ CrashLoopBackOff.</strong> A Liveness Probe failure simply triggers a container <strong>restart</strong>. <code class='ic'>CrashLoopBackOff</code> is a separate state that occurs when a container exits abnormally right after starting, repeatedly — at which point kubelet progressively increases the delay between restart attempts (back-off), e.g., 10s → 20s → 40s. That said, an overly aggressive Liveness Probe (e.g., a very short <code class='ic'>initialDelaySeconds</code> that fires before the app has had a chance to come up) can cause relentless restarts, which <em>eventually</em> lead to <code class='ic'>CrashLoopBackOff</code>. The two are not directly equivalent, however — treating them as the same will cause you to misdiagnose the root cause of an incident.</p>
+</blockquote>
+<p><strong>Readiness Probe</strong> — &quot;Is this container ready to accept traffic right now?&quot;</p>
+<ul>
+<li>A failure does <strong>not</strong> restart the container. Instead, the Pod is <strong>temporarily removed from the Service&#x27;s load-balancer target list</strong>.</li>
+<li>For example, if an application takes 20–30 seconds to start, the Readiness Probe prevents 5xx errors from reaching users by blocking traffic until the app is ready.</li>
+<li>Once the probe succeeds again, traffic is automatically routed back to the Pod.</li>
+</ul>
+<p><strong>Startup Probe</strong> — &quot;Has a slow-starting application fully come up?&quot;</p>
+<ul>
+<li>Designed for legacy or heavyweight applications with long startup times.</li>
+<li>While the Startup Probe is still running, <strong>Liveness and Readiness Probes are suspended</strong>. This prevents Liveness from repeatedly restarting an application that is still initializing.</li>
+</ul>
+<blockquote class='callout'>
+<p>Key distinction: Liveness = <strong>restart</strong> on failure; Readiness = <strong>block traffic</strong> when not ready; Startup = <strong>hold other Probes</strong> until startup completes. Using Liveness and Readiness together is the recommended best practice in production.</p>
+</blockquote>
+<p>The state diagram below illustrates how the same container can follow completely different paths depending on which Probe fails. Notice in particular that a Liveness failure only sends the container back to the &quot;Starting&quot; state — it is the repetition of exits <em>immediately after</em> restarting that eventually leads to <code class='ic'>CrashLoopBackOff</code>, which is a distinct path, not a direct consequence of Liveness failure.</p>
+<figure class='diagram'><div class='mermaid'>stateDiagram-v2
+    [*] --&gt; Starting
+    Starting --&gt; Ready: Startup &amp; Readiness succeed
+    Ready --&gt; TrafficExcluded: Readiness fails
+    TrafficExcluded --&gt; Ready: Readiness succeeds again
+    Ready --&gt; Restarting: Liveness fails
+    TrafficExcluded --&gt; Restarting: Liveness fails
+    Restarting --&gt; Starting: Container restarts
+    Starting --&gt; CrashLoopBackOff: Repeated exits right after start
+    CrashLoopBackOff --&gt; Starting: Retry after back-off</div><figcaption>Container state transitions based on Probe results</figcaption></figure>
+<h5>Three Probe Mechanisms: HTTP / TCP / Exec</h5>
+<p>All three Probe types check container health using one of the following three mechanisms. Choose the one that best fits your application.</p>
+<ul>
+<li><strong>httpGet</strong>: Sends an HTTP request to a specified path and port; a response code of 200–399 is a success. → Best for web servers</li>
+<li><strong>tcpSocket</strong>: Succeeds if a TCP connection to the specified port can be established. → Best for port-based services such as databases or SSH</li>
+<li><strong>exec</strong>: Runs a command inside the container; exit code 0 is a success (any other code is a failure). → Best for custom checks such as verifying file existence</li>
+</ul>
+<blockquote class='callout'>
+<p>Important: Health-check commands must be <strong>lightweight and accurate</strong>. Running a CPU-intensive check as a Probe can degrade application performance and cause Kubernetes to kill a perfectly healthy container.</p>
+</blockquote>
+<h5>HTTP Liveness Probe Example</h5>
+<p>The following manifest attaches an httpGet-based Liveness Probe to an nginx web server.</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-liveness
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14
+    ports:
+    - containerPort: 80
+    livenessProbe:
+      httpGet:
+        path: /          # HTTP request to the root path
+        port: 80         # on port 80
+      initialDelaySeconds: 15  # wait 15 seconds after container start before first check
+      periodSeconds: 10        # repeat check every 10 seconds
+      timeoutSeconds: 2        # treat as failure if no response within 2 seconds
+      failureThreshold: 3      # mark unhealthy after 3 consecutive failures → restart
+      successThreshold: 1      # mark healthy after 1 success
+</code></pre>
+<p>Key field meanings:</p>
+<ul>
+<li><strong>initialDelaySeconds</strong>: How long to wait before the first check, because the container may not be ready immediately after start (default: 0).</li>
+<li><strong>periodSeconds</strong>: Check interval (default: 10s). Too long delays fault detection; too short increases load.</li>
+<li><strong>timeoutSeconds</strong>: Response wait limit (default: 1s).</li>
+<li><strong>failureThreshold</strong>: How many consecutive failures trigger &quot;unhealthy&quot; status (default: 3). A safety buffer so a single blip does not kill the container.</li>
+<li><strong>successThreshold</strong>: How many consecutive successes trigger &quot;healthy&quot; status (default: 1).</li>
+</ul>
+<p>A Readiness Probe uses <strong>nearly identical syntax</strong> — simply replace <code class='ic'>livenessProbe</code> with <code class='ic'>readinessProbe</code>. The key difference in behavior (traffic blocking instead of restart) is what matters.</p>
+<h5>Verifying with kubectl</h5>
+<pre><code>
+# Create the Pod with the Probe attached
+kubectl apply -f nginx-liveness.yaml
+
+# Watch the Pod — the RESTARTS count rises when the Probe fails
+kubectl get pod nginx-liveness -w
+
+# Inspect events for Probe activity (Unhealthy / Killing / Started, etc.)
+kubectl describe pod nginx-liveness
+</code></pre>
+<p>When Liveness begins to fail, the Events section of <code class='ic'>describe</code> output will show <code class='ic'>Liveness probe failed</code>, followed by <code class='ic'>Killing container</code>, and then <code class='ic'>Started</code> for the new container. At this point, <strong>the Pod itself remains alive — only the container restarts</strong> — so the Pod&#x27;s IP address does not change. This distinction matters. If the container exits again immediately after restarting, and this cycle repeats, the Pod status changes to <code class='ic'>CrashLoopBackOff</code> and the <code class='ic'>RESTARTS</code> count climbs rapidly. This is a signal that &quot;a restart alone cannot fix this problem&quot; — you should investigate both the Probe configuration and the application logs.</p>
+<h4>2. Rolling Updates and maxSurge / maxUnavailable</h4>
+<p>Now for new-version deployments. The <strong>default deployment strategy in a Kubernetes Deployment is a rolling update</strong>. Even without explicit configuration, this is how Kubernetes handles updates internally.</p>
+<p>A rolling update <strong>replaces Pods one at a time</strong> (or in defined batches). By cycling through — terminating old-version Pods and spinning up new ones — across the entire set, the service stays up throughout the upgrade.</p>
+<p>The behavior is governed by a ReplicaSet and two parameters. When you create a Deployment, a ReplicaSet is created internally and delegated the responsibility of maintaining the desired Pod count. When you deploy a new version, a <strong>new ReplicaSet</strong> is created, and the rollout proceeds by scaling down the old ReplicaSet while scaling up the new one.</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate    # default value
+    rollingUpdate:
+      maxSurge: 1           # allow up to 1 Pod above the desired count
+      maxUnavailable: 1     # allow up to 1 Pod below the desired count during rollout
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+      - name: demo
+        image: myapp:v2
+</code></pre>
+<p>What the two parameters mean:</p>
+<ul>
+<li><strong>maxSurge</strong>: The maximum number of Pods that can be created <strong>above</strong> the target replica count (<code class='ic'>replicas</code>). Controls the upper bound — how many extra Pods can exist at once to speed up the rollout.</li>
+<li><strong>maxUnavailable</strong>: The maximum number of Pods that can be <strong>below</strong> the target count during a rollout. Controls the lower bound — how much capacity can be temporarily sacrificed.</li>
+</ul>
+<p>Both accept absolute numbers (<code class='ic'>1</code>) or percentages (<code class='ic'>20%</code>). With replicas=5 and both set to 1, the Pod count during an update stays between <strong>4 (5−1) and 6 (5+1)</strong>, ensuring at least 4 Pods are always running and zero downtime is guaranteed.</p>
+<p>As shown in the sequence diagram below, maxSurge and maxUnavailable pace each step as the Deployment scales down the old ReplicaSet and scales up the new one.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant D as Deployment
+    participant Old as Old ReplicaSet v1
+    participant New as New ReplicaSet v2
+    participant R as Readiness Probe
+    D-&gt;&gt;New: Create new Pods up to maxSurge limit
+    New-&gt;&gt;R: Check new Pod readiness
+    R--&gt;&gt;D: New Pod Ready
+    D-&gt;&gt;Old: Terminate old Pods within maxUnavailable limit
+    Note over D,New: Repeat while maintaining minimum available count
+    D-&gt;&gt;New: Scale new Pods up to desired count
+    D-&gt;&gt;Old: Scale old Pods down to 0
+    Note over D,Old: Old ReplicaSet retained at 0 replicas for rollback</div><figcaption>ReplicaSet replacement flow during a rolling update</figcaption></figure>
+<blockquote class='callout'>
+<p>If availability is the top priority, set <code class='ic'>maxUnavailable: 0</code>. Kubernetes will never terminate an old Pod until a new one is Ready, so available capacity never drops even for an instant. <strong>However, <code class='ic'>maxSurge</code> must be at least 1 in this case.</strong> With <code class='ic'>maxUnavailable: 0</code>, no existing Pod can be taken down first, so if there is no room to add a new Pod (<code class='ic'>maxSurge</code>), the rollout cannot make any progress. (Setting both to 0 blocks the rollout entirely.) Additionally, a <strong>Readiness Probe must be configured</strong> alongside this setup — that is how Kubernetes determines whether a new Pod is genuinely ready to serve traffic before proceeding to the next replacement.</p>
+</blockquote>
+<p>Monitor rollout progress in real time with:</p>
+<pre><code>
+kubectl apply -f deployment.yaml
+kubectl rollout status deployment/demo   # streams progress until the rollout completes
+kubectl get rs                            # shows both the new and old ReplicaSets
+</code></pre>
+<p>In the <code class='ic'>kubectl get rs</code> output, the new ReplicaSet shows DESIRED=5 while the old one shows 0. <strong>The old ReplicaSet is retained at 0 replicas to support rollbacks</strong> — its Pod template is preserved so the system can revert instantly if needed.</p>
+<h4>3. Rollbacks and Revision History (kubectl rollout)</h4>
+<p>If a problem is discovered after deploying a new version, there is no need to manually re-apply the old YAML — simply revert to a revision that Kubernetes has already saved.</p>
+<pre><code>
+# View deployment history (revisions)
+kubectl rollout history deployment/demo
+
+# Immediately roll back to the previous version
+kubectl rollout undo deployment/demo
+
+# Roll back to a specific revision (e.g., revision 2)
+kubectl rollout undo deployment/demo --to-revision=2
+
+# Pause or resume an in-progress rollout
+kubectl rollout pause deployment/demo
+kubectl rollout resume deployment/demo
+</code></pre>
+<p>Each deployment is recorded with a <strong>revision number</strong> — revision 1 for the first deploy, revision 2 for the next, and so on. <code class='ic'>rollout undo</code> scales the saved old ReplicaSet back up and scales the current one down to zero, performing the rollback <strong>in the same rolling fashion, with zero downtime</strong>.</p>
+<p>To capture a meaningful change description in <code class='ic'>kubectl rollout history</code>, add a <code class='ic'>kubernetes.io/change-cause</code> annotation to the Deployment&#x27;s <code class='ic'>metadata.annotations</code>. This is the clearest approach — the deprecated <code class='ic'>--record</code> flag should no longer be used.</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo
+  annotations:
+    kubernetes.io/change-cause: &quot;image v2 - fix payment timeout bug&quot;  # appears in CHANGE-CAUSE column
+spec:
+  replicas: 5
+  # ... (rest unchanged)
+</code></pre>
+<p>After running <code class='ic'>kubectl apply</code>, the <code class='ic'>CHANGE-CAUSE</code> column in <code class='ic'>kubectl rollout history deployment/demo</code> will display this message, making it easy to identify &quot;what was deployed in which revision&quot; later.</p>
+<p>The number of retained revisions is controlled by <code class='ic'>spec.revisionHistoryLimit</code> in the Deployment (default: 10). Keeping this too high causes old ReplicaSets to accumulate, so set a reasonable limit.</p>
+<h4>Common Pitfalls</h4>
+<ul>
+<li><strong>Do not use Liveness alone without Readiness.</strong> Without a Readiness Probe, traffic is routed to new Pods before they are ready, causing 5xx errors. The Readiness Probe is the foundation of zero-downtime deployment.</li>
+<li><strong>Do not set Liveness Probe thresholds too aggressively.</strong> A short <code class='ic'>initialDelaySeconds</code> or a low <code class='ic'>failureThreshold</code> can kill a healthy application that is still starting up, triggering continuous restarts that eventually lead to <code class='ic'>CrashLoopBackOff</code>. Use a Startup Probe to protect slow-starting applications.</li>
+<li><strong>Keep probe commands lightweight.</strong> If a Probe puts load on the application, the health check itself becomes the cause of the failure.</li>
+<li><strong>Never set both maxUnavailable and maxSurge to 0.</strong> The rollout cannot make any progress. In particular, when using <code class='ic'>maxUnavailable: 0</code>, make sure <code class='ic'>maxSurge</code> is at least 1.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Probes are Kubernetes&#x27; self-healing mechanism. <strong>Liveness = restart</strong>, <strong>Readiness = block/restore traffic</strong>, <strong>Startup = protect slow-starting apps</strong> — each has a distinct role. A Liveness Probe failure triggers only a restart; <code class='ic'>CrashLoopBackOff</code> is a separate state that occurs when a container keeps exiting right after restarting — not a direct synonym for Liveness failure.</li>
+<li>Each Probe type checks health via one of three mechanisms — <strong>httpGet / tcpSocket / exec</strong> — with sensitivity tuned via <code class='ic'>initialDelaySeconds</code>, <code class='ic'>periodSeconds</code>, <code class='ic'>failureThreshold</code>, and related fields.</li>
+<li>Rolling updates are the default Deployment strategy. <strong>maxSurge</strong> (how many extra Pods can exist) and <strong>maxUnavailable</strong> (how many Pods can be missing) define the Pod count range during a rollout to guarantee zero downtime. When <code class='ic'>maxUnavailable: 0</code>, <code class='ic'>maxSurge</code> must be at least 1, and a Readiness Probe is required for truly uninterrupted updates.</li>
+<li>Every deployment is recorded as a <strong>revision</strong>. Use the <code class='ic'>kubernetes.io/change-cause</code> annotation to document changes, <code class='ic'>kubectl rollout history</code> to view history, and <code class='ic'>kubectl rollout undo</code> to perform a zero-downtime rollback.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Observing Liveness Probe Behavior</p>
+<p>Deploy a Pod running nginx:1.25 with an HTTP Liveness Probe attached, then verify that the Probe is actually firing by checking the event log.</p>
+<p>Requirements:</p>
+<ul>
+<li>Path: /healthz (nginx does not serve this path by default, so the Probe will intentionally fail)</li>
+<li>initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 2</li>
+<li>After creating the Pod, run kubectl get pod -w and observe the RESTARTS count incrementing.</li>
+<li>Run kubectl describe pod and check the Events section for the Probe failure → container restart sequence.</li>
+</ul></div>
+              <pre class='starter'><code># nginx-liveness-fail.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-liveness-fail
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.25
+    ports:
+    - containerPort: 80
+    livenessProbe:
+      httpGet:
+        path: ___________   # fill in a path that does not exist
+        port: 80
+      initialDelaySeconds: ___  # 5
+      periodSeconds: ___        # 5
+      failureThreshold: ___     # 2</code></pre>
+              <details><summary>Hint</summary><ul><li>Any path that nginx does not serve works here. The default nginx image has no /healthz route, so it returns 404.</li><li>Leave kubectl get pod nginx-liveness-fail -w running; the STATUS and RESTARTS columns update in real time. After roughly 15–20 seconds, RESTARTS should reach 1 or higher.</li><li>Scroll to the bottom of kubectl describe pod nginx-liveness-fail and look at the Events: section. You should see &#x27;Liveness probe failed&#x27;, &#x27;Killing&#x27;, and &#x27;Started&#x27; appearing in that order.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Completed nginx-liveness-fail.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-liveness-fail
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.25
+    ports:
+    - containerPort: 80
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      failureThreshold: 2
+
+# Deploy and observe
+kubectl apply -f nginx-liveness-fail.yaml
+kubectl get pod nginx-liveness-fail -w          # watch RESTARTS count rise
+kubectl describe pod nginx-liveness-fail        # check Events section
+
+# The following sequence should appear in the Events output:
+# Liveness probe failed: HTTP probe failed with statuscode: 404
+# Killing  container with id ...: liveness probe failed
+# Started  Container nginx
+
+# Clean up after the exercise
+kubectl delete pod nginx-liveness-fail</code></pre>
+                <div class='exp2'><p>nginx does not serve /healthz by default, so it returns 404. Because 404 falls outside the 200–399 success range, the Probe marks the check as a failure. With failureThreshold: 2, Kubernetes forcibly terminates (Killing) the container after two consecutive failures and starts a new one (Started). This restart increments the RESTARTS counter. The important detail is that the Pod itself remains alive — only the container restarts — so the Pod&#x27;s IP address does not change. This exercise lets you trace the full path from a Liveness Probe failure to a container restart directly in the Events output.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Lab 1] Configuring a Readiness Probe and Observing Traffic Blocking</p>
+<p>Deploy an nginx Deployment (replicas: 2) with a Readiness Probe, then intentionally trigger a Readiness failure on one Pod and verify that it is removed from the Service endpoints.</p>
+<p>Steps:</p>
+<p>1. Complete the starter below and deploy both the Deployment and a ClusterIP Service.</p>
+<p>2. Run kubectl get endpoints &lt;service-name&gt; and confirm two endpoints are listed.</p>
+<p>3. Exec into one of the running Pods and delete /tmp/ready (the exec Readiness Probe checks for this file).</p>
+<p>4. Run kubectl get pod -w and watch the targeted Pod&#x27;s READY column change from 1/1 to 0/1.</p>
+<p>5. Run kubectl get endpoints again and confirm the endpoint count has dropped to 1.</p>
+<p>6. Recreate /tmp/ready inside the Pod and verify the Pod returns to Ready.</p></div>
+              <pre class='starter'><code># readiness-demo.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: readiness-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: readiness-demo
+  template:
+    metadata:
+      labels:
+        app: readiness-demo
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.36
+        command: [&quot;/bin/sh&quot;, &quot;-c&quot;,
+          &quot;touch /tmp/ready &amp;&amp; while true; do sleep 30; done&quot;]
+        readinessProbe:
+          exec:
+            command:
+            - cat
+            - ___________   # fill in the file path to check (/tmp/ready)
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          failureThreshold: 2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: readiness-svc
+spec:
+  selector:
+    app: readiness-demo
+  ports:
+  - port: 80
+    targetPort: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>In an exec Probe, the last element of the command array is the file path to check. Running &#x27;cat /tmp/ready&#x27; returns exit code 0 (success) if the file exists and exit code 1 (failure) if it does not.</li><li>Storing the Pod name in a variable saves typing: POD_NAME=$(kubectl get pod -l app=readiness-demo -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)</li><li>kubectl get pod -w streams status changes. Wait about 10–15 seconds after running rm; the READY column should drop to 0/1. Immediately after, run kubectl get endpoints readiness-svc to confirm the IP was removed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Complete the starter (fill in the path)
+# command: [&quot;cat&quot;, &quot;/tmp/ready&quot;]
+
+# Completed readiness-demo.yaml (key section)
+        readinessProbe:
+          exec:
+            command:
+            - cat
+            - /tmp/ready
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          failureThreshold: 2
+
+# 2. Deploy
+kubectl apply -f readiness-demo.yaml
+
+# 3. Confirm initial endpoints (should show 2 IPs)
+kubectl get endpoints readiness-svc
+
+# 4. Get Pod name, exec in, and delete the file
+kubectl get pod -l app=readiness-demo
+# Example: POD_NAME=readiness-demo-xxxxxxx-yyyyy
+kubectl exec -it &lt;POD_NAME&gt; -- rm /tmp/ready
+
+# 5. Watch Pod status (separate terminal recommended)
+kubectl get pod -l app=readiness-demo -w
+# → READY column should change from 1/1 to 0/1
+
+# 6. Re-check endpoints (should drop to 1)
+kubectl get endpoints readiness-svc
+
+# 7. Restore the file → Pod returns to Ready
+kubectl exec -it &lt;POD_NAME&gt; -- touch /tmp/ready
+kubectl get endpoints readiness-svc
+# → Should return to 2 endpoints
+
+# Clean up
+kubectl delete -f readiness-demo.yaml</code></pre>
+                <div class='exp2'><p>A Readiness Probe failure does not restart the container. Instead, Kubernetes removes the Pod from the Service&#x27;s endpoint list so that no traffic is directed to it. Deleting /tmp/ready causes &#x27;cat /tmp/ready&#x27; to return exit code 1 (file not found), which the Probe treats as a failure. With failureThreshold: 2, the Pod transitions to Not Ready after about 10 seconds (periodSeconds 5 × 2 failures) and is dropped from the endpoints. Recreating the file causes the Probe to succeed and the Pod is automatically added back to the endpoints. This is the core Readiness behavior: blocking and restoring traffic without any container restart.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core Lab 2] Combined Liveness + Readiness Probes with a change-cause Annotation</p>
+<p>Create an apps/v1 Deployment with both a Liveness Probe (httpGet) and a Readiness Probe (httpGet) configured, and record a change-cause annotation on the initial deployment.</p>
+<p>Requirements:</p>
+<ul>
+<li>Image: nginx:1.25, replicas: 3</li>
+<li>Liveness: GET /index.html :80, initialDelaySeconds: 10, periodSeconds: 10, failureThreshold: 3</li>
+<li>Readiness: GET /index.html :80, initialDelaySeconds: 5, periodSeconds: 5, failureThreshold: 2</li>
+<li>Add the annotation kubernetes.io/change-cause: &quot;v1 initial deployment - nginx 1.25&quot; to metadata.annotations</li>
+<li>After deploying, check the rollout status with kubectl rollout status and inspect ReplicaSets with kubectl get rs.</li>
+</ul></div>
+              <pre class='starter'><code># probe-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+  annotations:
+    kubernetes.io/change-cause: ___________   # fill in the change description
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: probe-demo
+  template:
+    metadata:
+      labels:
+        app: probe-demo
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: ___   # 10
+          periodSeconds: ___         # 10
+          failureThreshold: ___      # 3
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: ___   # 5
+          periodSeconds: ___         # 5
+          failureThreshold: ___      # 2</code></pre>
+              <details><summary>Hint</summary><ul><li>The change-cause annotation must go under the Deployment&#x27;s metadata.annotations, not under template.metadata.annotations — otherwise it will not appear in rollout history. Do not mix up the two locations.</li><li>kubectl rollout status blocks until the deployment is complete. When you see &#x27;3 out of 3 new replicas have been updated&#x27; and &#x27;successfully rolled out&#x27;, the rollout is done.</li><li>kubectl get rs -l app=probe-demo should show exactly one ReplicaSet with DESIRED/CURRENT/READY all equal to 3. Since this is the first deployment, there should be no old RS with 0 replicas.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Completed probe-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+  annotations:
+    kubernetes.io/change-cause: &quot;v1 initial deployment - nginx 1.25&quot;
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: probe-demo
+  template:
+    metadata:
+      labels:
+        app: probe-demo
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 2
+
+# Deploy
+kubectl apply -f probe-deployment.yaml
+
+# Confirm rollout completion (look for &#x27;successfully rolled out&#x27;)
+kubectl rollout status deployment/probe-demo
+
+# Inspect ReplicaSets (should show 1 RS with DESIRED=READY=3)
+kubectl get rs -l app=probe-demo
+
+# View deployment history (CHANGE-CAUSE column should show the annotation)
+kubectl rollout history deployment/probe-demo</code></pre>
+                <div class='exp2'><p>Running Liveness and Readiness together is the production best practice. Readiness must succeed before traffic flows to a new Pod; after that, if the container becomes unresponsive during operation, Liveness triggers an automatic restart. Setting initialDelaySeconds lower for Readiness (5s) than for Liveness (10s) prevents Liveness from checking too early and misidentifying a healthy startup as a failure. The --record flag is deprecated, so the kubernetes.io/change-cause annotation should be placed directly in metadata.annotations. revisionHistoryLimit: 5 caps the number of stored ReplicaSets at 5 so they do not accumulate indefinitely.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Core Lab 3] Adjusting maxSurge / maxUnavailable and Observing a Rolling Update</p>
+<p>Update the image in the previous exercise (probe-demo) from nginx:1.25 to nginx:1.27, setting maxSurge: 1 / maxUnavailable: 0 to perform an availability-first rolling update.</p>
+<p>Steps:</p>
+<p>1. Update probe-deployment.yaml: change image to nginx:1.27 and set rollingUpdate to maxSurge: 1 / maxUnavailable: 0.</p>
+<p>2. Also update the change-cause annotation to &quot;v2 deployment - nginx 1.27 / maxUnavailable=0 stable rollout&quot;.</p>
+<p>3. Immediately after kubectl apply, open a second terminal and run kubectl get pod -l app=probe-demo -w. Observe the total Pod count temporarily reach 4 (3+1) before settling back to 3.</p>
+<p>4. Run kubectl get rs -l app=probe-demo to see how DESIRED changes on both the new and old ReplicaSets.</p>
+<p>5. Run kubectl rollout history deployment/probe-demo and confirm that two revisions (1 and 2) are listed.</p></div>
+              <pre class='starter'><code># probe-deployment.yaml (updated)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+  annotations:
+    kubernetes.io/change-cause: ___________   # fill in the v2 deployment message
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: ___          # 1
+      maxUnavailable: ___    # 0
+  selector:
+    matchLabels:
+      app: probe-demo
+  template:
+    metadata:
+      labels:
+        app: probe-demo
+    spec:
+      containers:
+      - name: nginx
+        image: ___________   # nginx:1.27
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 2</code></pre>
+              <details><summary>Hint</summary><ul><li>Open two terminals in advance. Apply from one, and start kubectl get pod -w in the other simultaneously to catch the 3→4→3 Pod count transition in time.</li><li>Setting both maxSurge and maxUnavailable to 0 makes a rollout impossible — there is no room to make any progress. At least one of them must be a positive value.</li><li>kubectl get rs -l app=probe-demo does not display the image directly in the columns. To identify the new RS, run kubectl describe rs &lt;RS-name&gt; | grep Image, or simply treat the RS with DESIRED=3 as the new one.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Completed probe-deployment.yaml (v2)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+  annotations:
+    kubernetes.io/change-cause: &quot;v2 deployment - nginx 1.27 / maxUnavailable=0 stable rollout&quot;
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: probe-demo
+  template:
+    metadata:
+      labels:
+        app: probe-demo
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 2
+
+# Apply (terminal A)
+kubectl apply -f probe-deployment.yaml
+
+# Watch Pods in real time (terminal B — run immediately after apply)
+kubectl get pod -l app=probe-demo -w
+# Expected: total Pod count briefly rises to 4 (3 + maxSurge 1),
+#           then drops back to 3 as old Pods Terminate one by one
+
+# Check ReplicaSet state (terminal A)
+kubectl get rs -l app=probe-demo
+# Expected: new RS (nginx:1.27) DESIRED=3, old RS (nginx:1.25) DESIRED=0
+
+# Wait for rollout to complete
+kubectl rollout status deployment/probe-demo
+
+# View history (should show 2 CHANGE-CAUSE entries)
+kubectl rollout history deployment/probe-demo</code></pre>
+                <div class='exp2'><p>maxUnavailable: 0 prevents Kubernetes from terminating any existing Pod before a replacement is ready. As a result, Kubernetes first creates a new Pod (nginx:1.27) up to the maxSurge: 1 limit. Only after that Pod passes the Readiness Probe and reaches Ready status does Kubernetes terminate one old Pod. Throughout the rollout, at least 3 Pods remain serviceable. By contrast, with maxUnavailable: 1 Kubernetes would terminate an old Pod first and then create a new one, causing a brief moment where only 2 Pods are available. Both approaches are valid; maxUnavailable: 0 is recommended for high-availability services. The old ReplicaSet remaining at DESIRED=0 is intentional — it is retained for rollback purposes.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 5. [Applied] Intentional Deployment Failure → Rollback with rollout history + rollout undo</p>
+<p>Update probe-demo (currently nginx:1.27) with a bad image (nginx:broken-image) to produce a stalled rolling update. Then inspect the revision history and roll back to a specific revision (revision 2, i.e., nginx:1.27).</p>
+<p>Steps:</p>
+<p>1. Change image to nginx:broken-image and change-cause to &quot;v3 deployment - bad image (intentional failure for lab)&quot; and kubectl apply.</p>
+<p>2. Confirm that kubectl rollout status is hanging. (Press Ctrl+C to exit the watch.)</p>
+<p>3. Run kubectl get pod -l app=probe-demo and look for Pods in ImagePullBackOff / ErrImagePull state.</p>
+<p>4. Run kubectl rollout history deployment/probe-demo and confirm three revisions are listed.</p>
+<p>5. Run kubectl rollout undo deployment/probe-demo --to-revision=2 to roll back to revision 2 (nginx:1.27).</p>
+<p>6. Verify the rollback is complete with kubectl rollout status and kubectl get pod.</p></div>
+              <pre class='starter'><code># Step 1: Deploy with the bad image (edit probe-deployment.yaml as follows)
+#   annotations.kubernetes.io/change-cause: &quot;v3 deployment - bad image (intentional failure for lab)&quot;
+#   image: nginx:broken-image
+# Keep all other Probe/strategy fields the same as before
+
+# Step 2: Observation commands (fill in the blanks)
+kubectl apply -f probe-deployment.yaml
+kubectl rollout status deployment/___________
+kubectl get pod -l app=probe-demo
+
+# Step 3: View history
+kubectl rollout history deployment/___________
+
+# Step 4: Roll back to a specific revision
+kubectl rollout undo deployment/___________ --to-revision=___</code></pre>
+              <details><summary>Hint</summary><ul><li>Pressing Ctrl+C while kubectl rollout status is waiting does not cancel the deployment itself — it only stops the watch. To actually revert the deployment, you must run rollout undo.</li><li>Always check kubectl rollout history for the actual REVISION numbers before specifying --to-revision. If you followed these labs in order, nginx:1.27 should be revision 2, but the number may differ if you redeployed at any point.</li><li>After the rollback, run kubectl get deployment probe-demo -o jsonpath=&#x27;{.spec.template.spec.containers[0].image}&#x27; to confirm the image is nginx:1.27. Make it a habit to verify the active image after every rollback.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Completed probe-deployment.yaml (v3 - intentional failure)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+  annotations:
+    kubernetes.io/change-cause: &quot;v3 deployment - bad image (intentional failure for lab)&quot;
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: probe-demo
+  template:
+    metadata:
+      labels:
+        app: probe-demo
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:broken-image
+        ports:
+        - containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /index.html
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 2
+
+# 1. Deploy the bad image
+kubectl apply -f probe-deployment.yaml
+
+# 2. Check rollout status (will hang → press Ctrl+C to exit)
+kubectl rollout status deployment/probe-demo
+# Example output: Waiting for deployment &#x27;probe-demo&#x27; rollout to finish: 1 out of 3 new replicas have been updated...
+
+# 3. Check for failed Pods (ErrImagePull or ImagePullBackOff)
+kubectl get pod -l app=probe-demo
+# → nginx:broken-image Pods show ErrImagePull/ImagePullBackOff
+#   The existing nginx:1.27 Pods (3) are still Running (thanks to maxUnavailable:0)
+
+# 4. View revision history
+kubectl rollout history deployment/probe-demo
+# REVISION  CHANGE-CAUSE
+# 1         v1 initial deployment - nginx 1.25
+# 2         v2 deployment - nginx 1.27 / maxUnavailable=0 stable rollout
+# 3         v3 deployment - bad image (intentional failure for lab)
+
+# 5. Roll back to revision 2 (nginx:1.27)
+kubectl rollout undo deployment/probe-demo --to-revision=2
+# Output: deployment.apps/probe-demo rolled back
+
+# 6. Confirm rollback is complete
+kubectl rollout status deployment/probe-demo
+kubectl get pod -l app=probe-demo
+# → All 3 Pods running nginx:1.27
+
+# Verify the current image
+kubectl get deployment probe-demo -o jsonpath=&#x27;{.spec.template.spec.containers[0].image}&#x27;
+# Output: nginx:1.27
+
+# Final clean-up
+kubectl delete deployment probe-demo</code></pre>
+                <div class='exp2'><p>The maxUnavailable: 0 setting proves its value in this failure scenario. The bad image (nginx:broken-image) stays in ImagePullBackOff and never becomes Ready, so its Readiness Probe never passes. Because maxUnavailable: 0 requires a new Pod to be Ready before any old Pod can be terminated, Kubernetes refuses to touch the existing nginx:1.27 Pods. The rollout stalls, but the service keeps running. rollout undo --to-revision=2 restores the saved revision 2 ReplicaSet (nginx:1.27) to DESIRED=3 and scales the broken-image RS back to 0. This rollback follows the same rolling mechanism (respecting maxSurge/maxUnavailable), so it is also zero-downtime. Note that after the rollback, the revision number does not revert to 2 — it advances to a new number (4), which you can verify with rollout history.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=x2e6pIBLKzw' target='_blank'>Kubernetes Health Probes Explained | Liveness Probe vs Readiness Probe</a></li><li><a href='https://www.youtube.com/watch?v=XbVNMhr55WM' target='_blank'>Kubernetes Rolling Updates Tutorial</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

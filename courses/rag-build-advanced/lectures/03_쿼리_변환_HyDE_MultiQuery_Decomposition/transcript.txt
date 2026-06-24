@@ -1,0 +1,52 @@
+## Video 1: RAG from scratch: Part 5 (Query Translation -- Multi Query)
+https://www.youtube.com/watch?v=JChPi0CRnDY
+
+Hi this is Nate from LangChain. Over the next few videos we're going to be talking about query translation. In this first video we're going to cover the topic of multi-query.
+
+Query translation sits kind of at the first stage of an advanced RAG pipeline and the goal of query translation is really to take an input user question and to translate in some way in order to improve retrieval. The problem statement is pretty intuitive. User queries can be ambiguous and if the query is poorly written, because we're typically doing some kind of semantic similarity search between the query and our documents, if the query is poorly written or ill-posed we won't retrieve the proper documents from our index.
+
+There's a few approaches to attack this problem and you can kind of group them in a few different ways. A few approaches involve query rewriting so taking a query and reframing it like writing it from a different perspective, and that's what we're going to talk about in depth using approaches like multi-query or RAG Fusion which we'll talk about in the next video.
+
+You can also do things like take a question and break it down to make it less abstract like into sub questions and there's a bunch of interesting papers focused on that like least to most from Google. You can also take the opposite approach of take a question to make it more abstract and there's an approach we're going to talk about later in a future video called stepback prompting that focuses on kind of a higher level question from the input.
+
+The intuition for the multi-query approach is we're taking a question and we're going to break it down into a few differently worded questions from different perspectives. The intuition here is simply that it is possible that the way a question is initially worded, once embedded, it is not well aligned or in close proximity in this high dimensional embedding space to a document that we want to retrieve that's actually related. So the thinking is that by kind of rewriting it in a few different ways you actually increase the likelihood of actually retrieving the document that you really want to. Because of nuances in the way that documents and questions are embedded, this kind of more shotgun approach of taking a question, fanning it out into a few different perspectives, may improve and increase the reliability of retrieval.
+
+Of course we can combine this with retrieval so we can take our fan out questions, do retrieval on each one and combine them in some way and perform RAG.
+
+To set this up, we install a few packages and set up our API keys. First I'm going to index a blog post on agents. I'm going to load it, split it, and then index it in Chroma locally, which is a vector store. Now I have my index defined. Here is where I'm defining my prompt for multi-query, which is: your task is to basically reframe this question into a few different sub-questions. We'll pass that to an LLM, parse it into a string and then split the string by new lines and so we'll get a list of questions out of this chain.
+
+Here's a sample input question with our generate queries chain which we defined. We're going to take that list and then simply apply each question to retriever, so we'll do retrieval per question. This function here is just going to take the unique union of documents across all those retrievals.
+
+When we run this, we can see what happened under the hood. We ran our initial chain to generate a set of reframed questions from our input and here is that set of questions that we generated. Now for every one of those questions we did an independent retrieval. Then we took the unique union of documents. In our final LLM prompt we say "answer the following question based on the context" and this is the final set of unique documents that we retrieved from all of our sub-questions.
+
+This shows you how you can set this up really easily and how you can use LangSmith to investigate what's going on and in particular use LangSmith to investigate those intermediate questions that you generate in that question generation phase. In future talks we're going to go through some of these other methods that we introduced at the start of this one.
+
+## Video 2: Advanced RAG techniques for developers
+https://www.youtube.com/watch?v=sGvXO7CVwc0
+
+[Advanced RAG techniques covered previously - includes pre-processing, metadata filtering, hypothetical question generation, different storage methods, and reranking for improved RAG quality and context relevance]
+
+## Video 3: Using RAG expansion to improve model speed and accuracy
+https://www.youtube.com/watch?v=I_l91kdNE4w
+
+Welcome back to real terms for AI. I'm Ashapiro Hammerly and I'm joined by Jason Davenport. We've been covering a lot of RAG related topics recently and another topic that's about retrieval that we should talk about is document expansion and query expansion.
+
+This is about the expansion of material from documents and text and it's actually a method that powers a lot of information retrieval systems today. But what exactly is it and why does making things bigger actually help the developer?
+
+There are several ways that document expansion can help. One example is something called term or vocabulary mismatch. In English like many languages there are multiple ways to say the same thing. For example, maybe a user has a question about hashmaps but your documents call them dictionaries. Or someone might ask how much is this mug but the data just says costs $5. Semantic encoding and vector databases already address this somewhat, but using expansion can help overcome those limitations by creating additional queries that could be used on the data or by annotating the data with additional information to improve the search quality. It can also apply to situations where you aren't using vector databases and so you don't have that semantic space, like with things like Google search.
+
+Expansion also helps with things like latency in applications. Imagine if you were about to ask many questions about a document into a search bar. You'd expect some delay maybe a couple seconds, but would you be willing to wait many seconds or potentially even many minutes? The problem of information retrieval is core to the search use case and RAG is essentially an information retrieval platform. We need to provide very fast results across our data which means we need to expand what's available at runtime to reduce the additional computation that could be needed in production systems. We combine different machine learning methods with LLMs and even different application development methods to build a highly performance system across aspects like cost, latency, quality and accuracy.
+
+How would you actually use something like document or query expansion in your developer flow? Let's start with document expansion. Take a document you might have about operating your refrigerator where you've created embeddings for that text. In document expansion we may use a method like extractive expansion where we generate different terms for something in the document, or we could use abstractive expansion where we are attempting to build the gist of something that may look a little bit different from the original text.
+
+In expansion we're attempting to expand what the original documents are saying in order to provide a better result for our end users. So in a refrigerator operating manual we may choose to word things differently or generate semantically similar sentences to increase the probability we could answer the litany of questions we get for something like fixing a broken ice maker.
+
+The second part is how we improve RAG by improving the input query that someone is asking of our RAG system. For this we use query expansion. In query expansion we're using similar methods to document expansion to improve the likelihood of finding the best match.
+
+Let's walk through an example here. Step one: let's assume that you have manuals for all of your household gadgets. You might consider using document expansion along with embeddings to take sentences or paragraphs of information, write them in different ways and abstract the meaning of those different sentences and paragraphs. These would be stored also as embeddings from your embedding model.
+
+Then when a user has a question or query, you use expansion to help rewrite that query and use that to search your semantic embedding space. The retriever results then go back to the LLM for the final drafting of an answer. This also seems to fit in multimodal workflows and potentially even agentic systems where you could use different models for different stages of your flow or use different prompts with the same model for those different stages.
+
+You could even imagine where you may have something like a rewriter for your input query or a query expander that may be a different model type from your large language model that you use to actually answer that question. Although as we have said in almost every episode, you should always pick the models and the methods that work best for your app and use case based on the data you know about your app.
+
+Expansion can actually help improve both the quality of our information that we use as the basis for RAG and how expansion can improve the queries that people submit, ultimately improving our RAG's performance and helping our users.

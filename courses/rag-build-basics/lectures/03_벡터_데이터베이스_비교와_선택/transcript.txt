@@ -1,0 +1,83 @@
+## 영상 1: What is a Vector Database? Powering Semantic Search & AI Applications (https://www.youtube.com/watch?v=gl1r1XV0SLw)
+
+A vector database is a way to store and retrieve unstructured data by representing it as mathematical vectors or embeddings. Traditional relational databases can store binary image data and metadata like file format and creation date, but they largely miss the semantic context of the data. For example, you cannot effectively query for images with similar color palettes or landscapes of mountains in the background using traditional database queries.
+
+This disconnect between how computers store data and how humans understand it is called the semantic gap. Traditional database queries like "select star where color equals orange" fall short because they don't capture the nuanced multi-dimensional nature of unstructured data.
+
+Vector databases solve this problem by representing unstructured data as high-dimensional vector embeddings. Vector embeddings are arrays of numbers where each position represents some kind of learned feature. Similar items are positioned close together in vector space, while dissimilar items are positioned far apart. This allows vector databases to perform similarity searches as mathematical operations.
+
+Vector embeddings can represent all sorts of unstructured data including images, text files, and audio files. These complex objects are transformed into vector embeddings and stored in the database. For example, a mountain sunset image might be represented with a vector having dimensions like 0.91 indicating significant elevation changes, 0.15 showing few urban elements, and 0.83 representing strong warm colors.
+
+When comparing different images, you can see similarities in their vector representations. A sunset at the beach would have a similar third dimension (0.89) because both have warm colors, but very different first dimensions since beaches have minimal elevation changes compared to mountains.
+
+In real machine learning systems, vector embeddings typically contain hundreds or even thousands of dimensions. Each type of data has its own specialized embedding model. For images, you might use CLIP. For text, you might use GloVe. For audio, you might use Wav2vec. Embedding models work by passing data through multiple layers where each layer extracts progressively more abstract features. Early layers might detect basic features like edges, while deeper layers recognize complex objects.
+
+With vector embeddings created, you can perform powerful operations that weren't possible with traditional relational databases, such as similarity search where you find items similar to a query item by finding the closest vectors in space. However, when you have millions of vectors with hundreds or thousands of dimensions each, comparing your query vector to every single vector in the database would be too slow.
+
+Vector indexing solves this through approximate nearest neighbor or ANN algorithms. Instead of finding the exact closest match, these algorithms quickly find vectors that are likely to be among the closest matches. HNSW (Hierarchical Navigable Small World) creates multi-layered graphs connecting similar vectors, while IVF (Inverted File Index) divides the vector space into clusters and only searches the most relevant clusters. These indexing methods trade a small amount of accuracy for significant improvements in search speed.
+
+Vector databases are a core feature of retrieval augmented generation (RAG), where vector databases store chunks of documents and articles as embeddings. When a user asks a question, the system finds relevant text chunks by comparing vector similarity and feeds those to a large language model to generate responses using the retrieved information.
+
+
+## 영상 2: 벡터 데이터베이스 검색 - 계층적 탐색 가능 소규모 세계(HNSW) 설명 (https://www.youtube.com/watch?v=77QH0Y2PYKg)
+
+Vector databases are used to store high-dimensional vectors where each vector represents some kind of data like an image or text, with the core principle that closer vectors represent more similar data. For example, the sentences "today the weather is sunny" and "it's a sunny day" are quite similar and their vector representations should be close to each other. In contrast, "today the weather is sunny" and "Paris is the capital of France" have nothing in common so their vectors should be far apart.
+
+Vector search aims to find the top K most similar vectors to a given query vector. A naive approach would be to compute similarity between the query vector and every single vector in the database, known as the brute force method. However, this becomes impractically slow as the database size grows, having an O(n) time complexity.
+
+One way to speed up search is using a data structure called a navigable small world, which is a graph where each node represents a vector. You construct this graph by iteratively connecting each document to its K most similar documents. You pick a document and add it to the graph, then pick another and find its K closest neighbors. You link that node, then add another document and connect it with the K nearest documents added so far. This process repeats until all documents are added to the graph.
+
+To find the most similar documents to a query using navigable small world, you start at a random node and look at neighboring nodes, moving to the one closest to your query. If that neighbor is closer to the query than your current node, you look again at its neighbors and move to its closest neighbor. This process repeats until you reach a node where none of its neighbors are closer to the query. In practice, you randomly pick a starting node multiple times to collect a larger range of candidates, which is still much faster than brute force since you only consider a small subset of the database.
+
+The second important idea in hierarchical navigable small worlds is the skip list, a variant of linked list where each node can have skip pointers pointing to nodes further down the list. This allows you to quickly skip over large portions of the list making searches much faster. For example, when searching for a node with a specific value, you check if the next node is higher or lower, navigating the levels until you find your target.
+
+Hierarchical navigable small worlds (HNSW) combines navigable small worlds and skip lists. You have a lower level with more nodes and connections and an upper level with fewer nodes and connections. The bottom level is more dense while the top is more sparse. To search in this graph, you select a random entry point in the upper level and visit it. You compare the cosine similarity of this node and all its neighbors with the query. You go down to the level where you find the closest neighbor. You perform this step again at the next level, comparing the node and its neighbors' cosine similarity with the query. This process continues until you reach a node where no neighboring node has better similarity, at which point you stop the algorithm and return the top K best matches based on similarity scores.
+
+HNSW offers significant improvement in average search time complexity compared to brute force. While brute force has O(n) time complexity, HNSW reduces it to O(log n). The key insight is that the hierarchical structure allows the algorithm to take advantage of the property that nearby vectors tend to be clustered together in high dimensional space. By starting the search at a coarse level and gradually refining it, HNSW can efficiently eliminate large regions of the search space unlikely to contain the target vector, resulting in a significant reduction in the number of vectors that need to be examined.
+
+
+## 영상 3: AI 이미지 검색 엔진 만들기 - 벡터 데이터베이스 설명과 Chroma DB 튜토리얼 (https://www.youtube.com/watch?v=7WCRhW1Z8NI)
+
+벡터 데이터베이스는 복합 비정형 데이터를 효과적이고 효율적으로 저장하고 검색하기 위한 기술입니다. 오늘날 각광을 받는 이유는 뉴럴 네트워크의 발달로 인해 복합 비정형 데이터들을 빠르고 정확하게 임베딩으로 변환할 수 있게 되었기 때문입니다.
+
+예를 들어 "나는 학생입니다"라는 문장을 토큰 형태의 숫자로 변환한 다음 벡터 형태로 표현할 수 있습니다. 이미지도 마찬가지고 음성, 영상, 3D 모델링, PDF 파일 같은 비정형 데이터들도 정확하게 벡터로 변환할 수 있게 되었습니다. 문장이나 단어는 BERT 같은 모델들로 표현하고, 이미지는 Vision Transformer 같은 모델들로 벡터화합니다.
+
+손글씨 숫자 0부터 9까지를 임베딩한 후 시각화하면, 각 숫자들이 비슷한 공간 안에 모여 있는 것을 볼 수 있습니다. 이렇게 수많은 데이터 중에서 사용자가 쿼리를 날렸을 때 빠르고 정확하게 찾을 수 있는 방법이 필요했습니다.
+
+기존의 키값 기반 데이터베이스, 문서 기반의 데이터베이스, 그래프 기반의 데이터베이스들은 어느 정도 이런 기능들이 작동했지만 완벽하지 않았고 속도도 매우 느렸습니다. 이렇게 나온 것이 벡터 데이터베이스라는 개념입니다.
+
+벡터 데이터베이스는 저장된 데이터들과 새로운 데이터 간의 거리를 구해서 더 가까운 데이터를 가져오는 방식으로 설계되었습니다. SQL 같은 관계형 데이터베이스나 파이어베이스, 몽고디비 같은 문서 기반 데이터베이스들은 이런 기능들이 어느 정도는 가능했지만 효과적이거나 효율적이지 않았습니다.
+
+간단한 예를 들어보면, 여러 단어들이 공간 안에서 점으로 표현될 수 있습니다. 왜냐하면 벡터이기 때문입니다. 예를 들어 "newspaper"는 원점으로부터 한 방향을 가리키는 벡터가 되고, "article"은 다른 방향, "magazine"은 또 다른 방향, "apple"은 다른 방향, "banana"는 또 다른 방향을 가리킵니다.
+
+newspaper, magazine, article은 비슷한 성향을 가지고 있어서 비슷한 위치에 모여 있고, apple과 banana는 과일이라는 속성을 가지고 있어서 비슷한 영역에 모여 있습니다.
+
+만약 새로운 데이터 "사과가 주는 건강적 이득"이라는 아티클을 주면 어떻게 될까요? 이 아티클의 주요 단어들을 뽑아 벡터라이저라는 벡터화 도구에 넣어서 임베딩을 만듭니다. 이 숫자들은 인간이 이해할 수는 없지만 컴퓨터가 이해하기 쉬운 형태로 변환된 것입니다. 이렇게 숫자로 변환하는 것을 벡터 라이저 또는 인코더라고 부릅니다.
+
+공간상에서 매핑하면 새로운 데이터가 들어왔을 때 article의 속성도 가지고 있고 apple의 속성도 가지고 있기 때문에 중간 어딘가에 위치하게 됩니다. 실제로 이것이 중간에 위치합니다. 그래서 새로운 데이터가 들어왔을 때 거리 기반으로 측정할 수 있습니다.
+
+벡터 데이터베이스에는 여러 가지 종류가 있습니다. Chroma, Weaviate, Pinecone, Milvus 같은 것들이 있으며 굉장히 다양하고 좋은 편한 기능들을 제공합니다. 로컬에 설치할 수 있는 방식도 있고 API로만 사용 가능한 방식도 있습니다.
+
+기타 기능으로는 다른 데이터베이스에서 제공하는 sharding이나 replication 같은 기능들도 있습니다. 일반적으로 벡터 데이터베이스는 데이터들을 RAM에 올려서 검색하는 것이 일반적인데, 이것을 RAM과 SSD를 섞어서 저장하고 검색할 수 있는 하이브리드 스토리지 기능도 제공합니다. 또한 API 기능도 제공하므로 로컬의 데이터베이스를 설치하지 않아도 API를 활용해서 사용할 수 있습니다.
+
+이미지 검색 엔진을 만드는 실습으로 Chroma DB를 사용합니다. 필요한 패키지는 Chroma와 Transformers입니다. Chroma는 벡터 데이터베이스를 사용하기 위해 필요하고, Transformers는 이미지를 벡터로 변환하기 위해 Hugging Face의 모델을 사용할 때 필요합니다.
+
+사용하는 데이터셋은 Food-11 데이터셋입니다. Kaggle에 있으며 빵, 유제품, 디저트, 계란, 튀김 등 11개의 음식 데이터가 있고 모두 이미지 형태로 되어 있습니다. 이미지를 벡터로 바꾸기 위해 Facebook의 DINO Vision Transformer 16 모델을 사용합니다.
+
+이미지를 임베딩 벡터로 변환하면 사람은 이해할 수 없는 값들이 저장됩니다. 예를 들어 이 벡터는 384차원입니다. 각 이미지가 384차원의 공간 안에 어떤 점으로 표시됩니다.
+
+Chroma DB를 사용하려면 먼저 클라이언트를 만든 다음 컬렉션을 만듭니다. 이는 SQL 기반 데이터베이스의 테이블과 비슷한 개념입니다. 모든 이미지를 벡터화한 후 데이터베이스에 저장하는 코드는 매우 간단합니다. 컬렉션에 add 메서드를 사용해서 임베딩, 메타데이터, ID를 저장합니다.
+
+임베딩은 벡터 데이터들을 리스트 형태로 저장한 것이고, 메타데이터는 여러분이 저장하고 싶은 데이터들을 담으면 됩니다. 예를 들어 이미지의 경로를 저장하면 비슷한 이미지를 검색했을 때 실제로 사람이 볼 수 있습니다.
+
+가장 가까운 3개의 값을 뽑으면 매우 빠르게 검색하는 것을 볼 수 있습니다. ID, 임베딩, 문서, 메타데이터, 거리들을 반환합니다. 메타데이터들이 반환되면 bread 이미지들과 hamburger를 넣었을 때 bread와 가장 가까웠다는 것을 볼 수 있습니다. 각각의 거리는 154, 279, 301입니다.
+
+결과를 사람이 볼 수 있게 표현하면 모두 빵 이미지가 나왔고, 쿼리로 날린 hamburger 이미지와 가장 가까운 결과는 154의 거리를 가지고 있습니다.
+
+테스트를 위해 함수를 만들어서 이미지의 경로와 반환할 결과의 개수를 입력받고 쿼리 결과를 반환합니다. 또 다른 테스트로 인터넷에서 무작위 고기 이미지를 가져와 쿼리로 날리면 고기 이미지들이 반환됩니다. 유제품 쿼리를 하면 유제품이 반환되지만 데이터베이스의 데이터가 충분하지 않아서 다른 카테고리의 이미지도 포함될 수 있습니다.
+
+밥을 쿼리로 날리면 비슷한 밥 이미지들이 반환됩니다. 이것이 벡터 데이터베이스의 원리입니다.
+
+전체 원리를 정리하면, 먼저 빵, 유제품, 계란 같은 이미지들이 있습니다. 이 이미지들을 Facebook의 DINO Vision Transformer를 사용해서 벡터화합니다. 이 벡터들은 이미지들을 잘 표현하는 벡터입니다. 이 벡터들을 Chroma에 저장합니다. 저장된 것들을 시각화하면 어떤 공간 좌표상에서 분포가 됩니다. 실제로는 384차원이지만 인간이 이해할 수 있도록 2차원으로 생각해봅시다. 빵은 빵대로 분포되어 있고, 밥은 밥대로, 유제품은 유제품대로, 면은 면대로, 계란은 계란대로 분포되어 있습니다.
+
+새로운 데이터가 들어왔을 때, 예를 들어 빵 데이터가 들어왔을 때 이것을 벡터화해서 공간상에 뿌려보니까 빵과 비슷하더라, 고기와도 약간 비슷하더라 하는 식으로 계산하는 방법이 바로 벡터 데이터베이스의 원리입니다.

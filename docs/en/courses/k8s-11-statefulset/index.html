@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-StatefulSet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-11-statefulset/index.html'>한국어</a></div>
+  <h1>K8S-StatefulSet</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 1 (ConfigMap/Secret, PV/PVC, Probes, rolling updates and rollback, requests/limits and HPA, Ingress) and want to broaden their real-world cluster operations skills. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. StatefulSet and Stateful Workloads - Stable Identity and Ordered Operations</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. StatefulSet and Stateful Workloads - Stable Identity and Ordered Operations </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the requirements of stateful workloads that a Deployment alone cannot satisfy</li>
+<li>Explain how a Headless Service assigns stable network identities to individual Pods and how ordered operations work</li>
+<li>Deploy a StatefulSet that uses <code class='ic'>volumeClaimTemplates</code> to automatically provision a dedicated PVC per Pod</li>
+</ul>
+<h3>Content</h3>
+<h4>Stateless vs. Stateful: What Is the Difference?</h4>
+<p>Throughout Kubernetes Intermediate Part 1, we ran applications primarily with <strong>Deployments</strong>. For workloads like web servers or APIs — where no individual Pod has a meaningful identity — a Deployment is nearly perfect. When a Pod dies, Kubernetes spins up an identical replacement, and the Service load-balances incoming requests across whichever Pods are alive. We never need to care which Pod handled a given request. This is called a <strong>stateless</strong> workload: one where there is no persistent data to worry about and a brief interruption causes no lasting harm.</p>
+<p>The challenge arises with workloads that <strong>continuously write data to disk</strong> — databases, Kafka, Redis, and distributed storage systems. These <strong>stateful</strong> workloads give each Pod a distinct identity with its own data and role. If <code class='ic'>mysql-0</code> is the write-capable primary and <code class='ic'>mysql-1</code> is a read-only replica that syncs from it, these two Pods are not interchangeable. Yet a Deployment is built on exactly that assumption of interchangeability.</p>
+<h4>What Happens When You Run a Database on a Deployment</h4>
+<p>Forcing a stateful workload onto a Deployment hits three walls in quick succession.</p>
+<p><strong>1) Pod names change every time.</strong> Deployment Pod names include a random hash — something like <code class='ic'>myapp-7d9f8c-abcde</code> — and change entirely whenever the Pod is recreated. In a database cluster, replicas need to know the primary&#x27;s address. An address that keeps changing makes cluster formation impossible.</p>
+<p><strong>2) All replicas share a single volume.</strong> This is a fundamental design limitation of Deployment. A Deployment is built to have <strong>all replicas share the one PVC (storage claim) defined in the Pod template</strong> — the concept of &quot;different data per Pod&quot; simply does not exist. Scale to two or more replicas and most default storage uses <code class='ic'>ReadWriteOnce (RWO)</code>, which allows mounting on only one node at a time, so the second Pod stalls at creation. This RWO collision is just a <strong>symptom</strong>, not the root cause.</p>
+<blockquote class='callout'>
+<p>A common misconception: &quot;Can I just use <code class='ic'>ReadWriteMany (RWX)</code> storage to run a database on a Deployment?&quot; No. RWX removes the mount conflict, but then <strong>all replicas write to the same disk simultaneously</strong>, corrupting data. And a Deployment still provides no stable identity or startup ordering. Changing the access mode does not solve the underlying problem.</p>
+</blockquote>
+<p><strong>3) You cannot control startup order.</strong> A Deployment launches all replicas <strong>at the same time</strong>. But a database cluster requires the primary to be fully up before replicas can connect to it. Starting everything at once means replicas fail while searching for a primary that does not yet exist.</p>
+<blockquote class='callout'>
+<p>The core point: stateful workloads require (1) stable names, (2) dedicated per-Pod storage, and (3) predictable startup and shutdown ordering. A Deployment guarantees none of these three. <strong>StatefulSet</strong> was introduced specifically to fill this gap.</p>
+</blockquote>
+<h4>The Three Guarantees StatefulSet Provides</h4>
+<p>A StatefulSet is a controller that, like a Deployment, maintains a desired number of Pods — but it is designed to satisfy exactly the three requirements above.</p>
+<p><strong>Stable identity.</strong> StatefulSet Pods receive fixed names in the format <code class='ic'>&lt;name&gt;-&lt;ordinal&gt;</code> rather than random hashes. With three replicas you get <code class='ic'>web-0</code>, <code class='ic'>web-1</code>, and <code class='ic'>web-2</code>. If <code class='ic'>web-1</code> dies and is recreated, it comes back as <code class='ic'>web-1</code>. Even if rescheduled to a different node, it keeps the same name and the same volume. Each Pod gains a <strong>permanent identity</strong>.</p>
+<p><strong>Dedicated per-Pod storage.</strong> By defining a <code class='ic'>volumeClaimTemplates</code> &quot;PVC blueprint,&quot; StatefulSet automatically provisions a separate PVC for each Pod. <code class='ic'>web-0</code> gets <code class='ic'>data-web-0</code>, <code class='ic'>web-1</code> gets <code class='ic'>data-web-1</code>, and so on. When a Pod is recreated, it reattaches the volume matching its ordinal, preserving its data. This is the exact opposite of the single shared PVC that a Deployment uses.</p>
+<p><strong>Ordered operations.</strong> By default, a StatefulSet creates Pods <strong>one at a time in ordinal order</strong>. <code class='ic'>web-1</code> is not created until <code class='ic'>web-0</code> is fully Ready. Scale-down and deletion proceed in <strong>reverse order</strong> — highest ordinal first (<code class='ic'>web-2</code> → <code class='ic'>web-1</code> → <code class='ic'>web-0</code>) — keeping the primary (ordinal 0) alive longest. As shown in the diagram below, creation and deletion are mirror images of each other.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph CREATE[&quot;Creation: one at a time, lowest ordinal first&quot;]
+        direction LR
+        C0[&quot;web-0 created&lt;br/&gt;Wait for Ready&quot;] --&gt; C1[&quot;web-1 created&lt;br/&gt;Wait for Ready&quot;] --&gt; C2[&quot;web-2 created&lt;br/&gt;Wait for Ready&quot;]
+    end
+    subgraph DELETE[&quot;Deletion / scale-down: highest ordinal first&quot;]
+        direction LR
+        D2[&quot;web-2 terminated&quot;] --&gt; D1[&quot;web-1 terminated&quot;] --&gt; D0[&quot;web-0 terminated&quot;]
+    end
+    CREATE -.-&gt;|&quot;opposite direction&quot;| DELETE</div><figcaption>StatefulSet ordered operations: creation starts at 0, deletion in reverse</figcaption></figure>
+<h4>Stable Network Identity and the Headless Service</h4>
+<p>The most important concept here is the <strong>Headless Service</strong>. A regular Service holds a single virtual IP (ClusterIP) and load-balances incoming requests across its backing Pods. That is ideal for stateless workloads, but fatal when writes must go to the primary only — a write request accidentally landing on a read-only replica breaks the system.</p>
+<p>A Headless Service turns off that load balancing. Declaring <code class='ic'>clusterIP: None</code> in the manifest means the Service receives no virtual IP; instead, DNS lookups return <strong>individual DNS records for each Pod</strong>. Each Pod then has a stable DNS address of the form:</p>
+<pre><code>
+&lt;pod-name&gt;.&lt;service-name&gt;.&lt;namespace&gt;.svc.cluster.local
+e.g., web-0.nginx.default.svc.cluster.local
+</code></pre>
+<p>Even if <code class='ic'>web-0</code> is rescheduled to a different node and its IP changes, this DNS name stays the same. A replica can therefore hardcode &quot;the primary is at <code class='ic'>mysql-0.mysql</code>&quot; and connect directly. A Headless Service also creates SRV records in addition to A records (name → IP), letting some clients discover port information from DNS as well.</p>
+<p>The diagram below shows how a StatefulSet, the Headless Service, Pods, and their dedicated PVCs all fit together.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    HS[&quot;Headless Service&lt;br/&gt;nginx&lt;br/&gt;clusterIP: None&quot;]
+    SS[&quot;StatefulSet&lt;br/&gt;web (replicas 3)&quot;]
+    VCT[&quot;volumeClaimTemplates&lt;br/&gt;PVC blueprint &#x27;data&#x27;&quot;]
+
+    SS --&gt;|&quot;linked via serviceName&quot;| HS
+    SS --&gt;|&quot;create Pods in order&quot;| P0
+    SS --&gt;|&quot;create Pods in order&quot;| P1
+    SS --&gt;|&quot;create Pods in order&quot;| P2
+    SS --&gt;|&quot;provision PVC per Pod&quot;| VCT
+
+    subgraph PODS[&quot;Pods with fixed names&quot;]
+        direction TB
+        P0[&quot;Pod web-0&quot;]
+        P1[&quot;Pod web-1&quot;]
+        P2[&quot;Pod web-2&quot;]
+    end
+
+    HS -.-&gt;|&quot;web-0.nginx DNS record&quot;| P0
+    HS -.-&gt;|&quot;web-1.nginx DNS record&quot;| P1
+    HS -.-&gt;|&quot;web-2.nginx DNS record&quot;| P2
+
+    P0 --&gt; V0[&quot;PVC data-web-0&quot;]
+    P1 --&gt; V1[&quot;PVC data-web-1&quot;]
+    P2 --&gt; V2[&quot;PVC data-web-2&quot;]
+    VCT -.-&gt;|&quot;auto-provisioned from blueprint&quot;| V0
+    VCT -.-&gt;|&quot;auto-provisioned from blueprint&quot;| V1
+    VCT -.-&gt;|&quot;auto-provisioned from blueprint&quot;| V2</div><figcaption>StatefulSet + Headless Service + per-Pod PVC architecture</figcaption></figure>
+<h4>Hands-On Deployment</h4>
+<p>Now let&#x27;s work through Learning Objective 3. Assume a practice cluster such as minikube is running, and a default StorageClass with dynamic provisioning is available (covered in Intermediate Part 1).</p>
+<p><strong>Step 1: Create the Headless Service first.</strong> Creating the Service before the StatefulSet is the standard approach, since this Service is responsible for each Pod&#x27;s DNS records.</p>
+<pre><code>
+# web-headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx          # Becomes the middle segment of each Pod&#x27;s DNS: web-0.nginx
+spec:
+  clusterIP: None      # This single line is what makes it Headless
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+</code></pre>
+<p><strong>Step 2: Define the StatefulSet.</strong> The YAML looks similar to a Deployment, with two key differences: <code class='ic'>serviceName</code> points to the Headless Service above, and <code class='ic'>volumeClaimTemplates</code> at the bottom defines the per-Pod PVC blueprint.</p>
+<pre><code>
+# web-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: nginx          # Which Headless Service to use (for DNS)
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+              name: web
+          volumeMounts:
+            - name: data            # Must match the template name below
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:             # Blueprint that auto-provisions one PVC per Pod
+    - metadata:
+        name: data
+      spec:
+        accessModes: [&quot;ReadWriteOnce&quot;]
+        resources:
+          requests:
+            storage: 1Gi
+</code></pre>
+<p>The key point is that <code class='ic'>volumeClaimTemplates</code> is a <strong>template (blueprint)</strong>, not a <code class='ic'>volumes</code> entry. Kubernetes reads this single blueprint and stamps out a separate PVC for each Pod it creates. Because every Pod owns its own PVC, the &quot;single shared volume&quot; problem that a Deployment would produce never arises.</p>
+<p><strong>Step 3: Apply the manifests and watch Pods come up in order.</strong></p>
+<pre><code>
+kubectl apply -f web-headless-svc.yaml
+kubectl apply -f web-statefulset.yaml
+
+# The -w (watch) flag shows web-0 reaching Running before web-1 is created
+kubectl get pods -l app=nginx -w
+</code></pre>
+<p>Confirm that Pod names are fixed as <code class='ic'>web-0</code>, <code class='ic'>web-1</code>, and <code class='ic'>web-2</code>, appearing strictly in sequence.</p>
+<p><strong>Step 4: Verify that dedicated PVCs were auto-provisioned.</strong></p>
+<pre><code>
+kubectl get pvc
+# data-web-0   Bound   ...
+# data-web-1   Bound   ...
+# data-web-2   Bound   ...
+</code></pre>
+<p>PVC names follow the <code class='ic'>&lt;template-name&gt;-&lt;pod-name&gt;</code> convention (<code class='ic'>data-web-0</code>). Each Pod now has its own independent 1 Gi volume.</p>
+<p><strong>Step 5: Verify stable identity and data persistence.</strong> Write a marker file to <code class='ic'>web-1</code> only, then delete the Pod. Use <code class='ic'>kubectl wait</code> before reading the file — running the read command before the Pod is Ready again will fail.</p>
+<pre><code>
+kubectl exec web-1 -- sh -c &#x27;echo &quot;I am web-1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl delete pod web-1                          # Must come back as web-1
+kubectl wait --for=condition=ready pod/web-1      # Wait until Ready (important)
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt   # Still &quot;I am web-1&quot;
+</code></pre>
+<p>The Pod name is still <code class='ic'>web-1</code>, the same PVC (<code class='ic'>data-web-1</code>) is reattached, and the file survives. This is the decisive difference from a Deployment.</p>
+<h4>Operational Tips Worth Knowing</h4>
+<ul>
+<li><strong>Parallel startup when ordering is not needed.</strong> Bringing up 50 Pods one at a time can be very slow. If strict ordering is unnecessary, set <code class='ic'>spec.podManagementPolicy: Parallel</code> to launch all Pods simultaneously.</li>
+<li><strong>PVCs are not automatically deleted.</strong> Even when you delete a StatefulSet or scale it down, PVCs created by <code class='ic'>volumeClaimTemplates</code> are retained for data protection. When cleaning up, <strong>always back up and verify your data before manually running <code class='ic'>kubectl delete pvc</code>.</strong> Deleting a PVC permanently destroys the underlying volume and all its data, so add an extra verification step in production.</li>
+<li><strong>Useful even for stateless workloads.</strong> When fixed, predictable instance names are needed — as in some distributed systems — a StatefulSet is a valid choice even if persistent storage is not involved.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Stateful workloads require stable names, dedicated per-Pod storage, and predictable startup/shutdown ordering — none of which a Deployment guarantees. In particular, a Deployment is designed so that <strong>all replicas share a single PVC</strong>, making per-Pod data impossible (the RWO conflict is just a symptom; switching to RWX does not solve the real problem). Use <strong>StatefulSet</strong> instead.</li>
+<li>StatefulSet Pods use the <code class='ic'>&lt;name&gt;-&lt;ordinal&gt;</code> naming scheme (e.g., <code class='ic'>web-0</code>) and retain the same name and volume across restarts and reschedules.</li>
+<li>A <strong>Headless Service</strong> (<code class='ic'>clusterIP: None</code>) provides an individual DNS record per Pod (<code class='ic'>web-0.nginx.&lt;ns&gt;.svc.cluster.local</code>) instead of load balancing, enabling direct connections to a specific Pod.</li>
+<li>Default behavior is <strong>ordered</strong>: creation goes from ordinal 0 upward one at a time; scale-down and deletion go from the highest ordinal downward. Set <code class='ic'>podManagementPolicy: Parallel</code> when ordering is not required.</li>
+<li><code class='ic'>volumeClaimTemplates</code> auto-provisions one PVC per Pod following the <code class='ic'>&lt;template-name&gt;-&lt;pod-name&gt;</code> naming convention (e.g., <code class='ic'>data-web-0</code>). PVCs survive StatefulSet deletion for data protection and must be removed manually — only after backing up.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>Anton Putra, &quot;Kubernetes Deployment vs. StatefulSet vs. DaemonSet&quot; — https://www.youtube.com/watch?v=30KAInyvY_o</li>
+<li>Raghav Dua, &quot;Deploy a production Database in Kubernetes&quot; — https://www.youtube.com/watch?v=UDXnyh0vtXw</li>
+<li>Google Cloud Tech, &quot;What are stateful workloads?&quot; — https://www.youtube.com/watch?v=yROFvZiV5cU</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Create the following two Services.</p>
+<p>Service A (regular): name=nginx-normal, selector=app:nginx, port 80, type omitted (ClusterIP default)</p>
+<p>Service B (Headless): name=nginx-headless, selector=app:nginx, port 80, clusterIP: None</p>
+<p>After creating both, compare the CLUSTER-IP column in kubectl get svc and explain the difference between the two Services.</p></div>
+              <pre class='starter'><code># nginx-normal-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-normal
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+
+---
+# nginx-headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-headless
+spec:
+  clusterIP: ____    # the single line that makes it Headless
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web</code></pre>
+              <details><summary>Hint</summary><ul><li>The clusterIP field sits directly under spec, at the same level as selector and ports.</li><li>In kubectl get svc output, a CLUSTER-IP value of None confirms success. If an IP address appears instead, double-check that clusterIP: None was entered correctly.</li><li>The clusterIP of an existing Service cannot be changed. If you need to fix it, delete the Service with kubectl delete svc nginx-headless and re-apply.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># nginx-normal-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-normal
+spec:
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+
+# nginx-headless-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-headless
+spec:
+  clusterIP: None
+  selector:
+    app: nginx
+  ports:
+    - port: 80
+      name: web
+
+# Apply
+kubectl apply -f nginx-normal-svc.yaml
+kubectl apply -f nginx-headless-svc.yaml
+
+# Compare
+kubectl get svc nginx-normal nginx-headless
+# Expected output:
+# NAME             TYPE        CLUSTER-IP      PORT(S)   AGE
+# nginx-normal     ClusterIP   10.96.xxx.xxx   80/TCP    10s
+# nginx-headless   ClusterIP   None            80/TCP    8s</code></pre>
+                <div class='exp2'><p>Setting clusterIP: None is all it takes to create a Headless Service. A regular Service receives a virtual IP (ClusterIP) backed by iptables/IPVS rules and acts as a load balancer. A Headless Service skips the virtual IP entirely and instead registers individual A records for each backing Pod in DNS. When a StatefulSet references this Service, each Pod gets a stable DNS address in the form web-0.nginx-headless.default.svc.cluster.local, allowing clients to target a specific Pod directly.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Write a StatefulSet manifest (web-statefulset.yaml) that uses the nginx-headless Service created in Step 1.</p>
+<ul>
+<li>name: web, replicas: 3, serviceName: nginx-headless</li>
+<li>Container: nginx:1.25, port 80, mount the data volume at /usr/share/nginx/html</li>
+<li>volumeClaimTemplates: name=data, accessModes=ReadWriteOnce, storage=1Gi</li>
+</ul>
+<p>After applying, verify the following two things.</p>
+<p>(a) Run kubectl get pods -l app=nginx -w and observe that Pods are created strictly in order.</p>
+<p>(b) Run kubectl get pvc and confirm that three PVCs — data-web-0, data-web-1, data-web-2 — were automatically provisioned.</p></div>
+              <pre class='starter'><code># web-statefulset.yaml (fill in the blanks)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: ____          # name of the Headless Service
+  replicas: ____
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+              name: web
+          volumeMounts:
+            - name: ____      # must match the name in volumeClaimTemplates
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+    - metadata:
+        name: ____
+      spec:
+        accessModes: [&quot;____&quot;]
+        resources:
+          requests:
+            storage: ____</code></pre>
+              <details><summary>Hint</summary><ul><li>volumeMounts.name and volumeClaimTemplates[].metadata.name must be identical strings. A mismatch causes a &#x27;volume not found&#x27; error during Pod creation.</li><li>If kubectl get pvc shows STATUS as Pending, either no StorageClass exists or dynamic provisioning is disabled. Run kubectl get storageclass to check for a default StorageClass. In a minikube environment, the standard StorageClass is created automatically on minikube start.</li><li>If web-1 appears in kubectl get pods -l app=nginx -w before web-0 reaches Running, you have likely created a Deployment by mistake. Verify that apiVersion is apps/v1 and kind is StatefulSet.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># web-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: nginx-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25
+          ports:
+            - containerPort: 80
+              name: web
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [&quot;ReadWriteOnce&quot;]
+        resources:
+          requests:
+            storage: 1Gi
+
+# Apply
+kubectl apply -f web-statefulset.yaml
+
+# (a) Observe ordered creation (run in a separate terminal)
+kubectl get pods -l app=nginx -w
+# Expected output:
+# NAME    READY   STATUS              AGE
+# web-0   0/1     ContainerCreating   2s
+# web-0   1/1     Running             8s   &lt;- web-1 not created until web-0 is Ready
+# web-1   0/1     ContainerCreating   9s
+# web-1   1/1     Running             15s  &lt;- web-2 not created until web-1 is Ready
+# web-2   0/1     ContainerCreating   16s
+# web-2   1/1     Running             22s
+
+# (b) Verify automatic PVC provisioning
+kubectl get pvc
+# Expected output:
+# NAME        STATUS   VOLUME       CAPACITY   ACCESS MODES
+# data-web-0  Bound    pvc-xxxxxxx  1Gi        RWO
+# data-web-1  Bound    pvc-xxxxxxx  1Gi        RWO
+# data-web-2  Bound    pvc-xxxxxxx  1Gi        RWO</code></pre>
+                <div class='exp2'><p>In a StatefulSet spec, volumeClaimTemplates is a blueprint, not a volumes entry. Each time Kubernetes creates a Pod, it uses this blueprint to provision a PVC named &lt;template-name&gt;-&lt;pod-name&gt;. As you can see in the watch output, web-1 is not created until web-0 reaches Running and Ready — this is the Ordered (sequential) behavior that sets StatefulSet apart from Deployment. The serviceName field must exactly match an existing Headless Service name so that DNS records are created correctly for each Pod.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. 1. Use kubectl exec to create a file inside the web-1 container.</p>
+<ul>
+<li>Write &#x27;I am web-1&#x27; to /usr/share/nginx/html/id.txt.</li>
+</ul>
+<p>2. Delete the Pod with kubectl delete pod web-1.</p>
+<p>3. Watch with kubectl get pods -l app=nginx -w until web-1 is recreated and Running again.</p>
+<p>4. Use kubectl exec to read /usr/share/nginx/html/id.txt on the recreated web-1 and confirm the content is preserved.</p>
+<p>5. Use the same command to read /usr/share/nginx/html/id.txt on web-0 and confirm the file does not exist there (nothing was written to web-0).</p></div>
+              <pre class='starter'><code># 1. Write a marker file to web-1
+kubectl exec web-1 -- sh -c &#x27;____&#x27;
+
+# Verify immediately
+kubectl exec web-1 -- cat ____
+
+# 2. Delete the Pod
+kubectl delete pod ____
+
+# 3. Watch recreation
+kubectl get pods -l app=nginx -w
+
+# 4. Confirm data is preserved after recreation
+kubectl exec web-1 -- cat ____
+
+# 5. Confirm no file exists on web-0
+kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt</code></pre>
+              <details><summary>Hint</summary><ul><li>When using sh -c &#x27;...&#x27; in kubectl exec, any command that contains a redirection (&gt;) must be wrapped in quotes so the redirection is processed inside the container, not by the local shell.</li><li>There may be a brief moment after deleting web-1 where the Pod is not listed at all. Using the -w flag watches for the Terminating → ContainerCreating → Running transition so you don&#x27;t miss it.</li><li>If the cat output in step 4 is empty, the container may not be fully ready yet. Check kubectl get pod web-1 and wait until STATUS is Running and READY shows 1/1 before running exec again.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Write a marker file to web-1
+kubectl exec web-1 -- sh -c &#x27;echo &quot;I am web-1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+
+# Verify immediately
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
+# Output: I am web-1
+
+# 2. Delete the Pod
+kubectl delete pod web-1
+# Output: pod &quot;web-1&quot; deleted
+
+# 3. Watch recreation
+kubectl get pods -l app=nginx -w
+# Sample output:
+# web-0   1/1   Running             ...
+# web-1   0/1   Terminating         ...
+# web-1   0/1   ContainerCreating   ...
+# web-1   1/1   Running             ...
+
+# 4. Confirm data is preserved
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
+# Expected output: I am web-1  (identical to before deletion)
+
+# 5. Confirm no file on web-0
+kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt
+# Expected output: cat: can&#x27;t open &#x27;/usr/share/nginx/html/id.txt&#x27;: No such file or directory
+# -&gt; The data-web-0 volume is completely separate, so the file is absent — this is expected</code></pre>
+                <div class='exp2'><p>When the StatefulSet recreates web-1, it always reattaches the data-web-1 PVC. Files stored on the volume outlive the Pod, so id.txt is preserved. By contrast, web-0 never had the file written to its data-web-0 volume, so id.txt is absent there. Verifying both results together proves that per-Pod volumes are fully isolated from each other. With a Deployment, a recreated Pod is not guaranteed to reattach the same volume, so data persistence of this kind cannot be relied upon.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. 1. Write a distinct marker file to each of web-0, web-1, and web-2.</p>
+<ul>
+<li>web-0: echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt</li>
+<li>web-1: echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt</li>
+<li>web-2: echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt</li>
+</ul>
+<p>2. Run kubectl scale statefulset web --replicas=1 to scale down. Watch with kubectl get pods -l app=nginx -w and confirm that web-2 terminates before web-1.</p>
+<p>3. Run kubectl get pvc and confirm that all three PVCs remain after the scale-down.</p>
+<p>4. Run kubectl scale statefulset web --replicas=3 to scale back up.</p>
+<p>5. Read id.txt from the recreated web-1 and web-2 and confirm that the values pod1 and pod2 written before the scale-down have been recovered.</p></div>
+              <pre class='starter'><code># 1. Write marker files to each Pod
+kubectl exec web-0 -- sh -c &#x27;echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-1 -- sh -c &#x27;echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-2 -- sh -c &#x27;echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+
+# 2. Scale down to 1 replica (recommended: run watch in a separate terminal)
+kubectl scale statefulset web --replicas=____
+kubectl get pods -l app=nginx -w
+
+# 3. Confirm PVC retention
+kubectl get pvc
+
+# 4. Scale back up to 3 replicas
+kubectl scale statefulset web --replicas=____
+
+# 5. Confirm data recovery after scale-up
+kubectl exec web-1 -- cat ____
+kubectl exec web-2 -- cat ____</code></pre>
+              <details><summary>Hint</summary><ul><li>If the watch output shows termination in the order web-1 → web-2 (lowest ordinal first), you may be looking at a Deployment rather than a StatefulSet. Run kubectl get statefulset to confirm the web StatefulSet exists.</li><li>If kubectl exec web-1 returns &#x27;error: pod not found&#x27; after scaling back up, the Pod is not yet Running. Check kubectl get pod web-1 and wait until READY shows 1/1 before retrying.</li><li>If id.txt in step 5 is empty or contains an unexpected value, inspect kubectl get pvc data-web-1 -o yaml and check spec.volumeName. The PVC must point to the same underlying volume as before the scale-down for data recovery to work. In a minikube environment using hostPath volumes, data recovery is straightforward to observe.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Write marker files to each Pod
+kubectl exec web-0 -- sh -c &#x27;echo &quot;pod0&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-1 -- sh -c &#x27;echo &quot;pod1&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+kubectl exec web-2 -- sh -c &#x27;echo &quot;pod2&quot; &gt; /usr/share/nginx/html/id.txt&#x27;
+
+# 2. Scale down to 1 replica
+kubectl scale statefulset web --replicas=1
+
+# Watch for reverse-order termination
+kubectl get pods -l app=nginx -w
+# Expected output:
+# web-2   1/1   Terminating   ...  &lt;- terminates first
+# web-2   0/1   Terminating   ...
+# web-2         (gone)
+# web-1   1/1   Terminating   ...  &lt;- terminates next
+# web-1   0/1   Terminating   ...
+# web-1         (gone)
+# web-0   1/1   Running       ...  &lt;- only web-0 remains
+
+# 3. Confirm PVC retention (StatefulSet does not delete them)
+kubectl get pvc
+# Expected output: data-web-0, data-web-1, data-web-2 all remain Bound
+
+# 4. Scale back up to 3 replicas
+kubectl scale statefulset web --replicas=3
+
+# Wait for all Pods to be ready
+kubectl wait pod -l app=nginx --for=condition=Ready --timeout=120s
+
+# 5. Confirm data recovery
+kubectl exec web-1 -- cat /usr/share/nginx/html/id.txt
+# Expected output: pod1
+
+kubectl exec web-2 -- cat /usr/share/nginx/html/id.txt
+# Expected output: pod2
+
+# Verify web-0 as well
+kubectl exec web-0 -- cat /usr/share/nginx/html/id.txt
+# Expected output: pod0</code></pre>
+                <div class='exp2'><p>StatefulSet scale-down terminates Pods from the highest ordinal (web-2) downward, one at a time. This ordering is designed to protect the Pod with ordinal 0 — typically the master — until the very end. PVCs created from volumeClaimTemplates are intentionally not deleted when the StatefulSet is scaled down or deleted, in order to protect the data they hold. When you scale back up, web-1 and web-2 reattach their existing data-web-1 and data-web-2 PVCs and recover the previous data. To fully clean up the PVCs, you must delete them explicitly with kubectl delete pvc data-web-0 data-web-1 data-web-2 — this permanently destroys the data, so proceed with caution.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=30KAInyvY_o' target='_blank'>Kubernetes Deployment vs. StatefulSet vs. DaemonSet</a></li><li><a href='https://www.youtube.com/watch?v=UDXnyh0vtXw' target='_blank'>Deploy a production Database in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=yROFvZiV5cU' target='_blank'>What are stateful workloads?</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

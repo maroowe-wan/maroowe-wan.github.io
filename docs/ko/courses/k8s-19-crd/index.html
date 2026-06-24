@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-CRD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-19-crd/index.html'>EN</a></div>
+  <h1>K8S-CRD</h1>
+  <div class="sub">중급2까지 마친 학습자 (RBAC·스케줄링·NetworkPolicy·Helm·모니터링을 이미 아는 수준) · 총 1강</div>
+  <ul><li><a href='#lec1'>01. CRD와 커스텀 리소스 — 쿠버네티스 API 확장하기</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. CRD와 커스텀 리소스 — 쿠버네티스 API 확장하기 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>CustomResourceDefinition(CRD)의 구조와 OpenAPI v3 스키마 검증을 이해하고 직접 정의할 수 있다</li>
+<li>커스텀 리소스(CR)를 생성하고 <code class='ic'>kubectl get</code>/<code class='ic'>describe</code>/<code class='ic'>explain</code>으로 빌트인 리소스처럼 다룰 수 있다</li>
+<li>쿠버네티스 API 확장의 의미와, CRD가 빌트인 리소스와 똑같이 동작하는 원리를 설명할 수 있다</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 API를 확장하는가</h4>
+<p>여러분은 이미 Pod·Deployment·Service 같은 빌트인 리소스를 자유롭게 다룬다. 그런데 쿠버네티스를 운영하다 보면 &quot;우리 도메인에 딱 맞는 리소스 타입이 있으면 좋겠다&quot;는 순간이 온다. 예를 들어 <code class='ic'>Database</code>, <code class='ic'>Certificate</code>, <code class='ic'>BackupJob</code> 같은 개념을 매번 Deployment·ConfigMap·CronJob의 조합으로 표현하는 대신, <strong>그 자체를 하나의 1급 리소스</strong>로 만들고 싶은 것이다.</p>
+<p>객체지향 언어에 비유하면 이렇다. 언어가 제공하는 <code class='ic'>String</code>, <code class='ic'>Array</code> 같은 내장 클래스만으로 애플리케이션을 만들 수는 없어서 우리는 직접 클래스를 정의한다. 쿠버네티스에서 CRD는 바로 그 <strong>클래스 정의</strong>에 해당하고, 그 클래스로 찍어내는 인스턴스가 커스텀 리소스(CR)다.</p>
+<p>CRD를 등록하면 쿠버네티스 API 서버에 새로운 엔드포인트가 추가된다. 그 순간부터 <code class='ic'>kubectl get</code>, <code class='ic'>describe</code>, RBAC, 라벨 셀렉터, watch, etcd 저장 등 <strong>빌트인 리소스가 누리는 모든 기능을 그대로</strong> 쓸 수 있다. 이것이 &quot;API를 확장한다&quot;는 말의 실제 의미다.</p>
+<blockquote class='callout'>
+<p>CRD는 &quot;데이터 모델 등록&quot;일 뿐이다. 그 리소스를 보고 실제 동작을 일으키는 컨트롤러는 별개다. CRD만 만들면 etcd에 예쁘게 저장되는 객체가 생길 뿐, 아무 일도 일어나지 않는다. 동작을 붙이는 것이 다음 강의의 Operator다.</p>
+</blockquote>
+<h4>CRD 매니페스트의 구조</h4>
+<p>CRD는 그 자체가 하나의 쿠버네티스 리소스이며, <code class='ic'>apiextensions.k8s.io/v1</code> 그룹에 속한다. 핵심 필드를 짚어 보자.</p>
+<pre><code>
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  # 이름은 반드시 &lt;plural&gt;.&lt;group&gt; 형식이어야 한다
+  name: certificates.training.example.com
+spec:
+  group: training.example.com        # API 그룹 (객체지향의 &#x27;패키지&#x27;에 해당)
+  scope: Namespaced                  # Namespaced 또는 Cluster
+  names:
+    plural: certificates             # kubectl get certificates
+    singular: certificate
+    kind: Certificate                # 매니페스트의 kind 값
+    shortNames: [&quot;cert&quot;]             # kubectl get cert (별칭, 선택)
+  versions:
+    - name: v1
+      served: true                   # API 서버가 이 버전을 응답할지
+      storage: true                  # etcd에 이 버전으로 저장할지
+      subresources:
+        status: {}                   # status 하위 리소스 활성화 (아래 설명)
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:                     # 사용자가 선언하는 &#x27;원하는 상태&#x27;
+              type: object
+              properties:
+                commonName:
+                  type: string
+                dnsNames:
+                  type: array
+                  items:
+                    type: string
+                renewBefore:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  default: 30         # 미지정 시 API 서버가 자동 주입
+              required: [&quot;commonName&quot;]
+            status:                   # 컨트롤러가 채우는 &#x27;실제 상태&#x27;
+              type: object
+              properties:
+                phase:
+                  type: string        # Pending / Ready / Expired 등
+                expiresAt:
+                  type: string
+                message:
+                  type: string
+</code></pre>
+<p>읽어야 할 핵심은 다음과 같다.</p>
+<ul>
+<li><strong>group / names</strong>: 리소스의 정체성. <code class='ic'>name</code>은 반드시 <code class='ic'>복수형.그룹</code> 조합이어야 등록된다.</li>
+<li><strong>scope</strong>: <code class='ic'>Namespaced</code>면 네임스페이스에 속한 리소스(Pod처럼), <code class='ic'>Cluster</code>면 클러스터 전역 리소스(Node·ClusterRole처럼).</li>
+<li><strong>versions</strong>: 같은 리소스의 여러 버전(<code class='ic'>v1alpha1</code>, <code class='ic'>v1beta1</code>, <code class='ic'>v1</code>)을 동시에 정의할 수 있다. <code class='ic'>served</code>는 클라이언트에게 그 버전을 응답할지, <code class='ic'>storage</code>는 etcd에 저장할 정본(canonical) 버전인지 결정한다. <strong>storage가 true인 버전은 정확히 하나</strong>여야 한다.</li>
+<li><strong>schema.openAPIV3Schema</strong>: OpenAPI v3 형식으로 필드의 타입·필수 여부·제약을 선언한다. 이 부분이 검증의 핵심이다. 위 <code class='ic'>renewBefore</code>처럼 <code class='ic'>default</code>를 주면, 사용자가 값을 생략했을 때 API 서버가 기본값을 자동으로 채워 넣는다.</li>
+</ul>
+<h4>spec과 status — CRD 패턴의 진짜 핵심</h4>
+<p>위 스키마에서 <code class='ic'>spec</code>과 <code class='ic'>status</code>를 나란히 둔 것이 가장 중요하다. 쿠버네티스의 모든 핵심 리소스는 이 두 부분으로 나뉜다.</p>
+<ul>
+<li><strong><code class='ic'>spec</code> (원하는 상태, desired state)</strong>: 사용자가 &quot;이렇게 되길 원한다&quot;고 선언하는 부분. 사람이 작성한다.</li>
+<li><strong><code class='ic'>status</code> (실제 상태, actual state)</strong>: 컨트롤러가 현실을 관찰해 &quot;지금 실제로는 이렇다&quot;고 기록하는 부분. <strong>컨트롤러가 작성하고, 사람은 읽기만</strong> 한다.</li>
+</ul>
+<p>예를 들어 <code class='ic'>Certificate</code>라는 CR이 있을 때 사용자는 <code class='ic'>spec.commonName: web.example.com</code>만 선언하지만, 실제로 인증서가 발급됐는지(<code class='ic'>status.phase: Ready</code>), 언제 만료되는지(<code class='ic'>status.expiresAt</code>), 발급에 실패했다면 왜인지(<code class='ic'>status.message</code>)는 컨트롤러가 <code class='ic'>status</code>에 써 넣는다. 운영자는 <code class='ic'>kubectl get certificate</code>만 봐도 인증서가 <code class='ic'>Pending</code>인지 <code class='ic'>Ready</code>인지 <code class='ic'>Expired</code>인지 한눈에 파악한다. <strong>이 status가 없으면 CRD는 그저 입력 양식일 뿐, &quot;현재 어떤 상태인가&quot;를 관찰할 수 없다.</strong></p>
+<p>이를 제대로 쓰려면 위 예시처럼 <strong><code class='ic'>subresources.status: {}</code>를 선언</strong>해 status를 하위 리소스로 활성화해야 한다. 그러면 두 가지 중요한 변화가 생긴다.</p>
+<p>1. <strong>권한 분리</strong> — <code class='ic'>spec</code>(사용자가 수정)과 <code class='ic'>status</code>(컨트롤러가 수정)가 별도 엔드포인트(<code class='ic'>/status</code>)로 분리된다. 사용자가 실수로 status를 건드리지 못하고, 컨트롤러도 spec을 함부로 바꾸지 못한다.</p>
+<p>2. <strong>충돌 방지</strong> — 사용자의 spec 수정과 컨트롤러의 status 갱신이 서로의 변경을 덮어쓰지 않는다.</p>
+<blockquote class='callout'>
+<p>spec과 status의 분리는 쿠버네티스 선언형 모델의 뿌리다. <strong>사람은 spec으로 &quot;원하는 상태&quot;를 말하고, 컨트롤러는 status로 &quot;실제 상태&quot;를 보고한다.</strong> 다음 강의의 컨트롤러/Operator가 하는 일이 바로 spec을 읽어 현실을 맞추고 그 결과를 status에 기록하는 것이다.</p>
+</blockquote>
+<h4>OpenAPI 스키마 검증 — 빌트인과 똑같은 안전망</h4>
+<p>빌트인 리소스에서 Deployment의 <code class='ic'>replicas</code>에 문자열을 넣으면 거부되듯, CRD도 스키마에 어긋난 CR을 거부한다. 위 예시에서 <code class='ic'>renewBefore</code>에 <code class='ic'>minimum: 1, maximum: 90</code>을 줬으니, 100을 넣으면 API 서버가 다음처럼 막는다.</p>
+<pre><code>
+The Certificate is invalid: spec.renewBefore: Invalid value: 100:
+spec.renewBefore in body should be less than or equal to 90
+</code></pre>
+<p>이 검증은 컨트롤러가 아니라 <strong>API 서버가 admission 단계에서</strong> 수행한다. 즉 잘못된 데이터는 etcd에 저장되기 전에 차단된다. <code class='ic'>required</code>, <code class='ic'>enum</code>, <code class='ic'>pattern</code>(정규식), <code class='ic'>default</code>(기본값 주입) 등을 활용하면 사용자가 잘못 쓸 여지를 크게 줄일 수 있다.</p>
+<h4>CEL 검증 — 필드 간 관계까지 선언적으로 거는 법</h4>
+<p>OpenAPI v3 스키마는 강력하지만 한계가 있다. <strong>각 필드를 독립적으로</strong> 검사할 뿐, &quot;A 필드가 있으면 B 필드도 반드시 있어야 한다&quot;거나 &quot;종료일이 시작일보다 늦어야 한다&quot;처럼 <strong>여러 필드의 관계</strong>를 검증하지 못한다. 과거에는 이런 교차 검증을 위해 별도의 validating admission webhook(외부 검증 서버)을 직접 만들어 운영해야 했다 — 배포·인증서·가용성을 책임져야 하는 부담스러운 작업이다.</p>
+<p>쿠버네티스 1.25부터 정식 기능이 된 <strong>CEL(Common Expression Language) 기반 validation rules</strong>가 이 부담을 없앤다. 스키마 안에 <code class='ic'>x-kubernetes-validations</code>로 검증 규칙을 표현식으로 써 두면, 별도 서버 없이 <strong>API 서버가 직접</strong> 교차 검증을 수행한다.</p>
+<pre><code>
+schema:
+  openAPIV3Schema:
+    type: object
+    properties:
+      spec:
+        type: object
+        properties:
+          autoRenew:
+            type: boolean
+          renewBefore:
+            type: integer
+        # 이 spec 객체 수준에서 필드 간 제약을 건다
+        x-kubernetes-validations:
+          # autoRenew가 true면 renewBefore는 반드시 지정되어야 한다
+          - rule: &quot;!self.autoRenew || has(self.renewBefore)&quot;
+            message: &quot;autoRenew가 true이면 renewBefore가 필요합니다&quot;
+</code></pre>
+<p><code class='ic'>rule</code>은 불리언으로 평가되는 CEL 표현식이고, <code class='ic'>self</code>는 그 규칙이 걸린 객체(여기선 <code class='ic'>spec</code>)를 가리킨다. 위 규칙은 &quot;autoRenew가 false이거나, 아니면 renewBefore가 존재해야 한다&quot;는 의미다. 이를 어기면 API 서버가 <code class='ic'>message</code>를 그대로 돌려주며 요청을 거부한다. <code class='ic'>self.endDate &gt; self.startDate</code> 같은 대소 비교, 리스트 길이·중복 검사 등도 표현식 하나로 처리된다.</p>
+<blockquote class='callout'>
+<p>핵심 판단 기준: 단일 필드의 타입·범위·정규식은 OpenAPI 스키마로, <strong>여러 필드의 관계</strong>는 CEL(<code class='ic'>x-kubernetes-validations</code>)로 거는 것이 현대 쿠버네티스의 모범 사례다. CEL로 표현되지 않는 진짜 복잡한 로직(외부 시스템 조회 등)만 남겨 webhook으로 처리하면, 운영해야 할 webhook 수를 크게 줄일 수 있다.</p>
+</blockquote>
+<h4>CRD의 진화 — 버전 관리와 변환(Conversion)</h4>
+<p>CRD도 소프트웨어처럼 진화한다. 처음엔 <code class='ic'>v1alpha1</code>로 실험하다가 안정화되면 <code class='ic'>v1</code>로 승격하는데, 이때 <strong>이미 클러스터에 저장된 기존 리소스와 그것을 사용하는 클라이언트를 깨뜨리지 않는 것</strong>이 고급 운영의 핵심이다. 그래서 <code class='ic'>versions</code>에 여러 버전을 동시에 둔다.</p>
+<pre><code>
+versions:
+  - name: v1alpha1
+    served: true       # 구버전 클라이언트를 위해 계속 응답
+    storage: false     # 더 이상 이 버전으로 저장하지 않음
+  - name: v1
+    served: true
+    storage: true      # etcd에는 항상 이 한 버전으로만 저장
+</code></pre>
+<ul>
+<li><strong><code class='ic'>served</code></strong>: API 서버가 이 버전으로 요청을 받아 줄지. 여러 버전을 동시에 <code class='ic'>served: true</code>로 두면 구버전·신버전 클라이언트가 공존할 수 있다.</li>
+<li><strong><code class='ic'>storage</code></strong>: etcd에 저장하는 정본 버전. <strong>딱 하나만 true</strong>다. 모든 객체는 결국 이 버전 형태로 etcd에 들어간다.</li>
+</ul>
+<p>여기서 자연스러운 질문이 생긴다. 사용자가 <code class='ic'>v1alpha1</code>로 요청을 보냈는데 저장 버전은 <code class='ic'>v1</code>이라면, 그 사이의 형식 차이는 누가 맞춰 줄까? 이것을 <strong>버전 변환(conversion)</strong>이라 한다.</p>
+<ul>
+<li><strong><code class='ic'>strategy: None</code></strong> — 필드 추가/삭제 정도의 단순한 변화라면 변환 없이 그대로 통과시킨다(기본값).</li>
+<li><strong><code class='ic'>strategy: Webhook</code> (Conversion Webhook)</strong> — 필드 이름이 바뀌거나 구조가 달라져 자동으로 매핑할 수 없을 때 사용한다. API 서버가 버전 변환이 필요한 순간마다 <strong>여러분이 등록한 변환 webhook을 호출</strong>해 &quot;이 객체를 v1alpha1에서 v1 형태로 바꿔 달라&quot;고 위임한다. 사용자가 어떤 버전으로 읽든, webhook이 그 버전 형태로 변환해 돌려주므로 클라이언트는 마치 그 버전이 그대로 있는 것처럼 동작한다.</li>
+</ul>
+<blockquote class='callout'>
+<p>운영 포인트: 한번 <code class='ic'>served: true</code>로 노출한 버전은 사용자가 그것에 의존하기 시작하므로 함부로 제거할 수 없다. 안전한 진화 순서는 (1) 새 버전을 <code class='ic'>served</code>로 추가 → (2) 필요하면 conversion webhook으로 변환 보장 → (3) <code class='ic'>storage</code>를 신버전으로 옮김 → (4) 충분한 유예 후 구버전 <code class='ic'>served: false</code> → (5) 최종 제거다. 빌트인 API가 <code class='ic'>v1beta1</code>을 오랜 기간 deprecated로 유지하다 제거하는 것과 같은 절차다.</p>
+</blockquote>
+<h4>커스텀 리소스 생성과 조작</h4>
+<p>CRD를 적용하면 즉시 새 엔드포인트가 살아난다.</p>
+<pre><code>
+kubectl apply -f certificate-crd.yaml
+kubectl get crd certificates.training.example.com
+</code></pre>
+<p>이제 CRD를 청사진 삼아 실제 인스턴스(CR)를 만든다. CR의 <code class='ic'>apiVersion</code>은 <code class='ic'>그룹/버전</code> 조합이다.</p>
+<pre><code>
+apiVersion: training.example.com/v1
+kind: Certificate
+metadata:
+  name: web-cert
+spec:
+  commonName: web.example.com
+  dnsNames: [&quot;web.example.com&quot;, &quot;www.example.com&quot;]
+  renewBefore: 30
+</code></pre>
+<pre><code>
+kubectl apply -f web-cert.yaml
+kubectl get certificates           # 또는 kubectl get cert
+kubectl describe certificate web-cert
+# 스키마 문서를 그대로 조회 (전체 리소스 이름을 쓰는 것이 가장 안정적)
+kubectl explain certificates.training.example.com.spec
+</code></pre>
+<p><code class='ic'>kubectl explain</code>이 동작한다는 점이 중요하다. 이는 우리가 정의한 OpenAPI 스키마를 API 서버가 <strong>문서로 노출</strong>하기 때문이며, 커스텀 리소스가 빌트인과 동일한 디스커버리 메커니즘 위에 올라가 있다는 증거다.</p>
+<blockquote class='callout'>
+<p>실무 팁: <code class='ic'>kubectl explain certificate.spec</code>처럼 짧은 이름은 같은 약칭이 여러 그룹에 있으면 충돌할 수 있다. <code class='ic'>kubectl explain certificates.training.example.com.spec</code>처럼 <strong>전체 리소스 이름(plural.group)</strong>을 쓰면 어떤 환경에서도 정확히 우리 CRD의 스키마를 조회한다. 같은 이유로 여러 CRD가 같은 <code class='ic'>kind</code>를 공유할 때는 <code class='ic'>kubectl describe</code>에도 전체 리소스 이름을 써 모호성을 없애는 것이 안전하다. 모범 사례로 몸에 익혀 두자.</p>
+</blockquote>
+<h4>CRD가 빌트인과 동일하게 동작하는 원리</h4>
+<p><code class='ic'>kubectl get certificates</code>를 실행하면 내부적으로 무슨 일이 벌어질까. kubectl은 먼저 API 서버의 <strong>디스커버리 엔드포인트</strong>에 &quot;어떤 그룹/버전/리소스가 있나&quot;를 묻는다. CRD를 등록한 순간 <code class='ic'>training.example.com/v1</code>의 <code class='ic'>certificates</code>가 이 목록에 등재되므로, kubectl은 이를 표준 리소스와 구분 없이 취급한다. 요청은 같은 API 서버를 통해 처리되고, 데이터는 같은 etcd에 저장되며, RBAC도 <code class='ic'>apiGroups: [&quot;training.example.com&quot;]</code>처럼 동일한 문법으로 권한을 부여한다.</p>
+<p>아래 시퀀스는 CRD 등록부터 <code class='ic'>kubectl get</code>이 디스커버리를 거쳐 새 리소스를 빌트인처럼 다루기까지의 흐름을 보여 준다.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as 사용자
+    participant K as kubectl
+    participant API as API 서버
+    participant E as etcd
+    U-&gt;&gt;K: CRD 적용 kubectl apply
+    K-&gt;&gt;API: CRD 등록 요청
+    API-&gt;&gt;E: CRD 정의 저장
+    API--&gt;&gt;API: 디스커버리 목록에 새 엔드포인트 등재
+    U-&gt;&gt;K: kubectl get certificates
+    K-&gt;&gt;API: 디스커버리 조회 그룹/버전/리소스
+    API--&gt;&gt;K: certificates 리소스 존재 응답
+    K-&gt;&gt;API: certificates 목록 요청
+    API-&gt;&gt;E: 커스텀 리소스 조회
+    E--&gt;&gt;API: 저장된 CR 반환
+    API--&gt;&gt;K: CR 목록 응답
+    K--&gt;&gt;U: 빌트인과 동일하게 출력</div><figcaption>CRD 등록과 커스텀 리소스 디스커버리 흐름</figcaption></figure>
+<blockquote class='callout'>
+<p>실무 팁: 잘 만든 CRD에는 <code class='ic'>additionalPrinterColumns</code>를 추가해, <code class='ic'>kubectl get</code>의 출력에 핵심 필드(예: <code class='ic'>status.phase</code>, <code class='ic'>status.expiresAt</code>)를 컬럼으로 노출하라. 운영자가 status를 한눈에 파악할 수 있어 매우 유용하다. 또한 cert-manager·Prometheus Operator 등 실제 운영 도구들이 전부 CRD로 자기 리소스를 정의하므로, 여러분이 쓰는 도구의 CRD를 <code class='ic'>kubectl get crd</code>로 들여다보는 것이 가장 좋은 학습이다.</p>
+</blockquote>
+<h3>핵심 요약</h3>
+<ul>
+<li>CRD는 쿠버네티스 API에 새로운 리소스 타입을 등록하는 메커니즘이며, CR은 그 타입의 인스턴스다(클래스와 객체의 관계).</li>
+<li>CRD는 <code class='ic'>group</code>/<code class='ic'>names</code>/<code class='ic'>scope</code>/<code class='ic'>versions</code>로 정체성을, <code class='ic'>openAPIV3Schema</code>로 필드 검증 규칙을 정의한다. <code class='ic'>storage: true</code> 버전은 단 하나.</li>
+<li>CR은 <code class='ic'>spec</code>(사용자가 선언하는 원하는 상태)과 <code class='ic'>status</code>(컨트롤러가 기록하는 실제 상태)로 나뉜다. <code class='ic'>subresources.status: {}</code>로 활성화하면 권한·충돌이 분리되며, 이 status가 리소스의 현재 상태(Ready/Expired 등)를 관찰하는 기반이다.</li>
+<li>검증은 두 층이다. 단일 필드는 OpenAPI 스키마(타입·범위·<code class='ic'>enum</code>·<code class='ic'>pattern</code>·<code class='ic'>default</code>)로, 필드 간 관계는 CEL(<code class='ic'>x-kubernetes-validations</code>)로 건다. 둘 다 API 서버가 admission 단계에서 수행하므로 규격 위반 CR은 etcd 저장 전에 차단된다.</li>
+<li>CRD는 여러 버전을 동시에 둘 수 있다(<code class='ic'>served</code>/<code class='ic'>storage</code>). 버전 간 형식이 다르면 conversion(기본 <code class='ic'>None</code>, 복잡하면 Webhook)으로 변환하며, 안전한 진화는 새 버전 추가→storage 이동→구버전 단계적 제거 순으로 진행한다.</li>
+<li>등록된 CR은 디스커버리·<code class='ic'>kubectl</code>·RBAC·watch·etcd 저장까지 빌트인 리소스와 완전히 동일하게 동작한다. 실제 동작(spec→현실 반영, status 기록)은 컨트롤러/Operator의 몫이며, 이것이 다음 강의의 주제다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. [워밍업] kubectl api-resources 명령을 실행해 현재 클러스터에 등록된 리소스 종류를 확인하라. 출력에서 NAMESPACED, KIND, APIVERSION 컬럼을 읽고, &#x27;apps&#x27; API 그룹에 속한 리소스 목록만 따로 필터링하라.</p></div>
+              <pre class='starter'><code># 전체 API 리소스 조회
+kubectl api-resources
+
+# apps 그룹만 필터링
+kubectl api-resources --api-group=___
+
+# 커스텀 리소스 정의(CRD) 목록 확인 (아직 없어도 됨)
+kubectl get crd</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl api-resources의 출력이 길면 &#x27;| grep apps&#x27; 파이프로 필터할 수 있다.</li><li>NAMESPACED 컬럼이 true이면 네임스페이스 범위 리소스, false이면 클러스터 범위 리소스다.</li><li>kubectl api-resources -o wide 를 추가하면 VERBS 컬럼도 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 전체 API 리소스 조회
+kubectl api-resources
+# 출력 예시 (일부):
+# NAME                  SHORTNAMES  APIVERSION         NAMESPACED  KIND
+# pods                  po          v1                 true        Pod
+# deployments           deploy      apps/v1            true        Deployment
+# ...
+
+# apps 그룹만 필터링
+kubectl api-resources --api-group=apps
+# 출력 예시:
+# NAME                  SHORTNAMES  APIVERSION  NAMESPACED  KIND
+# controllerrevisions               apps/v1     true        ControllerRevision
+# daemonsets            ds          apps/v1     true        DaemonSet
+# deployments           deploy      apps/v1     true        Deployment
+# replicasets           rs          apps/v1     true        ReplicaSet
+# statefulsets          sts         apps/v1     true        StatefulSet
+
+# CRD 목록 확인 (클러스터에 따라 결과 다름)
+kubectl get crd
+# 아무것도 설치되지 않은 경우: No resources found</code></pre>
+                <div class='exp2'><p>kubectl api-resources는 클러스터에 등록된 모든 리소스 종류를 나열한다. APIVERSION은 그룹/버전 형태(예: apps/v1)이며, 코어 그룹(v1 등)은 그룹명 없이 버전만 표시된다. CRD를 추가하면 이 목록에 새 항목이 추가되어 빌트인 리소스와 동일하게 취급된다. --api-group 플래그로 그룹별 필터링이 가능하다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. [핵심 실습] 아래 스키마를 갖는 CRD &#x27;databases.myapp.example.com&#x27;을 작성해 클러스터에 등록하라. 필드는 name(string, 필수), engine(string, 기본값 &#x27;postgresql&#x27;), replicas(integer, 1~5 범위)를 가진다. 등록 후 kubectl get crd로 확인하고, 스키마 검증이 동작하는지 확인하기 위해 replicas를 10으로 설정한 잘못된 커스텀 리소스 생성을 시도해 오류 메시지를 확인하라.</p></div>
+              <pre class='starter'><code># database-crd.yaml 작성 시작
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.myapp.example.com
+spec:
+  group: myapp.example.com
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - ___          # 필수 필드 지정
+              properties:
+                name:
+                  type: ___
+                engine:
+                  type: string
+                  default: ___
+                replicas:
+                  type: integer
+                  minimum: ___
+                  maximum: ___
+  scope: Namespaced
+  names:
+    plural: databases
+    singular: database
+    kind: Database
+    shortNames:
+      - db</code></pre>
+              <details><summary>힌트</summary><ul><li>CRD의 metadata.name은 반드시 &#x27;&lt;plural&gt;.&lt;group&gt;&#x27; 형식이어야 한다. 예: databases.myapp.example.com</li><li>scope를 Namespaced로 설정하면 네임스페이스별로 분리되고, Cluster로 설정하면 클러스터 전역 리소스가 된다.</li><li>CRD 등록 후 Established 상태가 될 때까지 수 초가 걸릴 수 있다. kubectl get crd &lt;name&gt; -o yaml | grep -A5 &#x27;status:&#x27; 로 상태를 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># database-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.myapp.example.com
+spec:
+  group: myapp.example.com
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                engine:
+                  type: string
+                  default: postgresql
+                replicas:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+  scope: Namespaced
+  names:
+    plural: databases
+    singular: database
+    kind: Database
+    shortNames:
+      - db
+
+---
+# 적용
+kubectl apply -f database-crd.yaml
+# 출력: customresourcedefinition.apiextensions.k8s.io/databases.myapp.example.com created
+
+# CRD 등록 확인
+kubectl get crd databases.myapp.example.com
+# NAME                           CREATED AT
+# databases.myapp.example.com    2024-01-01T00:00:00Z
+
+# 검증 테스트: replicas=10 (범위 초과) 시도
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: bad-db
+spec:
+  name: test
+  replicas: 10
+EOF
+# 오류 예시:
+# The Database &quot;bad-db&quot; is invalid:
+#   spec.replicas: Invalid value: 10: spec.replicas in body should be less than or equal to 5</code></pre>
+                <div class='exp2'><p>CRD의 spec.versions[].schema.openAPIV3Schema는 커스텀 리소스의 필드 타입과 제약을 정의한다. required 배열에 필드명을 넣으면 해당 필드 없이 생성 시 API Server가 거부한다. minimum/maximum은 정수 범위 검증에 사용되며, default는 필드 미지정 시 자동으로 채워준다. 이 모든 검증이 API Server 단계에서 일어나므로 컨트롤러 없이도 잘못된 리소스 생성이 차단된다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. [핵심 실습] 이전 단계에서 등록한 Database CRD를 이용해 커스텀 리소스 2개를 생성하라. 첫 번째는 name=&#x27;prod-db&#x27;, engine=&#x27;mysql&#x27;, replicas=3이고, 두 번째는 name=&#x27;dev-db&#x27;만 지정해 engine 기본값이 자동으로 채워지는지 확인하라. 생성 후 kubectl get db, kubectl describe db prod-db, kubectl get db -o yaml 명령으로 리소스를 빌트인 리소스처럼 조회하라.</p></div>
+              <pre class='starter'><code># prod-db 커스텀 리소스
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: prod-db
+  namespace: default
+spec:
+  name: ___
+  engine: ___
+  replicas: ___
+
+---
+# dev-db: engine을 생략해 default 동작 확인
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: dev-db
+  namespace: default
+spec:
+  name: ___
+
+# 파일로 저장 후 적용
+# kubectl apply -f databases.yaml
+
+# 조회 명령 (아래 빈칸을 채워 실행)
+kubectl get ___
+kubectl describe ___ prod-db
+kubectl get ___ -o yaml</code></pre>
+              <details><summary>힌트</summary><ul><li>apiVersion은 CRD의 spec.group + &#x27;/&#x27; + spec.versions[].name 형태다. 예: myapp.example.com/v1</li><li>kubectl get databases 또는 kubectl get db 둘 다 동작한다. shortNames는 편의를 위한 별칭이다.</li><li>dev-db의 engine 기본값 확인은 &#x27;-o yaml&#x27; 출력의 spec 섹션에서 postgresql이 채워졌는지 보면 된다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># databases.yaml
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: prod-db
+  namespace: default
+spec:
+  name: prod-db
+  engine: mysql
+  replicas: 3
+
+---
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: dev-db
+  namespace: default
+spec:
+  name: dev-db
+
+# 적용
+kubectl apply -f databases.yaml
+# database.myapp.example.com/prod-db created
+# database.myapp.example.com/dev-db created
+
+# shortName &#x27;db&#x27;로 조회
+kubectl get db
+# NAME      AGE
+# dev-db    5s
+# prod-db   5s
+
+# 상세 조회
+kubectl describe db prod-db
+
+# YAML 출력 (engine 기본값 확인)
+kubectl get db dev-db -o yaml
+# spec:
+#   engine: postgresql   &lt;-- default가 자동으로 채워짐
+#   name: dev-db</code></pre>
+                <div class='exp2'><p>커스텀 리소스는 CRD를 등록하면 빌트인 리소스(Pod, Deployment 등)와 동일하게 kubectl get/describe/delete/apply 명령으로 다룰 수 있다. shortNames(예: db)를 정의하면 kubectl get db 처럼 축약 명령이 가능하다. API Server는 커스텀 리소스를 etcd에 저장하지만, 이것만으로는 실제 DB가 만들어지지 않는다. 커스텀 리소스에 반응해 실제 작업을 수행하는 것은 다음 강의에서 배울 컨트롤러(Operator)의 역할이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. [응용] 앞서 만든 커스텀 리소스를 정리하고 CRD를 삭제하라. CRD 삭제 시 해당 CRD로 만든 커스텀 리소스들도 함께 삭제되는지 관찰하라. 그리고 kubectl api-resources 출력에서도 Database 종류가 사라졌는지 확인하라.</p></div>
+              <pre class='starter'><code># 1. 커스텀 리소스 먼저 삭제 (선택)
+kubectl delete db prod-db dev-db
+
+# 2. CRD 삭제
+kubectl delete crd ___
+
+# 3. CRD 삭제 후 DB 리소스 조회 시도 (오류 예상)
+kubectl get db
+
+# 4. api-resources에서 사라졌는지 확인
+kubectl api-resources | grep ___</code></pre>
+              <details><summary>힌트</summary><ul><li>CRD를 삭제하기 전에 커스텀 리소스를 먼저 삭제하는 것이 안전하다. finalizers가 설정된 경우 CRD 삭제가 블로킹될 수 있다.</li><li>kubectl delete crd &lt;name&gt;은 비동기로 처리될 수 있다. kubectl get crd로 완전히 사라졌는지 확인하라.</li><li>운영 환경에서 CRD 삭제는 해당 CRD를 사용하는 Operator나 애플리케이션이 없는지 반드시 먼저 확인해야 한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. 커스텀 리소스 삭제
+kubectl delete db prod-db dev-db
+# database.myapp.example.com &quot;prod-db&quot; deleted
+# database.myapp.example.com &quot;dev-db&quot; deleted
+
+# 2. CRD 삭제
+kubectl delete crd databases.myapp.example.com
+# customresourcedefinition.apiextensions.k8s.io &quot;databases.myapp.example.com&quot; deleted
+
+# 3. 삭제 후 조회 시도
+kubectl get db
+# error: the server doesn&#x27;t have a resource type &quot;db&quot;
+
+# 4. api-resources 확인
+kubectl api-resources | grep databases
+# (출력 없음 — 완전히 제거됨)
+
+# 참고: CRD를 먼저 삭제하면 해당 CRD의 커스텀 리소스도 cascade 삭제된다
+# kubectl delete crd databases.myapp.example.com
+# (prod-db, dev-db도 함께 삭제됨)</code></pre>
+                <div class='exp2'><p>CRD를 삭제하면 해당 그룹/버전/Kind에 속한 모든 커스텀 리소스가 cascade 방식으로 함께 삭제된다. 이후 kubectl get으로 조회하면 API Server가 해당 리소스 타입 자체를 모르는 상태가 되어 에러가 반환된다. CRD는 API 확장 메커니즘이므로 CRD 등록 = 새 API 엔드포인트 추가, CRD 삭제 = 해당 API 엔드포인트 제거로 이해하면 된다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=u1X5Rf7fWwM' target='_blank'>Kubernetes Custom Resource Definition (CRD) Explained with Demo</a></li><li><a href='https://www.youtube.com/watch?v=TScDYMym7LA' target='_blank'>What are Custom Resource Definitions (CRDs) in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=3huz7lRzUQo' target='_blank'>Day 49 - Custom Resource Definition (CRD, CR) Kubernetes (explained with Demo)</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

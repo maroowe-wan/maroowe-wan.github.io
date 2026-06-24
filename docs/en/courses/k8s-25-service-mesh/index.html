@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-ServiceMesh</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-25-service-mesh/index.html'>한국어</a></div>
+  <h1>K8S-ServiceMesh</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Introduction to Service Mesh — Traffic Management, mTLS, and Observability with Istio</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Introduction to Service Mesh — Traffic Management, mTLS, and Observability with Istio </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the sidecar proxy-based service mesh architecture and the distinction between the data plane and control plane</li>
+<li>Control traffic routing with Istio VirtualService and DestinationRule, and apply automatic mTLS encryption</li>
+<li>Leverage the observability capabilities provided by a service mesh — distributed tracing and metrics</li>
+</ul>
+<h3>Content</h3>
+<h4>Why a Service Mesh?</h4>
+<p>As a microservices architecture grows to tens of services, the same concerns arise everywhere: how do we encrypt inter-service communication? Where do retries, timeouts, and circuit breakers live? How do we implement Canary traffic splitting? How do we see which service calls which, and at what rate? Implementing this logic <strong>in each application, in each programming language</strong>, leads to an explosion of duplication and inconsistency.</p>
+<p>A service mesh <strong>extracts these cross-cutting concerns out of the application and into the infrastructure layer</strong>. The key mechanism is the <strong>sidecar proxy</strong>. A lightweight proxy (Envoy, in Istio&#x27;s case) is deployed alongside each Pod, and all traffic that Pod sends and receives flows through this proxy. The proxy handles encryption, routing, retries, and metric collection — and the application continues making plain HTTP calls as always. You get mTLS and traffic control without changing a single line of application code.</p>
+<h4>Data Plane and Control Plane</h4>
+<p>The Istio architecture is divided into two layers.</p>
+<ul>
+<li><strong>Data Plane</strong> — The collection of Envoy sidecar proxies injected into each Pod. This is where <strong>actual traffic flows</strong>. Every inter-service request is intercepted here and policies are enforced.</li>
+<li><strong>Control Plane</strong> — A single component called <code class='ic'>istiod</code>. It <strong>distributes configuration and issues certificates</strong> to all proxies in the data plane. Traffic itself does not pass through the control plane; it only delivers instructions: &quot;here is how you should behave.&quot;</li>
+</ul>
+<p>The diagram below shows the control plane (istiod) pushing configuration and certificates down to the sidecars, while actual traffic flows directly between the Envoy proxies in each Pod. Note that all inbound and outbound traffic from an application container passes through the Envoy sidecar in the same Pod.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph CP[&quot;Control Plane&quot;]
+        ISTIOD[&quot;istiod - distribute config / issue certificates&quot;]
+    end
+    subgraph DP[&quot;Data Plane&quot;]
+        subgraph PODA[&quot;Pod A&quot;]
+            APPA[&quot;App container&quot;] --&gt;|&quot;outbound intercepted&quot;| ENVA[&quot;Envoy sidecar&quot;]
+        end
+        subgraph PODB[&quot;Pod B&quot;]
+            ENVB[&quot;Envoy sidecar&quot;] --&gt;|&quot;inbound delivered&quot;| APPB[&quot;App container&quot;]
+        end
+    end
+    ISTIOD -. config/certificates .-&gt; ENVA
+    ISTIOD -. config/certificates .-&gt; ENVB
+    ENVA == actual traffic (mTLS) ==&gt; ENVB</div><figcaption>Istio Data Plane and Control Plane Architecture</figcaption></figure>
+<p>Sidecars are injected automatically at Pod creation time. Add a single label to a namespace and all new Pods created there will have Envoy injected automatically.</p>
+<pre><code>
+kubectl label namespace default istio-injection=enabled
+# From this point on, Pods in this namespace will have 2 containers (app + istio-proxy)
+kubectl get pod my-app -o jsonpath=&#x27;{.spec.containers[*].name}&#x27;
+</code></pre>
+<blockquote class='callout'>
+<p>The sidecar model offers language-agnostic, zero-code adoption, but it introduces a resource overhead and a slight latency increase per Pod — a trade-off worth knowing. Istio also offers <strong>Ambient mode</strong>, which operates at the node level without sidecars, to reduce this overhead. That said, the sidecar model is the most intuitive way to understand the underlying concepts, so this lecture uses it as the reference architecture.</p>
+</blockquote>
+<h4>Traffic Routing — VirtualService and DestinationRule</h4>
+<p>Istio&#x27;s two core traffic management resources have clearly distinct roles:</p>
+<ul>
+<li><strong>DestinationRule</strong> — Defines how to treat a destination service. In particular, it uses <code class='ic'>subsets</code> to group Pods by version label (v1, v2) and applies load balancing, connection pool, and circuit breaker policies.</li>
+<li><strong>VirtualService</strong> — Defines the routing rules for incoming requests — <strong>which subset to send them to</strong>. Weighted traffic splitting, header/path-based routing, retries, and timeouts are all configured here.</li>
+</ul>
+<p>Combining the two resources naturally implements a Canary deployment. Here is an example that sends 90% of traffic to v1 and 10% to v2:</p>
+<pre><code>
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: reviews
+spec:
+  host: reviews          # references the Kubernetes Service named &#x27;reviews&#x27;
+  subsets:
+    - name: v1
+      labels: { version: v1 }
+    - name: v2
+      labels: { version: v2 }
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: reviews
+spec:
+  hosts: [&quot;reviews&quot;]     # routing target — also the Service name (or FQDN)
+  http:
+    - route:
+        - destination: { host: reviews, subset: v1 }
+          weight: 90
+        - destination: { host: reviews, subset: v2 }
+          weight: 10
+</code></pre>
+<p>One thing worth noting: the <code class='ic'>host</code> and <code class='ic'>hosts</code> values in VirtualService and DestinationRule typically reference a <strong>Kubernetes Service name</strong> (short name within the same namespace, or <code class='ic'>reviews.&lt;ns&gt;.svc.cluster.local</code> FQDN for cross-namespace). Istio layers routing rules on top of existing Services, so the Services you already have can be used as-is.</p>
+<p>Adjusting <code class='ic'>weight</code> changes the traffic ratio precisely. (The Argo Rollouts from the previous lecture orchestrates a Canary by incrementally adjusting exactly this weight.) Header-based routing is also possible — routing only internal testers with an <code class='ic'>x-beta: true</code> header to v2, for example, requires nothing more than a single declarative rule.</p>
+<h4>mTLS — Automatic Encryption Without Code Changes</h4>
+<p>Encrypting all inter-service communication with mutual TLS (mTLS) normally involves the significant burden of certificate issuance, distribution, and rotation. Istio offloads all of this to the control plane. <code class='ic'>istiod</code> automatically issues and rotates certificates for each sidecar, and the proxies communicate via mTLS, so even though the application sends plain text, the traffic is encrypted on the wire.</p>
+<p>Enforcing mTLS across an entire namespace requires just a single <code class='ic'>PeerAuthentication</code> resource:</p>
+<pre><code>
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: default
+spec:
+  mtls:
+    mode: STRICT          # reject plaintext; only mTLS is allowed
+</code></pre>
+<p>With <code class='ic'>STRICT</code>, unencrypted requests from outside the mesh are rejected. When introducing mTLS incrementally, start with <code class='ic'>PERMISSIVE</code> (which allows both plaintext and mTLS), then tighten to <code class='ic'>STRICT</code> once all workloads have sidecars.</p>
+<h5>Identity-Based Access Control — AuthorizationPolicy</h5>
+<p>The real value of mTLS goes beyond encryption: it provides <strong>service identity verification</strong>. Each workload carries a SPIFFE identity — based on its ServiceAccount — embedded in its certificate, so the network can guarantee &quot;this caller is really who it claims to be.&quot; That identity is the foundation on which <strong><code class='ic'>AuthorizationPolicy</code></strong> enforces fine-grained rules for &quot;who can call whom.&quot;</p>
+<p>For example, the rule &quot;only the order service may call the payment service&quot; looks like this:</p>
+<pre><code>
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: payment-allow-order
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: payment           # this policy applies to the payment workload
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            # only the ServiceAccount identity of the order service is allowed
+            principals: [&quot;cluster.local/ns/default/sa/order&quot;]
+      to:
+        - operation:
+            methods: [&quot;POST&quot;]
+            paths: [&quot;/charge&quot;]
+</code></pre>
+<p><code class='ic'>selector</code> targets the workload being protected (<code class='ic'>payment</code>), and <code class='ic'>from.source.principals</code> specifies the identities allowed to call it (here, the ServiceAccount of <code class='ic'>order</code>). Once this policy is applied, the sidecar blocks any service other than <code class='ic'>order</code> from reaching <code class='ic'>payment</code>.</p>
+<p>Here is an important detail about how Istio authorization actually works. <strong>By default, with no policies in place, Istio allows all requests (allow-all).</strong> However, the moment <strong>any <code class='ic'>ALLOW</code> policy is attached to a workload</strong>, that workload switches to <strong>deny-by-default — only explicitly permitted requests are allowed through, and everything else is blocked</strong>. In other words, to protect <code class='ic'>payment</code>, you do not need a separate <code class='ic'>DENY</code> policy — attaching an <code class='ic'>ALLOW</code> policy that permits only <code class='ic'>order</code> automatically blocks all other callers. (Note: workloads with no policies at all remain allow-all. <code class='ic'>DENY</code> policies are used as a supplement when you need to block a specific source explicitly.) mTLS <em>proves</em> identity, and AuthorizationPolicy <em>authorizes</em> based on that identity — together they deliver near-zero-trust service-to-service security without touching application code.</p>
+<h4>Observability — Visibility That Comes for Free</h4>
+<p>The fact that all traffic passes through the sidecar is a decisive advantage for observability. Because Envoy sees every request, <strong>without any application code changes</strong> it automatically captures request rate, error rate, and latency (the so-called golden signals) as metrics. Istio visualizes these with the following tools:</p>
+<ul>
+<li><strong>Kiali</strong> — Displays inter-service call relationships as a real-time topology graph. Where errors are occurring and which services are calling which becomes visible at a glance.</li>
+<li><strong>Prometheus / Grafana</strong> — Collects and dashboards the metrics exposed by sidecars (the same monitoring stack covered in the intermediate course).</li>
+<li><strong>Distributed Tracing (Jaeger/Tempo)</strong> — Traces the full path of a single request as it traverses multiple services.</li>
+</ul>
+<blockquote class='callout'>
+<p><strong>Distributed tracing is the important exception to &quot;zero code changes.&quot;</strong> Metrics, topology, and mTLS are all delivered by the sidecar alone with no application changes — but <strong>distributed tracing is different.</strong> When a request flows A→B→C, for the full trace to be connected, B must take the tracing headers it received from A (e.g., B3 headers, <code class='ic'>x-request-id</code>, W3C <code class='ic'>traceparent</code>) and <strong>propagate them forward</strong> when calling C. The sidecar can append tracing information if the headers are present, but it cannot copy those headers from an incoming request to an outgoing one on the application&#x27;s behalf. Therefore <strong>the application must include minimal header propagation code</strong> (or use a library like OpenTelemetry). Missing this causes traces to be fragmented per service, rendering distributed tracing useless. It is something to get right from the moment you introduce a mesh.</p>
+</blockquote>
+<pre><code>
+# Open the Kiali dashboard after installing Istio add-ons
+istioctl dashboard kiali
+</code></pre>
+<p>This integration of traffic management, security (mTLS + AuthorizationPolicy), and observability in a single declarative platform is the genuine value of a service mesh. That said, adoption introduces operational complexity, so it is best adopted when the number of services and the security and observability requirements justify the overhead.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A service mesh extracts cross-cutting concerns — encryption, routing, retries, observability — out of applications and into sidecar proxies (Envoy). Most capabilities are added without any code changes.</li>
+<li>The architecture is divided into a data plane (Envoy proxies that handle traffic) and a control plane (istiod, which distributes configuration and certificates). Sidecars are auto-injected via a namespace label.</li>
+<li>DestinationRule defines version subsets and traffic policies; VirtualService defines routing by weight, headers, and more. Both resources reference Kubernetes Service names, and adjusting <code class='ic'>weight</code> enables precise Canary deployments.</li>
+<li>istiod automatically issues and rotates certificates, providing mTLS without code changes. <code class='ic'>PeerAuthentication</code> controls the STRICT/PERMISSIVE enforcement level. AuthorizationPolicy leverages the mTLS identity to enforce &quot;who can call whom.&quot; Attaching any <code class='ic'>ALLOW</code> policy to a workload flips it to deny-by-default — calls not matching the allow rules are automatically blocked without needing a separate <code class='ic'>DENY</code> policy (workloads with no policy remain allow-all).</li>
+<li>Metrics and service topology (Kiali) are obtained almost automatically. <strong>Distributed tracing is the exception</strong> — the application must propagate tracing headers between service calls, or traces will be fragmented and unusable.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Install Istio using istioctl and enable automatic sidecar injection. Label the default namespace with istio-injection, deploy a test application, and verify that each Pod has an Envoy sidecar container injected automatically.</p></div>
+              <pre class='starter'><code># 1. Download and install Istio
+curl -L https://istio.io/downloadIstio | sh -
+cd istio-*/bin
+export PATH=$PWD:$PATH
+
+# Or via Helm:
+# helm repo add istio https://istio-release.storage.googleapis.com/charts
+# helm install istio-base istio/base -n istio-system --create-namespace
+# helm install istiod istio/istiod -n istio-system
+
+# 2. Install using the demo profile (Istio-recommended learning environment)
+istioctl install --set profile=demo -y
+
+# 3. Verify installation
+kubectl get pods -n istio-system
+
+# 4. Enable automatic sidecar injection (default namespace)
+kubectl label namespace default ___=enabled
+
+# 5. Deploy the test app (Bookinfo example)
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/bookinfo/platform/kube/bookinfo.yaml
+
+# 6. Verify sidecar injection (READY column should show 2/2)
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>If istioctl install is slow, install without --verify and then monitor readiness separately with kubectl get pods -n istio-system -w.</li><li>To inject the sidecar into Pods already running, restart all Deployments in the namespace: kubectl rollout restart deployment -n default</li><li>Use istioctl proxy-status to verify at a glance that all sidecar proxies are synchronized with istiod.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 2. Install Istio
+istioctl install --set profile=demo -y
+# Istio core installed
+# Istiod installed
+# Egress gateways installed
+# Ingress gateways installed
+
+# 3. Verify installation
+kubectl get pods -n istio-system
+# NAME                                    READY   STATUS    RESTARTS   AGE
+# istio-egressgateway-xxx                 1/1     Running   0          2m
+# istio-ingressgateway-xxx                1/1     Running   0          2m
+# istiod-xxx                              1/1     Running   0          2m
+
+# 4. Enable automatic sidecar injection
+kubectl label namespace default istio-injection=enabled
+# namespace/default labeled
+
+# 5. Deploy Bookinfo
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/bookinfo/platform/kube/bookinfo.yaml
+
+# 6. Verify sidecar injection
+kubectl get pods
+# NAME                          READY   STATUS    RESTARTS   AGE
+# details-v1-xxx                2/2     Running   0          30s  &lt;-- 2/2: app+sidecar
+# productpage-v1-xxx            2/2     Running   0          30s
+# ratings-v1-xxx                2/2     Running   0          30s
+# reviews-v1-xxx                2/2     Running   0          30s
+# reviews-v2-xxx                2/2     Running   0          30s
+# reviews-v3-xxx                2/2     Running   0          30s
+
+# List containers in a specific Pod (verify istio-proxy container)
+kubectl describe pod productpage-v1-xxx | grep &#x27;Container ID&#x27; -A3</code></pre>
+                <div class='exp2'><p>Installing Istio creates istiod (the control plane) along with istio-ingressgateway and istio-egressgateway (data plane gateways). Adding the istio-injection=enabled label to a namespace causes all Pods created there afterward to have an Envoy proxy container (istio-proxy) injected automatically. READY 2/2 means both the application container and the Envoy sidecar are ready. Existing Pods are not auto-injected — use kubectl rollout restart to recreate them.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Use VirtualService and DestinationRule to split traffic across three versions of the Bookinfo reviews service (v1/v2/v3). Configure weight-based routing that sends 70% to v1 and 30% to v3. Validate the actual traffic distribution with repeated curl requests.</p></div>
+              <pre class='starter'><code># 1. DestinationRule: define subsets (Pod groups by version)
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: reviews-dr
+spec:
+  host: reviews
+  subsets:
+    - name: v1
+      labels:
+        version: ___
+    - name: v2
+      labels:
+        version: ___
+    - name: v3
+      labels:
+        version: ___
+
+---
+# 2. VirtualService: weight-based routing
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: reviews-vs
+spec:
+  hosts:
+    - reviews
+  http:
+    - route:
+        - destination:
+            host: reviews
+            subset: v1
+          weight: ___    # v1 70%
+        - destination:
+            host: reviews
+            subset: v3
+          weight: ___    # v3 30%
+
+# 3. Validate after applying (v1/v3 distinguished by ratings call pattern)
+# v1: no star rating, v3: red star rating
+for i in $(seq 1 10); do
+  kubectl exec deploy/productpage-v1 -c istio-proxy -- \
+    curl -s http://reviews:9080/reviews/1 | grep -o &#x27;&quot;color&quot;:&quot;[^&quot;]*&quot;&#x27;
+done</code></pre>
+              <details><summary>Hint</summary><ul><li>v1 has no rating feature and does not call ratings. v2 shows black stars; v3 shows red stars. The distribution can also be verified visually in the productpage UI.</li><li>If the sum of weights in a VirtualService is not 100, you will see the error: &#x27;sum of weights must equal 100&#x27;.</li><li>Inspect the complete routing rules currently applied with kubectl get virtualservice -o yaml.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Apply DestinationRule
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: reviews-dr
+spec:
+  host: reviews
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+    - name: v3
+      labels:
+        version: v3
+EOF
+
+# 2. Apply VirtualService
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: reviews-vs
+spec:
+  hosts:
+    - reviews
+  http:
+    - route:
+        - destination:
+            host: reviews
+            subset: v1
+          weight: 70
+        - destination:
+            host: reviews
+            subset: v3
+          weight: 30
+EOF
+
+# 3. Validate traffic distribution
+# Call reviews 10 times from productpage Pod
+for i in $(seq 1 10); do
+  kubectl exec deploy/productpage-v1 -c istio-proxy -- \
+    curl -s http://reviews:9080/reviews/1 2&gt;/dev/null | python3 -c &quot;import sys,json; d=json.load(sys.stdin); print(d.get(&#x27;reviews&#x27;,[{}])[0].get(&#x27;rating&#x27;,{}).get(&#x27;color&#x27;,&#x27;none&#x27;))&quot;
+done
+# Expected: &#x27;none&#x27; (v1, no rating) ~7 times, &#x27;red&#x27; (v3, red stars) ~3 times
+
+# Check VirtualService status
+kubectl get virtualservice reviews-vs
+kubectl get destinationrule reviews-dr</code></pre>
+                <div class='exp2'><p>DestinationRule groups a service&#x27;s Pods into subsets by version label. VirtualService then distributes traffic across those subsets using weights. The sum of weight values must equal 100. This mechanism is how Istio enables Canary deployments without Argo Rollouts. The Envoy sidecar intercepts all traffic and routes it according to the VirtualService rules, applying the traffic policy without any changes to application code.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core Practice] Apply PeerAuthentication to enforce mTLS in STRICT mode across the entire namespace. Verify that plain-text requests from a Pod without a sidecar are rejected after the change, and use istioctl to confirm the mTLS authentication state.</p></div>
+              <pre class='starter'><code># 1. Check current mTLS state (PERMISSIVE by default)
+istioctl x describe pod $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)
+
+# 2. Apply STRICT mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-mtls
+  namespace: default
+spec:
+  mtls:
+    mode: ___    # STRICT or PERMISSIVE
+
+# 3. Re-check mTLS state
+istioctl x describe pod $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)
+
+# 4. Attempt access from a Pod without a sidecar (rejection expected)
+kubectl run test-client --image=curlimages/curl --restart=Never -- \
+  curl -v http://productpage:9080/productpage
+# Pod without a sidecar → rejected by STRICT mTLS
+
+# 5. Verify normal access via Bookinfo Ingress Gateway
+kubectl get svc istio-ingressgateway -n istio-system</code></pre>
+              <details><summary>Hint</summary><ul><li>If existing inter-service communication breaks after applying STRICT mode, run istioctl x describe pod &lt;name&gt; to see which PeerAuthentication is in effect.</li><li>To exempt a specific service from STRICT mode, create a separate PeerAuthentication with spec.selector.matchLabels targeting only that Pod.</li><li>Istio automatically issues and rotates mTLS certificates based on SPIFFE/SPIRE every 24 hours. No manual certificate management is needed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Check current state
+istioctl x describe pod $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)
+# Effectively PERMISSIVE or inherits from mesh policy
+
+# 2. Apply STRICT mTLS
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-mtls
+  namespace: default
+spec:
+  mtls:
+    mode: STRICT
+EOF
+
+# 3. Re-check state
+istioctl x describe pod $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;)
+# mTLS: YES
+# Effective PeerAuthentication: default-mtls
+
+# 4. Attempt access from a Pod without a sidecar
+# Run this Pod in a namespace without istio-injection to ensure no sidecar
+kubectl run test-client -n kube-system --image=curlimages/curl --restart=Never -- \
+  curl -v --max-time 5 http://productpage.default.svc.cluster.local:9080/productpage
+
+kubectl logs test-client -n kube-system
+# curl: (56) Recv failure: Connection reset by peer
+# or: (35) OpenSSL SSL_connect: Connection reset by peer
+# STRICT mode rejects plaintext connections
+
+# 5. Normal access via Bookinfo ingress gateway (gateway has a sidecar)
+export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath=&#x27;{.spec.ports[?(@.name==&quot;http2&quot;)].nodePort}&#x27;)
+curl -s http://$(minikube ip):$INGRESS_PORT/productpage | head -20
+
+# 6. mTLS validation tool
+istioctl authn tls-check $(kubectl get pod -l app=productpage -o jsonpath=&#x27;{.items[0].metadata.name}&#x27;) reviews
+# HOST:PORT            STATUS    SERVER    CLIENT    AUTHN POLICY        DESTINATION RULE
+# reviews:9080         OK        STRICT    STRICT    default-mtls/...    reviews-dr/...</code></pre>
+                <div class='exp2'><p>PeerAuthentication STRICT mode enforces mTLS for all inter-service communication in the namespace. Pods with Istio sidecars automatically negotiate an encrypted mTLS channel by exchanging certificates via Envoy. Plain-text traffic from Pods without sidecars is rejected in STRICT mode. PERMISSIVE mode allows both mTLS and plaintext for use during incremental migration. The istioctl authn tls-check command shows the actual mTLS negotiation result between two services.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Application] Install Istio&#x27;s observability add-ons (Kiali, Jaeger) and experience service mesh visualization and distributed tracing. Generate traffic to Bookinfo, then view the service dependency graph in Kiali and inspect distributed trace spans for an HTTP request in Jaeger.</p></div>
+              <pre class='starter'><code># 1. Install Kiali, Jaeger, Prometheus, and Grafana (Istio sample add-ons)
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/kiali.yaml
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/jaeger.yaml
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/prometheus.yaml
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/addons/grafana.yaml
+
+# 2. Wait for add-on Pods to be ready
+kubectl get pods -n istio-system -w
+
+# 3. Generate traffic (repeated requests to Bookinfo)
+for i in $(seq 1 50); do
+  curl -s -o /dev/null http://$(minikube ip):$INGRESS_PORT/productpage
+done
+
+# 4. Open Kiali dashboard
+istioctl dashboard kiali
+# Check service graph in the browser
+
+# 5. Open Jaeger dashboard
+istioctl dashboard jaeger
+# Search for productpage service, then view traces</code></pre>
+              <details><summary>Hint</summary><ul><li>The istioctl dashboard command sets up kubectl port-forward automatically and opens a browser. To do it manually, run kubectl port-forward svc/kiali -n istio-system 20001:20001 and navigate to http://localhost:20001.</li><li>If traces are not appearing in Jaeger, check Envoy&#x27;s sampling rate. The default is 1% (1 in 100 requests). To see more traces in a lab environment, raise the sampling rate to 100% using the Telemetry API.</li><li>If &#x27;Unknown&#x27; services appear in Kiali, the corresponding Pods are missing app or version labels. Kiali uses these labels to draw the service graph.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Install add-ons (run the commands above)
+
+# 2. Wait for readiness (may take a few minutes)
+kubectl get pods -n istio-system
+# kiali-xxx             1/1     Running   0          2m
+# jaeger-xxx            1/1     Running   0          2m
+# prometheus-xxx        1/1     Running   0          2m
+# grafana-xxx           1/1     Running   0          2m
+
+# 3. Configure Ingress port and generate traffic
+export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -o jsonpath=&#x27;{.spec.ports[?(@.name==&quot;http2&quot;)].nodePort}&#x27;)
+export INGRESS_HOST=$(minikube ip)
+
+# Configure Bookinfo gateway (traffic entry point)
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/bookinfo/networking/bookinfo-gateway.yaml
+
+# Generate repeated requests
+for i in $(seq 1 50); do
+  curl -s -o /dev/null http://$INGRESS_HOST:$INGRESS_PORT/productpage
+done
+
+# 4. Open Kiali (automatically opens browser)
+istioctl dashboard kiali &amp;
+# Graph &gt; Namespace: default
+# View productpage → reviews(v1/v2/v3) → ratings dependency graph
+# See traffic volume, error rates, and latency metrics visualized
+
+# 5. Open Jaeger
+istioctl dashboard jaeger &amp;
+# Service: productpage.default → Find Traces
+# Click a trace to view the full request path (productpage→reviews→ratings) as spans
+
+# 6. Grafana (Istio metrics dashboards)
+istioctl dashboard grafana &amp;
+# Dashboards &gt; Istio Service Dashboard
+
+# 7. Clean up
+kubectl delete -f https://raw.githubusercontent.com/istio/istio/release-1.20/samples/bookinfo/platform/kube/bookinfo.yaml
+kubectl delete peerauthentication default-mtls
+kubectl delete virtualservice reviews-vs
+kubectl delete destinationrule reviews-dr</code></pre>
+                <div class='exp2'><p>Istio provides three observability capabilities without any application code changes. First, metrics (Prometheus/Grafana): request rate, error rate, and P99 latency are collected automatically. Second, distributed tracing (Jaeger/Zipkin): the latency of each service hop and the full request path are recorded as spans. Third, a service graph (Kiali): real-time traffic flows and service dependencies are visualized. Together these three form the three pillars of observability for a service mesh: metrics, traces, and logs.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=16fgzklcF7Y' target='_blank'>Istio &amp; Service Mesh - simply explained in 15 mins</a></li><li><a href='https://www.youtube.com/watch?v=H4YIKwAQMKk' target='_blank'>Istio Tutorial (Service Mesh - Ingress Gateway - Virtual Service - Gateway - Ingress - mTLS)</a></li><li><a href='https://www.youtube.com/watch?v=0w23AQ-hrF4' target='_blank'>[ Kube 57 ] Istio demo with Kiali and traffic management</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

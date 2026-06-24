@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Ingress</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-10-ingress/index.html'>EN</a></div>
+  <h1>K8S-Ingress</h1>
+  <div class="sub">쿠버네티스 기초(Pod, Deployment, Service, YAML 매니페스트)를 이미 아는 학습자. 실무 운영·배포 안정화 단계로 한 단계 더 나아가려는 중급 학습자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. Ingress로 외부 트래픽 라우팅하기 - L7 라우팅과 도메인 기반 접근</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Ingress로 외부 트래픽 라우팅하기 - L7 라우팅과 도메인 기반 접근 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>NodePort/LoadBalancer의 한계와 Ingress가 필요한 이유를 이해한다</li>
+<li>Ingress Controller와 Ingress 리소스의 관계, 호스트·경로 기반 라우팅 규칙을 안다</li>
+<li>Ingress 매니페스트를 작성해 여러 서비스를 하나의 진입점으로 노출해본다</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 Ingress인가 — NodePort/LoadBalancer의 한계</h4>
+<p>쿠버네티스에서 Pod를 클러스터 밖으로 노출하는 가장 기본적인 방법은 Service의 타입을 바꾸는 것이다. 우리는 이미 세 가지를 알고 있다.</p>
+<ul>
+<li><strong>ClusterIP</strong>: 클러스터 내부에서만 접근 가능한 가상 IP. 외부 노출은 불가능하다.</li>
+<li><strong>NodePort</strong>: 모든 노드의 같은 포트(기본 30000~32767 범위)를 열어 외부 트래픽을 받는다.</li>
+<li><strong>LoadBalancer</strong>: 클라우드 제공자에게 외부 로드밸런서(NLB 등)를 1개 프로비저닝하고 외부 IP를 부여받는다.</li>
+</ul>
+<p>처음 한두 개 서비스를 띄울 때는 이걸로 충분하다. 그런데 실무로 들어가면 금세 벽에 부딪힌다.</p>
+<p><strong>NodePort의 문제.</strong> 사용자에게 <code class='ic'>http://노드IP:31080</code> 같은 주소를 주는 건 현실적이지 않다. 포트 번호가 높고(30000번 이상), 사용자가 이를 기억할 수도 없다. DNS를 노드 IP로 연결하더라도 노드가 죽거나 교체되면 IP가 바뀌어 따라다니며 갱신해야 한다. 결국 앞단에 80/443 포트를 31080으로 넘겨주는 프록시 서버를 또 두게 된다.</p>
+<p><strong>LoadBalancer의 문제.</strong> 클라우드에서는 깔끔하지만, <strong>서비스 1개당 로드밸런서 1개</strong>가 원칙이다. 로드밸런서는 클라우드에서 과금되는 자원이라, 서비스가 10개면 로드밸런서 10개 → 비용 10배다. 게다가 새 서비스를 추가할 때마다 외부 IP가 또 생기고, &quot;어느 URL은 어느 로드밸런서로&quot; 같은 분기를 또 다른 프록시에서 처리해야 한다. SSL/TLS 인증서도 서비스마다 따로 붙이게 된다.</p>
+<p>정리하면, 여러 서비스를 URL이나 도메인에 따라 한 진입점에서 나눠 보내고, TLS를 한곳에서 관리하고 싶은 욕구가 생긴다. 이걸 쿠버네티스 리소스로, 즉 다른 매니페스트들과 함께 YAML로 선언해서 관리하게 해주는 것이 바로 <strong>Ingress</strong>다. 아래 비교도처럼, LoadBalancer 방식은 서비스마다 로드밸런서가 늘어나지만 Ingress는 단일 진입점으로 모은다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    ext1[&quot;외부 사용자&quot;]
+    ext2[&quot;외부 사용자&quot;]
+    subgraph LB[&quot;LoadBalancer 방식 - 서비스마다 1개 (클러스터)&quot;]
+        lb1[&quot;로드밸런서 1 - 과금&quot;]
+        lb2[&quot;로드밸런서 2 - 과금&quot;]
+        lb3[&quot;로드밸런서 3 - 과금&quot;]
+        lb1 --&gt; svcA[&quot;서비스 A&quot;]
+        lb2 --&gt; svcB[&quot;서비스 B&quot;]
+        lb3 --&gt; svcC[&quot;서비스 C&quot;]
+    end
+    subgraph ING[&quot;Ingress 방식 - 단일 진입점 (클러스터)&quot;]
+        ic[&quot;Ingress Controller - 진입점 1개&quot;]
+        ic --&gt; isvcA[&quot;서비스 A&quot;]
+        ic --&gt; isvcB[&quot;서비스 B&quot;]
+        ic --&gt; isvcC[&quot;서비스 C&quot;]
+    end
+    ext1 --&gt; lb1
+    ext1 --&gt; lb2
+    ext1 --&gt; lb3
+    ext2 --&gt; ic</div><figcaption>LoadBalancer 방식과 Ingress 방식의 외부 노출 구조 비교</figcaption></figure>
+<blockquote class='callout'>
+<p>Ingress는 클러스터에 내장된 L7(애플리케이션 계층, HTTP/HTTPS) 로드밸런서라고 생각하면 된다. NodePort/LoadBalancer가 L4(IP·포트) 수준이라면, Ingress는 &quot;어떤 URL 경로/도메인이냐&quot;까지 보고 라우팅한다.</p>
+</blockquote>
+<h4>Ingress Controller와 Ingress 리소스는 다른 것이다</h4>
+<p>여기서 가장 많이 헷갈리는 지점을 분명히 짚자. Ingress는 <strong>두 가지가 짝을 이뤄야</strong> 동작한다.</p>
+<p>1. <strong>Ingress Controller (실제 일하는 엔진)</strong></p>
+<p>   클러스터에서 실제로 트래픽을 받아 프록시하는 소프트웨어다. nginx, HAProxy, Traefik, 클라우드 제공자 컨트롤러 등 여러 구현체가 있다. 이 강의에서는 가장 널리 쓰이는 <strong>ingress-nginx</strong>를 기준으로 설명한다. 컨트롤러는 클러스터 안에서 하나의 Deployment + Service(보통 NodePort나 LoadBalancer)로 배포되며, API 서버를 감시(watch)하다가 새 Ingress 규칙이 생기면 그에 맞게 내부 nginx 설정을 자동으로 다시 쓴다.</p>
+<p>2. <strong>Ingress 리소스 (규칙 선언서)</strong></p>
+<p>   &quot;이런 호스트/경로로 들어오면 이 Service로 보내라&quot;는 <strong>규칙의 집합</strong>이다. Pod·Deployment·Service처럼 YAML 매니페스트로 만든다. 그 자체로는 아무 일도 못 한다 — 규칙일 뿐이다.</p>
+<blockquote class='callout'>
+<p>가장 흔한 실수: 클러스터에는 Ingress Controller가 기본 탑재되어 있지 않다. 컨트롤러 없이 Ingress 리소스만 만들면 아무 일도 일어나지 않는다. minikube라면 <code class='ic'>minikube addons enable ingress</code>, 그 외엔 ingress-nginx 매니페스트를 먼저 설치해야 한다.</p>
+</blockquote>
+<p>둘의 관계와 트래픽 흐름은 다음과 같다. 외부 사용자가 도메인으로 접속하면 → DNS가 Ingress Controller의 외부 진입점(LoadBalancer IP 또는 노드:NodePort)을 가리키고 → 컨트롤러가 요청의 호스트/경로를 보고 → Ingress 리소스에 적힌 규칙대로 적절한 Service로 넘기고 → Service가 다시 Pod 중 하나로 부하분산한다. 즉 컨트롤러는 단 한 번만 외부에 노출하면 되고, 이후 모든 라우팅·TLS는 Ingress 리소스를 추가/수정하는 것으로 끝난다. 아래 구성도가 이 전체 경로를 보여준다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    user[&quot;외부 사용자&quot;] --&gt;|&quot;도메인 접속&quot;| dns[&quot;DNS&quot;]
+    dns --&gt;|&quot;진입점 IP 응답&quot;| user
+    user --&gt;|&quot;HTTP/HTTPS 요청&quot;| ic[&quot;Ingress Controller - nginx&quot;]
+    rule[&quot;Ingress 리소스 - 라우팅 규칙 YAML&quot;] -.-&gt;|&quot;규칙 제공&quot;| ic
+    ic --&gt;|&quot;host/path 매칭&quot;| branch{&quot;규칙 분기&quot;}
+    branch --&gt;|&quot;/ 또는 shop.example.com&quot;| svc1[&quot;marvel-service&quot;]
+    branch --&gt;|&quot;/pay 또는 pay.example.com&quot;| svc2[&quot;pay-service&quot;]
+    branch --&gt;|&quot;어느 규칙에도 불일치&quot;| def[&quot;default backend - 404&quot;]
+    svc1 --&gt;|&quot;부하분산&quot;| pod1[&quot;Pod&quot;]
+    svc1 --&gt; pod2[&quot;Pod&quot;]
+    svc2 --&gt;|&quot;부하분산&quot;| pod3[&quot;Pod&quot;]
+    svc2 --&gt; pod4[&quot;Pod&quot;]</div><figcaption>외부 트래픽이 Ingress Controller를 거쳐 Service와 Pod로 라우팅되는 흐름</figcaption></figure>
+<h4>라우팅 규칙: host 기반과 path 기반</h4>
+<p>Ingress 규칙은 두 축으로 구성된다.</p>
+<ul>
+<li><strong>host(도메인) 기반</strong>: <code class='ic'>shop.example.com</code>은 A 서비스로, <code class='ic'>pay.example.com</code>은 B 서비스로. 서브도메인을 같은 Ingress Controller IP로 모두 DNS 연결해두면, 컨트롤러가 요청의 Host 헤더를 보고 분기한다.</li>
+<li><strong>path(경로) 기반</strong>: <code class='ic'>example.com/</code>은 메인 서비스로, <code class='ic'>example.com/pay</code>는 결제 서비스로. 같은 도메인 안에서 URL 경로로 분기한다.</li>
+</ul>
+<p>이 둘은 함께 쓸 수 있다. host 규칙 안에 여러 path를 둘 수 있다. 어느 규칙에도 맞지 않는 요청은 <strong>default backend</strong>(보통 404 페이지)로 떨어진다.</p>
+<p>path 매칭 방식(<code class='ic'>pathType</code>)도 알아두자. 현재 API에서는 명시가 필수이며 주로 두 가지를 쓴다.</p>
+<ul>
+<li><code class='ic'>Prefix</code>: 경로를 <code class='ic'>/</code>로 끊은 <strong>요소 단위 접두사 매칭</strong>이다. <code class='ic'>/pay</code>는 <code class='ic'>/pay</code> 자체와 그 하위인 <code class='ic'>/pay/card</code>, <code class='ic'>/pay/history</code> 등을 모두 포함한다(단순 문자열 접두사가 아니라 경로 세그먼트 단위라 <code class='ic'>/payment</code>는 <code class='ic'>/pay</code>에 매칭되지 않는다). 실무에서 가장 많이 쓴다.</li>
+<li><code class='ic'>Exact</code>: 경로가 정확히 일치할 때만. <code class='ic'>/pay</code>는 오직 <code class='ic'>/pay</code>에만 매칭되고 <code class='ic'>/pay/card</code>는 안 된다.</li>
+</ul>
+<blockquote class='callout'>
+<p>여러 path 규칙이 동시에 맞을 때는 <strong>더 구체적인(긴) 경로가 우선</strong>한다. 예컨대 <code class='ic'>/</code>(메인)와 <code class='ic'>/pay</code>(결제)가 함께 있을 때 <code class='ic'>/pay/card</code> 요청은 <code class='ic'>/</code>에도 <code class='ic'>/pay</code>에도 걸리지만, 더 긴 <code class='ic'>/pay</code>로 라우팅된다. 그래서 넓은 경로(<code class='ic'>/</code>)와 좁은 경로(<code class='ic'>/pay</code>)를 한 Ingress에 함께 두어도 의도대로 갈린다.</p>
+</blockquote>
+<h4>실습: 두 서비스를 하나의 진입점으로 노출하기</h4>
+<p>마블 쇼핑몰을 예로 든다. <code class='ic'>/</code>로 들어오면 메인 페이지(<code class='ic'>marvel-service</code>), <code class='ic'>/pay</code>로 들어오면 결제 페이지(<code class='ic'>pay-service</code>)로 보낸다. Deployment와 Service는 이미 있다고 가정하고(이전 강의에서 다룬 내용), Ingress 리소스에 집중한다.</p>
+<pre><code>
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: marvel-ingress
+  annotations:
+    # 매칭된 경로 전체를 / 로 바꿔 백엔드에 전달 — 하위 경로는 보존되지 않음(아래 설명 참고)
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx          # 이 Ingress를 처리할 컨트롤러 지정
+  rules:
+    - http:
+        paths:
+          - path: /                 # 메인 페이지
+            pathType: Prefix
+            backend:
+              service:
+                name: marvel-service
+                port:
+                  number: 80
+          - path: /pay              # 결제 페이지
+            pathType: Prefix
+            backend:
+              service:
+                name: pay-service
+                port:
+                  number: 80
+</code></pre>
+<h5>rewrite-target은 정확히 무슨 일을 하나 (필수 이해)</h5>
+<p>위 매니페스트에서 <code class='ic'>nginx.ingress.kubernetes.io/rewrite-target: /</code>는 &quot;장식용 주석&quot;이 아니라 <strong>요청 경로를 백엔드로 넘기기 전에 다시 쓰는 핵심 동작</strong>을 한다. 그런데 그 동작은 직관과 다르므로 정확히 짚어야 한다.</p>
+<blockquote class='callout'>
+<p>단순 <code class='ic'>rewrite-target: /</code>는 <strong>매칭된 경로 전체를 통째로 <code class='ic'>/</code>로 바꿔</strong> 백엔드에 전달한다. 즉 사용자가 <code class='ic'>/pay</code>로 요청하든 <code class='ic'>/pay/card</code>로 요청하든, <code class='ic'>pay-service</code>가 받는 경로는 <strong>둘 다 <code class='ic'>/</code></strong>다. <code class='ic'>/pay/card</code>라고 해서 백엔드에 <code class='ic'>/card</code>로 전달되는 것이 <strong>아니다</strong> — 하위 경로 <code class='ic'>card</code>는 그냥 사라진다.</p>
+</blockquote>
+<p>왜 이런 재작성이 필요할까? 많은 백엔드 앱은 자신이 루트(<code class='ic'>/</code>)에서 서비스된다고 가정하고 만들어진다. 그런데 Ingress에서 <code class='ic'>/pay</code> 접두사를 붙여 노출하면, 재작성이 없을 경우 앱은 <code class='ic'>/pay</code>라는 (자신이 모르는) 경로로 요청을 받아 404를 내기 쉽다. 단순 <code class='ic'>rewrite-target: /</code>는 외부에 노출되는 접두사(<code class='ic'>/pay</code>)를 떼고 앱이 기대하는 루트(<code class='ic'>/</code>)로 맞춰 준다. 다만 그 대가로 <code class='ic'>/pay</code> 아래의 하위 경로도 함께 날아간다는 점을 기억해야 한다.</p>
+<h5>하위 경로를 보존하려면: 정규식 캡처 그룹</h5>
+<p>만약 <code class='ic'>/pay/card</code> → 백엔드의 <code class='ic'>/card</code>처럼 <strong>접두사만 떼고 하위 경로는 살리고 싶다면</strong>, 단순 <code class='ic'>/</code>로는 불가능하고 <strong>정규식 캡처 그룹</strong>을 써야 한다. 경로를 정규식으로 적고(<code class='ic'>pathType: ImplementationSpecific</code>), 캡처한 부분을 <code class='ic'>rewrite-target</code>에서 <code class='ic'>$번호</code>로 되살린다.</p>
+<pre><code>
+metadata:
+  annotations:
+    # 캡처 그룹 2번($2)을 살려 하위 경로 보존
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: &quot;true&quot;
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /pay(/|$)(.*)     # ( /|$ )=1번, (.*)=2번 캡처
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: pay-service
+                port:
+                  number: 80
+</code></pre>
+<p>이 패턴에서 <code class='ic'>(.*)</code>가 두 번째 캡처 그룹이고, <code class='ic'>rewrite-target: /$2</code>가 그 캡처 내용을 <code class='ic'>/</code> 뒤에 붙인다. 결과는 다음과 같다.</p>
+<ul>
+<li><code class='ic'>/pay</code> → 백엔드 <code class='ic'>/</code></li>
+<li><code class='ic'>/pay/</code> → 백엔드 <code class='ic'>/</code></li>
+<li><code class='ic'>/pay/card</code> → 백엔드 <code class='ic'>/card</code></li>
+<li><code class='ic'>/pay/card/detail</code> → 백엔드 <code class='ic'>/card/detail</code></li>
+</ul>
+<p>즉 <strong>하위 경로를 보존하려면 단순 <code class='ic'>/</code>가 아니라 캡처 그룹(<code class='ic'>/$2</code>)이 필요하다</strong>는 것이 핵심이다. 데모처럼 백엔드가 루트(<code class='ic'>/</code>)에서만 응답하면 단순 <code class='ic'>/</code>로 충분하지만, 앱이 <code class='ic'>/card</code> 같은 하위 라우트를 가진다면 캡처 그룹 방식을 써야 한다.</p>
+<p>반대로 <strong>주의할 점</strong>도 분명하다. 만약 <code class='ic'>pay-service</code> 앱이 <em>스스로</em> <code class='ic'>/pay</code> 경로를 기대하도록 만들어졌다면(즉 앱 라우트가 <code class='ic'>/pay/...</code>로 정의돼 있다면), <code class='ic'>rewrite-target: /</code>를 켜는 순간 경로가 <code class='ic'>/</code>로 깎여 전달되므로 오히려 <strong>404가 난다</strong>. 이 경우에는 rewrite를 빼거나, 앱이 기대하는 경로에 맞게 재작성 규칙을 조정해야 한다. 정리하면 rewrite-target은 &quot;외부 노출 경로와 앱 내부 경로가 다를 때 둘을 맞춰 주는 다리&quot;이며, <strong>켤지 말지·어떻게 쓸지는 백엔드 앱이 어떤 경로를 기대하는가에 달려 있다.</strong></p>
+<p>(참고로 <code class='ic'>/pay</code>처럼 접두사를 그대로 백엔드에 전달하고 싶다면 rewrite-target 주석을 아예 생략하면 된다. 그러면 <code class='ic'>pay-service</code>는 <code class='ic'>/pay</code>, <code class='ic'>/pay/card</code> 등 원래 경로를 그대로 받는다.)</p>
+<blockquote class='callout'>
+<p>한 가지 덧붙이면, rewrite를 껐을 때 404가 난다고 무조건 rewrite만 의심하지는 말자. 실무의 많은 웹 프레임워크는 자산·링크 경로를 절대 경로 대신 <strong>상대 경로</strong>로 만들어 접두사 영향을 덜 받게 설계돼 있어, 접두사를 그대로 받아도 멀쩡히 동작하는 경우가 많다. 그래서 404의 진짜 원인은 rewrite 여부보다 <strong>앱 자체의 라우팅(베이스 경로) 설계</strong>, 즉 앱이 어떤 base path에서 라우트를 등록했는지인 경우가 잦다. rewrite와 앱의 base path 설정을 함께 점검하는 습관을 들이자.</p>
+</blockquote>
+<blockquote class='callout'>
+<p><code class='ic'>rewrite-target</code>은 ingress-nginx의 레거시 어노테이션이라 버전·설정에 따라 동작이 미묘하게 달라져 온 역사가 있다. 그래서 하위 경로를 다루는 실무에서는 처음부터 <strong>캡처 그룹(<code class='ic'>path: /pay(/|$)(.*)</code> + <code class='ic'>rewrite-target: /$2</code>) 패턴</strong>을 표준으로 삼는 것이 단순 <code class='ic'>/</code>보다 예측 가능하고 안전하다.</p>
+</blockquote>
+<blockquote class='callout'>
+<p>API 버전 주의: 예전 자료에는 <code class='ic'>apiVersion: extensions/v1beta1</code>로 되어 있는 경우가 많은데, 이는 폐기(deprecated)되어 제거되었다. 쿠버네티스 1.19부터 정식(GA)이 된 <code class='ic'>networking.k8s.io/v1</code>을 사용해야 하며, <code class='ic'>backend</code> 안에 <code class='ic'>service.name</code>/<code class='ic'>service.port.number</code>로 쓰는 구조가 v1 문법이다.</p>
+</blockquote>
+<p>적용하고 확인한다.</p>
+<pre><code>
+kubectl apply -f marvel-ingress.yaml
+
+kubectl get ingress
+# NAME             CLASS   HOSTS   ADDRESS        PORTS   AGE
+# marvel-ingress   nginx   *       192.168.0.10   80      10s
+
+kubectl describe ingress marvel-ingress
+# Rules 섹션에서 /  -&gt; marvel-service:80,  /pay -&gt; pay-service:80 확인
+</code></pre>
+<p><code class='ic'>ADDRESS</code>에 컨트롤러의 외부 IP가 채워졌다면, 그 주소의 <code class='ic'>/</code>와 <code class='ic'>/pay</code>로 접속해 서로 다른 페이지가 뜨는지 확인한다.</p>
+<pre><code>
+curl http://192.168.0.10/         # 메인 페이지
+curl http://192.168.0.10/pay      # 결제 페이지 (단순 rewrite-target: / 면 백엔드엔 / 로 전달됨)
+curl http://192.168.0.10/pay/card # 단순 / 면 백엔드엔 역시 / 로 전달(card 소실), 캡처 그룹 쓰면 /card
+</code></pre>
+<p>이제 도메인 기반으로 나누고 싶다면 <code class='ic'>rules</code> 항목마다 <code class='ic'>host</code>를 추가한다.</p>
+<pre><code>
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shop.example.com       # 이 도메인은 메인 서비스로
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: marvel-service
+                port:
+                  number: 80
+    - host: pay.example.com        # 이 도메인은 결제 서비스로
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pay-service
+                port:
+                  number: 80
+</code></pre>
+<p>두 도메인 모두 같은 Ingress Controller IP를 가리키도록 DNS(또는 로컬 테스트라면 <code class='ic'>/etc/hosts</code>)를 설정하면, 컨트롤러가 Host 헤더로 분기한다. 정리하면 path 분기는 &quot;규칙 1개에 path 여러 개&quot;, host 분기는 &quot;host마다 규칙 1개&quot;라는 차이다. 참고로 host 기반에서는 각 서비스가 <code class='ic'>/</code>에서 받으므로 rewrite-target이 따로 필요 없는 경우가 많다.</p>
+<h4>실무에서 자주 쓰는 어노테이션</h4>
+<p>ingress-nginx는 어노테이션으로 라우팅 외의 동작을 미세 조정한다. 중급 운영에서 특히 자주 마주치는 두 가지를 짚는다.</p>
+<p><strong>세션 어피니티(Sticky Session) — 같은 사용자를 같은 Pod로.</strong> 기본적으로 Service는 요청을 여러 Pod에 고르게 부하분산한다. 그런데 로그인 세션을 각 Pod의 메모리에 들고 있는 앱(세션 정보를 외부 저장소로 빼지 못한 레거시 등)이라면, 매 요청이 다른 Pod로 가면 로그인이 풀린 것처럼 보인다. 이때 <strong>쿠키 기반 세션 어피니티</strong>를 켜면 컨트롤러가 사용자에게 쿠키를 발급하고, 같은 사용자의 후속 요청을 처음 붙은 Pod로 계속 보낸다.</p>
+<pre><code>
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: &quot;cookie&quot;
+    nginx.ingress.kubernetes.io/affinity-mode: &quot;persistent&quot;
+    nginx.ingress.kubernetes.io/session-cookie-name: &quot;route&quot;
+</code></pre>
+<blockquote class='callout'>
+<p>세션 어피니티는 상태를 외부로 빼지 못한 레거시를 위한 <strong>최후의 수단</strong>일 뿐, 무상태(stateless)·수평 확장형 앱에는 오히려 안티패턴이다. 특정 Pod로 트래픽이 쏠려 부하분산이 한쪽으로 기울 수 있고, 그 Pod가 죽으면 세션도 끊긴다. 새로 설계하는 앱이라면 처음부터 세션을 Redis 같은 외부 저장소로 빼서 모든 Pod가 공유하게 만들고, 어피니티에 의존하지 않는 것이 정석이다.</p>
+</blockquote>
+<p><strong>CORS — 다른 출처의 브라우저 요청 허용.</strong> 프런트엔드가 <code class='ic'>https://app.example.com</code>에 있고 API가 <code class='ic'>https://api.example.com</code>에 있으면, 브라우저는 보안 정책(Same-Origin Policy)에 따라 이 교차 출처(cross-origin) 요청을 기본 차단한다. 백엔드 앱 코드를 고치지 않고 Ingress 레벨에서 CORS 응답 헤더를 붙여 허용하고 싶을 때 다음 어노테이션을 쓴다.</p>
+<pre><code>
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/enable-cors: &quot;true&quot;
+    nginx.ingress.kubernetes.io/cors-allow-origin: &quot;https://app.example.com&quot;
+    nginx.ingress.kubernetes.io/cors-allow-methods: &quot;GET, POST, PUT, DELETE, OPTIONS&quot;
+</code></pre>
+<p><code class='ic'>enable-cors: &quot;true&quot;</code>만 켜면 기본값으로 모든 출처(<code class='ic'>*</code>)를 허용하므로, 운영에서는 <code class='ic'>cors-allow-origin</code>으로 허용할 도메인을 명시해 범위를 좁히는 것이 안전하다.</p>
+<h4>주의사항과 실무 팁</h4>
+<ul>
+<li><strong>컨트롤러 먼저, 리소스는 그다음.</strong> Ingress가 동작하지 않으면 십중팔구 컨트롤러가 없거나 <code class='ic'>ingressClassName</code>이 맞지 않는 경우다.</li>
+<li><strong>TLS는 한곳에서.</strong> Ingress의 <code class='ic'>spec.tls</code>에 인증서를 담은 Secret을 연결하면 HTTPS 종료(TLS termination)를 컨트롤러가 처리한다. 개발자가 앱마다 SSL을 구현할 필요가 없어진다.</li>
+<li><strong><code class='ic'>/pay/card</code>가 백엔드에 그대로 가지 않는다 — 단순 <code class='ic'>/</code>는 하위 경로를 버린다.</strong> <code class='ic'>rewrite-target: /</code>은 매칭 경로 전체를 <code class='ic'>/</code>로 바꾸므로 <code class='ic'>/pay/card</code>도 백엔드엔 <code class='ic'>/</code>로 간다. 하위 경로를 살리려면 <code class='ic'>path: /pay(/|$)(.*)</code> + <code class='ic'>rewrite-target: /$2</code> 캡처 그룹을 쓴다.</li>
+<li><strong><code class='ic'>/pay</code>인데 404가 난다면 — rewrite와 앱 라우팅을 함께 보라.</strong> 백엔드 앱이 <code class='ic'>/pay</code>를 기대하는데 404가 나면 rewrite가 경로를 깎은 게 원인일 수 있다. 다만 많은 프레임워크는 상대 경로를 써서 접두사 영향을 덜 받으므로, 404의 진짜 원인은 rewrite 여부보다 <strong>앱이 어떤 베이스 경로에 라우트를 등록했는가</strong>인 경우가 많다. rewrite만 의심하지 말고 앱의 base path 설정도 함께 확인하자. 또 annotation은 컨트롤러마다 키가 다르니(Traefik 등은 다른 키 사용) 쓰는 컨트롤러 문서를 확인한다.</li>
+<li><strong>Ingress는 HTTP/HTTPS 전용.</strong> TCP/UDP나 gRPC 스트림 같은 비-HTTP 트래픽 라우팅은 Ingress의 범위를 벗어난다. 이런 요구가 커지면서 등장한 것이 Gateway API인데, 이는 다음 단계 학습 주제다.</li>
+</ul>
+<h3>핵심 요약</h3>
+<ul>
+<li>NodePort는 높은 포트·노드 IP 의존, LoadBalancer는 서비스마다 별도 로드밸런서(비용) 문제가 있다. Ingress는 단일 진입점에서 L7 라우팅과 TLS를 통합 관리한다.</li>
+<li>Ingress는 <strong>Controller(실제 트래픽을 처리하는 nginx 등 엔진)</strong> 와 <strong>Ingress 리소스(라우팅 규칙 YAML)</strong> 의 짝으로 동작한다. 컨트롤러는 기본 탑재되지 않으므로 반드시 먼저 설치해야 한다.</li>
+<li>host 기반은 도메인으로, path 기반은 URL 경로로 분기하며 함께 쓸 수 있다. <code class='ic'>Prefix</code>는 경로 세그먼트 단위 접두사 매칭이고, 여러 규칙이 맞으면 더 긴 경로가 우선한다. 어느 규칙에도 안 맞으면 default backend로 간다.</li>
+<li>단순 <code class='ic'>rewrite-target: /</code>은 매칭 경로 전체를 <code class='ic'>/</code>로 바꿔 전달하므로 <code class='ic'>/pay</code>든 <code class='ic'>/pay/card</code>든 백엔드엔 모두 <code class='ic'>/</code>로 간다(하위 경로 소실). 하위 경로를 보존하려면 <code class='ic'>path: /pay(/|$)(.*)</code> + <code class='ic'>rewrite-target: /$2</code> 캡처 그룹을 써야 <code class='ic'>/pay/card</code>가 <code class='ic'>/card</code>로 전달된다. 404가 나도 rewrite만 의심하지 말고 앱의 베이스 경로 설계까지 함께 점검한다.</li>
+<li>실무에서는 어노테이션으로 동작을 확장한다. <strong>세션 어피니티(<code class='ic'>affinity: cookie</code>)</strong>는 상태를 외부로 빼지 못한 레거시를 위한 최후의 수단이며, <strong>CORS(<code class='ic'>enable-cors: &quot;true&quot;</code>)</strong>는 다른 출처의 브라우저 요청을 Ingress 레벨에서 허용한다.</li>
+<li>매니페스트는 <code class='ic'>networking.k8s.io/v1</code> 사용이 정답이며, <code class='ic'>ingressClassName</code>·<code class='ic'>pathType</code>·<code class='ic'>service.port.number</code> 구조를 지켜야 한다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. [워밍업] minikube에 Ingress Controller를 활성화하고 실제로 기동되었는지 확인하라. ingress-nginx Pod가 Running 상태가 될 때까지 기다린 뒤, 어떤 네임스페이스에 컨트롤러 Pod가 뜨는지 확인하라.</p></div>
+              <pre class='starter'><code># minikube가 실행 중이어야 한다
+# minikube start 로 클러스터가 준비된 상태를 가정한다
+
+# 아직 아무 Ingress 관련 리소스도 없는 상태에서 시작
+kubectl get pods -A | grep ingress
+# (출력 없음이 정상)</code></pre>
+              <details><summary>힌트</summary><ul><li>minikube addons list 명령으로 현재 활성화된 애드온 목록을 확인할 수 있다. ingress 행의 STATUS 열이 enabled인지 확인해 보자.</li><li>kubectl wait가 timeout으로 실패한다면 kubectl describe pod -n ingress-nginx &lt;pod-name&gt; 으로 이벤트를 확인하라. 이미지 풀 실패(ImagePullBackOff)라면 네트워크/방화벽 문제일 가능성이 높다.</li><li>컨트롤러 Service의 TYPE이 NodePort로 보이면 정상이다. minikube 환경에서는 LoadBalancer 타입 대신 NodePort를 쓴다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. Ingress 애드온 활성화
+minikube addons enable ingress
+
+# 2. ingress-nginx 네임스페이스에 컨트롤러 Pod가 Running이 될 때까지 대기
+kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=120s
+
+# 3. 컨트롤러 Pod 및 Service 확인
+kubectl get pods -n ingress-nginx
+kubectl get svc -n ingress-nginx
+
+# 기대 출력 (Pod)
+# NAME                                        READY   STATUS    RESTARTS   AGE
+# ingress-nginx-controller-xxxx               1/1     Running   0          60s
+
+# 기대 출력 (Service)
+# NAME                                 TYPE        CLUSTER-IP      ...
+# ingress-nginx-controller             NodePort    10.96.xxx.xxx   ...</code></pre>
+                <div class='exp2'><p>minikube는 Ingress Controller를 기본 탑재하지 않는다. <code class='ic'>minikube addons enable ingress</code> 명령이 ingress-nginx 컨트롤러를 ingress-nginx 네임스페이스에 Deployment로 배포한다. 컨트롤러가 없으면 Ingress 리소스를 아무리 만들어도 트래픽이 라우팅되지 않으므로, 이 단계를 반드시 먼저 거쳐야 한다. kubectl wait로 Pod Ready 조건을 확인해 컨트롤러가 완전히 기동될 때까지 기다리는 습관을 들이면 이후 단계에서 &#x27;왜 안 되지?&#x27; 하고 헤매는 시간을 줄일 수 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. [핵심 실습 1] 두 개의 Deployment와 ClusterIP Service를 배포하라. 첫 번째는 메인 페이지 역할의 &#x27;marvel-app&#x27;, 두 번째는 결제 페이지 역할의 &#x27;pay-app&#x27;이다. 각 Deployment는 nginx 이미지를 쓰되, 두 서비스가 서로 다른 응답을 반환하도록 ConfigMap으로 index.html을 주입한다. 배포 후 kubectl get pods, kubectl get svc로 모두 Running/있음을 확인하라.</p></div>
+              <pre class='starter'><code># 아래 YAML 골격을 완성하라.
+# ConfigMap으로 각 nginx 컨테이너의 /usr/share/nginx/html/index.html을 덮어써서
+# 서로 다른 텍스트를 반환하게 만드는 것이 핵심이다.
+
+# marvel-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: marvel-html
+data:
+  index.html: |
+    # TODO: marvel 메인 페이지임을 알 수 있는 HTML 한 줄을 넣어라
+
+---
+# pay-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pay-html
+data:
+  index.html: |
+    # TODO: pay 결제 페이지임을 알 수 있는 HTML 한 줄을 넣어라</code></pre>
+              <details><summary>힌트</summary><ul><li>volumeMounts.mountPath를 /usr/share/nginx/html 로 설정해야 nginx가 그 폴더를 웹 루트로 사용한다. 경로가 하나라도 틀리면 nginx 기본 페이지가 그대로 보인다.</li><li>kubectl describe pod &lt;pod-name&gt; 으로 이벤트를 보면 ConfigMap 마운트 실패 여부를 확인할 수 있다. &#x27;MountVolume.SetUp failed&#x27; 메시지가 나오면 ConfigMap 이름 오타를 먼저 의심하라.</li><li>Service가 Pod를 제대로 선택하는지 kubectl get endpoints marvel-service 로 확인할 수 있다. ENDPOINTS 열에 Pod IP:80 이 표시되어야 정상이다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># ---- marvel-app.yaml ----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: marvel-html
+data:
+  index.html: |
+    &lt;h1&gt;Marvel Main Page&lt;/h1&gt;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: marvel-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: marvel
+  template:
+    metadata:
+      labels:
+        app: marvel
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:stable-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: marvel-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: marvel-service
+spec:
+  selector:
+    app: marvel
+  ports:
+    - port: 80
+      targetPort: 80
+
+# ---- pay-app.yaml ----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pay-html
+data:
+  index.html: |
+    &lt;h1&gt;Pay Service Page&lt;/h1&gt;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pay-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pay
+  template:
+    metadata:
+      labels:
+        app: pay
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:stable-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+      volumes:
+        - name: html
+          configMap:
+            name: pay-html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pay-service
+spec:
+  selector:
+    app: pay
+  ports:
+    - port: 80
+      targetPort: 80
+
+# 적용
+kubectl apply -f marvel-app.yaml
+kubectl apply -f pay-app.yaml
+
+# 확인
+kubectl get pods
+# NAME                          READY   STATUS    RESTARTS   AGE
+# marvel-app-xxxx               1/1     Running   0          30s
+# pay-app-xxxx                  1/1     Running   0          28s
+
+kubectl get svc
+# NAME             TYPE        CLUSTER-IP      PORT(S)   AGE
+# marvel-service   ClusterIP   10.96.xxx.xxx   80/TCP    30s
+# pay-service      ClusterIP   10.96.xxx.yyy   80/TCP    28s</code></pre>
+                <div class='exp2'><p>Ingress는 클러스터 내부의 Service를 백엔드로 참조한다. Service 타입이 ClusterIP여도 충분하다 — Ingress Controller가 같은 클러스터 안에 있어서 ClusterIP로 접근할 수 있기 때문이다. ClusterIP Service를 외부에 직접 노출할 필요가 없으므로, Ingress 앞단에 놓이는 Service는 ClusterIP가 가장 올바른 선택이다. ConfigMap으로 index.html을 주입한 것은 두 서비스가 서로 다른 응답을 내려줘야 라우팅 결과를 눈으로 확인할 수 있기 때문이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. [핵심 실습 2] networking.k8s.io/v1 API를 사용해 path 기반 Ingress 리소스를 작성하고 적용하라. &#x27;/&#x27; 경로는 marvel-service로, &#x27;/pay&#x27; 경로는 pay-service로 라우팅되어야 한다. pathType은 Prefix로 지정하고, ingressClassName은 nginx로 설정한다. kubectl apply 후 kubectl get ingress로 ADDRESS가 채워지면, curl 또는 minikube service URL로 두 경로를 각각 호출해 서로 다른 응답이 오는지 확인하라.</p></div>
+              <pre class='starter'><code># marvel-ingress.yaml 을 아래 골격을 채워 완성하라
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: marvel-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: # TODO
+            backend:
+              service:
+                name: # TODO
+                port:
+                  number: # TODO
+          - path: /pay
+            pathType: # TODO
+            backend:
+              service:
+                name: # TODO
+                port:
+                  number: # TODO</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl get ingress 의 ADDRESS 열이 비어 있다면 아직 컨트롤러가 Ingress를 처리 중이거나 컨트롤러 자체가 Running 상태가 아닌 것이다. kubectl get pods -n ingress-nginx 를 다시 확인하라.</li><li>curl 응답이 504 Gateway Timeout이면 Ingress는 받았지만 백엔드 Service에 닿지 못한 것이다. kubectl get endpoints marvel-service 로 Pod IP가 등록됐는지 확인하라.</li><li>pathType: Prefix 와 Exact 의 차이를 직접 실험하고 싶다면, /pay 규칙을 Exact로 바꾼 뒤 curl http://$INGRESS_IP/pay/test 를 호출해보자. Exact에서는 404가 돌아오고 Prefix에서는 응답이 온다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># ---- marvel-ingress.yaml (완성본) ----
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: marvel-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: marvel-service
+                port:
+                  number: 80
+          - path: /pay
+            pathType: Prefix
+            backend:
+              service:
+                name: pay-service
+                port:
+                  number: 80
+
+# 적용
+kubectl apply -f marvel-ingress.yaml
+
+# ADDRESS가 채워질 때까지 확인 (10~30초 소요)
+kubectl get ingress
+# NAME             CLASS   HOSTS   ADDRESS         PORTS   AGE
+# marvel-ingress   nginx   *       192.168.49.2    80      15s
+
+# 라우팅 확인 (INGRESS_IP는 위 ADDRESS 값)
+export INGRESS_IP=$(kubectl get ingress marvel-ingress -o jsonpath=&#x27;{.status.loadBalancer.ingress[0].ip}&#x27;)
+curl http://$INGRESS_IP/
+# 기대 출력: &lt;h1&gt;Marvel Main Page&lt;/h1&gt;
+
+curl http://$INGRESS_IP/pay
+# 기대 출력: &lt;h1&gt;Pay Service Page&lt;/h1&gt;
+
+# minikube 환경에서 IP 확인이 안 될 경우 대안
+minikube ip
+# 반환된 IP를 직접 사용: curl http://&lt;minikube-ip&gt;/</code></pre>
+                <div class='exp2'><p>Ingress 리소스는 세 가지 필드가 v1 문법의 핵심이다. 첫째, apiVersion을 networking.k8s.io/v1로 써야 한다 (extensions/v1beta1은 1.22에서 제거됨). 둘째, ingressClassName으로 이 Ingress를 처리할 컨트롤러를 지정한다 — 여기서는 ingress-nginx 컨트롤러가 &#x27;nginx&#x27;라는 IngressClass를 등록하므로 nginx를 쓴다. 셋째, pathType을 반드시 명시해야 한다 (v1에서 필수 필드). Prefix는 &#x27;/pay&#x27;가 &#x27;/pay&#x27;, &#x27;/pay/card&#x27;, &#x27;/pay/bank&#x27; 등 하위 경로까지 모두 포함한다. rewrite-target: / 어노테이션은 &#x27;/pay&#x27;로 들어온 요청을 pay-service에 전달할 때 경로를 &#x27;/&#x27;로 재작성해, nginx 기본 설정에서 index.html을 그대로 돌려주게 한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. [응용] path 기반 Ingress를 host 기반으로 변형하라. &#x27;shop.example.com&#x27;은 marvel-service로, &#x27;pay.example.com&#x27;은 pay-service로 라우팅되도록 Ingress를 수정한다. 실제 DNS 없이 로컬에서 테스트하려면 /etc/hosts(Linux/Mac) 또는 C:\Windows\System32\drivers\etc\hosts(Windows)에 minikube IP를 두 도메인에 매핑하거나, curl의 --resolve 옵션을 사용한다. 두 도메인 각각에 curl을 보내 서로 다른 서비스 응답이 오는지 확인하라.</p></div>
+              <pre class='starter'><code># 기존 marvel-ingress.yaml을 host 기반으로 수정하라
+# path 기반과의 차이: rules 배열 항목마다 host 필드가 생기고
+# 각 host 아래에는 단일 path: / 규칙만 둔다
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: marvel-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: # TODO
+            backend:
+              service:
+                name: # TODO
+                port:
+                  number: # TODO
+    - host: pay.example.com
+      http:
+        paths:
+          - path: /
+            pathType: # TODO
+            backend:
+              service:
+                name: # TODO
+                port:
+                  number: # TODO</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl describe ingress marvel-ingress 출력의 Rules 섹션에서 &#x27;Host&#x27;, &#x27;Path&#x27;, &#x27;Backends&#x27;가 모두 올바르게 채워져 있는지 먼저 확인하라. 규칙이 비어 있으면 YAML의 들여쓰기 오류다.</li><li>curl 응답으로 404 &#x27;default backend&#x27;가 오면 Host 헤더가 규칙과 일치하지 않는 것이다. --resolve 없이 IP로 직접 호출하면 Host 헤더가 IP가 되어 host 규칙에 매칭되지 않는다.</li><li>host 기반 Ingress에서 특정 도메인 요청에 rewrite-target 어노테이션이 필요 없다면 생략해도 된다. path 기반 실습에서 rewrite-target: / 을 쓴 이유는 &#x27;/pay&#x27; 경로를 그대로 전달하면 백엔드 nginx가 /pay 경로의 파일을 찾아 404를 내보내기 때문이었다. host 기반에서는 각 도메인이 &#x27;/&#x27;로 진입하므로 재작성이 불필요하다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># ---- marvel-ingress-host.yaml (완성본) ----
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: marvel-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: marvel-service
+                port:
+                  number: 80
+    - host: pay.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pay-service
+                port:
+                  number: 80
+
+# 기존 Ingress에 덮어쓰기 적용
+kubectl apply -f marvel-ingress-host.yaml
+
+# minikube IP 확인
+export MINIKUBE_IP=$(minikube ip)
+
+# 방법 A: curl --resolve 옵션 (hosts 파일 수정 없이 테스트 가능)
+curl --resolve shop.example.com:80:$MINIKUBE_IP http://shop.example.com/
+# 기대 출력: &lt;h1&gt;Marvel Main Page&lt;/h1&gt;
+
+curl --resolve pay.example.com:80:$MINIKUBE_IP http://pay.example.com/
+# 기대 출력: &lt;h1&gt;Pay Service Page&lt;/h1&gt;
+
+# 방법 B: /etc/hosts 추가 (Linux/Mac)
+# echo &quot;$MINIKUBE_IP shop.example.com pay.example.com&quot; | sudo tee -a /etc/hosts
+# curl http://shop.example.com/
+# curl http://pay.example.com/
+
+# 방법 C: Windows hosts 파일 (관리자 PowerShell)
+# Add-Content C:\Windows\System32\drivers\etc\hosts &quot;$MINIKUBE_IP shop.example.com pay.example.com&quot;
+# curl http://shop.example.com/
+# curl http://pay.example.com/
+
+# 라우팅 규칙 확인
+kubectl describe ingress marvel-ingress
+# Rules 섹션에 두 host가 각각의 service로 매핑된 것을 확인</code></pre>
+                <div class='exp2'><p>host 기반 라우팅과 path 기반 라우팅의 구조적 차이를 이해하는 것이 이 단계의 핵심이다. path 기반은 rules 항목 1개에 path를 여러 개 두지만, host 기반은 host마다 rules 항목 1개가 대응한다. 컨트롤러는 HTTP 요청의 Host 헤더를 보고 rules를 순서대로 매칭하므로, 두 도메인이 같은 Ingress Controller IP를 가리키기만 하면 된다. --resolve 옵션은 DNS 변경 없이 &#x27;curl이 이 도메인을 이 IP로 강제 연결&#x27;하도록 지시하는 것으로, hosts 파일을 건드리지 않아도 되는 테스트 방법이다. 실무에서는 클라우드 DNS나 내부 DNS 레코드를 Ingress Controller의 외부 IP(LoadBalancer IP)로 A 레코드 등록하는 방식으로 동일하게 동작한다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=GhZi4DxaxxE' target='_blank'>Kubernetes Ingress Explained Completely For Beginners - Updated</a></li><li><a href='https://www.youtube.com/watch?v=9TMIetXb6Pw' target='_blank'>[따배쿠] 8-2 Kubernetes Ingress 실습 - 웹페이지 구현</a></li><li><a href='https://www.youtube.com/watch?v=NPFbYpb0I7w' target='_blank'>Kubernetes Ingress in 5 mins</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

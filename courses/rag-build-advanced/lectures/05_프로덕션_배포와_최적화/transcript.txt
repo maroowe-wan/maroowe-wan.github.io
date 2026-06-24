@@ -1,0 +1,142 @@
+## Video 1: Your RAG is Broken — Production RAG Architecture Nobody Teaches You (2026)
+https://www.youtube.com/watch?v=Mbe2Tw57QFE
+
+Our RAG system retrieves the wrong documents 40% of the time. This is a problem that happens every week in most of the teams I work with. The team builds a RAG pipeline that works really well in the testing environment but it fails in the production environment. The problem is not in the vector database, not the embedding model, and not even the chunk size. The problem is the architecture around it.
+
+What happens in most scenarios is teams build three elements: they embed the documents, store it in a vector database, and then retrieve and generate. This works for demo but fails for production environments. In a production RAG architecture, we generally have seven layers, not three. We have document processing, chunking strategy, vector database, permission filtering or query permission filtering, hybrid search, re-ranking, and cost optimization. Then we'll have the LLM generation.
+
+Most teams build layers 1, 2, and 3 and wonder why the accuracy is just 60% and costs are getting exploded. In production, you need all seven layers.
+
+The first mistake most teams make is asking the wrong question about which vector database to use. The right question is: what are my access patterns and what will be my scale requirement? This is a clear decision framework to use whenever doing the implementation.
+
+Scenario One: If you are in early stage with less than 1 million vectors, then Chroma DB or Quadrant would be your first choice which is self-hosted. It's free or low cost, easy to get started with pip install or docker run, and has good enough performance. The cost is somewhere between 0 to $50 per month. However, avoid this when you need multi-tenancy, production SLA, or distributed search.
+
+Scenario Two: Production or mid-scale with 1 to 10 million vectors. Here, use Pinecone or Weaviate. Pinecone can be managed and Weaviate can be self-hosted. This provides production-ready infrastructure, better performance at scale, multi-tenancy support, monitoring and observability. Pinecone has zero operational overhead and very simple pricing, but the cost is between $70 to $300 per month. Weaviate allows more control and is better for complex filtering and hybrid search, but you have to manage the operations and need DevOps expertise. Overall cost is between $70 to $5,500 per month depending on scale.
+
+Scenario Three: Enterprise or large scale with more than 10 million vectors. Use Weaviate which is self-hosted or Milvus which is distributed. We need distributed architecture, fine grain control, and cost optimization at scale. Milvus is built for massive scale, distributed by design, and is open source, but it's complex to operate and requires significant DevOps. Overall cost is between $500 to $5k per month, but at 100 million plus vectors, managed solutions would cost more than $10k.
+
+The real decision is not about which is best. It's about where you are in your product life cycle, your budget, and your scale. My recommendation for most teams is to start with Chroma which is free and easy, then move to Pinecone when you hit production, then move to self-hosted Weaviate when cost matters especially at scale optimization.
+
+The next critical element is your chunking strategy. This is where most RAG systems fail. The common mistake is using fixed chunk size without overlap without context preservation. As a result, you get context loss at boundaries and related information is split across chunks, resulting in poor retrieval accuracy.
+
+For example, if you have a fixed chunk like chunk one saying "Q3 revenue is 2.1 million up by 34%" and chunk two with "growth driven by enterprise 67% increase", then a query about Q3 revenue growth will retrieve chunk one which doesn't have the answer. The answer is in chunk two or three. Overlapping provides better accuracy by preserving context at boundaries. Start with 20% overlap, which is the sweet spot we've seen in most cases. If you use 50% overlap it results in high accuracy but also high cost. My rule is 20% overlap for general content and 50% overlap for dense technical documents where context is critical.
+
+However, fixed chunks are still not optimal. The better approach is semantic chunking. Instead of chunking by token, chunk by meaning. LangChain has a semantic chunker that works really well. It embeds each sentence, calculates similarity between adjacent sentences, and splits when similarity drops below a threshold. This results in chunks that respect natural semantic boundaries. Instead of splitting mid-paragraph, it splits after completing a topic or at natural transition points. This results in 15 to 25% better retrieval accuracy in overall testing.
+
+However, there's a cost tradeoff. Higher cost because you're embedding every sentence. Use semantic chunking when dealing with high value documents, especially in legal, medical and financial domains, when accuracy matters and you have budget for extra embeddings. Avoid it when dealing with large documents corpus or in cost constraint environments.
+
+The recommended chunking strategy is 500 tokens per chunk, 100 tokens overlap (generally 20%), and semantic chunking for critical documents only.
+
+Even with perfect chunking, RAG systems fail because of missing the next layer: permission filtering. I've seen teams build RAG that works, deploy to production, but when a user queries "what exactly is my Q4 strategy" the system retrieves confidential executive memos that the user should not have access to. This is called data leakage.
+
+In demo, everyone has access to everything. But in production, permissions matter. The problem is vector databases don't know how to have permissions in your system. They'll happily retrieve whatever the user asks, they don't care. The solution is the permission filtering layer.
+
+You have two approaches. First is metadata filtering. Store the permission as metadata in vector database. The advantage is it's fast, especially while filtering in vector database, it scales well, and you don't require any additional service. The disadvantage is metadata size limits and you need to reindex on permission changes.
+
+Second is post-retrieval filtering. You retrieve documents then perform the filtering. The advantage is flexible permission logic, easy permission updates, and no metadata size limits. The disadvantage is it's slower and you might not get enough results after filtering.
+
+My recommendation is to always start with the simple metadata filtering approach, then move to post-retrieval filtering when permission rules get complex or change frequently.
+
+Permission filtering is not optional in production systems. It's essential. Budget it from day one. Don't add it later because later becomes never.
+
+Even with permission filtering, you'll still burn money if you don't optimize the cost. Let me show you where the cost comes from in a RAG system. Let's take a look into the system stats: 100k documents, 5 pages per document on average, 500k total pages, and you perform embed, store and query.
+
+For embedding cost, using OpenAI embedding 3 large, the cost is 0.13 per 1 million tokens. The average document is 2,000 tokens and we'll be dealing with 1 billion tokens so the total embedding cost will be $130 one-time. But with 20% overlapping of chunking, add 20% more to get $156. With semantic chunking, embed every sentence first, consider it as double for boundaries, so the cost would be $260.
+
+For vector storage cost using Pinecone as an example, 0.096 per 1 million vectors per month. For 500k pages, 600k chunks with overlap, the total storage cost would be close to $60 per month.
+
+For query cost with 10k queries per day, each query retrieves top 5 chunks, 10k into 5 is 50k vector search per day. Each query retrieves 5 chunks, 500 tokens per chunk, 2,500 tokens per context. 10k queries by 2,500 tokens equals 25 million tokens per day. Using GPT-4 Turbo at $10 per 1 million tokens, the LLM cost per day is $250 per day which is $7,500 per month.
+
+The total cost is $58 for vector storage, $7,500 LLM cost per month, total $7,558 per month. The vector DB is just 1% of your entire spending. The LLM cost is the most expensive part which most teams building it are missing.
+
+Strategy one for cost optimization is to reduce the retrieve chunks. Instead of top 5, retrieve top 3. This reduces from 2,500 tokens per query to 1,500 tokens per query and saves $3,000 per month. The tradeoff is slightly lower accuracy, but in many scenarios it's negligible.
+
+Second strategy is to use hybrid search and reranking. Don't send all five chunks, rerank them first. Retrieve 10 candidates, rerank to top 3 and send to the LLM. Use Cohere Rerank API which costs $1 per 1k searches which is very cheap, or use local BERT model which is free but adds latency overhead less than 100 milliseconds. This results in better accuracy with 10 candidates for broad recall, rerank to top 3 for precision, then send to LLM. This results in net savings of $2,700 per month.
+
+Third strategy is to cache embeddings, store smaller chunks for storage and larger chunks for LLM. Use smaller chunks in vector database and retrieve the parent document sections for the LLM context. This improves retrieval accuracy and provides parent sections.
+
+Fourth strategy is to cache embeddings. If 30 to 50% of your queries are similar, cache the embeddings. Then if there's a cache hit there's no embedding cost. If embedding cost is 0.1 per query at 10k queries per day, you'll save $150 per month.
+
+My production cost optimization stack would be: retrieve top 10 documents, perform hybrid search, rerank to 3 using Cohere, send 3 chunks to LLM which is 1,500 tokens, and cache common queries. These are the four things for cost optimization in production RAG.
+
+The rule is always simple: optimize the LLM context cost, not your vector database cost. Vector database is less than 1% of your total cost. The LLM is 99%.
+
+The complete production RAG architecture has seven layers: document processing (parse PDF, word documents, preserve structure, handle images with OCR if needed), chunking strategy (20% overlap, 500 tokens per chunk, semantic chunking for critical documents), embedding and storage (use OpenAI model, store in Pinecone or Weaviate), query processing (embed query, hybrid search with vector and keyword, retrieve top 10), permission filtering (metadata filtering, keep only accessible documents), reranking (rerank top 10 to top 3, use Cohere or local model), and LLM generation (assemble context of 3 chunks, generate response, cite resources).
+
+## Video 2: LLMOps — Managing Large Language Models in Production
+https://www.youtube.com/watch?v=QVzztmfdliQ
+
+Large language models or LLMs feel like pure magic. They can write poems, spit out code, and answer incredibly complex questions in seconds. But how do you take that magic, that cool demo, and turn it into a business tool you can rely on? This is the real challenge.
+
+This is the fundamental question that every developer and business leader is wrestling with. An LLM can be absolutely brilliant one second and then confidently make something up the next second. How do you build a real product on something that can be so unpredictable? How do you make it safe, reliable, and not break the bank?
+
+The demo is all about the wow factor, it's creative and exciting. But a real product has to be dependable. It has to be reliable every single time, safe for users and data, and efficient enough that it doesn't become a money pit.
+
+The LLM production problem is unique. Models have billions of parameters and are incredibly expensive to run. They're super sensitive to the context you feed them. A tiny change in a prompt can give a wildly different result. And how do you measure if it's correct when it can hallucinate or reflect biases?
+
+This unique set of problems demands a unique solution: LLMOps. LLMOps is the playbook. It's how we take incredibly powerful but wild and unpredictable models and tame them for professional use. It's the whole set of practices and tools that manages the entire life cycle from idea to a scalable app that serves millions of users.
+
+LLMOps is the crucial bridge. Without it, LLMs are just fascinating toys. With it, they become powerful enterprise-grade engines you can build a business on top of.
+
+With traditional machine learning, data meant spending ages on feature engineering. With LLMs, it's about prompt design and building a knowledge base. Monitoring used to be about simple accuracy. Now we're hunting for hallucinations and toxicity. The cost is in a completely different universe.
+
+The LLMOps life cycle includes defining the problem, mastering prompt design, picking the right model, deploying it, and continuous monitoring and governance.
+
+If you boil it down to one thing, LLMOps is about managing the conversation. It's a mindset shift. Unlike traditional code, you don't command an LLM, you prompt it, persuade it, guide it. Mastering that interaction through prompt engineering is the foundational skill.
+
+But if you need the model to know your specific stuff like company documents or product specs, you use Retrieval Augmented Generation or RAG. You're giving the LLM an open book test where the book is your private up-to-date information.
+
+When a user asks a question, the system doesn't just blindly send it to the LLM. First, it searches your knowledge base to find relevant documents. Then it takes those documents and bundles them with the original question into a super-informed prompt. Only then does the LLM generate a response grounded in your specific data.
+
+RAG makes the model an expert on your world without the cost and complexity of retraining a model from scratch. It's a game-changer for creating custom accurate AI applications.
+
+When your app is live, how do you know if it's working well? Forget simple accuracy scores. We're looking at hallucination rate, toxicity of output, response speed, and token usage. Every single token costs money. Words in the prompt and answer all add up. A poorly designed system can become a financial black hole.
+
+Effective LLMOps is also about smart cost management. Beyond cost, there are serious risks. Letting an LLM interact with users and data opens new ways for attack and misuse. Governance and security become 100% non-negotiable.
+
+We're dealing with whole new threats like prompt injection where a user tricks the model into ignoring instructions, or jailbreaking where they bypass safety filters. There's also leaking sensitive data or violating compliance rules like GDPR.
+
+For every risk, the LLMOps framework provides a defense. We use guardrails to keep model behavior in check, content moderation filters to block harmful output, and data masking to protect sensitive info.
+
+The field is moving at an incredible pace. We're heading towards multi-agent systems with teams of AIs working on complex problems. That requires smarter orchestration, models that improve over time, and rock-solid testing pipelines. As regulators catch up, having clear audit trails becomes essential.
+
+LLMOps isn't just a technical niche. It's the essential discipline that closes the gap between the promise of AI and the reality of a working valuable product. As models become a commodity, the real competitive edge isn't having the smartest model. It's having the smartest, safest, and most efficient operations wrapped around it.
+
+## Video 3: 6 Steps to Building Production-Ready Generative AI Applications
+https://www.youtube.com/watch?v=iHyK8KX6uS0
+
+Whipping up a basic AI chatbot demo is incredibly easy. Almost anyone can slap together a prompt and API key in an afternoon. But making the leap from a weekend project to a true production-ready generative AI application is a completely different challenge. We're popping the hood to see how the pros actually get it done.
+
+We need to shatter the illusion of the demo. A basic demo chatbot is totally ungrounded, hallucinates facts with confidence, crashes under pressure, and has no idea what your company does. A production environment is designed to be highly scalable, rock-solid in security, and customized to business needs.
+
+We break this journey into five logical steps: beyond the chatbot demo, the optimization balancing act, customizing AI with your own data, layering in safety and security, and exploring autonomous intelligent agents.
+
+Step One: Beyond the chatbot demo - choosing the right foundation model. A foundation model is the core engine powering your app. Today we have an incredible ecosystem with OpenAI, Anthropic, Meta AI, Google DeepMind, Mistral AI. But you can't just pick the most famous one.
+
+Evaluate them like a new hire: accuracy (how well does it answer domain-specific questions?), context window (can it read a 100-page legal contract?), and deployment flexibility (cloud or local?).
+
+The secret sauce is mapping specific business problems to specific AI brains. For coding assistants, you need coding-specialized LLMs. For medical summarizers, you need high accuracy reasoning where precision is life or death. For offline enterprise chatbots in high security, you go with local or open-source models.
+
+Choosing the wrong model creates massive scalability and cost nightmares.
+
+Step Two: The optimization balancing act - navigating the trilemma. Operating foundation models at scale introduces the classic engineering trilemma of GenAI: cost, latency, and accuracy. Large models are incredibly accurate but expensive per token. Small models are fast with low latency but accuracy drops. You literally cannot have all three maxed out.
+
+Developers use architectural techniques to navigate this trilemma: model routing (send simple FAQs to cheap models, save expensive models for complex reasoning), caching (serve answers to repeated questions instantly), streaming responses, prompt optimization, and quantization (shrink model size).
+
+Step Three: Customizing with your data - beyond generic knowledge. This is where the magic happens. A generic model knows zero about your internal documents, specific jargon, or workflow policies. It's a terrible employee without customization.
+
+We get our private data into AI without retraining using RAG: Retrieval-Augmented Generation. It happens in five steps: documents live in vector database, embedding model translates the question, retriever searches the database, re-ranking sorts the best information, and that perfect information is injected into the prompt.
+
+It effectively searches company files right before speaking. Vector databases like Pinecone, Weaviate, Chroma DB, and Milvus are the foundation of RAG stacks.
+
+Step Four: Safety and security layers - protecting customers and brand. We need to ask: what happens when generic AI goes wrong? A lawyer submitting AI-hallucinated fake legal precedent, a chatbot generating toxic content, or leaking personally identifiable information.
+
+A single unmonitored, unsafe response can obliterate user trust, create legal liabilities, and cause irreversible brand damage. Enterprise architects map specific risks to hard-coded architectural defenses. Worried about malicious users hacking prompts? Install strict input filtering. Terrified of toxic outputs or data leaks? Force every response through output moderation. Prevent unsafe recommendations by implementing strict policy enforcement.
+
+Generative AI introduces massive new security vectors. You're dealing with sensitive prompts, private documents, and external APIs. This requires bulletproof data encryption, strict data isolation, and intense prompt injection defense. Proving compliance with GDPR or HIPAA through detailed audit logging is often the biggest blocker preventing production.
+
+Step Five: Autonomous intelligent agents - transforming workflows. AI goes from passive encyclopedia to active working digital employee. Simple chatbots are passive, waiting for questions. Autonomous agents are fully active, reasoning through problems, creating plans, using tools, accessing APIs, executing workflows independently. They don't just answer questions; they do work.
+
+A fully automated customer support agent understands the issue, searches knowledge base for the fix, checks account status in CRM, creates a tracked ticket, and sends the resolved response. Building these relies on specialized architectures with single or multi-agent systems. Frameworks like LangChain, LangGraph, Crew AI, Autogen, and LlamaIndex orchestrate agentic workflows.
+
+The ultimate takeaway is that companies succeeding with AI treat generative AI as a full software platform, not just a chatbot feature. Real production readiness demands an entire ecosystem of robust software engineering around the model. It requires performance optimization, complex retrieval databases, strict moderation guardrails, and sophisticated agentic workflows. Simply calling an LLM API is just one tiny piece of the much larger puzzle.

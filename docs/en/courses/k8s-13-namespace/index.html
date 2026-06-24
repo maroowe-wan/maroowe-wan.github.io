@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Namespace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-13-namespace/index.html'>한국어</a></div>
+  <h1>K8S-Namespace</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 1 (ConfigMap/Secret, PV/PVC, Probes, rolling updates and rollback, requests/limits and HPA, Ingress) and want to broaden their real-world cluster operations skills. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Namespaces and Multi-Tenancy - Resource Isolation and Usage Limits</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Namespaces and Multi-Tenancy - Resource Isolation and Usage Limits </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand how to logically partition a cluster using Namespaces and configure multi-tenancy</li>
+<li>Limit the total resource consumption of an entire namespace using ResourceQuota</li>
+<li>Enforce default values and upper/lower bounds on Pods and containers using LimitRange</li>
+</ul>
+<h3>Content</h3>
+<h4>Why You Need to Partition a Cluster</h4>
+<p>Up until now, we have been creating Pods and Deployments as if we had the entire cluster to ourselves. In practice, however, a cluster is typically a <strong>shared resource used by multiple teams and multiple environments simultaneously</strong>. A development team, a data team, and CI jobs all share the same nodes, and dev, staging, and prod environments often coexist within a single cluster.</p>
+<p>What happens when everyone dumps their objects into the same space with no partitioning at all?</p>
+<ul>
+<li><strong>Name collisions occur.</strong> Team A&#x27;s <code class='ic'>web</code> Service and Team B&#x27;s <code class='ic'>web</code> Service clash in the same space.</li>
+<li><strong>Ownership becomes tangled.</strong> A single <code class='ic'>kubectl get pods</code> floods the screen with every team&#x27;s Pods at once.</li>
+<li><strong>One team monopolizes cluster resources.</strong> If someone accidentally spins up hundreds of Pods, other teams&#x27; Pods fail to schedule due to resource exhaustion.</li>
+</ul>
+<p>Kubernetes addresses this problem with <strong>Namespaces</strong>. A Namespace is a logical partition that divides a single physical cluster into multiple <strong>virtual clusters</strong>. Just as containers isolate multiple applications on a single OS, Namespaces isolate multiple groups of objects on a single cluster.</p>
+<blockquote class='callout'>
+<p>Namespace isolation is &quot;logical isolation,&quot; not the strong isolation that containers provide. With sufficient permissions, objects in other namespaces remain accessible. True security boundaries are established in combination with RBAC and NetworkPolicy, which we will cover in the next lecture.</p>
+</blockquote>
+<h4>Built-in Namespaces and Multi-Tenancy</h4>
+<p>Kubernetes ships with four namespaces out of the box.</p>
+<pre><code>
+kubectl get namespace   # shorthand: kubectl get ns
+</code></pre>
+<p>| Namespace | Purpose |</p>
+<p>|------|------|</p>
+<p>| <code class='ic'>default</code> | The default space where objects land when no namespace is specified |</p>
+<p>| <code class='ic'>kube-system</code> | Objects created by Kubernetes itself (scheduler, DNS, etc.) |</p>
+<p>| <code class='ic'>kube-public</code> | Resources that should be publicly readable across the entire cluster |</p>
+<p>| <code class='ic'>kube-node-lease</code> | Lease objects for improving the performance of node heartbeat signals |</p>
+<p><code class='ic'>default</code> is like a kitchen junk drawer — easy to toss things into — but in real-world operations it is standard practice to create dedicated namespaces per team and environment. The pattern of sharing a single cluster across multiple isolated user groups is called <strong>multi-tenancy</strong>. Each tenant has its own independent resources, policies, and constraints within its namespace.</p>
+<p>The overall picture of a multi-tenant cluster looks like the diagram below. A single physical cluster is divided into per-team namespaces acting as partitions, with resource usage limit rules (ResourceQuota and LimitRange) applied to each namespace.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph CLUSTER[&quot;Single Physical Kubernetes Cluster&quot;]
+        direction LR
+        subgraph NSDEV[&quot;Namespace: dev&quot;]
+            QD[&quot;ResourceQuota Total Resource Cap&quot;]
+            LD[&quot;LimitRange Per-Object Defaults &amp; Bounds&quot;]
+            PD[&quot;Pod / Service / ConfigMap&quot;]
+            QD --- PD
+            LD --- PD
+        end
+        subgraph NSPROD[&quot;Namespace: prod&quot;]
+            QP[&quot;ResourceQuota Total Resource Cap&quot;]
+            LP[&quot;LimitRange Per-Object Defaults &amp; Bounds&quot;]
+            PP[&quot;Pod / Service / ConfigMap&quot;]
+            QP --- PP
+            LP --- PP
+        end
+        subgraph NSSYS[&quot;Namespace: kube-system&quot;]
+            SYS[&quot;Scheduler / DNS and Other System Objects&quot;]
+        end
+    end
+    A[&quot;Dev Team&quot;] --&gt; NSDEV
+    B[&quot;Ops Team&quot;] --&gt; NSPROD</div><figcaption>Multi-Tenant Cluster Architecture - Per-Team Namespace Isolation and Usage Limits</figcaption></figure>
+<h4>Creating and Managing Namespaces</h4>
+<p>A Namespace is itself a Kubernetes object, so you manage it with <code class='ic'>create</code>/<code class='ic'>delete</code>.</p>
+<pre><code>
+kubectl create namespace dev      # imperative creation
+</code></pre>
+<p>Or declare it in a manifest.</p>
+<pre><code>
+# namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+</code></pre>
+<pre><code>
+kubectl apply -f namespace.yaml
+</code></pre>
+<p>The key difference is that <strong>nearly every command now requires you to specify which namespace to target</strong>. Use the <code class='ic'>-n</code> (or <code class='ic'>--namespace</code>) flag.</p>
+<pre><code>
+kubectl get pods -n dev                # list only Pods in the dev namespace
+kubectl run web --image=nginx -n dev   # create a Pod inside dev
+kubectl get pods --all-namespaces      # view all namespaces at once (shorthand: -A)
+</code></pre>
+<p>If typing <code class='ic'>-n dev</code> on every command becomes tedious, you can <strong>change the default namespace for the current context</strong> so it is applied automatically to subsequent commands.</p>
+<pre><code>
+kubectl config set-context --current --namespace=dev
+# From here on, commands run against the dev namespace without needing -n
+</code></pre>
+<blockquote class='callout'>
+<p>Deleting a namespace removes everything inside it along with it. A single <code class='ic'>kubectl delete ns dev</code> wipes out all Pods, Services, and ConfigMaps in dev — be especially careful with production namespaces.</p>
+</blockquote>
+<h4>ResourceQuota — Capping the Total Resources of an Entire Namespace</h4>
+<p>Even after partitioning with Namespaces, the resource-monopolization problem is still there. If the dev team keeps spinning up Pods without limit, the entire cluster can still grind to a halt. <code class='ic'>ResourceQuota</code> addresses this by placing a <strong>ceiling on the total amount of resources that may be consumed within a namespace</strong>.</p>
+<p>Recall the per-Pod <code class='ic'>requests</code>/<code class='ic'>limits</code> you learned in Intermediate Level 1. Those were <strong>the resource requests and limits for a single Pod</strong>; a ResourceQuota is the <strong>budget for the entire namespace</strong>. It defines an aggregate ceiling such as &quot;the dev team may use a combined total of 2 CPU cores, 2 Gi of memory, and up to 10 Pods.&quot;</p>
+<pre><code>
+# resource-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-quota
+  namespace: dev
+spec:
+  hard:
+    requests.cpu: &quot;2&quot;          # sum of CPU requests across all Pods ≤ 2 cores
+    requests.memory: 2Gi       # sum of memory requests ≤ 2 Gi
+    limits.cpu: &quot;4&quot;            # sum of CPU limits ≤ 4 cores
+    limits.memory: 4Gi         # sum of memory limits ≤ 4 Gi
+    pods: &quot;10&quot;                # number of Pods ≤ 10
+</code></pre>
+<pre><code>
+kubectl apply -f resource-quota.yaml
+kubectl describe quota dev-quota -n dev   # check current usage against limits
+</code></pre>
+<p><code class='ic'>hard</code> defines an absolute ceiling that can never be exceeded. You can restrict not only CPU and memory, but also the <strong>count</strong> of objects such as <code class='ic'>pods</code>, <code class='ic'>services</code>, <code class='ic'>persistentvolumeclaims</code>, <code class='ic'>secrets</code>, and <code class='ic'>configmaps</code>.</p>
+<p>What happens the moment the quota is exceeded? <strong>New Pod creation is rejected.</strong> Let&#x27;s observe this directly by trying to create a Pod that requests 3 cores when the limit is 2 cores. Specify the resource request in the manifest&#x27;s <code class='ic'>resources.requests</code> field and apply it with <code class='ic'>kubectl apply</code>.</p>
+<pre><code>
+# big-pod.yaml — deliberately exceeds the quota (2 cores) by requesting 3 cores
+apiVersion: v1
+kind: Pod
+metadata:
+  name: big
+  namespace: dev
+spec:
+  containers:
+    - name: nginx
+      image: nginx
+      resources:
+        requests:
+          cpu: &quot;3&quot;        # exceeds the quota limit (requests.cpu=2)
+        limits:
+          cpu: &quot;3&quot;
+</code></pre>
+<pre><code>
+kubectl apply -f big-pod.yaml
+# Error from server (Forbidden): error when creating &quot;big-pod.yaml&quot;: pods &quot;big&quot; is forbidden:
+# exceeded quota: dev-quota, requested: requests.cpu=3, used: requests.cpu=0, limited: requests.cpu=2
+</code></pre>
+<blockquote class='callout'>
+<p>The <code class='ic'>kubectl run big --image=nginx --requests=cpu=3</code> syntax seen in older tutorials and documentation no longer works. The <code class='ic'>--requests</code>/<code class='ic'>--limits</code> flags were deprecated in kubectl 1.18 and fully removed in 1.21 — running them today produces an <code class='ic'>unknown flag: --requests</code> error. The current standard is to specify resource requests and limits in the manifest&#x27;s <code class='ic'>resources</code> field and apply it with <code class='ic'>kubectl apply</code>, as shown above.</p>
+</blockquote>
+<p>If you try to create 11 Pods against a limit of 10, only the Pods up to the limit are created and the rest fail with a quota exceeded error. This is how Kubernetes proactively prevents any one team from starving others of resources.</p>
+<blockquote class='callout'>
+<p>Once a <strong>compute resource</strong> such as <code class='ic'>requests.cpu</code> or <code class='ic'>limits.memory</code> is set in a ResourceQuota, every container in that namespace <strong>must explicitly specify</strong> the corresponding field. Pods that omit requests/limits are rejected. The object that fills this gap is LimitRange, covered next.</p>
+</blockquote>
+<h4>LimitRange — Default Values and Bounds for Individual Pods and Containers</h4>
+<p>After applying a ResourceQuota, a new problem emerges: if a developer forgets to include requests/limits in a manifest, the Pod simply fails to create. Expecting every developer to always get the resource values exactly right is unrealistic.</p>
+<p><code class='ic'>LimitRange</code> fills this gap. Think of it as a <strong>corporate hotel booking policy</strong>. Employees choose their own hotel, but the company sets the rule: &quot;maximum $150 per night; if unspecified, the default is $100.&quot; LimitRange enforces three things for each individual <strong>container or Pod</strong> in a namespace.</p>
+<ul>
+<li><strong>Default values (<code class='ic'>default</code> / <code class='ic'>defaultRequest</code>)</strong>: Automatically filled in if the user omits requests/limits.</li>
+<li><strong>Maximum (<code class='ic'>max</code>)</strong>: The upper bound a single container may request.</li>
+<li><strong>Minimum (<code class='ic'>min</code>)</strong>: The lower bound a single container must request.</li>
+</ul>
+<pre><code>
+# limit-range.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: dev
+spec:
+  limits:
+    - type: Container
+      default:              # default upper limit applied when limits are not specified
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:       # default request applied when requests are not specified
+        cpu: 250m
+        memory: 256Mi
+      max:                  # maximum allowed value for a single container
+        cpu: &quot;1&quot;
+        memory: 1Gi
+      min:                  # minimum required value for a single container
+        cpu: 100m
+        memory: 128Mi
+</code></pre>
+<pre><code>
+kubectl apply -f limit-range.yaml
+kubectl describe limitrange dev-limits -n dev
+</code></pre>
+<p>Now try creating a Pod in dev with <strong>no resource fields at all</strong>.</p>
+<pre><code>
+kubectl run test --image=nginx -n dev
+kubectl describe pod test -n dev | grep -A4 Limits
+</code></pre>
+<p>Even though no resources were specified, the describe output shows the container has <code class='ic'>requests: cpu=250m, memory=256Mi</code> and <code class='ic'>limits: cpu=500m, memory=512Mi</code> <strong>filled in automatically</strong> — the LimitRange defaults were injected. As a side effect, this naturally satisfies the ResourceQuota&#x27;s requirement that requests/limits be explicitly present.</p>
+<p>Conversely, a container that exceeds <code class='ic'>max</code> (e.g., 2 CPU cores) or falls below <code class='ic'>min</code> is rejected at creation time. The upper and lower bounds prevent containers from being set either too large or too small.</p>
+<h4>ResourceQuota and LimitRange Are a Pair</h4>
+<p>The two objects have different scopes and only work fully when used together. Here is a clear breakdown of the differences.</p>
+<p>| | ResourceQuota | LimitRange |</p>
+<p>|------|---------------|------------|</p>
+<p>| Scope | Aggregate totals for the <strong>entire namespace</strong> | Each <strong>individual container or Pod</strong> |</p>
+<p>| Role | Total budget ceiling | Fill in defaults + enforce per-object bounds |</p>
+<p>| Analogy | Team budget | Per-person spending rule |</p>
+<p>| When it blocks | Pod creation that pushes the aggregate over the limit | Pod creation with missing values or bound violations |</p>
+<p>The recommended production pattern is to <strong>apply both together</strong>. LimitRange enforces sensible defaults and bounds on every Pod, so even if a developer omits resource values, they are filled in safely. ResourceQuota then guards the namespace-level total on top of that. The result is a fair, safe multi-tenant cluster where developers, data scientists, and CI jobs each receive a reasonable share.</p>
+<p>The typical configuration sequence is shown in the flow below. Create the namespace, lay down per-object rules with LimitRange, set the team budget with ResourceQuota, and then deploy workloads within those constraints.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    A[&quot;Create Namespace&lt;br/&gt;kubectl create ns dev&quot;] --&gt; B[&quot;Apply LimitRange&lt;br/&gt;Per-Object Defaults &amp; Bounds&quot;]
+    B --&gt; C[&quot;Apply ResourceQuota&lt;br/&gt;Namespace-Level Total&quot;]
+    C --&gt; D[&quot;Deploy Workloads&lt;br/&gt;Pod · Deployment&quot;]
+    D --&gt; E[&quot;Monitor Usage&lt;br/&gt;describe quota&quot;]</div><figcaption>Multi-Tenant Namespace Configuration Sequence</figcaption></figure>
+<pre><code>
+kubectl create ns dev
+kubectl apply -f limit-range.yaml      # per-object defaults and bounds
+kubectl apply -f resource-quota.yaml   # namespace-level total cap
+kubectl describe quota dev-quota -n dev   # monitor usage in operation
+</code></pre>
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>Namespace</strong> is a logical partition that divides a single physical cluster into multiple virtual clusters — the fundamental unit of per-team, per-environment multi-tenancy. Nearly every command requires the <code class='ic'>-n</code> flag, and you can change the default namespace with <code class='ic'>set-context</code>.</li>
+<li><strong>ResourceQuota</strong> places a ceiling (<code class='ic'>hard</code>) on the total resources and object counts for an entire namespace. Pod creation that would push the aggregate over the limit is rejected, preventing any one team from monopolizing resources.</li>
+<li>When compute resources are constrained by a ResourceQuota, every container in that namespace must explicitly specify requests/limits.</li>
+<li><strong>LimitRange</strong> enforces default values (<code class='ic'>default</code>/<code class='ic'>defaultRequest</code>) and upper/lower bounds (<code class='ic'>max</code>/<code class='ic'>min</code>) on individual containers and Pods. It automatically fills in defaults for Pods that omit resource fields, satisfying the ResourceQuota requirement transparently.</li>
+<li>The two are a pair. ResourceQuota is the &quot;team budget&quot;; LimitRange is the &quot;per-person spending rule.&quot; Both are needed for a fair and safe multi-tenant cluster.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>Google Cloud Tech, &quot;Namespaces in Kubernetes&quot; — https://www.youtube.com/watch?v=plB3kyZLHe8</li>
+<li>Techi Nik, &quot;Kubernetes LimitRange Explained | Default Resource Limits &amp; Requests + Resource Quota Demo&quot; — https://www.youtube.com/watch?v=tyoaLuaVyuQ</li>
+<li>Techi Nik, &quot;What Happens When You Don&#x27;t Use Kubernetes Resource Quotas?&quot; — https://www.youtube.com/watch?v=dYLRW0DZVGk</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. 1. Create the team-a namespace imperatively.</p>
+<p>2. Write a YAML manifest (ns-team-b.yaml) and create the team-b namespace declaratively.</p>
+<p>3. Run kubectl get ns to confirm both namespaces are listed.</p>
+<p>4. Create a Pod named web-pod using the nginx image inside team-a. (Use kubectl run with the -n flag.)</p>
+<p>5. Run kubectl get pods -n team-a to confirm the Pod is in the Running state.</p>
+<p>6. Change the default namespace to team-a with kubectl config set-context --current --namespace=team-a, then run kubectl get pods without -n and confirm you see the same result.</p>
+<p>7. When finished, restore the default namespace to default.</p></div>
+              <pre class='starter'><code># 1. Create team-a imperatively
+kubectl create namespace ____
+
+# 2. Write ns-team-b.yaml (fill in the blanks)
+apiVersion: v1
+kind: ____
+metadata:
+  name: ____
+
+# 3. Apply declaratively
+kubectl apply -f ns-team-b.yaml
+
+# 4. Create a Pod inside team-a
+kubectl run web-pod --image=nginx ____ team-a
+
+# 5. Verify
+kubectl get pods ____ team-a
+
+# 6. Change the default namespace
+kubectl config set-context --current ____=team-a
+kubectl get pods   # without -n
+
+# 7. Restore
+kubectl config set-context --current --namespace=default</code></pre>
+              <details><summary>Hint</summary><ul><li>kubectl create namespace and kind: Namespace produce the same result. The kind value is case-sensitive — it must be &#x27;Namespace&#x27;, not &#x27;namespace&#x27;.</li><li>kubectl run accepts -n &lt;name&gt; or --namespace=&lt;name&gt;. You can also write --namespace team-a with a space instead of =.</li><li>After running set-context, use kubectl config view --minify | grep namespace to verify the default namespace actually changed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create team-a imperatively
+kubectl create namespace team-a
+
+# 2. ns-team-b.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-b
+
+# Apply declaratively
+kubectl apply -f ns-team-b.yaml
+
+# 3. Verify all namespaces
+kubectl get ns
+# team-a and team-b should appear in Active state
+
+# 4. Create a Pod inside team-a
+kubectl run web-pod --image=nginx -n team-a
+
+# 5. Check Pod status
+kubectl get pods -n team-a
+# NAME      READY   STATUS    RESTARTS   AGE
+# web-pod   1/1     Running   0          ...
+
+# 6. Change default namespace and confirm same result without -n
+kubectl config set-context --current --namespace=team-a
+kubectl get pods
+# web-pod is shown the same as before
+
+# 7. Restore default namespace
+kubectl config set-context --current --namespace=default</code></pre>
+                <div class='exp2'><p>Namespace is a top-level v1 API object and can be created with kubectl create namespace or a YAML manifest. Objects with the same name can coexist without conflict as long as they are in different namespaces. The -n flag targets a specific namespace for a single command, while set-context --namespace changes the default namespace for the current context so it applies to all subsequent commands automatically. Always restore to default when done to avoid confusion in later steps.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. 1. Write limit-range.yaml with the following spec and apply it to team-a.</p>
+<ul>
+<li>type: Container</li>
+<li>defaultRequest: cpu=100m, memory=128Mi</li>
+<li>default (limits): cpu=300m, memory=256Mi</li>
+<li>min: cpu=50m, memory=64Mi</li>
+<li>max: cpu=500m, memory=512Mi</li>
+</ul>
+<p>2. Run kubectl describe limitrange dev-limits -n team-a to confirm the settings.</p>
+<p>3. Create a Pod named no-resources-pod in team-a without a resources block. (Image: nginx)</p>
+<p>4. Check the Limits / Requests section of kubectl describe pod no-resources-pod -n team-a and confirm the LimitRange defaults were injected automatically.</p>
+<p>5. Write a Pod manifest (over-limit-pod.yaml) with CPU limit set to 600m and try to create it with kubectl apply to observe the rejection error.</p></div>
+              <pre class='starter'><code># 1. limit-range.yaml (fill in the blanks)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: team-a
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: ____
+        memory: ____
+      default:
+        cpu: ____
+        memory: ____
+      min:
+        cpu: ____
+        memory: ____
+      max:
+        cpu: ____
+        memory: ____
+
+# Apply
+kubectl apply -f limit-range.yaml
+
+# 3. Create a Pod without a resources block (manifest method)
+# no-resources-pod.yaml (no resources block)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-resources-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# 5. over-limit-pod.yaml (exceeds max)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: over-limit-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: ____
+        limits:
+          cpu: ____   # set to 600m to exceed max (500m)</code></pre>
+              <details><summary>Hint</summary><ul><li>In a LimitRange, default sets the limits default and defaultRequest sets the requests default. They are separate fields and both must be specified. Using only default leaves requests unfilled, which causes problems when combined with ResourceQuota.</li><li>Use kubectl describe pod no-resources-pod -n team-a | grep -A6 Limits to quickly see just the Limits/Requests section. If there is no output, double-check the Pod name and namespace.</li><li>If the over-limit-pod error message contains &#x27;maximum cpu usage per Container is 500m&#x27;, the exercise is successful. If the Pod is created without error, verify that the max.cpu value is actually reflected in the LimitRange by running kubectl describe limitrange dev-limits -n team-a.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># limit-range.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: dev-limits
+  namespace: team-a
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      default:
+        cpu: 300m
+        memory: 256Mi
+      min:
+        cpu: 50m
+        memory: 64Mi
+      max:
+        cpu: 500m
+        memory: 512Mi
+
+# Apply
+kubectl apply -f limit-range.yaml
+
+# Verify settings
+kubectl describe limitrange dev-limits -n team-a
+
+# no-resources-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-resources-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# Create and confirm defaults were injected
+kubectl apply -f no-resources-pod.yaml
+kubectl describe pod no-resources-pod -n team-a | grep -A6 &#x27;Limits\|Requests&#x27;
+# Expected output:
+#   Limits:
+#     cpu:     300m
+#     memory:  256Mi
+#   Requests:
+#     cpu:     100m
+#     memory:  128Mi
+
+# over-limit-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: over-limit-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 600m
+        limits:
+          cpu: 600m
+
+# Attempt creation — confirm rejection
+kubectl apply -f over-limit-pod.yaml
+# Expected error:
+# Error from server (Forbidden): error when creating &quot;over-limit-pod.yaml&quot;: pods &quot;over-limit-pod&quot; is forbidden:
+# [maximum cpu usage per Container is 500m, but limit is 600m]</code></pre>
+                <div class='exp2'><p>LimitRange acts as an admission rule applied to the namespace. When a Pod is created without any resources block, the kube-apiserver injects the LimitRange&#x27;s defaultRequest and default values automatically at the admission stage. This is why requests/limits you never specified appear in kubectl describe pod — that behavior is expected. A container that exceeds max is immediately rejected at the same admission stage, and the Pod object itself is never created. These two behaviors — automatic injection and upper-bound enforcement — are the core function of LimitRange.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. 1. Write resource-quota.yaml with the following spec and apply it to team-a.</p>
+<ul>
+<li>requests.cpu: 500m</li>
+<li>requests.memory: 512Mi</li>
+<li>limits.cpu: 1 (1 core)</li>
+<li>limits.memory: 1Gi</li>
+<li>pods: 3</li>
+</ul>
+<p>2. Run kubectl describe quota team-quota -n team-a to verify usage vs. limits.</p>
+<p>3. Write a Pod manifest (big-cpu-pod.yaml) requesting 600m CPU and try to create it with kubectl apply to observe the exceeded quota error. (Specify requests.cpu=600m in the resources block.)</p>
+<p>4. The no-resources-pod from Step 2 already has LimitRange defaults applied (requests.cpu=100m). Confirm with describe quota that the current requests.cpu Used shows 100m.</p>
+<p>5. Create two more Pods within normal bounds (small-pod-1, small-pod-2) to reach the pods limit of 3, then confirm that a 4th Pod is rejected.</p></div>
+              <pre class='starter'><code># 1. resource-quota.yaml (fill in the blanks)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: ____
+    requests.memory: ____
+    limits.cpu: ____
+    limits.memory: ____
+    pods: ____
+
+# 3. big-cpu-pod.yaml — set requests.cpu=600m to exceed the quota (500m)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: big-cpu-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: ____      # set to exceed the quota limit (500m)
+          memory: 128Mi
+        limits:
+          cpu: ____
+          memory: 256Mi
+
+# 5. small-pod-1.yaml (within LimitRange bounds)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: small-pod-1
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi</code></pre>
+              <details><summary>Hint</summary><ul><li>For big-cpu-pod.yaml, the requests.cpu value must be high enough that used + requested exceeds hard. Since used is currently 100m from no-resources-pod, any new request of 401m or more pushes the total over 500m. Setting it to 600m makes the error easy to reproduce.</li><li>ResourceQuota does not apply retroactively to Pods that existed before it was created. However, the existing Pods&#x27; requests/limits values are still counted in the Used column of the new quota. Verify with describe quota&#x27;s Used column.</li><li>To reproduce the pods limit exceeded error, exactly 3 Pods must be in Running or Pending state in the namespace. Run kubectl get pods -n team-a to check the count before attempting.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># resource-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: 500m
+    requests.memory: 512Mi
+    limits.cpu: &quot;1&quot;
+    limits.memory: 1Gi
+    pods: &quot;3&quot;
+
+# Apply and verify
+kubectl apply -f resource-quota.yaml
+kubectl describe quota team-quota -n team-a
+# Expected output (no-resources-pod already exists):
+# Resource          Used   Hard
+# --------          ----   ----
+# limits.cpu        300m   1
+# limits.memory     256Mi  1Gi
+# pods              1      3
+# requests.cpu      100m   500m
+# requests.memory   128Mi  512Mi
+
+# big-cpu-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: big-cpu-pod
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 600m
+          memory: 128Mi
+        limits:
+          cpu: 600m
+          memory: 256Mi
+
+# Attempt creation — confirm exceeded quota
+kubectl apply -f big-cpu-pod.yaml
+# Expected error:
+# Error from server (Forbidden): error when creating &quot;big-cpu-pod.yaml&quot;: pods &quot;big-cpu-pod&quot; is forbidden:
+# exceeded quota: team-quota, requested: requests.cpu=600m, used: requests.cpu=100m, limited: requests.cpu=500m
+
+# small-pod-1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: small-pod-1
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+# small-pod-2.yaml (same spec as small-pod-1, only name changes)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: small-pod-2
+  namespace: team-a
+spec:
+  containers:
+    - name: app
+      image: nginx
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+# Create both Pods (total of 3 including no-resources-pod — limit reached)
+kubectl apply -f small-pod-1.yaml
+kubectl apply -f small-pod-2.yaml
+
+# Attempt 4th Pod — confirm pods limit exceeded
+kubectl run extra-pod --image=nginx -n team-a
+# Expected error:
+# Error from server (Forbidden): pods &quot;extra-pod&quot; is forbidden:
+# exceeded quota: team-quota, requested: pods=1, used: pods=3, limited: pods=3
+
+# Re-check usage
+kubectl describe quota team-quota -n team-a</code></pre>
+                <div class='exp2'><p>The hard field in a ResourceQuota sets a ceiling on the aggregate requests/limits across all Pods in a namespace, as well as on object counts. A key insight is that the LimitRange-injected defaults on no-resources-pod (requests.cpu=100m) are also counted toward the quota&#x27;s Used total. The exceeded quota error message helpfully shows all three values — requested, used, and limited — so you can immediately see how much is in use. When a compute resource quota such as requests.cpu is set on a namespace, every container in that namespace must explicitly declare requests/limits; LimitRange&#x27;s default values satisfy this requirement automatically. This is the reason the two objects are always used together.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Build a complete multi-tenant environment in the team-b namespace in the following order.</p>
+<p>1. Apply LimitRange (tb-limits)</p>
+<ul>
+<li>defaultRequest: cpu=200m, memory=256Mi</li>
+<li>default (limits): cpu=400m, memory=512Mi</li>
+<li>max: cpu=800m, memory=1Gi</li>
+<li>min: cpu=100m, memory=128Mi</li>
+</ul>
+<p>2. Apply ResourceQuota (tb-quota)</p>
+<ul>
+<li>requests.cpu: 800m</li>
+<li>requests.memory: 1Gi</li>
+<li>limits.cpu: 2 (2 cores)</li>
+<li>limits.memory: 2Gi</li>
+<li>pods: 4</li>
+</ul>
+<p>3. Create 3 Pods (app-1, app-2, app-3) in team-b without a resources block. (Image: nginx)</p>
+<p>4. Run kubectl describe quota tb-quota -n team-b to check current usage.</p>
+<ul>
+<li>Confirm that requests.cpu Used is close to 200m * 3 = 600m (the result of LimitRange defaults being injected automatically).</li>
+</ul>
+<p>5. Try to create a 4th Pod (app-4) without a resources block. Since the 3 existing Pods are already consuming 600m via the LimitRange default (requests.cpu=200m), adding app-4&#x27;s 200m brings the total to exactly 800m — the limit.</p>
+<ul>
+<li>The total exactly equals the limit, so app-4 should be allowed. After creating it, confirm Used is 800m.</li>
+</ul>
+<p>6. Try to create a 5th Pod (app-5) and confirm the exceeded quota error (either the pods limit of 4 or the requests.cpu limit of 800m is hit first).</p>
+<p>7. Capture the final output of kubectl describe quota tb-quota -n team-b and note the Used/Hard values.</p></div>
+              <pre class='starter'><code># 1. tb-limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tb-limits
+  namespace: team-b
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 200m
+        memory: 256Mi
+      default:
+        cpu: 400m
+        memory: 512Mi
+      max:
+        cpu: 800m
+        memory: 1Gi
+      min:
+        cpu: 100m
+        memory: 128Mi
+
+# 2. tb-quota.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tb-quota
+  namespace: team-b
+spec:
+  hard:
+    requests.cpu: 800m
+    requests.memory: 1Gi
+    limits.cpu: &quot;2&quot;
+    limits.memory: 2Gi
+    pods: &quot;4&quot;
+
+# 3. app-1.yaml (no resources block — same structure for app-2, app-3)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-1
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+      # resources block intentionally omitted</code></pre>
+              <details><summary>Hint</summary><ul><li>tb-limits must be applied before tb-quota. Reversing the order causes Pods without resources blocks to be immediately rejected by tb-quota&#x27;s explicit declaration requirement. The LimitRange → ResourceQuota order matters.</li><li>app-4 exactly meets the requests.cpu limit (800m), so it is allowed. Exceeding the limit triggers rejection; equaling the limit does not. app-5 is rejected because the pods limit (4) is already full before requests.cpu is even evaluated.</li><li>The Used/Hard columns side-by-side in kubectl describe quota tb-quota -n team-b make it immediately clear which resource is the bottleneck. This command is the first thing to check when troubleshooting CI/CD pipeline scheduling failures.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Apply tb-limits.yaml
+kubectl apply -f tb-limits.yaml
+
+# Apply tb-quota.yaml
+kubectl apply -f tb-quota.yaml
+
+# app-1.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-1
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# app-2.yaml (name changed to app-2, rest identical)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-2
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# app-3.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-3
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+# Create all 3 Pods
+kubectl apply -f app-1.yaml
+kubectl apply -f app-2.yaml
+kubectl apply -f app-3.yaml
+
+# 4. Check usage
+kubectl describe quota tb-quota -n team-b
+# Expected output:
+# Resource          Used   Hard
+# --------          ----   ----
+# limits.cpu        1200m  2
+# limits.memory     1536Mi 2Gi
+# pods              3      4
+# requests.cpu      600m   800m
+# requests.memory   768Mi  1Gi
+
+# 5. Create app-4 (requests.cpu 600m + 200m = 800m, exactly at limit)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-4
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+kubectl apply -f app-4.yaml
+# Creation succeeds (800m == 800m limit, equal is allowed)
+
+kubectl describe quota tb-quota -n team-b
+# requests.cpu Used: 800m  Hard: 800m  (limit 100% used)
+# pods         Used: 4     Hard: 4     (limit 100% used)
+
+# 6. Attempt app-5 — confirm exceeded quota
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-5
+  namespace: team-b
+spec:
+  containers:
+    - name: app
+      image: nginx
+
+kubectl apply -f app-5.yaml
+# Expected error (whichever limit is hit first — pods or requests.cpu):
+# Error from server (Forbidden): pods &quot;app-5&quot; is forbidden:
+# exceeded quota: tb-quota, requested: pods=1, used: pods=4, limited: pods=4
+
+# 7. Final usage check
+kubectl describe quota tb-quota -n team-b</code></pre>
+                <div class='exp2'><p>This advanced exercise is designed to walk through the full production workflow end-to-end: namespace creation → LimitRange → ResourceQuota → workload deployment → usage monitoring. There are two key observations. First, 3 Pods without a resources block are created without any error — this is because LimitRange transparently fills in the defaultRequest (cpu=200m) to satisfy ResourceQuota&#x27;s requirement that compute resources be explicitly declared. Second, when the limit is reached, exactly the one Pod that would exceed it is rejected — this is the mechanism that guarantees fair resource distribution across teams. In production, this configuration is typically packaged in a Helm chart or Kustomize overlay and applied consistently to every new team or environment.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=plB3kyZLHe8' target='_blank'>Namespaces in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=tyoaLuaVyuQ' target='_blank'>Kubernetes LimitRange Explained | Default Resource Limits &amp; Requests + Resource Quota Demo</a></li><li><a href='https://www.youtube.com/watch?v=dYLRW0DZVGk' target='_blank'>What Happens When You Don&#x27;t Use Kubernetes Resource Quotas?</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

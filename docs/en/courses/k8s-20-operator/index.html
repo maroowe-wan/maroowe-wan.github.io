@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Operator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-20-operator/index.html'>한국어</a></div>
+  <h1>K8S-Operator</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. The Operator Pattern and Controllers — Encoding Operational Knowledge in Code</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. The Operator Pattern and Controllers — Encoding Operational Knowledge in Code </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the reconciliation loop and how a controller continuously converges actual state toward desired state</li>
+<li>Install an existing Operator and observe the controller reacting to custom resource changes</li>
+<li>Explain key Operator development concepts including the Operator SDK and the Operator maturity model</li>
+</ul>
+<h3>Content</h3>
+<h4>Controllers: The Heart That Drives Kubernetes</h4>
+<p>In the previous lecture we said that a CRD &quot;only registers a data model and triggers no behavior.&quot; The entity that does trigger behavior is the <strong>controller</strong>. In fact, all of Kubernetes is essentially a collection of controllers. When you create a Deployment, the Deployment controller creates a ReplicaSet, and the ReplicaSet controller creates Pods. The reason you declare <code class='ic'>replicas: 3</code> and reliably get exactly 3 Pods is that something is constantly asking: &quot;does the current state match the declared state?&quot;</p>
+<p>That continuous check-and-correct process is the <strong>reconciliation loop</strong>. A controller repeats a single question in an endless cycle:</p>
+<p>1. <strong>Observe</strong> — what is the actual state of the cluster right now?</p>
+<p>2. <strong>Diff</strong> — how does it differ from the desired state the user declared?</p>
+<p>3. <strong>Act</strong> — what needs to be created, deleted, or modified to close that gap?</p>
+<p>Once the loop completes, it starts again from the top. If a Pod dies, actual ≠ desired, and in the next iteration the controller creates a new Pod to bring the difference back to zero. This is why the model is <strong>declarative</strong> rather than imperative. We say &quot;this is the state I want,&quot; and leave it to the controller to close the gap.</p>
+<p>The flowchart below shows the controller repeating observe → diff → act indefinitely until actual and desired states converge.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    O[&quot;observe: inspect actual state&quot;] --&gt; D{&quot;diff: matches desired?&quot;}
+    D --&gt;|&quot;yes&quot;| W[&quot;wait, then loop again&quot;]
+    D --&gt;|&quot;no&quot;| A[&quot;act: create/update/delete to close the gap&quot;]
+    A --&gt; O
+    W --&gt; O</div><figcaption>Controller Reconciliation Loop (observe → diff → act)</figcaption></figure>
+<blockquote class='callout'>
+<p>The reconciliation loop must be <strong>idempotent</strong> — running it any number of times with the same input must produce the same result. Because a controller may execute hundreds of times, it must read current state first and apply only the difference (e.g., &quot;skip if it already exists&quot;) rather than unconditionally creating resources, which would cause duplicates and conflicts.</p>
+</blockquote>
+<h4>Operators: Encoding Operational Knowledge in a Controller</h4>
+<p>Built-in controllers only understand generic resources like Pod and ReplicaSet. But imagine operating a PostgreSQL cluster: primary promotion, backup scheduling, failover handling, version upgrades — all of that lives in a human DBA&#x27;s head as operational knowledge. <strong>An Operator moves that operational knowledge into a custom controller.</strong></p>
+<p>The composition is simple: <strong>Operator = CRD + a custom controller that watches that CRD</strong>. For example, define a <code class='ic'>PostgresCluster</code> CRD, and when a user declares <code class='ic'>spec.replicas: 3, version: 15</code>, the Operator&#x27;s controller automatically creates the StatefulSet, Services, Secrets, and backup CronJobs, and promotes a replica if the primary fails. The user doesn&#x27;t need to know PostgreSQL internals — they just declare the desired state in YAML.</p>
+<p>The flow works like this: user creates or updates a CR → the API server saves it to etcd and emits a watch event → the Operator&#x27;s controller receives the event and runs the reconciliation loop → actual resources are aligned with the desired state. This watch-react-reconcile cycle is the essence of how an Operator works.</p>
+<p>The sequence diagram below shows the process from a user applying a CR, through the watch event waking the Operator, to the creation of subordinate resources.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as User
+    participant API as API Server
+    participant E as etcd
+    participant OP as Operator Controller
+    U-&gt;&gt;API: Apply PostgresCluster CR
+    API-&gt;&gt;E: Persist CR
+    API--&gt;&gt;OP: Deliver watch event
+    OP-&gt;&gt;OP: Run reconciliation loop (observe/diff/act)
+    OP-&gt;&gt;API: Request creation of StatefulSet/Service/Secret
+    API-&gt;&gt;E: Persist subordinate resources
+    Note over OP: Loop re-runs on every state change</div><figcaption>Operator Watch-React-Reconcile Cycle</figcaption></figure>
+<h4>Installing and Observing an Existing Operator</h4>
+<p>Before writing your own code, the fastest way to learn is to watch a well-built Operator react in real time. Take cert-manager as an example.</p>
+<pre><code>
+# 1) Install the cert-manager Operator (CRDs + controller deployed together)
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set installCRDs=true
+
+# 2) Confirm the CRDs registered by the Operator
+kubectl get crd | grep cert-manager
+# certificates.cert-manager.io, issuers.cert-manager.io ...
+
+# 3) Check controller Pods and stream logs
+kubectl get pods -n cert-manager
+kubectl logs -n cert-manager deploy/cert-manager -f
+</code></pre>
+<blockquote class='callout'>
+<p>The flag name for installing CRDs alongside cert-manager varies by chart version. <code class='ic'>--set installCRDs=true</code> is the most widely used form, while some recent charts use <code class='ic'>--set crds.enabled=true</code> (with <code class='ic'>crds.keep=true</code> to preserve CRDs on chart uninstall). Either way, the intent is the same — <strong>let Helm deploy the CRDs together with the chart</strong>. Check what your chart version expects by running <code class='ic'>helm show values jetstack/cert-manager | grep -i crd</code> before installing.</p>
+</blockquote>
+<p>Now create a CR (for example, a self-signed <code class='ic'>Issuer</code>) and watch the log window. The moment you <code class='ic'>apply</code> the CR, reconciliation messages appear in the controller logs, and shortly after, a Secret containing the certificate is automatically created.</p>
+<pre><code>
+kubectl apply -f selfsigned-issuer.yaml
+kubectl apply -f my-certificate.yaml
+kubectl get certificate          # watch the READY column flip to True
+kubectl get secret               # the TLS Secret created by the controller appears
+</code></pre>
+<p>The key observation here is that <strong>you never created the Secret directly</strong>. You declared one CR, and the controller ran the reconciliation loop and produced the subordinate resource. Delete the CR and the loop runs again, cleaning up the related resources. This is what it looks like for a controller to maintain desired state.</p>
+<h4>Operator SDK and the Maturity Model</h4>
+<p>When building your own Operator you typically use a framework. The <strong>Operator SDK</strong> (and its underlying libraries, controller-runtime and Kubebuilder) handles the plumbing — watch registration, work queuing, retries, client caching — so you only need to fill in the business logic inside the <code class='ic'>Reconcile()</code> function. Go is the most common language, but the SDK also supports Ansible and Helm-based Operators (wrapping a Helm chart directly as an Operator).</p>
+<p>Operator capability is commonly described using a <strong>5-level maturity model</strong>:</p>
+<p>1. <strong>Basic Install</strong> — Automates installation and basic configuration via CR</p>
+<p>2. <strong>Seamless Upgrades</strong> — Automates application and Operator version upgrades</p>
+<p>3. <strong>Full Lifecycle</strong> — Manages backup, recovery, and failover</p>
+<p>4. <strong>Deep Insights</strong> — Integrates metrics, alerts, and logging for observability</p>
+<p>5. <strong>Auto Pilot</strong> — Fully autonomous operation including autoscaling, self-tuning, and anomaly detection</p>
+<p>Each higher level represents more operational knowledge encoded in code. OperatorHub categorizes available Operators by this rating, making it a useful benchmark when evaluating a tool before adopting it.</p>
+<blockquote class='callout'>
+<p>Not everything needs to become an Operator. Simple deployments are handled perfectly well by Helm or Kustomize. Operators shine for <strong>stateful, operationally complex</strong> applications that require continuous human judgment — databases, message queues, monitoring stacks, and similar workloads.</p>
+</blockquote>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A controller repeats the observe → diff → act reconciliation loop indefinitely, converging actual state toward desired state. This idempotent loop is the foundation of the declarative model.</li>
+<li>An Operator = CRD + a custom controller. It is the pattern of encoding human operational knowledge (installation, upgrades, failover, etc.) into code.</li>
+<li>Installing an existing Operator (e.g., cert-manager) and applying a CR lets you directly observe the controller reacting via watch, automatically creating and cleaning up subordinate resources. Check the chart version to determine whether to use <code class='ic'>installCRDs=true</code> or <code class='ic'>crds.enabled=true</code>.</li>
+<li>The Operator SDK (controller-runtime / Kubebuilder) handles the plumbing — watch, queue, retries — so you can focus on the Reconcile logic.</li>
+<li>The maturity model (5 levels from Basic Install to Auto Pilot) provides a measure of an Operator&#x27;s automation depth. Operators are best suited for stateful, operationally intensive applications.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Install cert-manager via Helm and verify the installation. cert-manager is a prime example of the Operator pattern — it automatically issues and renews TLS certificates. After installation, confirm the controller Pods created in the cert-manager namespace and list the CRDs it registered.</p></div>
+              <pre class='starter'><code># 1. Add the cert-manager Helm repository
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+# 2. Install cert-manager (including CRDs)
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --version v1.14.0 \
+  --set installCRDs=true
+
+# 3. Wait for all controller Pods to reach Running state
+kubectl get pods -n ___
+
+# 4. List CRDs registered by cert-manager
+kubectl get crd | grep ___</code></pre>
+              <details><summary>Hint</summary><ul><li>It may take 1–2 minutes for the Pods to start after helm install. Use kubectl get pods -n cert-manager -w to watch the state changes in real time.</li><li>Newer versions may use --set crds.enabled=true instead of installCRDs=true. Run helm show values jetstack/cert-manager to see the available options.</li><li>In an offline environment, configure a local registry with kind or k3d, or use OCI archives.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1 &amp; 2. Helm installation (run the commands above)
+
+# 3. Check cert-manager Pods
+kubectl get pods -n cert-manager
+# NAME                                       READY   STATUS    RESTARTS   AGE
+# cert-manager-xxxx                          1/1     Running   0          60s
+# cert-manager-cainjector-xxxx               1/1     Running   0          60s
+# cert-manager-webhook-xxxx                  1/1     Running   0          60s
+
+# 4. cert-manager CRD list
+kubectl get crd | grep cert-manager
+# NAME                                             CREATED AT
+# certificaterequests.cert-manager.io              ...
+# certificates.cert-manager.io                     ...
+# challenges.acme.cert-manager.io                  ...
+# clusterissuers.cert-manager.io                   ...
+# issuers.cert-manager.io                          ...
+# orders.acme.cert-manager.io                      ...</code></pre>
+                <div class='exp2'><p>cert-manager is a textbook example of the Operator pattern. Installing it via Helm creates three controller Pods: cert-manager (core controller), cainjector (CA injector), and webhook (validation webhook). It also registers several CRDs including Certificate, Issuer, and ClusterIssuer. These CRDs serve as the Operator&#x27;s domain-specific API.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Create a SelfSigned Issuer and a Certificate custom resource for cert-manager, then observe the reconciliation loop as the controller automatically generates an actual TLS certificate (Secret). Once Certificate status shows Ready: True, inspect the tls.crt and tls.key fields of the created Secret.</p></div>
+              <pre class='starter'><code># 1. Create a SelfSigned Issuer
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: default
+spec:
+  selfSigned: {}
+
+---
+# 2. Create a Certificate custom resource
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: my-tls-cert
+  namespace: default
+spec:
+  secretName: my-tls-secret    # Name of the Secret to be created
+  duration: 2160h               # 90 days
+  dnsNames:
+    - example.com
+    - www.example.com
+  issuerRef:
+    name: ___                   # Name of the Issuer created above
+    kind: Issuer
+
+# 3. Watch Certificate status until Ready: True
+kubectl get certificate my-tls-cert -w
+
+# 4. Inspect the created Secret
+kubectl get secret ___
+kubectl describe secret ___</code></pre>
+              <details><summary>Hint</summary><ul><li>Check the Ready state of a Certificate with kubectl get certificate -o wide or in the Conditions section of kubectl describe certificate my-tls-cert.</li><li>If certificate issuance fails, the reason will be recorded in the Events section of kubectl describe certificate.</li><li>The reconciliation loop also automatically triggers renewal when the certificate approaches expiry (at 2/3 of the duration). This is a key advantage over managing certificates manually.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Save and apply the files
+kubectl apply -f issuer.yaml
+# issuer.cert-manager.io/selfsigned-issuer created
+
+kubectl apply -f certificate.yaml
+# certificate.cert-manager.io/my-tls-cert created
+
+# Watch the reconciliation loop (flips to Ready: True within seconds)
+kubectl get certificate my-tls-cert -w
+# NAME          READY   SECRET          AGE
+# my-tls-cert   False   my-tls-secret   2s
+# my-tls-cert   True    my-tls-secret   5s   &lt;-- controller finished issuing
+
+# Inspect the created Secret
+kubectl get secret my-tls-secret
+# NAME            TYPE                DATA   AGE
+# my-tls-secret   kubernetes.io/tls   3      10s
+
+kubectl describe secret my-tls-secret
+# Data
+# ====
+# ca.crt:   xxxx bytes
+# tls.crt:  xxxx bytes
+# tls.key:  xxxx bytes
+
+# Inspect certificate contents (base64 decode)
+kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep -E &#x27;Subject:|DNS:&#x27;</code></pre>
+                <div class='exp2'><p>When a Certificate custom resource is created, the cert-manager controller runs the reconciliation loop. It compares the current state (no Secret, Ready: False) against the desired state (a valid TLS Secret, Ready: True) and issues a certificate and creates the Secret accordingly. This is the core of the Operator pattern: the user only describes <em>what</em> they want (the Certificate declaration), while the controller handles <em>how</em> to produce it (generating the CSR, signing it, and storing it as a Secret).</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Application] Edit the existing Certificate to add &#x27;api.example.com&#x27; to its dnsNames. After applying the change with kubectl edit or kubectl apply, observe the controller automatically re-issuing the certificate and updating the Secret. Compare the Subject Alternative Names (SANs) in tls.crt before and after the update.</p></div>
+              <pre class='starter'><code># Option 1: edit directly with kubectl edit
+kubectl edit certificate my-tls-cert
+# Add &#x27;api.example.com&#x27; to dnsNames and save
+
+# Option 2: update the YAML and re-apply
+# Edit the dnsNames section in certificate.yaml:
+#   dnsNames:
+#     - example.com
+#     - www.example.com
+#     - api.example.com    # added
+# kubectl apply -f certificate.yaml
+
+# Watch the update propagate
+kubectl get certificate my-tls-cert -w
+
+# Verify the SANs after renewal
+kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep DNS</code></pre>
+              <details><summary>Hint</summary><ul><li>The save shortcut varies by editor. For vi use &#x27;:wq&#x27;; for nano use &#x27;Ctrl+X → Y → Enter&#x27;.</li><li>Run kubectl describe certificate my-tls-cert immediately after the change to see in the Events section why the controller triggered re-issuance.</li><li>Clean up: kubectl delete certificate my-tls-cert &amp;&amp; kubectl delete issuer selfsigned-issuer &amp;&amp; kubectl delete secret my-tls-secret</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Edit with kubectl edit (opens vi/nano)
+kubectl edit certificate my-tls-cert
+# Update the dnsNames section as follows, then save:
+#   dnsNames:
+#     - example.com
+#     - www.example.com
+#     - api.example.com
+
+# The controller detects the change and begins re-issuance (briefly goes False, then True again)
+kubectl get certificate my-tls-cert -w
+# NAME          READY   SECRET          AGE
+# my-tls-cert   True    my-tls-secret   2m
+# my-tls-cert   False   my-tls-secret   2m   &lt;-- re-issuance in progress
+# my-tls-cert   True    my-tls-secret   2m   &lt;-- re-issuance complete
+
+# Verify the renewed certificate&#x27;s SANs
+kubectl get secret my-tls-secret -o jsonpath=&#x27;{.data.tls\.crt}&#x27; | base64 -d | openssl x509 -text -noout | grep DNS
+# DNS:example.com, DNS:www.example.com, DNS:api.example.com  &lt;-- now 3 SANs</code></pre>
+                <div class='exp2'><p>In the Operator pattern, the controller watches for changes to custom resources and automatically reconciles whenever the desired state diverges from the actual state. Detecting the dnsNames change, the cert-manager controller revokes the old certificate and re-issues a new one with the updated SANs. With a single YAML change, a complex PKI re-issuance process is fully automated. This is the core value of the Operator pattern — encoding operational knowledge in code.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=ha3LjlD6g7g' target='_blank'>Kubernetes Operator explained in 10 minutes</a></li><li><a href='https://www.youtube.com/watch?v=i9V4oCa5f9I' target='_blank'>Kubernetes Operators Explained</a></li><li><a href='https://www.youtube.com/watch?v=q7b23612pSc' target='_blank'>Writing Kubernetes Controllers</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>
