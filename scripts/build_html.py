@@ -458,7 +458,6 @@ PAGE_DEFAULT = """<!DOCTYPE html>
 <nav>
   <div class="navtop"><a class="home" href="{home_href}">{home_label}</a>{lang_toggle}</div>
   <h1>{title}</h1>
-  <div class="sub">{subtitle} · {count_label}</div>
   <ul>{toc}</ul>
 </nav>
 <main>{sections}</main>
