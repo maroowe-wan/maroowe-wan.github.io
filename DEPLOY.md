@@ -57,5 +57,7 @@ git push
 푸시하면 Pages가 자동 재배포한다.
 
 ## 참고
+- **push 계정:** 이 저장소는 **`maroowe-wan`** 계정으로 push해야 한다. Windows 자격증명에 github.com 일반 항목(`jungwan-ko`)이 함께 있어 기본 인증이 jungwan-ko로 잡히면 `403 denied to jungwan-ko`가 난다. 로컬 git config `credential.https://github.com.useHttpPath=true`(이미 설정됨)가 repo 전용 maroowe-wan 자격증명으로 라우팅해 해결한다.
+- 강좌를 수정·추가했으면 원본(`courses/`)과 빌드 산출물(`docs/`)을 함께 커밋한다(`git add courses docs`).
 - `docs/.nojekyll` 가 있어 GitHub이 Jekyll 처리를 건너뛴다(언더스코어 파일·폴더 무시 방지).
 - 다이어그램(Mermaid)·폰트는 CDN을 쓴다. 사내망에서 CDN이 막히면 다이어그램은 소스 텍스트로 폴백 표시된다.

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-ProgressiveDelivery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-34-progressive-delivery/index.html'>EN</a></div>
+  <h1>K8S-ProgressiveDelivery</h1>
+  <div class="sub">중급2까지 마친 학습자 (RBAC·스케줄링·NetworkPolicy·Helm·모니터링을 이미 아는 수준) · 총 1강</div>
+  <ul><li><a href='#lec1'>01. 프로그레시브 딜리버리 — Canary·Blue-Green과 PodDisruptionBudget</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. 프로그레시브 딜리버리 — Canary·Blue-Green과 PodDisruptionBudget </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>Canary·Blue-Green 등 점진적 배포 전략의 차이와 적용 상황을 이해한다</li>
+<li>Argo Rollouts로 트래픽을 단계적으로 분할하며 새 버전을 점진 배포할 수 있다</li>
+<li>PodDisruptionBudget(PDB)으로 배포·노드 드레인 중 가용성을 보장하는 방법을 설명한다</li>
+</ul>
+<h3>본문</h3>
+<h4>RollingUpdate만으로는 부족한 이유</h4>
+<p>기본 Deployment의 <code class='ic'>RollingUpdate</code>는 구버전 Pod를 새 버전으로 하나씩 교체한다. 무중단이긴 하지만 한계가 있다. 일단 교체가 시작되면 <strong>모든 사용자가 점점 새 버전을 받게</strong> 되고, 새 버전에 버그가 있어도 트래픽을 정밀하게 제어하거나 멈출 수단이 약하다. 문제를 발견했을 땐 이미 상당수 사용자가 영향을 받은 뒤다.</p>
+<p><strong>프로그레시브 딜리버리(Progressive Delivery)</strong>는 여기에 두 가지를 더한다. 새 버전에 가는 트래픽 비율을 <strong>세밀하게 통제</strong>하고, 메트릭(에러율·지연)을 보며 <strong>자동으로 진행 또는 롤백</strong>한다. 대표 전략이 Canary와 Blue-Green이다.</p>
+<ul>
+<li><strong>Blue-Green</strong> — 구버전(Blue)과 신버전(Green)을 <strong>동시에 통째로</strong> 띄워 두고, 검증이 끝나면 트래픽을 한 번에 Green으로 전환한다. 롤백은 다시 Blue로 스위치만 돌리면 되어 즉각적이다. 대신 잠깐 두 배의 리소스가 필요하고, 전환 순간 전체 트래픽이 한꺼번에 새 버전을 맞는다.</li>
+<li><strong>Canary</strong> — 신버전을 소량(예: 5%)만 띄워 일부 트래픽을 흘려보내고, 문제가 없으면 10% → 25% → 50% → 100%로 점진 확대한다. 실제 사용자 일부로 안전하게 검증하므로 위험이 가장 잘 통제되지만, 단계 관리와 트래픽 분할 메커니즘이 필요하다.</li>
+</ul>
+<blockquote class='callout'>
+<p>선택 기준: <strong>즉각적 전체 전환과 빠른 롤백</strong>이 중요하면 Blue-Green, <strong>위험을 잘게 쪼개 실사용자로 검증</strong>하고 싶으면 Canary다. 스키마 마이그레이션처럼 두 버전이 공존하기 어려운 경우엔 Blue-Green이, 무상태 웹 서비스의 점진 출시엔 Canary가 잘 맞는다.</p>
+</blockquote>
+<h4>Argo Rollouts로 Canary 구현하기</h4>
+<p>기본 Deployment는 이런 세밀한 제어를 못 한다. <strong>Argo Rollouts</strong>는 Deployment를 대체하는 <code class='ic'>Rollout</code>이라는 CRD와 컨트롤러를 제공해, Canary/Blue-Green을 선언형으로 다룬다. Deployment를 거의 그대로 두고 <code class='ic'>kind: Deployment</code>를 <code class='ic'>kind: Rollout</code>으로 바꾼 뒤 <code class='ic'>strategy</code>만 추가하면 된다.</p>
+<p>그런데 Canary를 구성하기 전에 반드시 알아야 할 중요한 사실이 있다. Argo Rollouts의 Canary에는 <strong>두 가지 모드</strong>가 있고, 쓸 수 있는 <code class='ic'>steps</code> 키워드가 다르다.</p>
+<ul>
+<li><strong>복제본(replica) 기반 Canary — 기본(out-of-the-box).</strong> Istio·NGINX 같은 외부 트래픽 제공자 없이, <strong>새 버전 Pod의 개수 비율</strong>로 트래픽을 근사한다. 이때는 <code class='ic'>setWeight</code>가 아니라 <strong><code class='ic'>setCanaryScale</code></strong>로 &quot;새 버전을 몇 %(또는 몇 개) 띄울지&quot;를 단계적으로 늘린다. 트래픽은 Service의 기본 로드밸런싱으로 그 Pod들에 분산되므로 비율은 <strong>근사값</strong>이다.</li>
+<li><strong>트래픽 가중치 기반 Canary — 트래픽 제공자 필요.</strong> <code class='ic'>setWeight: 20</code>처럼 <strong>정확한 요청 비율</strong>을 지정하려면, Rollout이 Istio·NGINX Ingress·SMI·ALB 같은 트래픽 제공자와 연동돼 있어야 한다. <code class='ic'>setWeight</code>는 그 제공자에게 &quot;요청의 20%를 새 버전으로 보내라&quot;고 지시하는 것이라, <strong>연동 없이 단독으로는 동작하지 않는다.</strong></li>
+</ul>
+<blockquote class='callout'>
+<p>흔한 함정: <code class='ic'>setWeight</code>만 적어 두고 트래픽 제공자를 연동하지 않으면, 가중치가 의도대로 적용되지 않는다. <strong>외부 메시/인그레스가 없는 환경에서는 <code class='ic'>setCanaryScale</code>로 시작</strong>하고, 정밀한 비율 제어가 필요해지면 트래픽 제공자를 붙인 뒤 <code class='ic'>setWeight</code>로 넘어가는 것이 올바른 순서다.</p>
+</blockquote>
+<p>먼저 <strong>기본 환경(트래픽 제공자 없음)</strong>에서 동작하는 복제본 기반 Canary 예시다.</p>
+<pre><code>
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: web
+spec:
+  replicas: 5
+  selector:
+    matchLabels: { app: web }
+  template:                       # Deployment의 Pod 템플릿과 동일
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: our-org/web:v2
+  strategy:
+    canary:
+      steps:
+        - setCanaryScale:         # 새 버전 Pod 비중을 단계적으로 키운다
+            weight: 20            # 전체의 약 20%만 v2 Pod로
+        - pause: { duration: 5m } # 5분 관찰
+        - setCanaryScale:
+            weight: 50
+        - pause: {}               # 무기한 정지 → 사람이 수동 승인(promote)
+        - setCanaryScale:
+            weight: 100
+</code></pre>
+<p><code class='ic'>pause: {}</code>(duration 없음)는 <strong>사람의 수동 승인</strong>을 기다리는 게이트다. 운영자가 메트릭을 확인한 뒤 진행시킨다.</p>
+<p>정밀한 트래픽 분할이 필요해 Istio 등을 연동했다면, 같은 자리에 <code class='ic'>setWeight</code>를 쓴다(다음 강의의 Istio와 함께 쓰는 형태).</p>
+<pre><code>
+  strategy:
+    canary:
+      trafficRouting:             # 트래픽 제공자 연동이 전제다
+        istio:
+          virtualService: { name: web-vsvc }
+      steps:
+        - setWeight: 20           # 메시가 &#x27;정확히&#x27; 요청의 20%를 v2로 보냄
+        - pause: { duration: 5m }
+        - setWeight: 50
+        - pause: {}
+        - setWeight: 100
+</code></pre>
+<p>아래 흐름도는 위 <code class='ic'>steps</code> 정의가 실제로 어떻게 새 버전 비중을 단계적으로 늘리고, 각 단계에서 멈추거나 롤백하는지를 보여 준다. 기본 환경에서는 <code class='ic'>setCanaryScale</code>로 Pod 비율을, 트래픽 제공자를 연동했다면 <code class='ic'>setWeight</code>로 정확한 요청 비율을 키운다는 점만 다를 뿐 단계 흐름은 동일하다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    S[&quot;배포 시작 v2 기동&quot;] --&gt; W20[&quot;20% 단계: setCanaryScale 또는 setWeight 20&quot;]
+    W20 --&gt; P1[&quot;pause 5분 관찰&quot;]
+    P1 --&gt; C1{&quot;메트릭 정상인가?&quot;}
+    C1 --&gt;|&quot;이상&quot;| RB[&quot;abort 즉시 롤백 v1 100%&quot;]
+    C1 --&gt;|&quot;정상&quot;| W50[&quot;50% 단계: 비중 50으로 확대&quot;]
+    W50 --&gt; P2[&quot;pause 운영자 수동 승인 대기&quot;]
+    P2 --&gt; C2{&quot;promote 승인?&quot;}
+    C2 --&gt;|&quot;abort&quot;| RB
+    C2 --&gt;|&quot;promote&quot;| W100[&quot;100% 단계: 전환 완료&quot;]</div><figcaption>Canary 단계적 전환 흐름 — setCanaryScale / setWeight</figcaption></figure>
+<pre><code>
+# 상태 실시간 관찰 (kubectl 플러그인)
+kubectl argo rollouts get rollout web --watch
+# 수동 정지 단계를 통과시키기
+kubectl argo rollouts promote web
+# 문제가 보이면 즉시 롤백
+kubectl argo rollouts abort web
+</code></pre>
+<p>여기서 더 나아가 <code class='ic'>analysis</code>를 붙이면, 각 단계에서 Prometheus 등의 메트릭을 자동 평가해 에러율이 임계치를 넘으면 <strong>사람 개입 없이 자동 롤백</strong>한다. 이것이 프로그레시브 딜리버리의 완성형이다.</p>
+<h4>트래픽 분할 — 누가 비율을 보장하나</h4>
+<p>&quot;20%만 새 버전으로 보낸다&quot;를 실제로 구현하는 방식을 다시 정리하면 두 가지다.</p>
+<ul>
+<li><strong>Replica 비율 기반(기본, <code class='ic'>setCanaryScale</code>)</strong> — Pod 개수 비율로 근사한다. 5개 중 1개가 새 버전이면 대략 20%. 별도 인프라가 없어 간단하지만 정밀하지 않다(요청이 균등 분산된다는 가정에 의존).</li>
+<li><strong>트래픽 제공자 연동(<code class='ic'>setWeight</code> + <code class='ic'>trafficRouting</code>)</strong> — Istio·NGINX Ingress·SMI 등과 연동해 <strong>정확한 비율</strong>로 라우팅한다. <code class='ic'>setWeight: 20</code>이 진짜 요청의 20%가 되도록 메시/인그레스가 보장한다.</li>
+</ul>
+<p>정밀한 Canary가 필요하면 다음 강의의 Istio 같은 서비스 메시와 함께 쓰는 것이 자연스럽다. Rollouts가 단계를 지휘하고, 메시가 정확한 트래픽 분할을 실행하는 구조다.</p>
+<h4>PodDisruptionBudget — 자발적 중단으로부터의 안전망</h4>
+<p>배포·롤아웃과 별개로, 운영 중에는 <strong>자발적 중단(voluntary disruption)</strong>이 수시로 일어난다. 노드 업그레이드를 위한 <code class='ic'>kubectl drain</code>, 클러스터 오토스케일러의 노드 축소, VPA의 Pod 축출 등이 그것이다. 이때 한 서비스의 Pod가 동시에 너무 많이 내려가면 순간적으로 가용성이 무너질 수 있다.</p>
+<p><strong>PodDisruptionBudget(PDB)</strong>은 &quot;이 워크로드는 자발적 중단 중에도 최소 N개(또는 최대 M개 중단)는 보장하라&quot;고 선언하는 안전장치다.</p>
+<pre><code>
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-pdb
+spec:
+  minAvailable: 3              # 항상 최소 3개는 살아 있어야 함
+  # 또는 maxUnavailable: 1     # 동시에 1개까지만 내려갈 수 있음
+  selector:
+    matchLabels:
+      app: web
+</code></pre>
+<p>이 PDB가 있으면, 노드를 drain할 때 쿠버네티스는 <code class='ic'>web</code> Pod를 한꺼번에 비우지 않고 <strong>최소 3개가 유지되도록</strong> 축출을 직렬화한다. 조건을 어기게 되는 축출 요청은 일시적으로 거부된다.</p>
+<blockquote class='callout'>
+<p>주의: PDB는 <strong>자발적</strong> 중단만 막는다. 노드 하드웨어 장애 같은 <strong>비자발적</strong> 중단은 막지 못한다(그건 replica 수와 노드 분산으로 대비한다). 또한 PDB를 너무 빡빡하게(<code class='ic'>minAvailable</code>을 replica 수와 같게) 잡으면 노드 드레인이 영영 진행되지 않아 클러스터 유지보수가 막힐 수 있으니, 항상 여유분을 남겨야 한다. 프로그레시브 딜리버리로 &quot;배포 중 가용성&quot;을 지키고, PDB로 &quot;운영 중 가용성&quot;을 지킨다 — 둘은 짝을 이룬다.</p>
+</blockquote>
+<h3>핵심 요약</h3>
+<ul>
+<li>프로그레시브 딜리버리는 트래픽 비율을 세밀히 통제하고 메트릭 기반으로 진행/롤백하는 배포 방식이다. RollingUpdate의 한계를 보완한다.</li>
+<li>Blue-Green은 통째로 띄워 한 번에 전환(즉각 롤백, 리소스 2배), Canary는 소량부터 점진 확대(위험 통제, 단계 관리 필요)한다.</li>
+<li>Argo Rollouts의 Canary는 두 모드다. <strong>트래픽 제공자가 없으면 <code class='ic'>setCanaryScale</code>(복제본 비율 근사)</strong>, Istio·NGINX 등을 연동했으면 <strong><code class='ic'>setWeight</code>(정확한 비율)</strong>를 쓴다. <code class='ic'>setWeight</code>는 트래픽 제공자 연동 없이는 동작하지 않는다.</li>
+<li><code class='ic'>promote</code>/<code class='ic'>abort</code>로 단계를 제어하고, <code class='ic'>analysis</code>로 메트릭 기반 자동 롤백까지 구현한다.</li>
+<li>PodDisruptionBudget은 노드 드레인·오토스케일 축소 등 자발적 중단 중 최소 가용 Pod 수를 보장한다. 비자발적 장애는 막지 못하며, 너무 빡빡하면 유지보수가 막힌다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. [워밍업] PodDisruptionBudget(PDB)을 생성하고 kubectl drain으로 노드를 비울 때 PDB가 어떻게 Pod 축출을 제한하는지 관찰하라. 먼저 Deployment를 만들고 PDB를 minAvailable: 2로 설정한 뒤, 단일 노드 클러스터에서 drain 시도 시 어떤 메시지가 나오는지 확인하라.</p></div>
+              <pre class='starter'><code># 1. 테스트 Deployment (replicas: 3)
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pdb-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: pdb-demo
+  template:
+    metadata:
+      labels:
+        app: pdb-demo
+    spec:
+      containers:
+      - name: app
+        image: nginx
+EOF
+
+# 2. PDB 생성
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-demo-pdb
+spec:
+  minAvailable: ___     # 최소 유지 Pod 수
+  selector:
+    matchLabels:
+      app: ___
+
+# 3. PDB 상태 확인
+kubectl get pdb
+kubectl describe pdb pdb-demo-pdb
+
+# 4. minikube 사용 시 노드 이름 확인
+kubectl get nodes
+
+# 5. 노드 drain 시도 (PDB 위반 관찰)
+kubectl drain ___ --ignore-daemonsets --delete-emptydir-data</code></pre>
+              <details><summary>힌트</summary><ul><li>drain 명령이 블로킹 상태로 멈추면 Ctrl+C로 중단하고 kubectl uncordon &lt;노드명&gt; 으로 복구하라.</li><li>minAvailable 대신 maxUnavailable을 사용할 수도 있다. maxUnavailable: 1은 &#x27;최대 1개까지 동시에 사용 불가 허용&#x27;이다.</li><li>kubectl get pdb -o wide 로 ALLOWED DISRUPTIONS 컬럼을 확인하면 현재 몇 개의 Pod를 더 중단할 수 있는지 실시간으로 볼 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 2. PDB 생성
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: pdb-demo-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: pdb-demo
+EOF
+
+# 3. PDB 상태 확인
+kubectl get pdb
+# NAME           MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+# pdb-demo-pdb   2               N/A               1                     10s
+# ALLOWED DISRUPTIONS=1 : 현재 3개 중 1개만 축출 가능
+
+kubectl describe pdb pdb-demo-pdb
+# Status:
+#   Disruptions Allowed:  1
+#   Current Healthy:      3
+#   Desired Healthy:      2
+#   Expected Pods:        3
+
+# 4. 노드 drain (단일 노드 클러스터 minikube 기준)
+kubectl drain minikube --ignore-daemonsets --delete-emptydir-data
+# evicting pod default/pdb-demo-xxxx
+# error when evicting pods/&quot;pdb-demo-xxxx&quot;: Cannot evict pod as it would violate
+#   the pod&#x27;s disruption budget. (단일 노드에서 2개 이상 삭제 불가)
+# 또는 1개까지는 삭제되고 그 다음부터 대기 상태가 됨
+
+# 5. uncordon으로 노드 복구
+kubectl uncordon minikube
+
+# 정리
+kubectl delete deploy pdb-demo
+kubectl delete pdb pdb-demo-pdb</code></pre>
+                <div class='exp2'><p>PodDisruptionBudget은 자발적 중단(drain, 롤링 업데이트 등) 시 최소 가용 Pod 수를 보장한다. minAvailable: 2이면 3개 중 1개만 동시에 축출 허용된다. ALLOWED DISRUPTIONS 컬럼이 이 값을 보여준다. 비자발적 중단(노드 고장)에는 PDB가 적용되지 않는다. 롤링 업데이트 중에도 PDB가 동작해, maxUnavailable 설정과 함께 무중단 배포를 보장한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. [핵심 실습] Argo Rollouts를 설치하고 Canary 배포 전략으로 Rollout 오브젝트를 생성하라. 트래픽을 20% → 50% → 100% 단계로 점진적으로 전환하는 canary steps를 정의하고, 각 단계에서 pause로 수동 승인 대기 후 다음 단계로 진행하라.</p></div>
+              <pre class='starter'><code># 1. Argo Rollouts 설치
+kubectl create namespace argo-rollouts
+kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+
+# kubectl argo rollouts 플러그인 설치 (선택)
+# https://argoproj.github.io/argo-rollouts/installation/
+
+# 2. Rollout 오브젝트 (Canary 전략)
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: canary-demo
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+        - setWeight: ___    # 1단계: 20% 트래픽 카나리로
+        - pause: {}         # 수동 승인 대기
+        - setWeight: ___    # 2단계: 50%
+        - pause:
+            duration: ___   # 30초 자동 대기
+        - setWeight: 100    # 3단계: 100% 전환 완료
+  selector:
+    matchLabels:
+      app: canary-demo
+  template:
+    metadata:
+      labels:
+        app: canary-demo
+    spec:
+      containers:
+      - name: app
+        image: argoproj/rollouts-demo:blue    # v1
+        ports:
+        - containerPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canary-demo-svc
+spec:
+  selector:
+    app: canary-demo
+  ports:
+  - port: 80
+    targetPort: 8080</code></pre>
+              <details><summary>힌트</summary><ul><li>kubectl argo rollouts 플러그인이 없으면 kubectl get rollout canary-demo -o yaml | grep -A20 &#x27;status:&#x27; 로 상태를 확인할 수 있다.</li><li>canary 배포 중 문제가 발생하면 kubectl argo rollouts abort canary-demo 로 즉시 롤백(stable 버전으로 복원)된다.</li><li>setWeight의 정확한 비율은 replicas 수에 따라 근사값이 된다. replicas 5에서 setWeight: 20은 1개(20%)이고, setWeight: 40은 2개(40%)로 반올림된다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># Rollout 생성
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: canary-demo
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+        - setWeight: 20
+        - pause: {}
+        - setWeight: 50
+        - pause:
+            duration: 30
+        - setWeight: 100
+  selector:
+    matchLabels:
+      app: canary-demo
+  template:
+    metadata:
+      labels:
+        app: canary-demo
+    spec:
+      containers:
+      - name: app
+        image: argoproj/rollouts-demo:blue
+        ports:
+        - containerPort: 8080
+EOF
+
+# Rollout 상태 확인
+kubectl argo rollouts get rollout canary-demo --watch
+# 또는: kubectl get rollout canary-demo -n default
+
+# 새 버전으로 업데이트 (yellow 이미지로 canary 시작)
+kubectl argo rollouts set image canary-demo app=argoproj/rollouts-demo:yellow
+
+# 상태: 1개(20%)는 yellow, 4개는 blue, 1단계 pause 대기
+kubectl argo rollouts get rollout canary-demo
+# NAME           KIND       STATUS        STEP  SET-WEIGHT  READY  DESIRED  UP-TO-DATE  AVAILABLE
+# canary-demo    Rollout    ॥ Paused      1/5   20          5      5        1           5
+
+# 수동 승인 (다음 단계로 진행)
+kubectl argo rollouts promote canary-demo
+# 50% 단계 진행 후 30초 자동 대기
+
+# 두 번째 promote
+kubectl argo rollouts promote canary-demo
+# 100% 전환 완료</code></pre>
+                <div class='exp2'><p>Argo Rollouts의 Canary 전략은 steps에 정의된 단계를 순서대로 실행한다. setWeight는 카나리 Pod의 트래픽 비율을 제어하며, replicas 5에서 setWeight: 20이면 카나리 Pod 1개(20%)가 생성된다. pause: {}는 수동으로 promote 명령을 줄 때까지 대기한다. pause: {duration: 30}은 30초 자동 대기 후 진행한다. 이 단계적 트래픽 전환이 프로그레시브 딜리버리의 핵심으로, 각 단계에서 메트릭을 확인하며 문제 시 abort로 롤백할 수 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. [응용] Rollout에 PDB를 결합해, Canary 배포 중에도 최소 가용 Pod 수를 보장하라. Rollout replicas 5, minAvailable 4인 PDB를 생성하고, Canary 배포 중 kubectl drain 시도 시 PDB가 배포와 drain을 동시에 제한하는 상황을 관찰하라.</p></div>
+              <pre class='starter'><code># 1. Rollout에 연결된 PDB 생성
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: canary-demo-pdb
+spec:
+  minAvailable: ___    # 5개 중 4개 항상 가용
+  selector:
+    matchLabels:
+      app: canary-demo
+
+# 2. PDB 생성 후 상태 확인
+kubectl get pdb canary-demo-pdb
+
+# 3. 새 버전으로 업데이트 (canary 배포 시작)
+kubectl argo rollouts set image canary-demo app=argoproj/rollouts-demo:green
+
+# 4. Canary 진행 중 drain 시도 (PDB 제한 관찰)
+kubectl get nodes
+kubectl drain ___ --ignore-daemonsets --delete-emptydir-data --timeout=20s
+
+# 5. Canary 완료 또는 abort
+kubectl argo rollouts abort canary-demo
+
+# 6. 정리
+kubectl delete rollout canary-demo
+kubectl delete pdb canary-demo-pdb
+kubectl delete service canary-demo-svc
+kubectl delete namespace argo-rollouts</code></pre>
+              <details><summary>힌트</summary><ul><li>ALLOWED DISRUPTIONS가 0인 상태에서 drain이 블로킹되는 상황이 운영에서 실제로 자주 발생한다. --pod-selector 플래그로 특정 Pod만 제외하거나, --disable-eviction 플래그(강제 삭제)를 쓸 수 있지만 권장하지 않는다.</li><li>kubectl argo rollouts undo 는 rollout의 이전 안정 버전으로 되돌린다. abort 후 undo를 실행해야 완전히 이전 상태로 복원된다.</li><li>PDB를 percentage로 표현할 수 있다. minAvailable: &#x27;80%&#x27;는 전체 Pod의 80% 이상을 항상 가용하게 유지한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. PDB 생성
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: canary-demo-pdb
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app: canary-demo
+EOF
+
+# 2. PDB 상태
+kubectl get pdb canary-demo-pdb
+# NAME             MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+# canary-demo-pdb  4               N/A               1                     5s
+
+# 3. Canary 시작 (green 이미지)
+kubectl argo rollouts set image canary-demo app=argoproj/rollouts-demo:green
+# 이제 5개 중 1개는 green(canary), 4개는 yellow(stable)
+
+kubectl get pdb canary-demo-pdb
+# ALLOWED DISRUPTIONS: 0  &lt;-- canary 1개 + stable 4개 = 5개, minAvailable=4이므로 1개만 허용이지만
+# canary 교체 중에는 더 보수적으로 0이 될 수 있음
+
+# 4. drain 시도 (canary 중 drain = 이중 제약)
+kubectl drain minikube --ignore-daemonsets --delete-emptydir-data --timeout=20s
+# error: unable to drain node &quot;minikube&quot; due to error:
+#   Cannot evict pod as it would violate the pod&#x27;s disruption budget
+
+# 5. abort로 롤백
+kubectl argo rollouts abort canary-demo
+# Rollout is aborted, you should manually sync the Rollout or use the --force flag to override
+kubectl argo rollouts undo canary-demo
+
+# 6. 정리
+kubectl delete rollout canary-demo
+kubectl delete pdb canary-demo-pdb
+kubectl delete service canary-demo-svc</code></pre>
+                <div class='exp2'><p>PDB와 Canary 배포를 함께 사용하면 배포 중에도 서비스 가용성을 이중으로 보호할 수 있다. Canary 교체(이전 버전 Pod 축출)와 노드 drain 두 가지 자발적 중단이 동시에 일어날 때, PDB의 ALLOWED DISRUPTIONS가 0이면 두 작업 모두 블로킹된다. 실무에서는 배포 창(maintenance window) 중에 drain을 수행하거나, PDB의 minAvailable을 replicas보다 충분히 낮게 설정해 배포와 인프라 유지보수가 동시에 가능하도록 균형을 맞춘다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=hIL0E2gLkf8' target='_blank'>Argo Rollouts Demo</a></li><li><a href='https://www.youtube.com/watch?v=84Ky0aPbHvY' target='_blank'>Argo Rollouts - Canary Deployments Made Easy In Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=6zWfVqkKuyI' target='_blank'>Kubernetes Deployment strategies | Canary Deployment | Argo rollout</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

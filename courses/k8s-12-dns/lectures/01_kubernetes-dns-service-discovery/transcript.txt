@@ -1,0 +1,238 @@
+## Video 1: Understanding of CoreDNS in Kubernetes | ndots in resolv.conf file | coredns configmap | kube-dns
+https://www.youtube.com/watch?v=KAwzZXjG0sE
+
+Hello everyone, my name is Anish Rana and you are watching Kubernetes web series. In this video, I will explain DNS functionality on Kubernetes cluster.
+
+Why we use DNS in Kubernetes:
+There are many reasons to use DNS services in Kubernetes. In a Kubernetes environment, you would have hundreds or potentially thousands of objects with unique IPs. Keeping track of the IP address of all of them by hand is not possible. Additionally, in Kubernetes, pods are ephemeral by nature. Whenever pods die, they will be recreated by deployment and get a new IP address. So it's good to have one name with IPs attached to it behind the scenes. By translating the service names into IP addresses, we resolve many problems, such as keeping track of changes in pod IP addresses automatically. DNS services in Kubernetes make life much simpler for administrators.
+
+When we create a service, Kubernetes will assign one IP address to it. We can access those services by their name, and the IP address gets transferred to the endpoints. This means we just need to remember the name of the services. It makes our life very easy.
+
+Basic Information of DNS in Kubernetes:
+DNS is a built-in Kubernetes service launched automatically using the add-on manager. Before Kubernetes version 1.11, the Kubernetes DNS service was based on kube-dns. Version 1.11 introduced CoreDNS, an open-source DNS server written in Go language to provide DNS services across the environment. CoreDNS is designed specifically for cloud-native environments.
+
+DNS is a built-in Kubernetes service, launched automatically using the add-on manager, so you don't need to install or configure the DNS service. Kubernetes creates DNS records for Services and Pods automatically. Kubelet configures pods' DNS entries so that running containers can look up services by name rather than by IP address. DNS queries may be expanded using the pod's "/etc/resolv.conf" file, which Kubelet configures on each pod. If you want to use your own DNS server, you can add the entry inside this "/etc/resolv.conf" file.
+
+Kubernetes DNS add-on currently supports forward lookup (A record), port lookup (SRV), reverse lookup (PTR record), and some other options.
+
+CoreDNS Deployment:
+CoreDNS is deployed as a cluster-level pod that handles DNS queries within the cluster. By default, the service is named kube-dns. One or more pods are created when you create the Kubernetes cluster. When you execute "kubectl get service -n kube-system", you will observe the cluster IP address with the name of kube-dns.
+
+All DNS pods are created inside the kube-system Namespace. When you execute "kubectl -n kube-system get pods", you will observe that CoreDNS pods are running on the master nodes. When you list all objects in kube-system, you see that a Deployment named CoreDNS is created, which creates a ReplicaSet with the name of coredns and some numbers. This ReplicaSet creates pods based on the replica count specified in the deployment. For example, if the deployment specifies 2 replicas, the ReplicaSet will create and manage 2 pods.
+
+ConfigMap Configuration:
+If you check the ConfigMap inside the kube-system namespace, you will observe a CoreDNS ConfigMap. The CoreDNS config file is saved as a form of ConfigMap. In short, this ConfigMap is bound with the deployment. If any CoreDNS pod goes down, the ReplicaSet will create a new pod and attach this ConfigMap. We will not lose the DNS configuration when the pod is recreated.
+
+When you execute "kubectl -n kube-system get configmap coredns -oyaml", you will see the plugins it uses. The file name is Corefile. The port number it uses is 53, which is the default port number of DNS.
+
+The health plugin generates health check reports for CoreDNS. The default listening port is 8080. This plugin is used to evaluate the health status of CoreDNS. You can identify the CoreDNS pod's IP address and use the curl command with the pod's IP followed by 8080. If the output is "okay", then your DNS service is working fine.
+
+TTL value is 30. The forward plugin forwards DNS queries to the preferred DNS server in "/etc/resolv.conf" file on the host node. For example, if you type "ping google.com" and google.com cannot be resolved through the pod's cluster IP, the forward plugin will forward the request to your node's "/etc/resolv.conf" file. The cache plugin maintains the DNS caching table.
+
+Advanced DNS Concepts:
+The kube-dns service listens for service and endpoint events from the Kubernetes API and updates DNS records as needed. These events are triggered when you create, update, or delete Kubernetes services and their associated pods.
+
+A pod would have a DNS record in the format of "podip.namespace.pod.cluster.local". A service would have a DNS record in the format of "service_name.namespace.svc.cluster.local".
+
+DNS Records in Practice:
+When you create a namespace, pod, and service, you can observe the DNS records created for them. When you execute "kubectl -n core get all -o wide", you will observe the IP addresses of all objects inside the namespace.
+
+These pods and services are assigned their respective IP addresses. The DNS service is running on a specific IP address, which is the cluster IP for kube-dns. If you try to resolve a pod name by using the DNS service cluster IP, you will get no answer because the format is not correct. If you try to resolve a pod's IP by using the DNS service cluster IP, you will notice the service IP address that was exposed for this pod. This is how reverse lookup works - it resolves the pod's IP plus the name of the service which is exposed for this pod.
+
+For pod forward lookup, the A record is like this: IP address of the pod separated by hyphen instead of dot, followed by namespace, then "pod", and finally "cluster.local". The pod's IP address 133.166 is shown with the frontend service name, the namespace, and "service.cluster.local".
+
+For the service one, there is a slight difference. When you try to resolve the service IP address, you will observe the name of the service only. When you try to resolve using the "-x" option for reverse lookup (PTR record), you will get the name of the service and the namespace. If you try to resolve the service name "front-end-svc.core.svc", you will get the IP address of the service. For pods, it is different - you must use the IP address instead of the name.
+
+Resolving from Inside a Pod:
+Let's go inside the pod and verify these DNS resolution steps. To resolve the name, you need the nslookup command. You may need to install packages like iputils-ping and dnsutils. After installing, you can use the dig command with the pod's IP and the format "namespace.pod". You can get the IP address and resolve the name.
+
+DNS functionality can be used from any place in the cluster. You can resolve any pod's name from any namespace inside this cluster. In the advanced section, remember the format of the pod name and how to use it.
+
+The "/etc/resolv.conf" File:
+When you check the "/etc/resolv.conf" file inside a pod, you see the DNS resolver configuration. The search option represents the search path for a particular domain. The default nameserver is the CoreDNS service IP address. The ndots option represents the threshold value of the number of dots in a query name to be considered as a fully qualified domain name. By default, it is 5, but you can go up to 15.
+
+When you try to resolve just "kubernetes" without the FQDN format, it will try to search the entry using the search options. You will observe multiple answers from each search option because whenever you try to resolve a hostname, it will look up both IPv4 and IPv6. For IPv4, it looks for an "A" record, and for IPv6, it looks for an "AAAA" record.
+
+If you use a dot at the end with the same name, the resolver will send the traffic directly to the root server. However, in this case, there is no domain with "kubernetes." on the Internet, so you will get "no server could be reached".
+
+When you try to resolve any hostname, it will search based on these parameters. If not found, it will forward the query to the nameserver. The ndots value determines whether it considers something a fully qualified domain name. If there are 5 or more dots, it considers the hostname as fully qualified.
+
+Logging into DNS Pods:
+To log into a DNS pod, you first need to identify the IP address of your DNS pod. Then you need to find the container name and use the debug command instead of exec. Use the "--target=coredns" flag to specify the target container. Once you use this command, you will be able to log into the DNS pod.
+
+Lab Exercise:
+The lab involves finding the DNS pod names in the cluster, checking the pods inside kube-system, and observing the services created by default when you create the Kubernetes cluster. The kube-dns service has endpoints pointing to IP addresses on port 53, which is the port number of the DNS server.
+
+The DNS deployment configuration is set inside the ConfigMap. You can check the configuration by using YAML output. The CoreDNS uses port 53, generates health checks, and has a cache with a TTL of 30. Load balancing works by distributing requests among the pods - the first request goes to one pod, the second to another, and so on.
+
+You can check the health status using the curl command with the CoreDNS pod's IP address and port 8080. When you receive an "OK" result, it means your DNS is working fine.
+
+Pod and Service DNS Resolution:
+When you create a namespace, deployment, and service, you can resolve the DNS entries. All the IP addresses assigned to the pods and services become accessible through DNS. The CoreDNS service IP address is where DNS queries are forwarded.
+
+When you try to resolve the pod name without the correct format, you won't get a resolution. But when you try to resolve the pod's IP address, you will get the correct response. This confirms the correct format for DNS resolution.
+
+Service IP resolution also works - when you resolve the service IP, you will get the service name back. When you try to resolve the service name, you will get the IP address of the service. Note that for pods, you use the IP address format with hyphens instead of dots, but for services, you use the actual service name.
+
+Resolving Pods and Services from Inside a Pod:
+To resolve pods and services from inside a pod, you can use the same DNS resolution commands. First, get the IP address of the pods and then log into one pod. You can use either the debug command or the exec command to access the pod. Once inside, you can use dig or nslookup to resolve DNS entries.
+
+If the dig command is not available inside the pod, you may need to install the necessary packages first. After exiting the pod and installing the packages, you can re-enter the pod and use the dig command for DNS resolution.
+
+DNS works globally at the cluster level, not at the pod level. The same DNS resolution works across different pods in different namespaces. You can also resolve a second pod's IP from within another pod, showing that DNS is functioning cluster-wide.
+
+When you check the resolv.conf from a pod, you see the DNS configuration that applies to that pod. When you use nslookup for "kubernetes", it goes through all the default search domains like "example.com", "cluster.local", "svc.cluster.local". By default, the Kubernetes service is in the cluster, so it resolves successfully.
+
+The ndots value is set to 5 by default, and the nameserver is the CoreDNS cluster IP (typically 10.96.0.10). When the cluster receives any DNS request, it forwards the request to this nameserver, which searches through the zones like "example.com", "cluster.local", "svc.cluster.local", and "default.svc.cluster.local".
+
+## Video 2: Kubernetes - Debugging CoreDNS
+https://www.youtube.com/watch?v=E0D0TBHkBhQ
+
+In this debugging section, I'm going to demonstrate debugging on pod networking and CoreDNS. I have my cluster up and running with multiple namespaces and pods.
+
+Pod Setup:
+I created namespace ns1 with nginx export running in it, namespace two with busybox running, and another busybox running in namespace three. The pods are running on different nodes - one nginx is running on one node while the busybox pods are running on another worker node. So basically, the pods are on different VMs.
+
+Host and Subdomain Configuration:
+In the busybox pod, I added a namespace and a hostname to the YAML file. I also created a subdomain field. If the hostname is not specified, the pod name is how the DNS will resolve it - it will take the name of the pod, then the namespace, and then "pod.cluster.local". In this case, I added the hostname field to make it identifiable.
+
+When you execute inside the busybox pod and check the hostname, you will see that it has a hostname. I added this additional field just to test it out.
+
+CoreDNS Deployment Check:
+When you check the CoreDNS pods in the kube-system namespace with "kubectl get pods -m kube-system", you see that CoreDNS is running on multiple nodes. When you check with the wide output, you see the nodes where CoreDNS is running.
+
+The CoreDNS is running on the master in this setup. The reason is likely that the replicas were set to two and both instances are running on the master. Most likely, the master was created first, and worker nodes were added one by one over time, so CoreDNS did not get scheduled to the worker nodes initially.
+
+Pod Resolution Issue:
+The pods are running on the workers, and there is no way to route requests between the pods if CoreDNS is not accessible on the worker nodes. If you do an nslookup from one pod for another by the hostname, it won't work because the CoreDNS pods are not running on the worker nodes.
+
+When you execute into one of the pods in ns1, you find that you cannot resolve the name because the CoreDNS is not running on the worker nodes. However, checking your resolv.conf file shows that it has everything set up correctly with the search criteria and the nameserver information from the node itself.
+
+You are not able to ping or look up for one pod to another within the cluster in this configuration. This is happening because the CoreDNS is not running on the worker nodes.
+
+Fixing the CoreDNS Deployment:
+To fix this issue, you need to edit the CoreDNS deployment to add a node selector or affinity rule to ensure CoreDNS runs on worker nodes as well. I'm going to see if I can enable it on the worker nodes. I edited the CoreDNS deployment to run on worker 2.
+
+After enabling CoreDNS on the worker nodes and redeploying the pods, you can perform the lookup again. First, check to make sure that it's able to resolve "kubernetes.default". Check the resolv.conf to ensure it's correct.
+
+You can look at the logs to check if anything is unusual. The logs show that the plugin is reloaded and the service is running. When you check the service with "kubectl get svc -n kube-system", you see the DNS service and its endpoints. The nslookup for the IP specifically gives you where the whole domain of the kube-dns is running and for the pods specifically.
+
+Logging Configuration:
+You can add logging to the ConfigMap to enable logging in CoreDNS. This will help you capture the logs for debugging purposes. Once you add logging, the logs will take a few minutes to propagate to all the CoreDNS pods. You can check the logs again to see if there is more information relating to the logs.
+
+## Video 3: K8s Networking Explained — Lesson 05 (CNI · kube-proxy · DNS)
+https://www.youtube.com/watch?v=tnxgCc_pYtk
+
+Welcome to Lesson 5 on Kubernetes networking. Networking is the layer you'll spend more time debugging than any other in production Kubernetes.
+
+The Kubernetes Network Promise:
+The whole system rests on one promise: every Pod gets its own IP, and every Pod can reach every other Pod directly, with no NAT (Network Address Translation) and no port juggling. This flat network is what makes Kubernetes feel simple from an application perspective.
+
+Three Components of Kubernetes Networking:
+Underneath this promise, three components are doing the work:
+- A CNI plugin moving packets between nodes
+- kube-proxy translating Service IPs to Pod IPs
+- CoreDNS turning names into Service IPs
+
+Knowing which of the three owns a failure is the difference between a five-minute fix and a five-hour outage.
+
+The Network Debugging Loop:
+Here's the systematic approach for debugging network issues:
+1. Observe: Internalize the three IP spaces: Pods on their CIDR, Services on theirs, Nodes on the host network, all routable.
+2. Diagnose: Pick a CNI that fits the workload - Calico, Cilium, or Flannel each make different tradeoffs.
+3. Act: Understand kube-proxy modes - iptables, IPVS, or eBPF - and when to switch.
+4. Document: The DNS path through CoreDNS, because most 'service unreachable' tickets end up being name resolution, not routing.
+
+The Four Rules of Kubernetes Networking:
+Before touching any CNI plugin, internalize these four rules - they're the contract Kubernetes makes with every workload you'll deploy:
+
+Rule 1: Every Pod gets a unique cluster-wide IP, and Pods talk to each other directly - no NAT, no port-mapping gymnastics.
+
+Rule 2: Three distinct CIDRs stay in their lanes: Pods owned by the CNI, Services programmed by kube-proxy, Nodes living on your underlay.
+
+Rule 3: A ClusterIP isn't bound to any interface. It's a virtual IP, and iptables or IPVS rewrites the destination to a real Pod. If a packet looks like it vanished, it didn't - it was DNAT'd (Destination NAT).
+
+Rule 4: The fourth rule is the one that trips people up at 3am - if networking seems broken, always start by understanding these rules and what they guarantee.
+
+CNI Plugins:
+The CNI plugin implements those four rules. You've got three names that cover ninety percent of clusters in the wild:
+
+Calico: Routes with BGP, no overlay, mature and boring in the best way. It's the default you'll see in kubeadm and most distributions. Rule of thumb: Calico to learn.
+
+Cilium: Uses eBPF in the kernel, gives you the highest performance and deep observability through Hubble. That's where production at scale is heading. Cilium to scale.
+
+Flannel: With VXLAN is the easiest to stand up, but it has no NetworkPolicy support, so keep it in the lab. Flannel only when policy doesn't matter.
+
+kube-proxy Modes:
+Once the CNI gives you a flat network, kube-proxy is what turns a ClusterIP into an actual Pod on the other end. You get three modes to do it:
+
+Iptables: The default mode, but it adds a chain per Service, so lookup is O(N) and somewhere past a few thousand Services your nodes go CPU-bound just processing packets. Use iptables to learn.
+
+IPVS: Flips the lookup to O(1) with a real kernel load balancer, scales cleanly to ten thousand-plus Services, and gives you round-robin, least-connections, source-hashing load balancing options. Use IPVS to scale.
+
+eBPF: Cilium replaces kube-proxy entirely, runs the logic in-kernel with no iptables overhead, and hands you the deepest observability story of the three. Use eBPF when latency and visibility matter most.
+
+CoreDNS and Service Resolution:
+CoreDNS runs as a plain Deployment in kube-system, and kubelet auto-injects its ClusterIP into every Pod's resolv.conf. This ensures that any lookup for "web.default.svc.cluster.local" resolves to a Service IP that kube-proxy then translates.
+
+Watch the ndots:5 setting though. It means short names get tried against every search domain first, so a single external lookup can fan out into five or six queries.
+
+When people say the cluster is down, nine times out of ten it's actually DNS.
+
+Complete Network Path:
+Let's stitch all three components together and trace one curl from Pod A to Pod B:
+1. CoreDNS resolves the service name to a ClusterIP
+2. The packet leaves Pod A and hits the node's iptables KUBE-SERVICES chain
+3. kube-proxy's rules DNAT the packet to a real backend Pod IP - picked at random from the endpoint set
+4. The CNI takes over for the node-to-node hop: Calico via a BGP route, Cilium via an eBPF redirect
+5. The packet arrives at the destination pod
+
+Six steps, three components, and every step has a command you can run when it breaks at 3am.
+
+Network Debugging Techniques:
+Here are six reflexes that turn debugging from guesswork into mechanics:
+
+1. Start with DNS: nslookup from inside the pod, because seventy percent of so-called connectivity bugs are really CoreDNS or resolv.conf issues.
+
+2. kubectl get endpoints: An empty list means your Service selector doesn't match your Pod labels, the single most common bug in Kubernetes.
+
+3. Curl the Pod IP directly: If endpoints look healthy, bypass Service routing - that one test splits a CNI problem from a kube-proxy problem in seconds.
+
+4. On the node, iptables -t nat -L or ipvsadm -ln: Shows you what kube-proxy actually programmed. Hubble gives you flow-level visibility if you're on Cilium.
+
+5. tcpdump on the node: When every abstraction lies, tcpdump on the node never does.
+
+6. Use kubectl debug node: For ground truth when you need it.
+
+Twelve Debugging Patterns:
+Covering the whole stack:
+- kubectl get endpoints, get pods -o wide, and nslookup for the Service-DNS-Pod triangle
+- iptables, ipvsadm, and ip route for what kube-proxy and the kernel actually programmed
+- tcpdump and kubectl debug node when you need ground truth
+
+On the CNI side, the mental shortcut: Flannel is easiest, Calico is the sensible default, Cilium is the fastest.
+
+Two CIDRs to remember - Pod and Service - and you've got the whole networking layer in one screen.
+
+Common Failure Modes:
+Five mistakes that pattern-match to most networking outages:
+
+1 & 2 - CNI-owned failures: A Pod CIDR that collides with your VPC will give you intermittent connectivity nobody can explain. Running two CNIs means two things programming iptables, which is just chaos.
+
+3 - Policy failure: A flat-open cluster is one compromised pod away from lateral movement everywhere.
+
+4 & 5 - CoreDNS failures: Two replicas don't survive a thousand-pod cluster. When DNS breaks, always start at the pod's resolv.conf before you blame the Service.
+
+Hands-On Exercises:
+Theory's done. Now you build the muscle memory. Three exercises, and they're not optional:
+
+1. Trace a packet end-to-end on a multi-node kind cluster: Watch DNS resolve, find the KUBE-SVC chain in iptables, then tcpdump the packet leaving one node and arriving on the other.
+
+2. Break a Service on purpose by mismatching the selector: That's the bug that pages someone every week. The reflex you want is 'kubectl get endpoints first.'
+
+3. Read the kube-proxy rules and CoreDNS logs while queries are flowing.
+
+After these three exercises, you know exactly where to look when curl is slow or DNS times out.
+
+Conclusion:
+Networking is traced from the flat network model through CNI, kube-proxy modes, and the CoreDNS path. The next lesson shifts from how pods talk to how they remember - Lesson 06 covers Storage: persistent volumes, claims, StorageClasses, and the CSI drivers that make stateful workloads possible.

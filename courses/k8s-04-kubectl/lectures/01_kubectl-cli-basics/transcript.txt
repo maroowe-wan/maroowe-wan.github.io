@@ -1,0 +1,190 @@
+## Video 1: Improve kubectl productivity with imperative commands
+URL: https://www.youtube.com/watch?v=QOv26a-yaq8
+Duration: 21m 19s | Channel: Nilesh Gule
+
+Hello, welcome to the channel. My name is Nilesh. Today we are going to see how to use imperative commands to create Kubernetes objects.
+
+There are different ways to create Kubernetes objects. The manifest files can be created using JSON or YAML format, which are descriptive ways of describing how we want to create a particular Kubernetes object like a pod, service, or deployment. Then there is the imperative way, which is using the kubectl command line utility to give a set of instructions.
+
+In this session, we will focus on the command line option or imperative commands. We will look at different commands that we can use.
+
+First, let me show you how to find out the form of the commands. These commands have various short forms that we can use to reduce typing. I can use the command "k api-resources" where k is an alias for kubectl. In this output, we can see different types of objects available. Some have short names like config maps with short name "cm", endpoints with short name "ep", namespaces with short name "ns", nodes "no", PVC for persistent volume claim, PV for persistent volume, and so on.
+
+For example, instead of typing "kubectl get pods", we can use the short form "k get po". To get nodes, we can say "k get no". These short forms help reduce typing. There is a kubectl cheat sheet available that I highly recommend when preparing for Kubernetes exams. It gives you how to enable kubectl auto-completion so you can auto-complete while typing commands. You do not have to remember the object names because they will be automatically completed in your test environment.
+
+The kubectl reference documentation is another useful resource. It shows different types of top-level commands with examples. For example, under the "create" option for service, it shows the usage and all the different flags this command supports, such as template, TCP, save-config, output, and dry-run. Some of these like output and dry-run are common command line flags that can be used with almost all commands. This way you can quickly take whatever is shown in the example and use it in your practice.
+
+Let me show you some practical examples. For the first question, create an nginx pod and set an environment variable called var1 with value val1. Using the long form with a manifest, we would copy the YAML definition, create a file using the vi editor, and paste the content, which takes time. Instead, using the imperative command:
+
+k run nginx --image=nginx --env=var1=val1
+
+We can verify this by running:
+k get pods
+k describe po nginx
+
+To check if the environment variable was set correctly, we can exec into the pod:
+k exec -it nginx -- sh -c 'echo $var1'
+
+For the second example, create a deployment with image nginx, a specific tag, name it nginx, give it two replicas, use port 80, and create it in the jupiter namespace. First, create the namespace:
+
+k create ns jupiter
+k get namespace
+
+Then create the deployment:
+k create deploy nginx --image=nginx:1.18.0 --replicas=2 --port=80 -n jupiter --dry-run=client -o yaml
+
+Using dry-run first lets you see the YAML output and verify the command is correct before applying it. Once it looks good, remove the dry-run flag and apply:
+k create deploy nginx --image=nginx:1.18.0 --replicas=2 --port=80 -n jupiter
+
+Verify with:
+k get deploy -n jupiter
+k get rs -n jupiter
+k get pods -n jupiter
+
+For updating the image, if you need to update the nginx image from version 1.18 to 1.19, you can use the imperative command:
+
+k set image deployment/nginx nginx=nginx:1.19.8 -n jupiter
+
+You can check the rollout history:
+k rollout history deployment/nginx -n jupiter
+
+For the third example, create a job with the image busybox that executes a command with multiple sub-commands. Echo hello, sleep for 30 seconds, then echo world:
+
+k create job live-demo-busybox --image=busybox -- sh -c 'echo hello && sleep 30 && echo world'
+
+The key takeaway is how to use imperative commands to speed up your workflow. Instead of taking a lengthy YAML file, editing it, and dealing with indentation or typo issues, you can use imperative commands to create Kubernetes objects quickly. This is especially useful during Kubernetes certification exams where time management is crucial. Every few seconds you save is an added advantage.
+
+
+## Video 2: Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube & kubectl
+URL: https://www.youtube.com/watch?v=hDBgeUuPgXo
+Duration: 12m 40s | Channel: The Engineering Wisdom | Rakia Ben Sassi
+
+In this hands-on tutorial, we are diving into deploying your first Dockerized application using Minikube. Whether you are just starting out or brushing up on Kubernetes, this tutorial will guide you through every step.
+
+Before getting started, you will need a few tools in place. For this demo, we will be deploying a simple Spring Boot application using Minikube.
+
+First, install Docker Desktop, which includes Docker CLI and Docker Daemon. Docker Desktop also provides a Kubernetes option that we will use alongside Minikube.
+
+Install Minikube. If you have a MacBook Pro, you can do it by running:
+brew install minikube
+
+Install kubectl, the Kubernetes Command Line Interface (CLI), to interact with your Minikube cluster:
+brew install kubectl
+
+Start Minikube with the Docker driver:
+minikube start --driver=docker
+
+This will start Minikube using Docker as the container runtime, which works well with Docker Desktop.
+
+Minikube now creates a Kubernetes cluster for you. This cluster includes the control plane (master) which manages the cluster and its nodes, and a single node managed by Minikube where your workloads will run. This node is where the containers (pods) are hosted. This step initializes an empty Kubernetes cluster with a single node that is ready to receive workloads but does not create any pods or deployments on its own.
+
+Use the Docker environment within Minikube:
+eval $(minikube docker-env)
+
+Minikube provides a command to use the Docker daemon in Minikube so you can directly build Docker images inside Minikube without pushing them to a remote registry like Docker Hub.
+
+Create a Docker image for your Spring Boot app. You need to create a Dockerfile in the root of your Spring Boot project. Before building the Docker image, package your Spring Boot application into a .jar file by running the appropriate command that generates the .jar. If using Gradle as a build tool, run the bootJar Gradle task.
+
+Then build the Docker image:
+docker build -t spring-boot-app:latest .
+
+Remember, this Docker image will be created inside Minikube because we are using the Docker environment within Minikube. So you should not be surprised when you do not see the image on the Docker Desktop GUI.
+
+Verify the Docker image:
+docker images
+
+The output shows the image has been built successfully inside Minikube.
+
+For the next step, create the Kubernetes deployment. Create a deployment.yaml file to define your Spring Boot app deployment. Note that you should use imagePullPolicy: Never in your deployment.yaml file. Without that option, Kubernetes will fail to pull the specified Docker image and your pod will get the status ImagePullBackOff.
+
+By default, Kubernetes may try to pull the image from an external registry like Docker Hub, especially if the image tag is :latest. You can override this behavior by setting imagePullPolicy to Never, which will force Kubernetes to use the local image instead of trying to pull it from a remote registry.
+
+Next, create a service.yaml file to expose the application.
+
+Apply the deployment and service to the Kubernetes cluster:
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+Verify the application is running:
+kubectl get pods
+kubectl get services
+
+Ensure that your Spring Boot app's pod is running and the service is exposed as a NodePort.
+
+The command kubectl apply -f deployment.yaml creates a deployment in the existing Kubernetes cluster. The deployment instructs Kubernetes to create a specified number of pods based on the replicas field in deployment.yaml. At this point, Kubernetes schedules the pods to run on the available node that Minikube created when it started the cluster.
+
+After applying the service.yaml, Kubernetes creates a Service to expose your Spring Boot application (the pods) to the external world or to other services within the cluster. This Service maps network requests such as NodePort or LoadBalancer to the pods running your Spring Boot app.
+
+Access your Spring Boot application using Minikube's IP and the NodePort you exposed. First, get the Minikube IP:
+minikube ip
+
+Then access your Spring Boot application in the browser using the URL.
+
+If this approach does not work and you got an error like "Failed to connect" or "Could not connect to server", try an alternative approach. You can access your Spring Boot application by accessing your service and opening it in your browser. Use the minikube service command, which forwards traffic directly to the service and avoids possible networking issues:
+minikube service spring-boot-service --url
+
+This command returns a URL like http://127.0.0.1:<some-port>. Try accessing this URL in your browser and you should see the message "Greeting from Spring Boot!" coming from the HelloController.
+
+Now for the fun part - scaling. Manage resources by increasing the number of Pods in your deployment. If you had replicas: 1 in your deployment.yaml file, scale the app up to 5 replicas:
+kubectl scale deployment spring-boot-deployment --replicas=5
+
+Instantly, Kubernetes spins up more Pods, making sure your app can handle more traffic.
+
+Need to update your app? No problem. With rolling updates, you can deploy new versions without downtime. Kubernetes will gradually replace old Pods with new ones, so your users never notice a thing.
+
+kubectl is the command-line tool you will use to manage everything in Kubernetes. From listing Pods to checking logs to scaling deployments, kubectl is your best friend. Try some of these commands to get comfortable:
+kubectl logs <pod-name>
+kubectl delete pod <pod-name>
+
+Go wild with it. Try scaling up, rolling back, and breaking things. Kubernetes will fix itself because it is self-healing.
+
+Regarding troubleshooting: Do not get confused when you have 5 pods and you delete one, then you run kubectl get pods and you see 5 pods while you expected 4. Here is the thing: When you set the number of replicas to 5, Kubernetes ensures that 5 replicas (pods) of your application are running at all times. This is the desired state that you declared for your deployment.
+
+If a pod is deleted intentionally or due to failure, Kubernetes' self-healing mechanism kicks in to restore the desired state by creating a new pod to maintain the specified number of replicas. When you manually delete a pod:
+kubectl delete pod <pod-name>
+
+Kubernetes notices that the number of running replicas dropped below the desired count of 5. To maintain the desired state, it automatically creates a new pod to replace the one you deleted.
+
+This is how Kubernetes works:
+- Desired State: You set the deployment to have 5 replicas (5 pods)
+- Current State: When you delete a pod, Kubernetes sees that only 4 pods are running
+- Reconciliation: Kubernetes continuously monitors the cluster and detects that the current state does not match the desired state. It immediately schedules a new pod to bring the total back to 5.
+
+This self-healing behavior is one of the key benefits of Kubernetes. It ensures that your applications maintain high availability and recover from failures automatically.
+
+Sometimes Pods can get stuck in weird states like Pending or CrashLoopBackOff. Use:
+kubectl describe pod <pod-name>
+
+to dig deeper and understand what is going wrong. You can also check the logs:
+kubectl logs <pod-name>
+
+to get more detailed error messages.
+
+In this step-by-step tutorial, you went through deploying a Spring Boot application using Docker, Minikube, and kubectl. We covered everything from setting up Minikube to creating a Docker image and deploying your app on a Kubernetes cluster. You learned how to scale your application, troubleshoot common issues, and use Kubernetes' powerful self-healing feature.
+
+By the end, you had your app running smoothly and became confident navigating Kubernetes. The best part is that you have only scratched the surface. So do not stop here! Keep experimenting, break things, and learn from them.
+
+
+## Video 3: What really happens when we run "kubectl create deployment"?
+URL: https://www.youtube.com/watch?v=Dn3RkWlPDAk
+Duration: 5m 26s | Channel: Jérôme Petazzoni
+
+Let's see what happens when we create a deployment on Kubernetes. When you run kubectl create deployment, the control plane sits in the middle with a big cylinder representing storage (etcd). There are two nodes on the right. As you run your kubectl create command, the components that are active light up in red.
+
+First, you talk to the API server. The API server talks to etcd and creates the deployment by putting the deployment in etcd. Then it tells you "deployment created". Note that when the control plane tells you "deployment created", your container is not running at all. This is like when you put an order at a restaurant - they say "yep, we got it" but the kitchen is going to work on that, and you do not have your food yet.
+
+Next, a controller wakes up - the controller responsible for deployments. It says "I see a deployment, and a deployment is a replica set". The deployment is a replica set. Do we have a replica set yet? No. Let us create the replica set. So the deployment controller is going to create the replica set and then it goes back to sleep.
+
+Then at the next step, the replica set controller - the controller responsible for replica set - wakes up. It says "I see that you have a replica set. It says that you want to have one nginx pod. Fine, let us create the pod and go back to sleep." Again, at that point when we say "create the pod", that is just an entry in etcd. We do not have an actual container running on the cluster yet. So now we have a pod that is in state pending. Pending means it is kind of queuing outside of the cluster because we do not know yet where it is going to run.
+
+Next, another controller wakes up - a special one, the scheduler. The scheduler is the component responsible for optimizing the placement of containers as tightly as possible. It has to decide on which node the pod will run. It is going to look at all kinds of factors: How much RAM do you need? How many CPUs? Do you have placement constraints? Do you want to be in the same availability zone as another thing or whatever? It looks at the requirements and says "no constraints at all". What is running currently on the cluster? Nothing. All right, I am going to arbitrarily decide that you go on node 1. Then the scheduler goes back to sleep.
+
+Next step, kubelet on node 1 wakes up. Remember, the job of kubelet is to register with the control plane and say "hello, I am node 1. Do you have any containers for me?" At that point, the control plane says "well, precisely, I have an nginx pod for you." So kubelet is going to update the manifest here to say "creating" - basically saying "I am working on it". It is going to pull the image, allocate the IP address, start the containers. When everything is running, it is going to report back and mark the pod as running. At this point, we have truly created our container. We had created the deployment, but at that point we have kind of reconciled and it is truly up and running.
+
+All these steps - the pods being pending and creating - this is exactly what is going on. I am going to prove it. I am going to run:
+kubectl get pods -o wide --watch
+
+And then I am going to do:
+kubectl create deployment web --image=nginx
+
+And you will see here all these events happening. First, it is pending. Then it is pending but now on a node. Then it is container creating. And then if you come back later, it is running with an IP address. So that is what is happening when we create a deployment on Kubernetes.

@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Resources&amp;HPA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-14-hpa/index.html'>한국어</a></div>
+  <h1>K8S-Resources&amp;HPA</h1>
+  <div class="sub">Learners who are already familiar with Kubernetes fundamentals — Pods, Deployments, Services, and YAML manifests — and want to take the next step toward production-grade operations and deployment reliability. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Resource Management and Autoscaling - requests/limits and HPA</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Resource Management and Autoscaling - requests/limits and HPA </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand how CPU/memory requests and limits affect scheduling, QoS class assignment, and OOMKill behavior</li>
+<li>Learn how the Horizontal Pod Autoscaler (HPA) adjusts the number of Pods in response to load</li>
+<li>Configure an HPA backed by metrics-server and verify its behavior through a load test</li>
+</ul>
+<h3>Content</h3>
+<h4>Why Resource Management Matters</h4>
+<p>Running workloads in a cluster without understanding requests and limits is like spending money without knowing your budget. Two outcomes await. One is a cloud bill that silently grows, and the other is a Pod that gets killed by Kubernetes without warning.</p>
+<p>Every application needs two resources to run: <strong>CPU</strong> and <strong>memory</strong>. Pods run on nodes (worker machines), and all Pods on the same node <strong>share</strong> that node&#x27;s CPU and memory. When one Pod consumes resources uncontrollably, every other Pod on that node suffers. This is known as the &quot;Noisy Neighbor&quot; problem, and isolation is the primary reason to manage resources explicitly.</p>
+<h4>requests and limits: What Two Numbers Do</h4>
+<p>You can set two values per container.</p>
+<ul>
+<li><strong>requests</strong>: The resource amount this container is &quot;guaranteed at minimum&quot; for normal operation — think of it as the minimum system requirements on a game&#x27;s packaging. The scheduler uses this value when selecting a node.</li>
+<li><strong>limits</strong>: The &quot;maximum&quot; resource amount this container is allowed to use. Exceeding this threshold triggers Kubernetes intervention.</li>
+</ul>
+<p>These values go in the <code class='ic'>resources</code> section of a container spec.</p>
+<pre><code>
+resources:
+  requests:
+    cpu: &quot;250m&quot;      # guarantee 0.25 cores
+    memory: &quot;256Mi&quot;
+  limits:
+    cpu: &quot;500m&quot;      # cap at 0.5 cores
+    memory: &quot;512Mi&quot;
+</code></pre>
+<p>Pay attention to units. <strong>Memory is in bytes</strong> (Mi = mebibytes, Gi = gibibytes), and <strong>CPU is in cores</strong>. CPU supports fractional values: <code class='ic'>1000m</code> (millicores) equals one virtual CPU core, so <code class='ic'>250m</code> is 0.25 cores. Fractional allocation is possible because the OS slices time (time-slicing) and distributes CPU among containers.</p>
+<h4>requests Act at Scheduling Time, limits Act at Runtime</h4>
+<p>The key insight is that the two values operate at <strong>different points in time</strong>.</p>
+<p><strong>requests are used at scheduling time.</strong> When a new Pod is created, the scheduler examines the Pod&#x27;s total requests and looks for a node with sufficient headroom. If a Pod requests 800Mi of memory, the scheduler finds a node with 800Mi free. If no node has room, the Pod stays in <code class='ic'>Pending</code> state. (If a Cluster Autoscaler is present, a new node is provisioned and the Pod is placed there.)</p>
+<p><strong>limits are enforced continuously at runtime.</strong> Critically, CPU and memory behave very differently when a limit is exceeded.</p>
+<blockquote class='callout'>
+<p>Memory causes OOMKill; CPU causes throttling. Exceeding a memory limit causes the container to be killed with an <strong>OOMKilled</strong> (Out of Memory) signal. Exceeding a CPU limit does not kill the container — it is <strong>throttled</strong>, meaning it receives fewer CPU cycles and simply runs slower.</p>
+</blockquote>
+<p>This difference is what trips up operators most often. Memory overruns are obvious because the Pod restarts, but CPU throttling produces a &quot;something feels slow but nothing is crashing&quot; state that is hard to trace. Remembering <strong>&quot;memory dies, CPU slows&quot;</strong> makes incident analysis much easier.</p>
+<h4>QoS Classes and Eviction Order Under Memory Pressure</h4>
+<p>requests and limits are more than resource numbers — they signal to Kubernetes <strong>how important this application is</strong>. Based on how these two values are set, Kubernetes automatically assigns each Pod one of three QoS (Quality of Service) classes.</p>
+<ul>
+<li><strong>Guaranteed</strong>: Every container in the Pod has requests equal to limits for both CPU and memory. Resources are fully reserved from start to finish, making this the most stable class — but also the most wasteful if actual usage is lower.</li>
+<li><strong>Burstable</strong>: Any Pod that is neither Guaranteed nor BestEffort falls here. Specifically, if <strong>at least one value (requests or limits) is specified</strong> — for example, requests set but no limits, or requests set lower than limits — the Pod is Burstable. It consumes up to its requests amount normally, and can burst higher when spare capacity exists. This is the most common class in practice, striking a balance between cost efficiency and stability.</li>
+<li><strong>BestEffort</strong>: No requests <strong>and</strong> no limits are set on <strong>any</strong> container in the Pod. Even a single configured value disqualifies a Pod from this class. BestEffort Pods have the lowest priority.</li>
+</ul>
+<p>The classification rule is straightforward: <strong>neither set → BestEffort; all requests equal limits → Guaranteed; everything in between (including requests-only) → Burstable.</strong> As shown in the classification flow below, this determination is made automatically based on how requests and limits are configured, and it directly governs the eviction order when memory runs low.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A{&quot;Are requests/limits set?&quot;} --&gt;|&quot;Neither set&quot;| BE[&quot;BestEffort - lowest priority&quot;]
+    A --&gt;|&quot;Set&quot;| B{&quot;Are requests and limits equal?&quot;}
+    B --&gt;|&quot;Equal&quot;| GU[&quot;Guaranteed - most stable&quot;]
+    B --&gt;|&quot;requests is smaller&quot;| BU[&quot;Burstable - middle ground, most common&quot;]
+    BE --&gt;|&quot;Evicted first&quot;| EV[&quot;Eviction under memory pressure&quot;]
+    BU --&gt;|&quot;Evicted second&quot;| EV
+    GU --&gt;|&quot;Evicted last&quot;| EV</div><figcaption>Automatic QoS class classification and eviction order under memory pressure</figcaption></figure>
+<p>This class becomes decisive when a node experiences <strong>memory pressure</strong>. When node memory runs low, Kubernetes <strong>evicts and terminates Pods in order of lowest priority first</strong>. The order is BestEffort → Burstable → Guaranteed. In other words, the more critical the service, the more important it is to set proper requests so the Pod survives.</p>
+<blockquote class='callout'>
+<p>Never run any workload without requests and limits. Omitting them results in BestEffort class, and those Pods are the first to be sacrificed when a node comes under pressure.</p>
+</blockquote>
+<p>You cannot know the perfect values from the start. <strong>Start small, measure, and adjust upward</strong> is the standard approach. Use monitoring tools (Prometheus, Grafana, Datadog, etc.) to observe real usage and tune accordingly. Setting limits too low causes throttling/OOM and makes your application suffer; setting requests too high locks up unused resources into &quot;empty checks&quot; that go to waste.</p>
+<p>There is an ongoing community debate about CPU limits. The argument for omitting CPU limits goes: throttling occurs even when spare CPU is available, which is irrational, and for many web-facing services CPU is rarely the primary bottleneck. (For compute-intensive, CPU-bound workloads like video encoding or scientific computation, CPU absolutely can be the bottleneck — so the argument does not generalize.) Removing limits introduces Noisy Neighbor risk and degrades QoS class. <strong>The recommended practice is to set limits, but do so thoughtfully.</strong></p>
+<h4>metrics-server: The Eyes of Autoscaling</h4>
+<p>Now we move to automatically adjusting the number of Pods based on load. For Kubernetes to make a scaling decision, it needs to know &quot;how much CPU is being used right now.&quot; The component that gathers this usage data is <strong>metrics-server</strong>.</p>
+<p>The collection flow works like this. Inside each worker node&#x27;s kubelet is an agent called <strong>cAdvisor</strong> that measures CPU and memory usage for each Pod. <strong>metrics-server</strong> collects these values from all nodes on a regular schedule, aggregates them, and exposes the results through the Kubernetes API server. The interval at which metrics-server scrapes each node is called the <strong>metric resolution (<code class='ic'>--metric-resolution</code>)</strong>, and its <strong>default is 60 seconds</strong> (some tuned environments set it shorter). You can then view live usage with <code class='ic'>kubectl top</code>, and the HPA controller reads the same data to make scaling decisions. As shown in the diagram below, usage data flows from nodes through the API server to both the HPA controller and operators.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph WorkerNode[&quot;Worker Node&quot;]
+        CA[&quot;cAdvisor - built into kubelet, measures Pod usage&quot;]
+    end
+    CA --&gt;|&quot;Pod CPU/memory usage&quot;| MS[&quot;metrics-server - collects and aggregates per-node values (default 60s interval)&quot;]
+    MS --&gt;|&quot;Exposes aggregated metrics&quot;| API[&quot;Kubernetes API server&quot;]
+    API --&gt;|&quot;kubectl top&quot;| USER[&quot;Operator&quot;]
+    API --&gt;|&quot;Metric query&quot;| HPA[&quot;HPA controller&quot;]</div><figcaption>metrics-server usage data collection and exposure flow</figcaption></figure>
+<p>metrics-server is not installed by default and must be deployed manually.</p>
+<pre><code>
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# Verify installation — usage data should appear
+kubectl top nodes
+kubectl top pods
+</code></pre>
+<blockquote class='callout'>
+<p>On minikube, <code class='ic'>minikube addons enable metrics-server</code> is all you need. On local or self-hosted clusters that produce TLS errors, you may need to add <code class='ic'>--kubelet-insecure-tls</code> to the metrics-server arguments (not recommended for production environments).</p>
+</blockquote>
+<h4>How HPA Works</h4>
+<p>The <strong>Horizontal Pod Autoscaler (HPA)</strong> is a controller that <strong>automatically scales the number of Pods (replicas) up and down</strong> based on load. When usage rises, it scales out (adds Pods) to distribute the load; when load drops, it scales in (removes Pods) to save resources. Once configured properly, it requires no manual intervention.</p>
+<p>For context, Kubernetes provides three types of autoscalers: HPA (adjusts Pod count), VPA (adjusts individual Pod requests/limits), and Cluster Autoscaler (adjusts node count). This lecture focuses on HPA, the most widely used of the three.</p>
+<p>Understanding HPA&#x27;s evaluation cycle and formula is important. The HPA controller runs in the control plane and queries the API server for metrics approximately every <strong>15 seconds</strong>, then calculates the desired replica count using this formula:</p>
+<pre><code>
+desired replicas = ceil( current replicas × (current metric value / target metric value) )
+</code></pre>
+<p>For example, if there are 2 Pods with an average CPU of 90% and the target is 70%, the result is <code class='ic'>2 × (90 / 70) = 2.57</code>, which is <strong>rounded up (ceil)</strong> to 3. The key point is that fractional results are always <strong>rounded up</strong>. (If 1 Pod is at 240% and the target is 100%: <code class='ic'>1 × 2.4 = 2.4</code>, ceil → 3, not round → 2.) When multiple metrics are specified simultaneously, each is calculated independently and the <strong>largest result</strong> is used.</p>
+<blockquote class='callout'>
+<p>How can CPU utilization exceed 100%? Here, &quot;%&quot; is relative to the Pod&#x27;s requests value. On a multi-core node, a multithreaded process inside a single Pod can simultaneously occupy multiple cores — consuming far more than the requested amount (e.g., 1 core requested but 2.4 cores actually used). Unless a CPU limit prevents this, values like 240% are entirely possible.</p>
+</blockquote>
+<p>The HPA controller <strong>only updates the replica count</strong>. The actual work of creating or deleting Pods is handled by the Deployment/ReplicaSet controller. As shown in the decision loop below, the controller queries, calculates, and updates approximately every 15 seconds, delegating actual Pod management to other controllers.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Q[&quot;Query metrics from API server - ~every 15s&quot;] --&gt; C[&quot;Compute desired replicas - ceil(current × currentValue ÷ targetValue)&quot;]
+    C --&gt; D{&quot;Does desired differ from current?&quot;}
+    D --&gt;|&quot;Differs&quot;| U[&quot;Update Deployment replica count&quot;]
+    D --&gt;|&quot;Same&quot;| W[&quot;No change&quot;]
+    U --&gt; DC[&quot;Deployment/ReplicaSet controller creates/deletes Pods&quot;]
+    DC --&gt; Q
+    W --&gt; Q</div><figcaption>HPA controller 15-second evaluation loop</figcaption></figure>
+<p>One important clarification: the <code class='ic'>maxSurge</code> and <code class='ic'>maxUnavailable</code> fields in a Deployment&#x27;s rolling update strategy control <strong>how fast old Pods are replaced by new ones when the Pod template itself changes</strong> (e.g., a new image or updated environment variables). They have <strong>no bearing on HPA scale-out or scale-in</strong>. When HPA simply increases or decreases the replica count, every Pod uses the same specification — no template change occurs, so no rolling update is triggered. If scaling feels slower than expected, do not look at <code class='ic'>maxSurge</code>/<code class='ic'>maxUnavailable</code>; instead, check the metrics-server collection interval, the HPA sync period, and Pod startup time, as discussed below.</p>
+<h4>Scaling Has Latency (The Delay Between Lightning and Thunder)</h4>
+<p>HPA does not react instantaneously. Multiple delays stack up before a metric spike translates into new Pods. The largest contributor is the <strong>metrics-server collection interval</strong>. As noted above, the default (<code class='ic'>--metric-resolution</code>) is <strong>60 seconds</strong>, which means the usage data HPA reads can already be up to a minute stale. Add the HPA controller&#x27;s own sync cycle (approximately 15 seconds), and <strong>with default settings it is completely normal for scale-out to take over a minute after load spikes</strong>. It is like seeing lightning but not hearing the thunder until later. You might set a target of 80%, yet scaling may not trigger until actual load has already climbed to 85% or 90%.</p>
+<blockquote class='callout'>
+<p>The &quot;30–45 seconds&quot; figures often cited online assume that metrics-server&#x27;s collection interval has been tuned shorter than the default 60 seconds — typically down to 15–30 seconds. With a stock installation, plan for more than a minute, and explicitly lower <code class='ic'>--metric-resolution</code> if faster response is required.</p>
+</blockquote>
+<p>You can reduce these intervals through configuration, but pushing them too aggressively — e.g., down to 1 second — dramatically increases API server load. The recommendation is not to push these values to extremes. Instead, consider the following approaches.</p>
+<ul>
+<li><strong>Tune the target utilization</strong>: An 80% target may react slowly. Lowering it to 50% triggers scaling sooner, but keeps more Pods running than necessary during normal traffic, raising costs. Calibrate the sensitivity to your traffic pattern.</li>
+<li><strong>Speed up Pod startup itself</strong>: Image pull time, init container work, and readiness probe delays all consume startup time. Pre-caching images, avoiding heavy initialization, and minimizing readiness probe delays all make scaling faster.</li>
+<li><strong>Burstable QoS as a buffer</strong>: Setting limits generously above requests gives the system excess capacity to absorb short bursts while scaling completes, without triggering OOM.</li>
+</ul>
+<h4>Lab: Configuring HPA and Running a Load Test</h4>
+<p>Let&#x27;s set up an HPA, generate load, and watch Pods scale out and back in. Start by creating a Deployment to receive the load. You must specify requests so that HPA can calculate utilization as a percentage.</p>
+<pre><code>
+# php-apache.yaml — sample app for CPU load testing
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-apache
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: php-apache }
+  template:
+    metadata:
+      labels: { app: php-apache }
+    spec:
+      containers:
+        - name: php-apache
+          image: registry.k8s.io/hpa-example
+          ports: [{ containerPort: 80 }]
+          resources:
+            requests:
+              cpu: &quot;200m&quot;     # ← baseline for HPA utilization calculation
+            limits:
+              cpu: &quot;500m&quot;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+spec:
+  selector: { app: php-apache }
+  ports: [{ port: 80 }]
+</code></pre>
+<pre><code>
+kubectl apply -f php-apache.yaml
+</code></pre>
+<p>There are two ways to attach an HPA. The quick imperative way:</p>
+<pre><code>
+kubectl autoscale deployment php-apache --cpu-percent=50 --min=1 --max=10
+</code></pre>
+<p>Or declaratively with YAML for version-controlled management:</p>
+<pre><code>
+# hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-apache
+  minReplicas: 1            # minimum Pod count
+  maxReplicas: 10           # maximum Pod count
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50   # target average CPU at 50%
+</code></pre>
+<p><code class='ic'>minReplicas</code>/<code class='ic'>maxReplicas</code> define the scale floor and ceiling. <code class='ic'>averageUtilization: 50</code> means &quot;keep the average Pod CPU utilization near 50% of requests (50% of 200m = 100m).&quot;</p>
+<p>Now generate load by firing continuous requests at the service from a temporary Pod. Use <code class='ic'>--restart=Never</code> because this is a one-shot Pod, and <code class='ic'>--rm</code> so it is automatically deleted when it exits. Pass the command after <code class='ic'>--</code> as shown (the older <code class='ic'>--generator</code> style options have been removed).</p>
+<pre><code>
+# Separate terminal — generate continuous requests from a temporary Pod
+kubectl run -i --tty load-generator --rm --image=busybox:1.28 --restart=Never -- \
+  /bin/sh -c &quot;while sleep 0.01; do wget -q -O- http://php-apache; done&quot;
+</code></pre>
+<blockquote class='callout'>
+<p>For reproducibility, you can also define the load-generator Pod as a YAML manifest (<code class='ic'>kind: Pod</code>) and apply it with <code class='ic'>kubectl apply -f</code>. This declarative approach is cleaner for automated testing or repeated runs.</p>
+</blockquote>
+<p>In another terminal, watch the HPA and Pods.</p>
+<pre><code>
+kubectl get hpa php-apache --watch    # REPLICAS increases when CPU% in TARGETS exceeds 50
+kubectl get pods -w                    # watch Pods being added
+kubectl top pods                       # check real-time usage
+</code></pre>
+<p>Once CPU exceeds the target, REPLICAS climbs from 1 → 4 → ... up to the ceiling of 10. Due to the collection delay described earlier, do not expect an immediate reaction — with default settings, it is normal to wait around a minute before scaling kicks in. Running <code class='ic'>kubectl describe hpa php-apache</code> shows scale events recorded with reasons like &quot;CPU resource above target.&quot; Then press <code class='ic'>Ctrl+C</code> in the load generator terminal to stop the requests — after a short delay, CPU drops and HPA scales Pods back down to minReplicas.</p>
+<blockquote class='callout'>
+<p>Scale-down applies a <strong>stabilization window</strong> (<code class='ic'>behavior.scaleDown.stabilizationWindowSeconds</code>, default 300 seconds = 5 minutes) to prevent &quot;flapping&quot; — the pattern of rapidly removing Pods during a brief dip only to spin them back up. Here is exactly how it works: the HPA records the recommended replica count produced by each evaluation cycle throughout the window, and at the end of the window it picks the <strong>highest</strong> of all those recorded values to apply. In other words, even if lower recommendations appear mid-window, the system waits until the highest recommendation within the window has dropped sufficiently before actually scaling down. This is why Pod count stays elevated for roughly five minutes after load drops — the window&#x27;s peak recommendation is still holding it in place. (By contrast, the default stabilization window for scale-up is 0 seconds, so scale-out happens promptly.)</p>
+</blockquote>
+<h4>Where HPA Alone Is Not Enough</h4>
+<p>Even a well-configured HPA cannot guarantee service stability on its own. If a traffic surge drives a Pod to its memory or database connection limits, that Pod can no longer handle requests — yet it continues to receive traffic until it dies. This is why <strong>health checks (readiness probes)</strong> are essential alongside HPA. When a Pod honestly signals &quot;I&#x27;m overloaded,&quot; Kubernetes stops routing traffic to it and directs requests only to healthy Pods. Stable autoscaling is only complete when requests/limits, HPA, and readiness probes <strong>all work together</strong>. (Health checks were covered in Lecture 3.)</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>requests</strong> define the scheduling baseline (minimum guarantee); <strong>limits</strong> define the runtime ceiling. Units: memory in bytes (Mi/Gi), CPU in cores (1000m = 1 core).</li>
+<li><strong>Exceeding a memory limit causes OOMKill (container dies); exceeding a CPU limit causes throttling (container slows down)</strong> — these behaviors are fundamentally different.</li>
+<li>The combination of requests and limits determines the QoS class: <strong>neither set → BestEffort; all requests equal limits → Guaranteed; everything in between (including requests-only) → Burstable.</strong> Burstable is the most common class in practice. Under memory pressure, eviction order is BestEffort → Burstable → Guaranteed, so always set at least requests on every workload.</li>
+<li>HPA calculates desired Pod count as <code class='ic'>ceil(current replicas × (current value / target value))</code> and depends on usage data from metrics-server (cAdvisor → aggregation → API server). <code class='ic'>maxSurge</code>/<code class='ic'>maxUnavailable</code> govern rolling-update replacement speed only and are completely unrelated to HPA scaling.</li>
+<li>metrics-server&#x27;s default collection interval (<code class='ic'>--metric-resolution</code>) is <strong>60 seconds</strong>, so with default settings it is normal for scale-out to take <strong>over a minute</strong> after load spikes. For faster response, lower the collection interval explicitly; also tune target utilization, accelerate Pod startup, use Burstable QoS, and add readiness probes together for stable autoscaling.</li>
+<li>Scale-down applies a default <strong>300-second stabilization window</strong> that records recommended replica counts over the window and applies the <strong>maximum</strong> at window end, preventing rapid flapping. Pod count will remain elevated for roughly five minutes after load drops — this is by design.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Deploy a Deployment with requests/limits configured and verify its QoS class.</p>
+<p>Write and apply a Deployment manifest called php-apache.yaml that meets the following requirements.</p>
+<ul>
+<li>Image: registry.k8s.io/hpa-example</li>
+<li>CPU requests: 200m, CPU limits: 500m</li>
+<li>Memory requests: 128Mi, memory limits: 256Mi</li>
+<li>Expose port 80; include a ClusterIP Service (port 80) in the same file</li>
+</ul>
+<p>After deploying, confirm two things.</p>
+<p>1. The Pod is in Running state.</p>
+<p>2. Use <code class='ic'>kubectl describe pod &lt;pod-name&gt;</code> to find the QoS class, and explain why that class was assigned.</p></div>
+              <pre class='starter'><code># php-apache.yaml skeleton — fill in the blanks
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-apache
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: php-apache }
+  template:
+    metadata:
+      labels: { app: php-apache }
+    spec:
+      containers:
+        - name: php-apache
+          image: registry.k8s.io/hpa-example
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: ______
+              memory: ______
+            limits:
+              cpu: ______
+              memory: ______
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+spec:
+  selector: { app: php-apache }
+  ports:
+    - port: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>The CPU unit m (millicores) is a string in YAML, so wrap it in double quotes or write it as a plain number. 200m is 0.2 cores, not 0.25.</li><li>Look for the QoS Class line near the bottom of `kubectl describe pod &lt;name&gt;` output, or filter with grep -i qos.</li><li>requests == limits on all containers → Guaranteed; requests &lt; limits → Burstable; neither set → BestEffort.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># php-apache.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-apache
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: php-apache }
+  template:
+    metadata:
+      labels: { app: php-apache }
+    spec:
+      containers:
+        - name: php-apache
+          image: registry.k8s.io/hpa-example
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: &quot;200m&quot;
+              memory: &quot;128Mi&quot;
+            limits:
+              cpu: &quot;500m&quot;
+              memory: &quot;256Mi&quot;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: php-apache
+spec:
+  selector: { app: php-apache }
+  ports:
+    - port: 80
+
+# Apply
+kubectl apply -f php-apache.yaml
+
+# Check Pod status
+kubectl get pods -l app=php-apache
+
+# Check QoS class — look for the QoS Class field near the bottom of describe output
+kubectl describe pod -l app=php-apache | grep -i qos
+
+# Expected output example
+# QoS Class: Burstable</code></pre>
+                <div class='exp2'><p>Because requests (200m/128Mi) are less than limits (500m/256Mi), the QoS class is Burstable. For a Pod to be Guaranteed, every container must have requests equal to limits. Burstable means the container is guaranteed its requests amount, and can burst up to its limits when capacity is available — a balance between stability and efficiency. Because requests are set, the scheduler places the Pod on a node with at least 200m CPU and 128Mi memory free. At runtime, limits serve as the ceiling: exceeding CPU causes throttling; exceeding memory causes OOMKill. If neither requests nor limits were set, the class would be BestEffort, and the Pod would be the first evicted under memory pressure — so always specify both values.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Lab 1] Install metrics-server and verify live usage with kubectl top.</p>
+<p>The goal is to read the CPU and memory usage of the php-apache Pod deployed in Task 1 using <code class='ic'>kubectl top</code>.</p>
+<p>Follow these steps in order.</p>
+<p>1. Install metrics-server in the cluster.</p>
+<ul>
+<li>Standard cluster: kubectl apply -f &lt;official URL&gt;</li>
+<li>minikube: use the addons enable command</li>
+</ul>
+<p>2. Wait until the metrics-server Pod is Ready.</p>
+<p>3. Run both <code class='ic'>kubectl top nodes</code> and <code class='ic'>kubectl top pods</code> and review the output.</p>
+<p>4. From the <code class='ic'>kubectl top</code> results, record the CPU (m) and memory (Mi) values for the php-apache Pod.</p>
+<p>(If kubectl top returns &#x27;error: metrics not available yet&#x27;, wait 30–60 more seconds and retry.)</p></div>
+              <pre class='starter'><code># Installation command for a standard cluster
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# minikube users: replace with this single command
+# minikube addons enable metrics-server
+
+# Wait until the metrics-server Pod is Running
+kubectl get pods -n kube-system -l k8s-app=metrics-server
+
+# Run the two commands below and record the output
+kubectl top nodes
+kubectl top pods</code></pre>
+              <details><summary>Hint</summary><ul><li>If the metrics-server Pod is Running but kubectl top still returns an error, data collection is still in progress. Wait about a minute and retry.</li><li>On a local kind/kubeadm cluster, if you see an x509 TLS error, add the --kubelet-insecure-tls argument via kubectl patch.</li><li>Use `kubectl top pods --all-namespaces` to view usage for all Pods including those in kube-system at once.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Install (standard cluster)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# If TLS errors occur on a local/self-signed cluster, patch with the insecure option
+# kubectl patch deployment metrics-server -n kube-system \
+#   --type=&#x27;json&#x27; \
+#   -p=&#x27;[{&quot;op&quot;:&quot;add&quot;,&quot;path&quot;:&quot;/spec/template/spec/containers/0/args/-&quot;,&quot;value&quot;:&quot;--kubelet-insecure-tls&quot;}]&#x27;
+
+# 2. Wait for rollout
+kubectl rollout status deployment/metrics-server -n kube-system
+
+# 3. Check node and Pod usage
+kubectl top nodes
+# Example output:
+# NAME       CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
+# minikube   120m         6%     820Mi           10%
+
+kubectl top pods
+# Example output:
+# NAME                          CPU(cores)   MEMORY(bytes)
+# php-apache-xxxxxxxxx-xxxxx    1m           10Mi
+
+# 4. Query only the php-apache Pod
+kubectl top pods -l app=php-apache</code></pre>
+                <div class='exp2'><p>metrics-server collects Pod CPU and memory usage that cAdvisor (embedded in each worker node&#x27;s kubelet) scrapes approximately every 10 seconds, and exposes those values through the Kubernetes API server&#x27;s metrics API (/apis/metrics.k8s.io). <code class='ic'>kubectl top</code> calls that API to display the data. The HPA controller reads metrics through the same path to make scaling decisions, so HPA will not function without metrics-server. On minikube, <code class='ic'>addons enable</code> handles TLS configuration automatically, making setup trivial. On manually installed clusters using self-signed certificates, the <code class='ic'>--kubelet-insecure-tls</code> patch is needed, but the recommended approach in production is to configure a proper CA certificate.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core Lab 2] Write and apply an autoscaling/v2 HPA YAML.</p>
+<p>Create an HPA manifest called hpa.yaml targeting the php-apache Deployment from Task 1, with the following configuration, and apply it.</p>
+<ul>
+<li>apiVersion: autoscaling/v2</li>
+<li>Target: Deployment php-apache</li>
+<li>Minimum replicas: 1, maximum replicas: 10</li>
+<li>Metric: average CPU Utilization at 50%</li>
+</ul>
+<p>After applying, check the TARGETS, MINPODS, and MAXPODS values in the <code class='ic'>kubectl get hpa php-apache</code> output.</p>
+<p>Record what the TARGETS value looks like with no load running, and explain why.</p></div>
+              <pre class='starter'><code># hpa.yaml skeleton — fill in the blanks
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ______
+  minReplicas: ______
+  maxReplicas: ______
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: ______</code></pre>
+              <details><summary>Hint</summary><ul><li>If TARGETS shows &lt;unknown&gt;/50% immediately after `kubectl get hpa`, metrics-server has not yet collected data. Recheck after 30 seconds.</li><li>autoscaling/v2beta2 was removed in Kubernetes 1.26. Use autoscaling/v2 if your cluster is version 1.23 or later.</li><li>The Conditions and Events sections of `kubectl describe hpa php-apache` show the reason behind each scaling decision and the timestamp of the last scale event.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># hpa.yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: php-apache
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: php-apache
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+
+# Apply
+kubectl apply -f hpa.yaml
+
+# Check status
+kubectl get hpa php-apache
+# Example output (no load):
+# NAME         REFERENCE               TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+# php-apache   Deployment/php-apache   1%/50%    1         10        1          30s
+
+# Check detailed events
+kubectl describe hpa php-apache</code></pre>
+                <div class='exp2'><p>autoscaling/v2 is the current standard API. Compared to v1, it supports multiple simultaneous metrics (CPU + memory + custom metrics), an explicit apiVersion in scaleTargetRef, and fine-grained scale rate control through the behavior block. <code class='ic'>averageUtilization: 50</code> means &#x27;keep the average CPU utilization across all Pods at 50% of their requests&#x27;. Since requests is 200m, the absolute target is 100m. With no load, TARGETS shows a low utilization such as 1%/50%, and REPLICAS stays at minReplicas (1). The HPA controller computes: ceil(1 × 1%/50%) = ceil(0.02) = 1, which equals minReplicas, so no change occurs.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Core Lab 3] Generate load with busybox and observe scale-out using kubectl get hpa --watch.</p>
+<p>Open two terminals and follow the steps below.</p>
+<p>[Terminal A — generate load]</p>
+<p>Launch a temporary busybox Pod and send infinite HTTP requests to the php-apache Service.</p>
+<p>[Terminal B — observe]</p>
+<p>Run the following three commands to observe the scaling process.</p>
+<p>1. kubectl get hpa php-apache --watch</p>
+<p>2. (separate window) kubectl get pods -w</p>
+<p>3. (separate window) kubectl top pods</p>
+<p>Answer the following questions.</p>
+<ul>
+<li>How many seconds did it take for the CPU% in TARGETS to first exceed 50?</li>
+<li>How many replicas were there when REPLICAS first increased?</li>
+<li>What was the final REPLICAS count after the load stabilized?</li>
+</ul></div>
+              <pre class='starter'><code># [Terminal A] Generate load — run this command as-is
+kubectl run -it --rm load-generator \
+  --image=busybox:1.28 \
+  -- /bin/sh -c &quot;while true; do wget -q -O- http://php-apache; done&quot;
+
+# [Terminal B] Watch HPA status
+kubectl get hpa php-apache --watch
+
+# [Terminal B - separate window] Watch Pod changes
+kubectl get pods -w
+
+# [Terminal B - separate window] Live usage (run repeatedly)
+watch kubectl top pods</code></pre>
+              <details><summary>Hint</summary><ul><li>If TARGETS does not change after generating load, verify that the load-generator Pod started correctly (kubectl get pods) and that the Service name is indeed php-apache.</li><li>It is normal for the replica count to increase in steps rather than all at once. By default, HPA limits each scale-up event to at most 2x the current replica count.</li><li>Running `kubectl top pods` repeatedly lets you see each new Pod receiving a share of the load as individual Pod CPU values drop.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># [Terminal A] Generate load
+kubectl run -it --rm load-generator \
+  --image=busybox:1.28 \
+  -- /bin/sh -c &quot;while true; do wget -q -O- http://php-apache; done&quot;
+
+# [Terminal B] HPA watch — REPLICAS starts increasing after ~30–45 seconds
+kubectl get hpa php-apache --watch
+# Observation example:
+# NAME         REFERENCE               TARGETS    MINPODS  MAXPODS  REPLICAS  AGE
+# php-apache   Deployment/php-apache   1%/50%     1        10       1         2m
+# php-apache   Deployment/php-apache   248%/50%   1        10       1         2m30s
+# php-apache   Deployment/php-apache   248%/50%   1        10       4         2m45s
+# php-apache   Deployment/php-apache   86%/50%    1        10       7         3m
+# php-apache   Deployment/php-apache   52%/50%    1        10       7         3m30s
+
+# [Terminal B] Watch Pod changes
+kubectl get pods -w
+
+# [Terminal B] Check detailed scale reason
+kubectl describe hpa php-apache
+# Look for &#x27;SuccessfulRescale&#x27; entries and the new size value in the Events section</code></pre>
+                <div class='exp2'><p>The busybox while loop sends tens to hundreds of requests per second to the php-apache Service, spiking Pod CPU utilization to several hundred percent of requests (200m). The HPA controller queries metrics every 15 seconds, and with cAdvisor collection (10s) and metrics-server aggregation (~30s average) stacked on top, it takes 30–45 seconds for TARGETS to reflect the spike. Calculation example: REPLICAS=1, current 248%, target 50% → ceil(1 × 248/50) = ceil(4.96) = 5. However, HPA&#x27;s default scale-up limit is 2x the current count (or at most 4 additional Pods per step), so the count climbs in stages such as 1→4→7. As more Pods share the load, average utilization converges toward the 50% target and scaling stops. The Events section of <code class='ic'>kubectl describe hpa</code> records the decision rationale as &#x27;SuccessfulRescale reason: cpu resource above target&#x27;.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 5. [Advanced] Remove the load, observe scale-in, and manually verify the HPA formula.</p>
+<p>[Part A — observe scale-in]</p>
+<p>Press Ctrl+C in Terminal A to stop load-generator. Continue running <code class='ic'>kubectl get hpa php-apache --watch</code> and measure how long it takes for REPLICAS to return to 1.</p>
+<p>Explain why scale-down is slower than scale-up.</p>
+<p>[Part B — verify the formula]</p>
+<p>Check the current CPU (m) values from <code class='ic'>kubectl top pods</code>, then manually compute the required replica count using the formula below and compare it to the actual HPA REPLICAS.</p>
+<p>  required replicas = ceil( current replicas × (current CPU utilization% / target utilization%) )</p>
+<p>Confirm whether your calculation matches the actual REPLICAS, and if it does not match, explain why (e.g., stabilization window).</p>
+<p>[Part C — clean up]</p>
+<p>Delete all resources created during this lab.</p></div>
+              <pre class='starter'><code># [Part A] Observe after removing load
+# Terminal A: press Ctrl+C (load-generator is deleted automatically)
+
+# Terminal B: keep watching HPA
+kubectl get hpa php-apache --watch
+
+# [Part B] Snapshot current state (immediately after stopping load)
+kubectl top pods
+kubectl get hpa php-apache
+
+# Use the values above to compute the formula manually
+# required replicas = ceil( current_replicas × (current_CPU% / 50) )
+
+# [Part C] Clean up
+kubectl delete -f php-apache.yaml
+kubectl delete -f hpa.yaml</code></pre>
+              <details><summary>Hint</summary><ul><li>Scale-down taking more than 5 minutes is not a bug. Check the Conditions section of `kubectl describe hpa` for a &#x27;ScalingActive&#x27; status with a &#x27;stabilizing&#x27; message.</li><li>In Part B, divide the kubectl top pods CPU value (m) by requests (200m) and multiply by 100 to get utilization (%). Example: 4m / 200m × 100 = 2%.</li><li>Use `kubectl delete -f &lt;filename&gt;` to delete all objects defined in a manifest (Deployment, Service, HPA) in a single command.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># [Part A] Observe scale-in
+# Press Ctrl+C to stop load-generator → load-generator Pod is deleted automatically
+# kubectl get hpa --watch example output (after load stops):
+# NAME         TARGETS   REPLICAS  AGE
+# php-apache   52%/50%   7         8m
+# php-apache   12%/50%   7         9m       ← CPU starting to drop
+# php-apache   3%/50%    7         10m      ← Pod count unchanged
+# php-apache   1%/50%    1         14m      ← scale-down after ~5 minutes
+
+# [Part B] Formula verification example
+# kubectl top pods output: 7 Pods, each ~3m CPU → avg utilization = 3/200 ≈ 1.5%
+# required replicas = ceil( 7 × (1.5 / 50) ) = ceil(0.21) = 1
+# actual REPLICAS: stays at 7 for a while → drops to 1 after stabilization window
+# The math says 1, but HPA applies a scale-down stabilization (stabilizationWindowSeconds=300, default 5 min) before acting
+
+# [Part C] Clean up resources
+kubectl delete -f php-apache.yaml
+kubectl delete -f hpa.yaml
+
+# Verify deletion
+kubectl get deployment php-apache   # Error: not found
+kubectl get hpa php-apache          # Error: not found
+kubectl get svc php-apache          # Error: not found</code></pre>
+                <div class='exp2'><p>Scale-down is slow because of HPA&#x27;s stabilization window (stabilizationWindowSeconds). The default for the scale-down direction is 300 seconds (5 minutes). This means that even when load drops, HPA bases its decision on the maximum required replica count calculated over the past 5 minutes. This prevents &#x27;flapping&#x27; — rapidly scaling down during a short spike only to scale back up immediately. The scale-up stabilization window defaults to 0 seconds, meaning scale-up reacts instantly. In the formula verification, when CPU drops, the math produces 1 required replica, but the actual count only decreases once the stabilization window has elapsed. This behavior can be tuned via spec.behavior.scaleDown.stabilizationWindowSeconds in the HPA spec.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=jyBDbm1FHiM' target='_blank'>Autoscaling in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=2CrprvnzPXY' target='_blank'>Kubernetes CPU Limits &amp; Requests EXPLAINED (Stop Wasting Resources!)</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,0 +1,66 @@
+## Video 1: How to debug Kubernetes? (Deployments, Services & Ingress)
+https://www.youtube.com/watch?v=hixs2GIGrUw
+
+When you decide to deploy any application to Kubernetes, you usually create the following three components: A Deployment, which is a blueprint on how to run your application and how many replicas you want. Then we have a Service, which is an internal load balancer that routes traffic to your Pods. And finally, an Ingress, which is a description of how to route traffic from outside of the cluster to your service. This is the most basic setup. In Kubernetes, your applications are exposed through two layers of load balancers: internal and external. The internal load balancer is called a Service, and the external one is called an Ingress. Also, keep in mind that pods are not directly deployed to Kubernetes; instead, they are managed by a higher-level abstraction which is the Deployment.
+
+Let's say you want to deploy a simple "Hello World" application to Kubernetes. The YAML would look like this: the Deployment object, Service Object, and Ingress. If you have never used it before, it may look a bit complex, especially how those components relate to each other. For example, when should you use port 7070 and when port 8080? Should you use a different port number for each service so that they don't clash? What about labels? Should you use the same labels everywhere?
+
+Before focusing on debugging Kubernetes, let's refresh how to link all those components, and we'll start with Deployment and Service. At this point, your pods should be running and in a ready state, and the service can distribute traffic to the pods. However, if you still can't see a response from your app, this most likely means that the Ingress is misconfigured.
+
+Since the Ingress controller is a third-party component in the cluster, there are different debugging techniques depending on the type of Ingress controller. There are also cloud-native ingress controllers that use a Layer 7 load balancer, like the Application Load Balancer, but for this video, we'll talk about common issues.
+
+Now, before diving into Ingress-specific tools, there's something straightforward that you could check. The Ingress uses the service.name and service.port to connect to the Service. First, you should check that these are correctly configured. You can use the following command. If the Backend column is empty, then there must be an error in the configuration. If you can see the endpoints in the Backend column but still can't access the application, it may be an infrastructure problem.
+
+Check if the underlying load balancer that the ingress uses is properly exposed to the internet. Also, check how you expose your entire cluster to the internet. To pinpoint the problem, you can isolate infrastructure issues from Ingress by connecting directly to the Ingress Pod. First, you need to get the Pod for your Ingress controller. In my case, it's in the ingress-nginx namespace. You can describe the pod to find exposed ports and finally connect to the pod using the port forward command. At this point, every time you visit port 3000 on your computer, the request is forwarded to port 80 on the Pod.
+
+If it works now and you can access the application, the issue is in the infrastructure. And you should investigate how the traffic is routed to your cluster. If it doesn't work, the problem lies with the Ingress controller. And you should debug the Ingress. There are many different ingress controllers such as Nginx, HAProxy, Traefik, and others. So, you should check the documentation of your Ingress controller to find a troubleshooting guide.
+
+You should always remember to approach the problem from the bottom up: start with the Pods and move up the stack to the Service and Ingress. You can also apply the same debugging techniques to Jobs, CronJobs, StatefulSets, and DaemonSets. Soon, I'll create a dedicated tutorial on how to debug the Ingress with TLS and cert-manager.
+
+If you want to learn more about Kubernetes, I have a playlist, and you may also be interested in Kafka or benchmarks. Thank you for watching, and I'll see you in the next video.
+
+---
+
+## Video 2: Kubernetes CrashLoopBackoff explained in 3 minutes
+https://www.youtube.com/watch?v=gKuu1toptm8
+
+So here's my application Pod, and I know that it is going through something called CrashLoopBackoff, but what is CrashLoopBackoff exactly in Kubernetes? When you have a Pod running in your cluster and the pod crashes, by default Kubernetes behaviors that it will try to restart the Pod. This is to maintain high availability of your application. This is controlled by something called the restart policy of the Pod, which by default is always, meaning when your Pod crashes, Kubernetes will try to restart it.
+
+But what if the Pod keeps crashing over and over? For example, you just made a new deployment to your code. But the code was buggy. So this code throws an exception during initialization. So now whenever your Pod starts, the code throws an exception. And because of that, the container exits and the Pod exits. This results in you being stuck in sort of a loop where your Pod comes up, then Pod goes through some issues and then it crashes and then Kubernetes will restart it. And then the same cycle repeats over and over.
+
+Kubernetes doesn't immediately try to restart your Pod always. In fact with every crash, Kubernetes will wait slightly longer amount of time before it restarts your Pod yet again. And this is called the back-off time. So for example, the first time your pod crashes, maybe after two seconds, Kubernetes restarts. Next time it crashes, wait for 10 seconds. And then restart. Next time it will be one minute. Next time it'd be five minutes and so on. So this is back off time keeps increasing. Because Kubernetes is trying to give you more time to fix this issue.
+
+And since this back-off time is happening in sort of a loop where your pod starts and then crashes and then restarts, this whole thing is called a crash loop back off. Now the important thing is that crash loop back-off by itself is not an error. But when it happens, it usually indicates that there is some other underlying issue with your Pod because of which it's constantly crashing. So you need to fix that underlying issue. So here in our case, maybe that was the faulty code. And so you need to now go and fix that faulty code, after which we will exit this whole loop because the next time the Pod gets started, it'll remain in the started state. And so we'll get rid of the crash loop back off.
+
+---
+
+## Video 3: DevOpsDays Seattle 2022: Debugging with Ephemeral Containers by Peter Valdez
+https://www.youtube.com/watch?v=xE_nlt8Lyk4
+
+Hello, everybody. Let's see if this works. Famous last words. Usually there is something auto advancing and today auto advancing the slides is me. The format is every 15 seconds I need to move the slide along. It is going to be a lot of information. Bear with me. I think we will make it through. Just got to give it a second to think.
+
+Hey, everybody. Can you hear me all right? Thumbs up if you hear me OK? Fantastic. Lots of thumbs up. My name is Peter. I am co-founder and CTO at Shipyard which day to day really means some engineering, some managing, wearing a lot of different hats but today we will be talking about ephemeral containers.
+
+Ephemeral containers we will talk about what that is in a minute. I flew here from New York City born and raised there, been writing code for a long time and specializing in Docker and Kubernetes for a while so that's why we are talking about Kubernetes things today. Founded some stuff. I use Neovim and it is great. I like sound tracks.
+
+What will we talk about? Distroless containers, a problem, how you solve that and when you use that solution. Anybody who builds images you know these things can get big. What you would do is build something and only include basically hopefully your binary and pretty much that's it. You build these super tiny containers called distroless containers.
+
+Why would you want do that and build these tiny containers? You want to build these tiny containers because that means you are passing around tiny things when pulling or starting them up. If it takes a long time to pull or startup that is going into the overhead of running your app which you don't want. Not only are you going to pull that image faster and start that container faster but you will always save money on storage cost because chances are you are a CI building these Docker images for you and you are building and saving them on every commit so over time as your developer is working you are adding and adding storage costs. You don't want that because that is money.
+
+All these things combined, if you are pulling faster, starting your containers faster and don't need much space to store them whatever is orchestrating your containers runs smoother and stable. If you are pulling huge images, Kubernetes isn't magic as I am sure we have all learned and it will take a long time to start your app still.
+
+All right. But one big problem. What is, you know, the problem with this fancy distroless container? The way you get it so small is stripping everything out but that means you don't have a shell baked into your image. If you don't have a shell baked into your container, how am I suppose to exec into it? How am I going to debug when something is going wrong? Don't worry. Smart people have thought of an answer and the answer at least in Kubernetes is ephemeral containers. They have been around for a bit and entered beta in Kubernetes 1.23 and with that beta came a much nicer CLI interface.
+
+You can basically with ephemeral containers, you have this distroless container with no shell and what you can do now is add a container to the Kubernetes pod. Instead of taking down pod you can add to your live running container another container which has all the debug tools that you need. You have all your tools. You are sharing processes with the container that's having trouble, you are in the same network context so you can use your tools to debug this live issue again on the actual pod that has the problem. You are not trying to replicate any sort of issue.
+
+Oh these ephemeral containers are great for this because you don't have a shell. So you can attach one of these containers and now you have your tools and can start debugging.
+
+Before we dive into anything, if anybody wants to try out a version of Kubernetes, there is a lot of ways to do it but I feel people are comfortable with VM and run it ask you have a single node Kubernetes cluster and pretty much any version you want to try.
+
+Here we get to the most important slide of this talk. How do you use ephemeral containers? That is one command. You have kubectl set up with the cluster and you say kubectl debug on my nginx. I want to start a busybox container and targeting the nginx, the pod with the issue and image you want to use with the debug tools baked in. That's your command.
+
+Now you have that and a shell and you can start inspecting things. What are the processes running? The shared process namespace you can get there full set of processes running in your distroless container. You can send signals to the other processes. If you had something running, it respects signals and you can reload and send the signal from the ephemeral container into your original problematic container. In this case we are reloading.
+
+If there is a networking issue, you can ping around and telnet around and figure out what is wrong because whatever that network context for that original problematic container is, your ephemeral container lives in the same network context so you can run whatever tools you have to start figure out why can't I connect to this other service.
+
+Yeah. That's it. That's how you use the new command. If you end up needing to use debug in Kubernetes and don't have a shell in the container you are trying to debug this is what you will use. We deal in Kubernetes every day at Shipyard. Check out any of those links. We have a mailing list and website talking about ephemeral environments, public GitHub, check us out. Thank you very much.

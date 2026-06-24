@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Secrets-External</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-23-secrets-external/index.html'>한국어</a></div>
+  <h1>K8S-Secrets-External</h1>
+  <div class="sub">Intermediate developers and platform engineers who have worked with basic Kubernetes Secrets and want to manage secrets securely in a GitOps environment · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. &quot;Kubernetes External Secrets: Managing Secrets Safely with Sealed Secrets and the External Secrets Operator&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;Kubernetes External Secrets: Managing Secrets Safely with Sealed Secrets and the External Secrets Operator&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Explain why a plain Kubernetes <code class='ic'>Secret</code> is not a security boundary (base64 is encoding, not encryption) and why committing one to Git is dangerous.</li>
+<li>Compare two GitOps-friendly approaches: encrypting secrets so they can live safely in Git (Sealed Secrets / SOPS) versus syncing from an external store such as HashiCorp Vault or AWS Secrets Manager with the External Secrets Operator (ESO).</li>
+<li>Use ESO&#x27;s <code class='ic'>SecretStore</code>/<code class='ic'>ClusterSecretStore</code> and <code class='ic'>ExternalSecret</code> resources to pull values from an external store into a native cluster <code class='ic'>Secret</code>, and recognize the common use cases for each pattern.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why the built-in Secret is not enough</h4>
+<p>A Kubernetes <code class='ic'>Secret</code> looks like it protects sensitive data, but it really only <em>encodes</em> it. The values you put in a Secret are stored as <strong>base64</strong>, and base64 is not encryption at all — it is a reversible text encoding. Anyone who can read the manifest can decode it instantly:</p>
+<pre><code>
+echo &#x27;cGFzc3dvcmQxMjM=&#x27; | base64 -d
+# password123
+</code></pre>
+<p>Inside a running cluster this is acceptable, because Kubernetes stores Secrets in <code class='ic'>etcd</code> (ideally with encryption-at-rest enabled) and gates access through RBAC. The real problem starts the moment you adopt <strong>GitOps</strong> — the practice of describing your whole cluster as YAML in a Git repository and letting a tool reconcile it. Git is excellent at versioning and reviewing manifests, but it cannot encrypt a Secret for you. If you commit a normal Secret manifest, your password is now sitting in plain text (well, base64, which is the same thing) in your repo history forever, readable by everyone with repo access and impossible to fully erase.</p>
+<blockquote class='callout'>
+<p>base64 is encoding, not encryption. A Secret manifest in Git is effectively a plaintext password in Git. Never commit a raw <code class='ic'>kind: Secret</code>.</p>
+</blockquote>
+<p>So we have a tension: we <em>want</em> every piece of cluster state in Git, but we <em>can&#x27;t</em> put raw secrets there. There are two well-established ways to resolve this, and they take opposite approaches.</p>
+<h4>Approach 1 — Encrypt the secret so Git can hold it (Sealed Secrets / SOPS)</h4>
+<p>The first idea is simple: if the problem is that the secret is plaintext in Git, then <strong>encrypt it before committing</strong>. The encrypted blob is safe to store anywhere, and only the cluster holds the key to decrypt it.</p>
+<p><strong>Sealed Secrets</strong> (by Bitnami) implements this with a controller running in your cluster. The flow is as follows:</p>
+<p>1. The controller generates a public/private key pair and keeps the private key inside the cluster.</p>
+<p>2. On your laptop you run a CLI (<code class='ic'>kubeseal</code>) that uses the <strong>public</strong> key to encrypt a normal Secret into a new resource of <code class='ic'>kind: SealedSecret</code>.</p>
+<p>3. You commit the <code class='ic'>SealedSecret</code> to Git. It is encrypted, so it is safe — only the controller&#x27;s private key can open it.</p>
+<p>4. When the <code class='ic'>SealedSecret</code> lands in the cluster, the controller decrypts it and produces a normal <code class='ic'>Secret</code> that your pods consume.</p>
+<p>The diagram below traces these four steps across the three trust boundaries — your laptop, the Git repository, and the cluster — and shows which key is used where.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph Laptop[&quot;Your laptop&quot;]
+        S[&quot;Plain Secret YAML&quot;]
+        K[&quot;kubeseal CLI&quot;]
+        S --&gt; K
+    end
+    subgraph Git[&quot;Git repository&quot;]
+        SS[&quot;SealedSecret (encrypted)&quot;]
+    end
+    subgraph Cluster[&quot;Kubernetes cluster&quot;]
+        CTRL[&quot;Sealed Secrets controller&quot;]
+        SEC[&quot;Native Secret&quot;]
+        POD[&quot;Pod&quot;]
+        CTRL --&gt;|&quot;decrypt with private key&quot;| SEC
+        SEC --&gt; POD
+    end
+    PUB[&quot;Public key&quot;]
+    CTRL -.-&gt;|&quot;publishes&quot;| PUB
+    PUB -.-&gt;|&quot;used by&quot;| K
+    K --&gt;|&quot;encrypt&quot;| SS
+    SS --&gt;|&quot;commit and reconcile&quot;| CTRL</div><figcaption>Sealed Secrets flow across laptop, Git, and cluster</figcaption></figure>
+<pre><code>
+# Turn a normal Secret into an encrypted SealedSecret (safe for Git)
+kubectl create secret generic db-creds \
+  --from-literal=password=&#x27;p@ssw0rd&#x27; \
+  --dry-run=client -o yaml \
+  | kubeseal --format yaml &gt; sealed-db-creds.yaml
+# Commit sealed-db-creds.yaml — the controller will decrypt it in-cluster.
+</code></pre>
+<p>A closely related, tool-agnostic option is <strong>SOPS + age</strong>. Here, <code class='ic'>age</code> does the actual encryption and <code class='ic'>sops</code> decides <em>which fields</em> get encrypted, so the manifest stays readable while only the sensitive values are scrambled. A <code class='ic'>.sops.yaml</code> rules file tells SOPS what to lock:</p>
+<pre><code>
+# .sops.yaml — encrypt only matching keys with a given age public key
+creation_rules:
+  - path_regex: secrets.*\.yaml$
+    encrypted_regex: &#x27;^(password|token|apiKey)$&#x27;
+    age: age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8j
+</code></pre>
+<p>You commit the encrypted file, and at deploy time you (or your CD tool) decrypt it with the <strong>private</strong> key and apply it. Two non-negotiable safeguards go with this pattern: protect the private key like your life depends on it, and add a <code class='ic'>.gitignore</code> so a plaintext manifest or the key file can never be committed by accident.</p>
+<blockquote class='callout'>
+<p>With the encrypt-in-Git approach, your CI/CD must hold the decryption key. Lose that key and your sealed data is unrecoverable; leak it and everything ever committed is exposed.</p>
+</blockquote>
+<h4>Approach 2 — Don&#x27;t store the secret in Git at all (External Secrets Operator)</h4>
+<p>The second idea flips the problem around. Instead of encrypting secrets to store them in Git, you <strong>keep them entirely out of Git</strong> and let a dedicated secrets manager be the source of truth: <strong>HashiCorp Vault</strong>, <strong>AWS Secrets Manager</strong>, GCP Secret Manager, Azure Key Vault, and so on. Git then holds only a <em>pointer</em> — a manifest that says &quot;fetch the value named X from store Y&quot; — which contains no sensitive data.</p>
+<p>The <strong>External Secrets Operator (ESO)</strong> makes this work. It introduces two custom resources:</p>
+<ul>
+<li><strong><code class='ic'>SecretStore</code></strong> (namespaced) or <strong><code class='ic'>ClusterSecretStore</code></strong> (cluster-wide): describes <em>where</em> the external store is and <em>how to authenticate</em> to it.</li>
+<li><strong><code class='ic'>ExternalSecret</code></strong>: describes <em>which</em> keys to fetch from that store and what the resulting native Kubernetes <code class='ic'>Secret</code> should be named.</li>
+</ul>
+<p>The flow is as follows: ESO reads the <code class='ic'>ExternalSecret</code>, authenticates to the backend using the <code class='ic'>SecretStore</code>, fetches the requested values, and continuously reconciles them into a normal Kubernetes <code class='ic'>Secret</code> that your workloads mount or read as environment variables. Because it reconciles on an interval, rotating a value in Vault propagates to the cluster automatically — no re-commit, no redeploy of the secret itself. The sequence below shows one reconcile cycle, including the short-lived credential exchange ESO uses to authenticate.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant ES as ExternalSecret
+    participant ESO as External Secrets Operator
+    participant Auth as Identity provider (OIDC / STS / Vault)
+    participant Store as External store (Vault / Secrets Manager)
+    participant Sec as Native K8s Secret
+    participant Pod as Pod
+    loop Every refreshInterval
+        ESO-&gt;&gt;ES: Read desired keys and target
+        ESO-&gt;&gt;Auth: Present service-account token
+        Auth--&gt;&gt;ESO: Short-lived scoped credential
+        ESO-&gt;&gt;Store: Fetch requested values
+        Store--&gt;&gt;ESO: Return secret values
+        ESO-&gt;&gt;Sec: Create or update Secret
+    end
+    Sec--&gt;&gt;Pod: Mounted or read as env vars</div><figcaption>ESO reconcile cycle from external store to native Secret</figcaption></figure>
+<p>A <code class='ic'>ClusterSecretStore</code> for AWS Secrets Manager looks like this:</p>
+<pre><code>
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: aws-secrets-manager
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: us-east-1
+      auth:
+        jwt:
+          serviceAccountRef:
+            name: external-secrets-sa
+            namespace: external-secrets
+</code></pre>
+<p>And an <code class='ic'>ExternalSecret</code> that pulls a database credential into a native Secret named <code class='ic'>db-credentials</code>:</p>
+<pre><code>
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: db-credentials
+  namespace: app
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: db-credentials        # the K8s Secret ESO will create
+    creationPolicy: Owner
+  data:
+    - secretKey: username        # key in the resulting K8s Secret
+      remoteRef:
+        key: prod/db-creds       # name in AWS Secrets Manager
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: prod/db-creds
+        property: password
+</code></pre>
+<p>Once applied, ESO reports <code class='ic'>SecretSynced</code>, and <code class='ic'>kubectl get secret db-credentials -n app</code> shows a real Secret your pods can consume exactly like any other.</p>
+<h4>The authentication piece: how ESO proves who it is</h4>
+<p>The hard part of Approach 2 is never the YAML — it&#x27;s letting the operator authenticate to the external store <em>without</em> hard-coding a long-lived credential (which would just recreate the original problem). The solution depends on the backend:</p>
+<ul>
+<li><strong>AWS Secrets Manager (on EKS):</strong> use <strong>IRSA</strong> — <em>IAM Roles for Service Accounts</em>. You create a Kubernetes <code class='ic'>ServiceAccount</code> for ESO and map it to an IAM role via the cluster&#x27;s OIDC provider. When ESO&#x27;s pod calls AWS, it presents the service account&#x27;s projected JWT, AWS STS validates it against OIDC, and hands back short-lived temporary credentials scoped by an IAM policy (typically read-only access to the relevant secrets). No static AWS keys ever live in the cluster.</li>
+<li><strong>HashiCorp Vault:</strong> enable Vault&#x27;s Kubernetes auth method, bind a Vault <strong>policy</strong> (e.g. read-only) to a Kubernetes <strong>service account</strong> through a Vault <strong>role</strong>. ESO authenticates with the service account token, Vault validates it against the cluster, and returns the requested secret. Only the deployments tied to that service account and role can read it.</li>
+</ul>
+<p>In both cases the principle is identical: a workload identity (the service account) is exchanged for short-lived, scoped access — so even the credential ESO uses is not a secret sitting in Git.</p>
+<h4>Which approach should you use?</h4>
+<p>Both are valid; they fit different situations.</p>
+<ul>
+<li><strong>Sealed Secrets / SOPS</strong> keeps everything self-contained in Git with no extra infrastructure to run. It is ideal for smaller teams, edge or air-gapped clusters, and &quot;pure GitOps&quot; setups where Git is genuinely the single source of truth. The trade-off: rotation and revocation mean re-encrypting and re-committing, and you must rigorously protect the decryption key.</li>
+<li><strong>External Secrets Operator</strong> centralizes secrets in a purpose-built manager with auditing, dynamic/rotating secrets, and fine-grained access policies, while Git stays completely free of sensitive data. It shines in larger organizations and multi-cluster fleets that already run Vault or a cloud secrets manager. The trade-off: you operate ESO and depend on the external store&#x27;s availability.</li>
+</ul>
+<p>A common real-world pattern is to use ESO for application credentials backed by a central Vault or cloud store, and Sealed Secrets for the small number of bootstrap secrets the cluster needs before ESO itself is running.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A Kubernetes <code class='ic'>Secret</code> is base64-encoded, not encrypted — committing a raw Secret to Git exposes it in plaintext, permanently.</li>
+<li>GitOps offers two safe patterns: <strong>encrypt-and-commit</strong> (Sealed Secrets, SOPS+age) where the cluster holds the decryption key, or <strong>store-externally-and-sync</strong> (ESO) where Git holds only a reference.</li>
+<li>ESO uses a <code class='ic'>SecretStore</code>/<code class='ic'>ClusterSecretStore</code> (where + how to authenticate) and an <code class='ic'>ExternalSecret</code> (what to fetch + target Secret name) to reconcile external values into native cluster Secrets, with automatic refresh.</li>
+<li>The critical detail is authentication without static credentials: <strong>IRSA/OIDC</strong> for AWS Secrets Manager and <strong>Kubernetes auth</strong> for Vault both exchange a service-account identity for short-lived, scoped access.</li>
+<li>Choose Sealed Secrets/SOPS for self-contained simplicity; choose ESO for centralized, auditable, rotating secrets across many clusters.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Decode a Kubernetes Secret and explain why it is not safe to commit to Git.</p>
+<p>Given the Secret manifest below, decode the <code class='ic'>password</code> value and write one sentence explaining why committing this manifest to a public (or private) Git repository is a security risk.</p>
+<pre><code>
+apiVersion: v1
+kind: Secret
+metadata:
+  name: demo-creds
+  namespace: default
+type: Opaque
+data:
+  username: YWRtaW4=
+  password: c3VwZXJzZWNyZXQxMjM=
+</code></pre></div>
+              <pre class='starter'><code># Run this in any terminal that has base64 available:
+echo &#x27;c3VwZXJzZWNyZXQxMjM=&#x27; | base64 -d</code></pre>
+              <details><summary>Hint</summary><ul><li>The `data` field in a Kubernetes Secret always contains base64-encoded strings. The shell command `echo &#x27;&lt;value&gt;&#x27; | base64 -d` decodes them.</li><li>Think about who can access a Git repository — not just today&#x27;s team members but also future contributors, CI runners, forks, and anyone who ever cloned it before the secret was &#x27;deleted&#x27;.</li><li>base64 has no key; there is nothing secret about the encoding algorithm. Any attacker who sees the string can decode it without any additional information.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Decode:
+echo &#x27;c3VwZXJzZWNyZXQxMjM=&#x27; | base64 -d
+# Output: supersecret123
+
+# One-sentence explanation:
+# base64 is a reversible text encoding, not encryption, so anyone with read
+# access to the repository — now or in the future — can instantly recover the
+# original password with a single command, and Git history makes it impossible
+# to fully erase once committed.</code></pre>
+                <div class='exp2'><p>base64 was designed for safe text transport, not secrecy. The Kubernetes API server stores Secrets as base64 in etcd (optionally with encryption-at-rest), which is acceptable because etcd access is gated by RBAC. Git has no such gate: every clone, fork, or CI runner that touches the repo gets the full history. Even if you delete the file later, the commit remains in history and in any existing clone. This is why a raw <code class='ic'>kind: Secret</code> manifest must never be committed to Git.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice 1: Write the <code class='ic'>kubeseal</code> pipeline to turn a plain Secret into a SealedSecret.</p>
+<p>You have already created the raw Secret manifest with <code class='ic'>kubectl create secret generic</code>. Complete the shell pipeline below so that it:</p>
+<p>1. Generates the raw Secret manifest in memory (never written to disk).</p>
+<p>2. Pipes it to <code class='ic'>kubeseal</code> to encrypt it with the cluster&#x27;s public key.</p>
+<p>3. Writes the resulting <code class='ic'>SealedSecret</code> YAML to <code class='ic'>sealed-db-creds.yaml</code>.</p>
+<p>The secret must contain a single key <code class='ic'>password</code> with the value <code class='ic'>p@ssw0rd</code> and live in the <code class='ic'>production</code> namespace.</p>
+<p>Then answer: which part of this file is safe to commit to Git and why?</p></div>
+              <pre class='starter'><code># Fill in the blanks (___) to complete the pipeline:
+kubectl create secret generic db-creds \
+  --from-literal=___ \
+  --namespace=___ \
+  --dry-run=client -o yaml \
+  | kubeseal --format yaml &gt; ___</code></pre>
+              <details><summary>Hint</summary><ul><li>`--from-literal=key=value` sets a single key-value pair. The key name must match exactly what the lecture example uses.</li><li>`--dry-run=client -o yaml` prevents `kubectl` from creating anything in the cluster; it just prints what it *would* create. This is what you pipe into `kubeseal`.</li><li>If `kubeseal` cannot reach the cluster to fetch the public key automatically, add `--fetch-cert` first to save the cert, then pass `--cert &lt;file&gt;` on the sealing command.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>kubectl create secret generic db-creds \
+  --from-literal=password=&#x27;p@ssw0rd&#x27; \
+  --namespace=production \
+  --dry-run=client -o yaml \
+  | kubeseal --format yaml &gt; sealed-db-creds.yaml
+
+# The entire sealed-db-creds.yaml file is safe to commit.
+# Reason: kubeseal replaces the plaintext (base64) values with ciphertext
+# encrypted by the cluster controller&#x27;s RSA public key.  The private key never
+# leaves the cluster, so the ciphertext is unreadable to anyone who only has
+# the Git repository.</code></pre>
+                <div class='exp2'><p>The <code class='ic'>--dry-run=client -o yaml</code> flag makes <code class='ic'>kubectl</code> emit the Secret manifest to stdout without contacting the API server — the secret never touches the cluster in plaintext form. <code class='ic'>kubeseal</code> reads that YAML, fetches the controller&#x27;s public key (or uses a cached copy), encrypts each secret value individually, and outputs a <code class='ic'>kind: SealedSecret</code> manifest. Only the Sealed Secrets controller inside the cluster holds the matching private key, so the encrypted blob in Git is meaningless to anyone outside the cluster. The <code class='ic'>--namespace</code> flag is important: SealedSecrets are namespace-scoped by default, meaning the ciphertext for namespace A cannot be decrypted in namespace B.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice 2: Author an ESO <code class='ic'>ClusterSecretStore</code> and <code class='ic'>ExternalSecret</code> manifest pair.</p>
+<p>Your organization stores database credentials in <strong>HashiCorp Vault</strong> at the KV-v2 path <code class='ic'>secret/data/prod/app-db</code>. The ESO Kubernetes auth method is already configured in Vault with a role named <code class='ic'>eso-role</code> that grants read access to that path. ESO itself runs in the <code class='ic'>external-secrets</code> namespace under the <code class='ic'>external-secrets-sa</code> ServiceAccount.</p>
+<p>Write two Kubernetes YAML manifests:</p>
+<p><strong>Manifest A — <code class='ic'>ClusterSecretStore</code></strong> named <code class='ic'>vault-backend</code> that:</p>
+<ul>
+<li>Uses <code class='ic'>external-secrets.io/v1beta1</code>.</li>
+<li>Points to a Vault instance reachable at <code class='ic'>http://vault.vault.svc:8200</code>.</li>
+<li>Uses Kubernetes auth (mount path <code class='ic'>kubernetes</code>) with the <code class='ic'>eso-role</code> role and the <code class='ic'>external-secrets-sa</code> ServiceAccount in the <code class='ic'>external-secrets</code> namespace.</li>
+</ul>
+<p><strong>Manifest B — <code class='ic'>ExternalSecret</code></strong> named <code class='ic'>app-db-secret</code> in namespace <code class='ic'>app</code> that:</p>
+<ul>
+<li>Refreshes every 15 minutes.</li>
+<li>References the <code class='ic'>vault-backend</code> ClusterSecretStore.</li>
+<li>Creates a K8s Secret named <code class='ic'>app-db-credentials</code> (creationPolicy: Owner).</li>
+<li>Maps two keys: <code class='ic'>username</code> from <code class='ic'>prod/app-db</code> property <code class='ic'>username</code>, and <code class='ic'>password</code> from <code class='ic'>prod/app-db</code> property <code class='ic'>password</code>.</li>
+</ul></div>
+              <pre class='starter'><code># Manifest A — ClusterSecretStore
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: ___
+spec:
+  provider:
+    vault:
+      server: ___
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: ___
+          role: ___
+          serviceAccountRef:
+            name: ___
+            namespace: ___
+---
+# Manifest B — ExternalSecret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: ___
+  namespace: ___
+spec:
+  refreshInterval: ___
+  secretStoreRef:
+    name: ___
+    kind: ClusterSecretStore
+  target:
+    name: ___
+    creationPolicy: Owner
+  data:
+    - secretKey: ___
+      remoteRef:
+        key: ___
+        property: ___
+    - secretKey: ___
+      remoteRef:
+        key: ___
+        property: ___</code></pre>
+              <details><summary>Hint</summary><ul><li>A `ClusterSecretStore` has no `namespace` in its metadata — that is what makes it cluster-wide. An `ExternalSecret`, however, IS namespaced because it determines where the resulting K8s Secret will live.</li><li>For Vault KV-v2 the `remoteRef.key` is the path *after* the mount name and *without* the `/data/` segment — ESO inserts that automatically when `version: v2` is set.</li><li>The `refreshInterval` accepts Go duration strings: `15m`, `1h`, `30s`. If you omit it ESO defaults to `1h`. Setting it to `0` disables automatic refresh (pull only once).</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Manifest A — ClusterSecretStore
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: vault-backend
+spec:
+  provider:
+    vault:
+      server: http://vault.vault.svc:8200
+      path: secret
+      version: v2
+      auth:
+        kubernetes:
+          mountPath: kubernetes
+          role: eso-role
+          serviceAccountRef:
+            name: external-secrets-sa
+            namespace: external-secrets
+---
+# Manifest B — ExternalSecret
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: app-db-secret
+  namespace: app
+spec:
+  refreshInterval: 15m
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: app-db-credentials
+    creationPolicy: Owner
+  data:
+    - secretKey: username
+      remoteRef:
+        key: prod/app-db
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: prod/app-db
+        property: password</code></pre>
+                <div class='exp2'><p>The <code class='ic'>ClusterSecretStore</code> is cluster-scoped (no <code class='ic'>namespace</code> in metadata) so any namespace can reference it via <code class='ic'>kind: ClusterSecretStore</code> in an <code class='ic'>ExternalSecret</code>. The <code class='ic'>vault.path</code> field (<code class='ic'>secret</code>) names the KV mount; the <code class='ic'>remoteRef.key</code> field (<code class='ic'>prod/app-db</code>) is the path within that mount. For KV-v2, ESO automatically appends <code class='ic'>/data/</code> when querying Vault, so the effective API path becomes <code class='ic'>secret/data/prod/app-db</code>. The Kubernetes auth block tells ESO to authenticate by presenting the <code class='ic'>external-secrets-sa</code> service account token to Vault&#x27;s <code class='ic'>/auth/kubernetes/login</code> endpoint; Vault validates it against the cluster&#x27;s token review API and returns a short-lived Vault token scoped by <code class='ic'>eso-role</code>. The <code class='ic'>ExternalSecret</code> sits in the <code class='ic'>app</code> namespace, which means the resulting <code class='ic'>app-db-credentials</code> Secret is created there — making it directly mountable by pods in that namespace. <code class='ic'>creationPolicy: Owner</code> means ESO owns the Secret&#x27;s lifecycle; deleting the <code class='ic'>ExternalSecret</code> also deletes the managed Secret. <code class='ic'>refreshInterval: 15m</code> ensures that a credential rotation in Vault propagates to the cluster within 15 minutes with no manual intervention.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: Design the bootstrap secret strategy and explain the trade-offs.</p>
+<p>You are setting up a new Kubernetes cluster from scratch with GitOps (Argo CD). The cluster needs two categories of secrets:</p>
+<ul>
+<li><strong>Category A</strong> — ESO&#x27;s own credentials (a short-lived bootstrap token for Vault Kubernetes auth, and the OIDC configuration for IRSA). These must exist <em>before</em> ESO is running.</li>
+<li><strong>Category B</strong> — All application secrets (database passwords, API keys, etc.). ESO will manage these once it is running.</li>
+</ul>
+<p>Answer the following in writing (no code required, but you may include YAML snippets to support your argument):</p>
+<p>1. Which secrets manager pattern (Sealed Secrets, SOPS+age, or ESO) should handle Category A, and why?</p>
+<p>2. Which pattern should handle Category B, and why?</p>
+<p>3. What is the single biggest operational risk of the pattern you chose for Category A, and what mitigation do you recommend?</p>
+<p>4. If your organization later requires that every secret access be logged for a compliance audit, does your chosen Category B pattern support this out of the box? Explain.</p></div>
+              <pre class='starter'><code># No code starter — write your answers as structured text.
+# Use this outline:
+
+# 1. Category A (bootstrap secrets): chosen pattern + justification
+
+# 2. Category B (application secrets): chosen pattern + justification
+
+# 3. Biggest operational risk for Category A pattern + mitigation
+
+# 4. Audit logging for Category B pattern</code></pre>
+              <details><summary>Hint</summary><ul><li>Think about what must exist *before* ESO can start. ESO needs to authenticate to Vault, which means it needs a service account and possibly a token — those cannot come from ESO itself. Ask: how does the cluster get that first secret?</li><li>Consider which category of secrets is larger and changes more often. A pattern that requires a Git commit and re-encrypt for every rotation does not scale well to dozens of application secrets rotated monthly.</li><li>For the audit question, check what Vault&#x27;s audit device logs versus what Kubernetes RBAC audit logs provide. They cover different layers — Vault logs what secret was fetched; Kubernetes logs who applied a manifest.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Category A — Sealed Secrets (or SOPS+age)
+# Justification: ESO is not yet running when these secrets are needed, so
+# you cannot use ESO to manage its own bootstrap credentials — that is a
+# circular dependency.  Sealed Secrets (or SOPS+age) lets you store the
+# encrypted bootstrap token in Git and have it applied by Argo CD before
+# ESO starts.  The cluster controller decrypts it at apply time with no
+# external dependency.
+
+# 2. Category B — External Secrets Operator backed by HashiCorp Vault
+# (or a cloud secrets manager)
+# Justification: Once ESO is running, it excels at centralized management:
+# automatic rotation propagation, fine-grained RBAC policies per secret
+# path, and audit trails. Application secrets are numerous and change
+# frequently; managing them via re-encrypt-and-commit (Sealed Secrets) at
+# scale becomes operationally expensive. ESO&#x27;s refreshInterval means a
+# rotated credential reaches all clusters within minutes without a Git commit.
+
+# 3. Biggest operational risk for Sealed Secrets (Category A):
+# Risk: Loss or compromise of the Sealed Secrets controller&#x27;s private key.
+#   - Loss: all SealedSecrets in Git become permanently unrecoverable.
+#   - Compromise: every secret ever sealed with that key is exposed.
+# Mitigation:
+#   a. Back up the controller&#x27;s private key to a secure out-of-band store
+#      (e.g., a hardware security module or the same Vault you will later
+#      use for ESO) immediately after cluster creation.
+#   b. Rotate the key pair on a schedule and re-seal all affected Secrets.
+#   c. Restrict RBAC so only the controller&#x27;s ServiceAccount can read the
+#      private key Secret in the sealed-secrets namespace.
+
+# 4. Audit logging for Category B (ESO + Vault):
+# Yes — HashiCorp Vault has a built-in audit device that logs every secret
+# read request, including the client token (mapped to the ESO service
+# account), the path accessed, and a timestamp.  You enable it with:
+#
+#   vault audit enable file file_path=/vault/logs/audit.log
+#
+# Each time ESO fetches credentials, Vault writes an entry.  Because ESO
+# uses short-lived tokens scoped by Vault role (Kubernetes auth), the log
+# shows exactly which role (and therefore which cluster/namespace) read
+# each secret.  This satisfies typical compliance requirements such as
+# SOC 2 and PCI-DSS secret-access logging.  AWS Secrets Manager similarly
+# logs every GetSecretValue call to AWS CloudTrail automatically with no
+# additional configuration.</code></pre>
+                <div class='exp2'><p>This task synthesises both approaches from the lecture into a real architectural decision. The key insight is that ESO cannot manage its own bootstrap secrets — a form of the chicken-and-egg problem common in platform engineering. The accepted solution is a small, carefully controlled set of Sealed Secrets (or SOPS-encrypted files) that provide just enough for the cluster to initialise ESO. After that, ESO takes over for everything else, because it provides capabilities that Sealed Secrets cannot match at scale: rotation without re-committing, centralised audit logs, and per-path access policies. The private key protection point reinforces the lecture&#x27;s warning: &#x27;Lose that key and your sealed data is unrecoverable; leak it and everything ever committed is exposed.&#x27; Vault&#x27;s audit device is a well-known compliance feature, and AWS CloudTrail provides equivalent coverage for the cloud-native path — neither requires custom instrumentation.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=r0aysXg-h-0' target='_blank'>Kubernetes Secrets are NOT secure? Do this instead!</a></li><li><a href='https://www.youtube.com/watch?v=l_aL13KEOj0' target='_blank'>GitOps Best Practice: Encrypt Kubernetes Secrets with SOPS and age</a></li><li><a href='https://www.youtube.com/watch?v=ywWbgqcw9Fc' target='_blank'>Manage Secrets Using HashiCorp Vault in Kubernetes Cluster</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

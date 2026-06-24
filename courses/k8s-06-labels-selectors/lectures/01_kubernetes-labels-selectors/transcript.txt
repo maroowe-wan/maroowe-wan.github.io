@@ -1,0 +1,295 @@
+## 영상 1: Learn about Pod Labels and Selectors - Civo Academy (https://www.youtube.com/watch?v=luUt9KxLWZ0)
+
+In this video, we'll be discussing labels 
+and selectors. Now, labels in Kubernetes  
+are a set of key-value pairs attached 
+to a Kubernetes object such as pods.  
+It is basically used to provide attributes 
+to create a meaningful Kubernetes object.  
+So, the command to view the labels 
+is kubectl get pods --show-labels.
+So you can see this pod named nginx, and this 
+label is attached. Now, you can attach a label  
+during the pod creation, get the labels, 
+attach the labels or add the labels even after  
+creating a pod. So you can edit the manifest 
+or use the command kubectl label pod nginx  
+demo=true. If I rerun the command, we 
+can see an addition of demo=true. So  
+this particular label has been added. So 
+this key-value type of label is called  
+an equity-based label. Just let's look 
+at a YAML file to understand it more.
+So let's look at the YAML file to understand 
+it more precisely. So, in this case,  
+every Kubernetes object has a metadata section. 
+Now, labels are defined in the metadata section.  
+So there is a field called label and is 
+the location where the labels are written.
+Now, another part where labels 
+are used is the Selector Section.  
+So there's a field called selectors 
+in most of the Kubernetes objects,  
+so they select on the basis of the labels. So, for 
+example, in this particular case, the deployment  
+uses the selector and matches the labels 
+based on the app Nginx. So all the  
+pods that are created using this deployment will 
+have this label as well. And these are matched  
+using the app Nginx. Now, this is an equity-based 
+operator. So there is another equity-based label,  
+and there is another set-based. It means 
+you can do more complex operations, like,  
+in, not in, or, exists, and both matched labels 
+and match expressions, which is the set-based,  
+can be used in conjunction. But if they 
+both are specified, they both have to be  
+true. So it's "and" between both 
+match labels and match expressions.
+Now, the select labels and selectors 
+play a significant role in services.  
+So say, you have a service that has to get 
+attached to a particular port or has to be  
+defined, whenever the traffic 
+comes to that particular endpoint,  
+particular service. So it has to route the 
+traffic to a specific number of pods. Now,  
+this happens based on the labels and selectors. 
+So ports are labelled based on app Nginx.
+And now, if the selector is also based on app 
+Nginx, then that particular service will send the  
+traffic to the ports of matching the label app 
+Nginx. So that's how labels and selectors work  
+on a very high-level overview. 
+That's it for this lecture.  
+Thank you for watching. See you in the next one.
+
+## 영상 2: Kubernetes Node Selector vs Node Affinity vs Pod Affinity vs Tains & Tolerations (https://www.youtube.com/watch?v=rX4v_L0k4Hc)
+
+The biggest advantage of Kubernetes is that it 
+can abstract away individual servers for you. Now,  
+you don’t need to worry about specific details of 
+individual servers. Instead, Kubernetes collects  
+all the details of each node, such as memory, CPU, 
+and other stuff. Plus, it has a built-in scheduler  
+that can decide where to put your workloads. Let’s 
+go over a simple example of how the scheduler  
+selects a node. For instance, you have a pod that 
+requires 2 CPUs and 4 Gi of memory. The first step  
+for the scheduler is to filter out all nodes 
+that do not meet the criteria, perhaps because  
+they don't have enough resources. The remaining 
+nodes are called feasible nodes. Now, the next  
+step is for the Kubernetes scheduler to run a set 
+of functions to score the feasible nodes. It then  
+selects a node with the highest score among the 
+feasible ones to run the Pod. If you get multiple  
+feasible nodes with the same score, the scheduler 
+will randomly select one. This process is called  
+binding. Now, in the real world, you may have 
+a bunch of different nodes in your Kubernetes  
+cluster. Maybe you have Windows nodes, nodes 
+with high CPU for running CPU-intensive tasks,  
+or memory-optimized nodes. In the cloud, it's 
+common to have spot nodes that are cheaper but  
+can be terminated at any time. So, your app must 
+be capable of recovering quickly. Some nodes may  
+use the amd64 architecture, while others use ARM, 
+such as Graviton nodes. These are again cheaper,  
+but your application must be compiled to run on 
+ARM first. You might also have GPU nodes to run  
+machine learning pipelines. Other nodes may have 
+fast SSD disks attached locally. For example,  
+if you decide to run Kafka in Kubernetes, 
+you would definitely want fast local SSDs  
+to improve performance. And so on. With all these 
+different types of servers, the default scheduler  
+cannot always decide the best place to run your 
+pods. So, you'll need to give Kubernetes some  
+extra instructions to help it make a better 
+decision. Now, all recommended approaches use  
+label selectors. No matter which option you decide 
+to use first, you need to assign specific labels  
+to your nodes. If you run 'kubectl get nodes 
+—show-labels', you'll see some default well-known  
+labels already attached to the nodes. In this 
+case, we have a Minikube setup with 3 nodes.  
+You can attach labels manually, for example, 
+using the 'kubectl' command as shown. However,  
+in practice, we assign labels to node groups, 
+not individual nodes, using Terraform or other  
+automation tools. So in this example, we have 
+a node or set of nodes with SSD local disks  
+attached to them. We want to create a deployment 
+or any other object, such as a stateful set, job,  
+etc., and run it only on that node with the label 
+'disktype: ssd'. The simplest and oldest approach  
+is to use a nodeSelector. Although it's a very 
+powerful approach, it's not very flexible. This  
+will instruct this deployment to deploy all the 
+pods on nodes with our label. You can test it  
+using Minikube; it should be running on the third 
+node. Again, nodeSelector is the simplest way to  
+bind specific pods to the nodes. A more advanced 
+approach would be to use affinity, and we'll start  
+with nodeAffinity. This does the same thing as 
+nodeSelector, but it's much more flexible. It can  
+also be used with all Kubernetes objects, such as 
+deployments, statefulsets, etc. Let's say we have  
+3 nodes. The first one only has well-known labels. 
+The second has additional price label equal to  
+'spot', and the third one has the same label from 
+the previous example, disktype equal to ‘ssd'.  
+First, let's convert the previous node selector 
+to nodeAffinity. This is how the whole deployment  
+will look. For now, let's only consider the 
+affinity section. Right after specifying affinity,  
+we state the type. In this case, we want to 
+bind the pod to the node. We'll talk about  
+pod affinity later. NodeAffinity has two types: 
+'RequiredDuringScheduling' and 'Preferred'. You  
+might also notice 'IgnoredDuringExecution'. This 
+means that if the pod has already been scheduled  
+to a particular node and is running, and only 
+after that, you updated or removed the node label,  
+it will be ignored and the pod will still be 
+running on the same node. So, this section is  
+only considered during the pod scheduling step. 
+Next, we have the nodeSelectors. As you can see,  
+we have arrays in multiple places and we'll 
+discuss them as well. But for now, the key  
+is the label name and the value is the label's 
+value. This is exactly the same as nodeSelector,  
+but much more verbose. In this case, Kubernetes 
+will schedule this pod on the third node with the  
+appropriate label. You can also use multiple 
+values for the same label. In this case,  
+it's an OR operation. So, at least one label must 
+be present on the node. Thus, in this situation,  
+the pod will still be scheduled on the third 
+node. Now, let's talk about operators. Here is  
+a full list of operators you can use in your 
+affinity section. Some of them apply only to  
+nodeAffinity. In the next example, we use two 
+conditions with two different labels. Again,  
+only one of these labels must be present on the 
+node. It can be 'price' on demand or 'disktype'  
+equal to 'ssd'. In this case, the pod will 
+also be scheduled on the third node. However,  
+in this example, when we specify multiple 
+conditions under 'matchExpressions',  
+all of them must be present on the node. 
+So, since node 3 does not have both labels,  
+this pod will be stuck in a pending state. All 
+the examples are in my GitHub repo, and you can  
+use it with minikube to test these conditions. 
+Another useful feature about nodeAffinity is that  
+you can set up soft constraints. It's called 
+'preferredDuringScheduling'. In this case,  
+Kubernetes will try to schedule it on the third 
+node, but if for some reason (perhaps insufficient  
+resources), it fails, Kubernetes will place it 
+on other nodes. So, Kubernetes won't leave the  
+pod in a pending state. In the final example, we 
+use the weight attribute. It's self-explanatory.  
+If the label exists with a high weight, such as 
+'price' equal to 'spot', the Kubernetes scheduler,  
+during the calculation of the score for feasible 
+nodes, will add this value and place the pod on  
+the second node. In general, this is my 
+default approach to constrain the pods.
+Now, you can also schedule pods based 
+on other pod labels. For example,  
+you may want to colocate some pods or 
+distribute them across many different nodes.
+In my opinion, the best way to learn is 
+to provide more examples and explain the  
+behavior. But first, all nodes must have 
+the same topology key. It is a label key,  
+such as kubernetes.io/hostname. This key, 
+not the value, must be the same on all nodes;  
+otherwise, the behavior of pod 
+affinity may be unpredictable.
+One of the most common use cases for pod affinity  
+is to use antiaffinity and deploy the 
+pods on different nodes. In this case,  
+if one Kubernetes node goes down or is 
+being upgraded, the impact is minimal.
+This pod-antiaffinity is frequently used to 
+deploy Nginx and other ingress controllers,  
+where it's very important to have as 
+many of them running simultaneously  
+because of the load. The syntax 
+is very similar to nodeAffinity,  
+and you also have 'required' and 'preferred' 
+options, which define soft constraints.
+In this example, when we create a deployment 
+object, we use pod labels as a constraint and  
+specify the topology key. But be careful if 
+you're using 'requiredDuringScheduling'. If  
+you don't have enough Kubernetes nodes, 
+pods will be stuck in the pending state.
+In the following example, we 
+use preferred scheduling. Now,  
+if we deploy three pods, they will all be 
+equally distributed across all nodes. But  
+if we add more pods than we have nodes, 
+they will still be scheduled as well.
+It's not recommended to use this on 
+large Kubernetes clusters with more  
+than a couple of hundred nodes because it's 
+a compute intensive task for the scheduler,  
+but I still use it, especially for 
+critical workloads that cannot be down.
+In the last example, we use podAffinity to 
+colocate some pods on the same nodes. The reason  
+for this is to reduce latency if different 
+pods need to communicate with each other.
+One of the examples from the open-source 
+helm chart would be to place Kafka and  
+Zookeeper on the same node since they need 
+to interact, and lower latency is better.
+Also, keep in mind that by default, 
+these constraints only apply to the  
+namespace where you deploy the application.
+Now with antiaffinity or affinity, if you 
+want to create constraints not only within  
+a single deployment and a namespace, 
+you need to add a namespaceSelector.  
+This empty object will update the behavior 
+of the affinity to look for all namespaces.
+And finally, let's talk about taints 
+and tolerations. Taints are used to  
+repel pods. For example, you might have 
+multiple instance groups in your cluster,  
+such as spot nodes and perhaps GPU nodes.
+If you don't use affinity to schedule pods or 
+use preferred soft constraints, you wouldn't  
+want to accidentally schedule pods on those node 
+groups. For this, you use taints. You can set them  
+manually, but of course, in the cloud, we use 
+Terraform to set constraints on node groups.
+When you have a taint, in order 
+to schedule pods on those nodes,  
+you need to add a toleration section in 
+your deployment or any other object. You  
+can use the describe command to check 
+the taint key and value on the node.
+I think the most common example of taints 
+would be Kubernetes control planes. By default,  
+Kubernetes adds some taints that 
+prevent you from scheduling pods  
+on the master nodes. However 
+it does not apply to minikube.
+Sometimes, you might want to deploy logging 
+or monitoring agents such as Fluentbit on all  
+nodes with all possible taints. You can 
+use this syntax to tolerate all of them.  
+You can use affinity and tolerations 
+together or just pick one of them.
+If you want to learn more about networking, 
+you can watch this video explaining how to  
+expose the application from Kubernetes. Or another 
+one which describes the differences between  
+deployment, statefulset, and daemonset. Thank you 
+for watching and I'll see you in the next video.

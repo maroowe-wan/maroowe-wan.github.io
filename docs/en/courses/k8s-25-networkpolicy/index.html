@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-NetworkPolicy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-25-networkpolicy/index.html'>한국어</a></div>
+  <h1>K8S-NetworkPolicy</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 1 (ConfigMap/Secret, PV/PVC, Probes, rolling updates and rollback, requests/limits and HPA, Ingress) and want to broaden their real-world cluster operations skills. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. NetworkPolicy - Controlling Pod-to-Pod Traffic and Default Deny</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. NetworkPolicy - Controlling Pod-to-Pod Traffic and Default Deny </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the flat network model that allows all traffic by default, and why controlling it is necessary</li>
+<li>Define allowed traffic using label selector-based ingress and egress rules</li>
+<li>Apply a default deny policy and write a NetworkPolicy that permits only specific communications</li>
+</ul>
+<h3>Content</h3>
+<h4>The Default Is &quot;Everything Goes Through&quot; — The Risk of a Flat Network</h4>
+<p>Kubernetes networking rests on one simple premise: <strong>every Pod in the cluster can communicate freely with every other Pod.</strong> Each Pod receives a unique IP address, and any Pod can send traffic to any other Pod&#x27;s IP or Service — regardless of namespace or node. This is called the <strong>flat network model</strong>.</p>
+<p>When you are first learning Kubernetes, this is convenient. Without any extra configuration, a frontend can reach the backend, and the backend can reach the database. From a security standpoint, however, this is like an <strong>office with no locks</strong>. It means a test Pod from a completely unrelated team can freely connect to the DB Pod belonging to your payment service.</p>
+<blockquote class='callout'>
+<p>The default network model is not &quot;traffic passes unless there is a reason to block it&quot; — it is &quot;everything passes regardless of whether it should.&quot; If a security incident starts in one Pod, a flat network becomes a highway for attackers to perform lateral movement across the entire cluster.</p>
+</blockquote>
+<p>The core security principle for containers is <strong>zero trust</strong> — &quot;trust nothing by default; only open communications that are explicitly allowed.&quot; The Kubernetes tool that enforces this is <strong>NetworkPolicy</strong>. A NetworkPolicy is an object that uses label-based rules to declare which Pods may send traffic to or receive traffic from a given Pod (ingress and egress).</p>
+<h4>NetworkPolicy in Context — A Different Layer from Ingress (L7)</h4>
+<p>It is easy to confuse <strong>Ingress</strong> (covered in the Intermediate Part 1 course) with <strong>NetworkPolicy</strong>, since both sound like &quot;traffic control.&quot; However, they operate at entirely different layers.</p>
+<p>| | Ingress (Intermediate Part 1) | NetworkPolicy (this lecture) |</p>
+<p>|---|---|---|</p>
+<p>| Layer | L7 (HTTP/HTTPS path and host) | L3/L4 (IP, port, protocol) |</p>
+<p>| Direction | Routing <strong>external → internal</strong> traffic into the cluster | Allowing or blocking traffic <strong>between Pods inside</strong> the cluster |</p>
+<p>| Question answered | &quot;Which Service should handle this URL?&quot; | &quot;Who is this Pod allowed to talk to?&quot; |</p>
+<p>| Analogy | Reception desk at the building entrance | Access control on each individual office door |</p>
+<p>In short, Ingress is a <strong>router</strong> that directs external HTTP requests to the appropriate Service based on path rules; NetworkPolicy is a <strong>firewall</strong> that allows or drops packets at the IP and port level as they flow between Pods. They are not competing solutions — they work together at different layers.</p>
+<h4>A Critical Prerequisite — The CNI Must Support It</h4>
+<p>There is a trap that learners commonly fall into with NetworkPolicy. <strong>Creating a NetworkPolicy object does not, by itself, enforce anything. The enforcement is performed by the CNI plugin, not by Kubernetes itself.</strong> CNI (Container Network Interface) is the plugin specification responsible for connecting Pods to the network.</p>
+<p>The Kubernetes API server accepts and stores a NetworkPolicy, but the actual work of dropping packets is done by the CNI. If you use <strong>a CNI that does not support NetworkPolicy</strong> (for example, certain plugins in their default configurations), even the most carefully crafted policy will be <strong>silently ignored</strong> and all traffic will continue to flow. No error is raised, which leads to the frustrating situation of &quot;I applied the policy — why is nothing being blocked?&quot;</p>
+<blockquote class='callout'>
+<p>Before applying any NetworkPolicy, verify that your cluster&#x27;s CNI supports it. <strong>Calico, Cilium, and Weave Net</strong> all support it. For managed services, you often need to explicitly enable the policy engine — for example, Azure Network Policy or Calico in AKS, or the VPC CNI policy engine in EKS. For local practice, start minikube with <code class='ic'>--cni=calico</code>.</p>
+</blockquote>
+<pre><code>
+# Start a minikube cluster with Calico CNI for hands-on practice
+minikube start --cni=calico
+
+# Verify that Calico Pods are running
+kubectl get pods -n kube-system | grep calico
+</code></pre>
+<h4>Setting Up the Lab — Creating the Test Targets</h4>
+<p>Let&#x27;s create the &quot;protected target&quot; first. In production, workloads are managed as <strong>Deployments rather than standalone Pods.</strong> A Deployment keeps the desired number of replicas running, reschedules Pods if they crash, and supports rolling updates and rollbacks. We will follow that recommended practice here and create the backend as a Deployment. All work takes place in a dedicated namespace.</p>
+<pre><code>
+kubectl create namespace demo
+</code></pre>
+<p>Create the backend as an nginx Deployment and expose it as a Service. Because NetworkPolicy selects targets by <strong>label</strong>, the key detail is ensuring the Pod carries the <code class='ic'>app=nginx</code> label.</p>
+<p>Option 1 — Imperative approach (<code class='ic'>kubectl create deployment</code> + <code class='ic'>kubectl expose</code>):</p>
+<pre><code>
+# 1) Create the backend Deployment
+kubectl create deployment backend --image=nginx -n demo
+
+# 2) Add the app=nginx label to the Deployment (to match the policy selector)
+#    kubectl create deployment sets app=backend by default, so we override it explicitly
+kubectl label deployment backend app=nginx --overwrite -n demo
+kubectl rollout restart deployment backend -n demo   # propagate the new label to the Pod
+
+# 3) Expose the Deployment as a Service named backend
+kubectl expose deployment backend --name=backend --port=80 -n demo
+</code></pre>
+<p>Option 2 — YAML manifest (lets you set labels correctly from the start — cleaner):</p>
+<pre><code>
+# backend-deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx         # ← the label NetworkPolicy will select
+    spec:
+      containers:
+        - name: nginx
+          image: nginx
+          ports:
+            - containerPort: 80
+</code></pre>
+<pre><code>
+kubectl apply -f backend-deploy.yaml
+kubectl expose deployment backend --name=backend --port=80 -n demo
+</code></pre>
+<blockquote class='callout'>
+<p>A standalone Pod (<code class='ic'>kubectl run</code>) is fine for quickly spinning up a single instance to verify a concept in a learning context, but in practice it is rarely used — no controller manages its lifecycle, restarts, or scaling. This lecture uses a Deployment for the protected target. The short-lived client Pods used for testing, on the other hand, are single Pods launched with <code class='ic'>--rm</code>; that is appropriate for one-off tests.</p>
+</blockquote>
+<p>Now spin up a client Pod to attempt connections. Since it is only needed for a brief test, a standalone Pod is sufficient.</p>
+<pre><code>
+# A client Pod with curl available
+kubectl run client --image=curlimages/curl -n demo -it --rm -- sh
+</code></pre>
+<p>Inside the <code class='ic'>client</code> Pod, connect to the backend Service. Since no policy exists yet, the nginx welcome page comes back. This is proof of the &quot;allow all&quot; default state.</p>
+<pre><code>
+# Inside the client container shell
+curl backend     # Outputs nginx default page HTML → communication works
+</code></pre>
+<h4>Step 1: Applying a Default Deny Ingress Policy</h4>
+<p>The security best practice is: <strong>lock everything down first, then open only what is needed.</strong> Start by applying a default deny policy that blocks all inbound (ingress) traffic.</p>
+<p>Two fields are central to this. <code class='ic'>podSelector</code> selects <strong>which Pods the policy applies to</strong>, and <code class='ic'>policyTypes</code> specifies <strong>which direction(s) to control</strong> (Ingress/Egress). If you list <code class='ic'>Ingress</code> in <code class='ic'>policyTypes</code> but <strong>write no ingress rules at all</strong>, that itself means &quot;no allowed inbound traffic = block everything.&quot;</p>
+<pre><code>
+# default-deny.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: demo
+spec:
+  podSelector: {}          # {} = apply to all Pods in the namespace
+  policyTypes:
+    - Ingress              # Control the inbound direction
+  # No ingress rules → all incoming traffic is blocked
+</code></pre>
+<pre><code>
+kubectl apply -f default-deny.yaml
+</code></pre>
+<p>Now if you run <code class='ic'>curl backend</code> from the <code class='ic'>client</code> Pod, no response comes back — it <strong>hangs and then times out.</strong> NetworkPolicy is doing its job.</p>
+<blockquote class='callout'>
+<p><code class='ic'>podSelector: {}</code> (an empty selector) means &quot;no label condition = select all Pods in the namespace.&quot; The moment a Pod falls under a policy&#x27;s selector, its traffic in that direction switches to &quot;only explicitly allowed traffic passes.&quot; Remember that NetworkPolicy operates as a <strong>whitelist (allow list)</strong>.</p>
+</blockquote>
+<h4>Step 2: Allowing Specific Traffic (Ingress Rules)</h4>
+<p>With the door locked, let&#x27;s open exactly the one communication path we need. We will create a rule that says: &quot;only Pods with the <code class='ic'>access=granted</code> label may connect to nginx (<code class='ic'>app=nginx</code>).&quot;</p>
+<pre><code>
+# allow-frontend.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-nginx
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx           # The protected target: Pods labeled app=nginx
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              access: granted   # Only allow traffic from Pods with this label
+      ports:
+        - protocol: TCP
+          port: 80              # Only on port 80
+</code></pre>
+<pre><code>
+kubectl apply -f allow-frontend.yaml
+</code></pre>
+<p>Run a side-by-side test to confirm the policy works precisely:</p>
+<pre><code>
+# (a) Client with the correct label → connection succeeds
+kubectl run good --image=curlimages/curl --labels=&quot;access=granted&quot; \
+  -n demo -it --rm -- curl --max-time 5 backend
+# → Returns nginx HTML
+
+# (b) Client without the label → blocked (timeout)
+kubectl run bad --image=curlimages/curl \
+  -n demo -it --rm -- curl --max-time 5 backend
+# → No response, times out
+</code></pre>
+<p>The <code class='ic'>access=granted</code> label acts as an <strong>access badge</strong>. Because policy rules match on labels rather than IP addresses or Pod names, the rule remains valid even when a Pod dies and is rescheduled with a new IP — as long as the label is present. This is why label selector-based control is so powerful in the dynamic world of Kubernetes. Running the backend as a Deployment makes this especially clear: every time a Pod is replaced, its IP changes, but the <code class='ic'>app=nginx</code> label defined in the Pod template stays constant, so the policy applies without interruption. As the flow below shows, once default deny is in place, only traffic from matching labels passes through; everything else is dropped.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A[&quot;client Pod attempts to connect to backend (app=nginx)&quot;] --&gt; B{&quot;Is there a policy applied&lt;br/&gt;to the app=nginx Pod?&quot;}
+    B --&gt;|&quot;No&quot;| C[&quot;Default allow&lt;br/&gt;(flat network)&quot;]
+    B --&gt;|&quot;default deny applied&quot;| D{&quot;Does the source Pod&lt;br/&gt;have the access=granted label?&quot;}
+    D --&gt;|&quot;Yes&quot;| E{&quot;Is the target port&lt;br/&gt;TCP 80?&quot;}
+    D --&gt;|&quot;No&quot;| F[&quot;Blocked (timeout)&quot;]
+    E --&gt;|&quot;Yes&quot;| G[&quot;Allowed → nginx responds&quot;]
+    E --&gt;|&quot;No&quot;| F</div><figcaption>Inbound traffic allow/deny decision flow after default deny is applied</figcaption></figure>
+<p>Inside the <code class='ic'>from</code> block, you can combine <code class='ic'>podSelector</code> with the following:</p>
+<ul>
+<li><code class='ic'>namespaceSelector</code> — allow traffic from <strong>namespaces</strong> carrying a specific label (e.g., only the <code class='ic'>team=frontend</code> namespace)</li>
+<li><code class='ic'>ipBlock</code> — allow a specific <strong>IP/CIDR range</strong> (external systems, node IPs, etc.)</li>
+</ul>
+<blockquote class='callout'>
+<p>Writing <code class='ic'>podSelector</code> and <code class='ic'>namespaceSelector</code> inside <strong>a single list item</strong> in <code class='ic'>from</code> creates an <strong>AND</strong> condition: &quot;that Pod inside that namespace.&quot; Splitting them into <strong>separate list items</strong> creates an <strong>OR</strong> condition: &quot;this Pod or that namespace.&quot; A single level of YAML indentation changes the semantics entirely — pay close attention.</p>
+</blockquote>
+<h4>Step 3: Controlling Egress (Outbound Traffic)</h4>
+<p>So far we have dealt with &quot;who is allowed in (ingress).&quot; To tighten security further, you also need to restrict &quot;where this Pod is allowed to go (egress).&quot; This is useful, for example, to prevent application Pods from exfiltrating data to unknown external destinations.</p>
+<p>The most common trap in egress control is <strong>DNS</strong>. If egress is locked down, Pods can no longer perform DNS lookups to resolve domain names — Kubernetes uses CoreDNS on port 53 — and the result is that &quot;nothing reachable by name works anymore.&quot; When locking down egress, <strong>always open DNS (UDP/TCP port 53) at the same time.</strong></p>
+<p>A common security mistake here is opening port 53 with <code class='ic'>to: - namespaceSelector: {}</code> — which allows port 53 to every Pod in every namespace. That is effectively opening cluster-wide port 53 traffic, violating the principle of least privilege. DNS queries only need to reach the <strong>CoreDNS Pods in the <code class='ic'>kube-system</code> namespace</strong>, so the destination should be narrowed to exactly that. CoreDNS Pods typically carry the <code class='ic'>k8s-app: kube-dns</code> label, and to identify the <code class='ic'>kube-system</code> namespace in a selector, you need a label on it (for example, <code class='ic'>kubernetes.io/metadata.name: kube-system</code>).</p>
+<blockquote class='callout'>
+<p>Version and distribution compatibility note: The example below assumes the <code class='ic'>kube-system</code> namespace carries the <code class='ic'>kubernetes.io/metadata.name: kube-system</code> label and that CoreDNS Pods carry the <code class='ic'>k8s-app: kube-dns</code> label. The <code class='ic'>kubernetes.io/metadata.name</code> label is <strong>automatically applied to all namespaces starting from Kubernetes 1.21 (beta) / 1.22 (GA)</strong>, but it may be absent on older versions or certain custom distributions, and the DNS Pod label may also vary by distribution. Before applying this policy, verify the actual labels in your environment with <code class='ic'>kubectl get ns kube-system --show-labels</code> and <code class='ic'>kubectl get pods -n kube-system --show-labels | findstr dns</code> (use <code class='ic'>grep dns</code> on Linux/macOS). If the label is missing, add it manually with <code class='ic'>kubectl label namespace kube-system kubernetes.io/metadata.name=kube-system</code>, or adjust the selector in the example to match your actual labels.</p>
+</blockquote>
+<pre><code>
+# allow-egress.yaml — backend may only reach CoreDNS and a specific DB (e.g., port 5432)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-egress
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx
+  policyTypes:
+    - Egress
+  egress:
+    - to:                       # Allow DNS — scoped to CoreDNS in kube-system only
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:                       # Allow communication to the database only
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+</code></pre>
+<p>Notice that in the first <code class='ic'>to</code> block for DNS, <code class='ic'>namespaceSelector</code> and <code class='ic'>podSelector</code> are placed <strong>inside the same list item</strong>. As explained earlier, this is an AND condition — the destination is precisely &quot;CoreDNS Pods inside the <code class='ic'>kube-system</code> namespace.&quot;</p>
+<p>To put it all together: you lock every door with default deny, then use ingress and egress rules to open exactly the communication paths you need. The diagram below illustrates how NetworkPolicy controls bidirectional traffic for a Pod.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph IN[&quot;Inbound (ingress)&quot;]
+        F1[&quot;Pod with access=granted&quot;]
+        F2[&quot;Pod without label&quot;]
+    end
+
+    subgraph POD[&quot;Protected target (app=nginx)&lt;br/&gt;default deny applied&quot;]
+        NG[&quot;backend Pod&quot;]
+    end
+
+    subgraph OUT[&quot;Outbound (egress)&quot;]
+        D1[&quot;CoreDNS (53)&quot;]
+        D2[&quot;postgres DB (5432)&quot;]
+        D3[&quot;All other destinations&quot;]
+    end
+
+    F1 --&gt;|&quot;TCP 80 allowed&quot;| NG
+    F2 -.-&gt;|&quot;blocked&quot;| NG
+    NG --&gt;|&quot;UDP/TCP 53 allowed&quot;| D1
+    NG --&gt;|&quot;TCP 5432 allowed&quot;| D2
+    NG -.-&gt;|&quot;blocked&quot;| D3</div><figcaption>Selectively allowing inbound and outbound channels over a default deny baseline</figcaption></figure>
+<h4>Common Gotchas</h4>
+<ul>
+<li><strong>Silent failure with an unsupported CNI.</strong> As emphasized earlier, policies are silently ignored on CNIs that do not support NetworkPolicy — no error, no warning. If traffic that should be blocked is passing through, suspect the CNI first.</li>
+<li><strong>Policies are namespace-scoped.</strong> A NetworkPolicy applies only to Pods in the namespace specified in its metadata. To restrict Pods in another namespace, create a separate policy in that namespace or reference it with <code class='ic'>namespaceSelector</code>.</li>
+<li><strong>Multiple policies are unioned (OR/additive).</strong> When multiple NetworkPolicies apply to a single Pod, the <strong>union</strong> of all their allowed traffic is permitted. There are no &quot;deny&quot; rules — NetworkPolicy is purely additive. The only way to block traffic is to never add an allow rule for it, using default deny as the baseline.</li>
+<li><strong>Each direction is independent.</strong> Blocking ingress leaves egress wide open, and vice versa. To control both directions, specify both in <code class='ic'>policyTypes</code>.</li>
+<li><strong>Do not over-broaden the DNS egress destination.</strong> Opening port 53 with <code class='ic'>namespaceSelector: {}</code> allows it to every Pod in the cluster — a security risk. Narrow the destination to the CoreDNS Pods in <code class='ic'>kube-system</code> (<code class='ic'>k8s-app: kube-dns</code>) as shown above. Keep in mind that the namespace and Pod labels used in the selector may differ across environments — verify actual labels before applying.</li>
+<li><strong>Omitting ports opens all ports.</strong> If you write a <code class='ic'>from</code>/<code class='ic'>to</code> clause without a <code class='ic'>ports</code> block, all ports to or from that source are allowed. Always specify only the ports you need.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Kubernetes uses a <strong>flat network model where all Pods can communicate freely by default.</strong> Zero-trust control is required for security, and the tool for it is <strong>NetworkPolicy (L3/L4)</strong>. It operates at a different layer from Ingress (L7, external routing).</li>
+<li>NetworkPolicy only works if the <strong>CNI plugin (Calico, Cilium, Weave Net, etc.) supports and enforces it.</strong> On an unsupported CNI, policies are silently ignored — always verify CNI support before relying on policies.</li>
+<li>Policies follow a <strong>whitelist</strong> model. Use <code class='ic'>podSelector</code> to select target Pods, <code class='ic'>policyTypes</code> to choose a direction, and leave the rules block empty to block all traffic in that direction (default deny).</li>
+<li>In production, manage protected workloads as <strong>Deployments with a label (<code class='ic'>app=nginx</code>) that the policy selects.</strong> A standalone Pod (<code class='ic'>kubectl run</code>) is suitable only for learning or one-off tests. Because the label is defined in the Pod template, it persists across restarts and rescheduling — policies apply regardless of IP changes.</li>
+<li>Allow rules are defined using <strong>label selectors</strong> (<code class='ic'>podSelector</code> / <code class='ic'>namespaceSelector</code>), <code class='ic'>ipBlock</code>, and ports. Because rules match labels rather than IPs, they survive Pod rescheduling.</li>
+<li>When locking down egress, <strong>always open DNS (port 53) as well</strong> — but narrow the destination to the CoreDNS Pods in <code class='ic'>kube-system</code> (<code class='ic'>k8s-app: kube-dns</code>). Using <code class='ic'>namespaceSelector: {}</code> to open port 53 to everyone is a security risk. The <code class='ic'>kubernetes.io/metadata.name</code> label is automatically added to namespaces from Kubernetes 1.21 onward — verify labels in older or custom environments before applying. Multiple policies are applied as the union of all their allow rules.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>Alta3 Research, &quot;Navigating Kubernetes Networking: Tips and Tricks for Developers&quot; — https://www.youtube.com/watch?v=IYB7fpBjXgA</li>
+<li>Microsoft Azure, &quot;Securing traffic between pods using policies in Azure Kubernetes Service | Azure Tips and Tricks&quot; — https://www.youtube.com/watch?v=knnn2fPEL0M</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. 1. Start minikube with the Calico CNI and verify that the Calico Pods in the kube-system namespace are in the Running state.</p>
+<p>2. Create the demo namespace.</p>
+<p>3. Inside the demo namespace, create a backend Pod labeled app=nginx along with a Service on port 80.</p>
+<p>4. Launch a temporary client Pod using the curlimages/curl image, send a curl request to the backend Service, and confirm that the nginx response HTML is returned.</p>
+<p>Note: NetworkPolicy enforcement requires a CNI plugin that supports it. This entire lab assumes Calico CNI. If minikube is started without the --cni=calico option (default kindnet), policies are silently ignored — make sure to start with --cni=calico.</p></div>
+              <pre class='starter'><code># 1. Start minikube with Calico CNI
+minikube start --cni=calico
+
+# Verify Calico Pods are Running
+kubectl get pods -n kube-system | grep calico
+
+# 2. Create the namespace
+kubectl create namespace ____
+
+# 3. Create the backend Pod + Service
+kubectl run backend --image=____ --labels=&quot;____=____&quot; \
+  -n demo --expose --port=____
+
+# 4. Launch a temporary client Pod and curl the backend (a response means default-allow is confirmed)
+kubectl run client --image=curlimages/curl -n demo \
+  --rm -it -- curl --max-time 5 ____</code></pre>
+              <details><summary>Hint</summary><ul><li>If minikube is already running, delete it with `minikube delete` and start fresh with `minikube start --cni=calico`. Replacing the CNI on an existing cluster is complex, so a clean restart is the safest approach.</li><li>In the output of `kubectl get pods -n kube-system | grep calico`, the calico-node Pod must appear as Running for each node. If it is in Pending or CrashLoopBackOff, Calico is still initializing — wait 1–2 more minutes.</li><li>The `kubectl run backend --expose` command creates both a Pod and a ClusterIP Service with the same name. You can use the Service name `backend` as the curl target because cluster DNS (CoreDNS) automatically resolves `&lt;service-name&gt;.&lt;namespace&gt;.svc.cluster.local`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Start minikube with Calico CNI
+minikube start --cni=calico
+
+# Verify Calico Pods — calico-node, calico-kube-controllers, etc. must be Running
+kubectl get pods -n kube-system | grep calico
+
+# 2. Create the namespace
+kubectl create namespace demo
+
+# 3. Create the backend Pod + Service (--expose also creates a ClusterIP Service)
+kubectl run backend --image=nginx --labels=&quot;app=nginx&quot; \
+  -n demo --expose --port=80
+
+# Verify creation
+kubectl get pod,svc -n demo
+
+# 4. Launch a temporary client Pod and curl the backend
+# The Service name &#x27;backend&#x27; is resolvable via cluster DNS
+kubectl run client --image=curlimages/curl -n demo \
+  --rm -it -- curl --max-time 5 backend
+# Expected result: &lt;!DOCTYPE html&gt; ... nginx default HTML is printed
+# → Confirms that all Pod-to-Pod communication is allowed by default in the flat network</code></pre>
+                <div class='exp2'><p>Kubernetes adopts a &#x27;flat network model&#x27; by default. All Pods can communicate freely with each other regardless of namespace or node. In this state, with no NetworkPolicy objects present, there are no blocking rules either. The nginx response returned by curl is proof of the &#x27;default-allow&#x27; state. NetworkPolicy enforcement is performed not by the Kubernetes API server but by the CNI plugin. If an unsupported CNI is used (e.g., minikube&#x27;s default kindnet), even correctly written NetworkPolicy objects are silently ignored and all traffic continues to flow without any error. Calico, Cilium, and Weave Net are among the CNIs that do enforce NetworkPolicy.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Write a default deny NetworkPolicy (YAML filename: default-deny.yaml) that blocks all inbound traffic for every Pod in the demo namespace, then apply it.</p>
+<p>Requirements:</p>
+<ul>
+<li>kind: NetworkPolicy, namespace: demo</li>
+<li>Apply to all Pods: set podSelector to an empty value ({})</li>
+<li>List only Ingress in policyTypes</li>
+<li>Writing no ingress rules at all means all incoming traffic is blocked</li>
+</ul>
+<p>After applying, launch the curl client Pod again, attempt to connect to backend, and confirm the request times out with no response.</p>
+<p>Also verify the policy was created with kubectl get networkpolicy -n demo.</p></div>
+              <pre class='starter'><code># default-deny.yaml (fill in the blanks)
+apiVersion: networking.k8s.io/v1
+kind: ____
+metadata:
+  name: default-deny-ingress
+  namespace: ____
+spec:
+  podSelector: ____    # empty object: all Pods in the namespace
+  policyTypes:
+    - ____             # inbound direction only
+  # No ingress rules → all incoming traffic is blocked
+
+# Apply
+kubectl apply -f default-deny.yaml
+
+# Verify the policy was created
+kubectl get networkpolicy -n demo
+
+# Confirm blocking: --max-time 5 sets a 5-second timeout
+kubectl run client --image=curlimages/curl -n demo \
+  --rm -it -- curl --max-time 5 ____</code></pre>
+              <details><summary>Hint</summary><ul><li>In podSelector: {}, the braces must contain nothing. Using podSelector: null or omitting the podSelector key entirely behaves differently — always write the explicit empty object {}.</li><li>Specifying only policyTypes: [Ingress] leaves egress unrestricted. Blocking egress at this stage would cut DNS and break name resolution in later steps. Only block Ingress here.</li><li>In the output of kubectl get networkpolicy -n demo, the POD-SELECTOR column showing &lt;none&gt; is correct — it represents the empty selector (all Pods) and is expected behavior.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># default-deny.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: demo
+spec:
+  podSelector: {}       # {} = no label condition = applies to all Pods in the namespace
+  policyTypes:
+    - Ingress
+  # The ingress key is omitted entirely → &#x27;no allowed inbound&#x27; = block all
+
+# Apply
+kubectl apply -f default-deny.yaml
+
+# Verify the policy
+kubectl get networkpolicy -n demo
+# Sample output:
+# NAME                   POD-SELECTOR   AGE
+# default-deny-ingress   &lt;none&gt;         5s
+
+# Confirm blocking (times out after 5 seconds)
+kubectl run client --image=curlimages/curl -n demo \
+  --rm -it -- curl --max-time 5 backend
+# Expected result: curl: (28) Connection timed out after 5000 milliseconds
+# → NetworkPolicy is active and inbound traffic is being blocked</code></pre>
+                <div class='exp2'><p>NetworkPolicy uses a whitelist (allow-list) model. The moment a policy is applied to a Pod, the rule becomes &#x27;only explicitly allowed traffic passes; everything else is blocked.&#x27; podSelector: {} means &#x27;no label condition = select all Pods,&#x27; and listing Ingress in policyTypes without writing any ingress rules means &#x27;zero allow rules = block everything.&#x27; The timeout on curl is evidence that the policy is actively working. Note the distinction: an immediate &#x27;Connection refused&#x27; means the service itself is unavailable, whereas a timeout means the packet reached the network layer but was dropped by the CNI.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Write and apply a NetworkPolicy (allow-frontend.yaml) satisfying the following conditions.</p>
+<p>Requirements:</p>
+<ul>
+<li>Protected target: Pods labeled app=nginx (podSelector)</li>
+<li>Allowed source: Pods labeled access=granted (from.podSelector)</li>
+<li>Allowed port: TCP 80</li>
+<li>policyTypes: Ingress</li>
+</ul>
+<p>After applying, test with two different clients and compare results.</p>
+<p>(a) A Pod with the access=granted label → curl to backend, confirm the nginx HTML response</p>
+<p>(b) A Pod without the label → curl to backend, confirm the request is blocked (timeout)</p></div>
+              <pre class='starter'><code># allow-frontend.yaml (fill in the blanks)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-nginx
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      ____: ____        # label of the protected target Pod
+  policyTypes:
+    - ____
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              ____: ____    # label of the allowed source Pod
+      ports:
+        - protocol: TCP
+          port: ____
+
+# Apply
+kubectl apply -f allow-frontend.yaml
+
+# (a) Client with label → expect connection success
+kubectl run good --image=curlimages/curl --labels=&quot;____=____&quot; \
+  -n demo --rm -it -- curl --max-time 5 backend
+
+# (b) Client without label → expect block (timeout)
+kubectl run bad --image=curlimages/curl \
+  -n demo --rm -it -- curl --max-time 5 backend</code></pre>
+              <details><summary>Hint</summary><ul><li>Writing podSelector and namespaceSelector inside a single list item (-) in the from block creates an AND condition (that Pod in that namespace). Placing them as separate list items creates an OR condition. A single level of YAML indentation changes the semantics entirely — pay close attention.</li><li>Run kubectl get networkpolicy -n demo to confirm that both allow-to-nginx and default-deny-ingress exist. If either is missing, the apply failed.</li><li>If the good Pod succeeds but so does the bad Pod, the CNI is not enforcing the policies. Run `kubectl get pods -n kube-system | grep calico` to verify that the Calico Pods are in the Running state.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># allow-frontend.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-nginx
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx          # this policy applies to: the backend Pod
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              access: granted   # only allow traffic from Pods with this label
+      ports:
+        - protocol: TCP
+          port: 80              # only on port 80
+
+# Apply (added on top of the existing default-deny)
+kubectl apply -f allow-frontend.yaml
+
+# Verify the current policy list (should show 2 policies)
+kubectl get networkpolicy -n demo
+# NAME                   POD-SELECTOR   AGE
+# allow-to-nginx         app=nginx      5s
+# default-deny-ingress   &lt;none&gt;         2m
+
+# (a) Pod with access=granted label → connection succeeds
+kubectl run good --image=curlimages/curl --labels=&quot;access=granted&quot; \
+  -n demo --rm -it -- curl --max-time 5 backend
+# Expected result: &lt;!DOCTYPE html&gt; ... nginx HTML is printed
+
+# (b) Pod without label → blocked
+kubectl run bad --image=curlimages/curl \
+  -n demo --rm -it -- curl --max-time 5 backend
+# Expected result: curl: (28) Connection timed out after 5000 milliseconds</code></pre>
+                <div class='exp2'><p>NetworkPolicy allow rules are label-based. Because the condition is a label (access=granted) rather than an IP address or Pod name, the rule remains valid even after a Pod is rescheduled to a new IP — as long as the label matches. When default-deny-ingress and allow-to-nginx are both present, Kubernetes evaluates them as a union (OR). default-deny contributes &#x27;no allow rules&#x27;; allow-to-nginx contributes &#x27;allow TCP 80 from access=granted.&#x27; The union is &#x27;allow TCP 80 from access=granted only.&#x27; The bad Pod in test (b) times out because it carries no access=granted label and therefore matches no allow rule.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Step 1: Apply a deliberately broken egress policy (bad-egress.yaml) that omits the DNS port, then confirm that name resolution fails inside the backend Pod.</p>
+<p>Requirements (bad-egress.yaml):</p>
+<ul>
+<li>Target: Pods labeled app=nginx</li>
+<li>policyTypes: Egress</li>
+<li>Egress rules: allow only TCP 5432 to Pods labeled app=postgres (no DNS rule)</li>
+</ul>
+<p>Step 2: Delete bad-egress.yaml and apply a correct policy (allow-egress.yaml) that also allows DNS (UDP+TCP 53). Run the name resolution check again to confirm it now succeeds.</p>
+<p>Hint: To run commands inside the backend Pod, use the form <code class='ic'>kubectl exec -n demo backend -- &lt;command&gt;</code>.</p></div>
+              <pre class='starter'><code># bad-egress.yaml — broken example with no DNS rule (fill in the blanks)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-egress
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx
+  policyTypes:
+    - ____
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+# Apply, then confirm DNS failure
+kubectl apply -f bad-egress.yaml
+kubectl exec -n demo backend -- ____   # run: curl --max-time 5 http://kubernetes.default
+
+# -----------------------------------------------
+# allow-egress.yaml — allow DNS + postgres (fill in the blanks)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx
+  policyTypes:
+    - Egress
+  egress:
+    - to:                        # Allow DNS
+        - namespaceSelector: {}
+      ports:
+        - protocol: ____
+          port: ____
+        - protocol: ____
+          port: ____
+    - to:                        # Allow postgres
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432</code></pre>
+              <details><summary>Hint</summary><ul><li>The official nginx image does not include nslookup. Use `kubectl exec -n demo backend -- curl --max-time 5 http://kubernetes.default` to check name resolution. &#x27;Could not resolve host&#x27; means DNS is blocked; &#x27;Connection refused&#x27; or &#x27;401&#x27; means name resolution succeeded (the name resolved but the connection was refused).</li><li>If you apply allow-egress without first deleting bad-egress, both policies will be active and their allow rules will be unioned. Always run `kubectl delete networkpolicy bad-egress -n demo` before applying allow-egress.</li><li>The absence of an actual postgres Pod does not invalidate this exercise. Adding the app=postgres rule to the egress policy is simply a declaration: &#x27;when a Pod with that label appears, allow it.&#x27; The key behavior to observe is the DNS allow rule.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># bad-egress.yaml — broken example with no DNS rule
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bad-egress
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+# Step 1: Apply the broken policy and confirm DNS failure
+kubectl apply -f bad-egress.yaml
+
+# The nginx image does not include nslookup; use curl to check name resolution
+kubectl exec -n demo backend -- curl --max-time 5 http://kubernetes.default
+# Expected result: curl: (6) Could not resolve host: kubernetes.default
+# → Port 53 is blocked, so name resolution itself fails
+
+# -----------------------------------------------
+# Delete the broken policy
+kubectl delete networkpolicy bad-egress -n demo
+
+# allow-egress.yaml — allow DNS + postgres
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-egress
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: nginx
+  policyTypes:
+    - Egress
+  egress:
+    - to:                          # Allow DNS lookups (CoreDNS lives in kube-system)
+        - namespaceSelector: {}    # All namespaces, including kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:                          # Allow communication to the postgres Pod
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+# Step 2: Apply the correct policy and confirm DNS is restored
+kubectl apply -f allow-egress.yaml
+
+kubectl exec -n demo backend -- curl --max-time 5 http://kubernetes.default
+# Expected result: DNS resolves; the response may be a 401 Unauthorized (API server auth required)
+# → Name resolution succeeds, confirming the DNS egress rule is working correctly
+
+# Verify the final policy list
+kubectl get networkpolicy -n demo
+# NAME                   POD-SELECTOR   AGE
+# allow-egress           app=nginx      10s
+# allow-to-nginx         app=nginx      5m
+# default-deny-ingress   &lt;none&gt;         8m</code></pre>
+                <div class='exp2'><p>Adding Egress to policyTypes switches that Pod&#x27;s outbound traffic to whitelist mode as well. The most common mistake is forgetting DNS. Name resolution inside a Kubernetes cluster goes through the CoreDNS Pod in the kube-system namespace on UDP/TCP port 53. If port 53 is missing from the egress rules, the Pod cannot resolve any domain names and produces a &#x27;Could not resolve host&#x27; error. The reason <code class='ic'>namespaceSelector: {}</code> is used for DNS is that CoreDNS lives in kube-system, not in the same namespace as the backend Pod. An empty namespaceSelector means &#x27;all Pods in all namespaces,&#x27; which includes kube-system&#x27;s CoreDNS. In production, it is recommended to narrow the scope to <code class='ic'>namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}</code>.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=IYB7fpBjXgA' target='_blank'>Navigating Kubernetes Networking: Tips and Tricks for Developers</a></li><li><a href='https://www.youtube.com/watch?v=knnn2fPEL0M' target='_blank'>Securing traffic between pods using policies in Azure Kubernetes Service | Azure Tips and Tricks</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

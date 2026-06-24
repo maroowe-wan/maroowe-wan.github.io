@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-CRD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-29-crd/index.html'>한국어</a></div>
+  <h1>K8S-CRD</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. CRDs and Custom Resources — Extending the Kubernetes API</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. CRDs and Custom Resources — Extending the Kubernetes API </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the structure of a CustomResourceDefinition (CRD) and its OpenAPI v3 schema validation, and be able to define one from scratch</li>
+<li>Create custom resources (CRs) and interact with them using <code class='ic'>kubectl get</code>, <code class='ic'>describe</code>, and <code class='ic'>explain</code> just as you would with built-in resources</li>
+<li>Explain what it means to extend the Kubernetes API, and describe why CRDs behave identically to built-in resources</li>
+</ul>
+<h3>Content</h3>
+<h4>Why Extend the API?</h4>
+<p>By now you&#x27;re comfortable working with built-in resources like Pods, Deployments, and Services. But as you operate Kubernetes in production, you&#x27;ll eventually reach a point where you think: &quot;I wish there were a resource type that maps directly to our domain.&quot; Instead of expressing concepts like <code class='ic'>Database</code>, <code class='ic'>Certificate</code>, or <code class='ic'>BackupJob</code> as a combination of Deployments, ConfigMaps, and CronJobs every time, you want each of them to stand as a <strong>first-class resource</strong> in its own right.</p>
+<p>Think of it like object-oriented programming. You can&#x27;t build an entire application using only built-in types like <code class='ic'>String</code> and <code class='ic'>Array</code> — you define your own classes. In Kubernetes, a CRD is that <strong>class definition</strong>, and each instance created from that class is a custom resource (CR).</p>
+<p>Once you register a CRD, the Kubernetes API server exposes a new endpoint. From that point on, your custom resource gains <strong>every capability that built-in resources enjoy</strong>: <code class='ic'>kubectl get</code>, <code class='ic'>describe</code>, RBAC, label selectors, watches, and storage in etcd. That is the real meaning of &quot;extending the API.&quot;</p>
+<blockquote class='callout'>
+<p>A CRD is nothing more than a <strong>data model registration</strong>. The controller that actually watches that resource and drives behavior is a separate concern. Registering a CRD on its own gives you a neatly stored object in etcd — but nothing actually happens. Attaching behavior is the job of an Operator, which is the topic of the next lecture.</p>
+</blockquote>
+<h4>The Structure of a CRD Manifest</h4>
+<p>A CRD is itself a Kubernetes resource, belonging to the <code class='ic'>apiextensions.k8s.io/v1</code> group. Let&#x27;s walk through its key fields.</p>
+<pre><code>
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  # The name must follow the &lt;plural&gt;.&lt;group&gt; format
+  name: certificates.training.example.com
+spec:
+  group: training.example.com        # API group (analogous to a &quot;package&quot; in OOP)
+  scope: Namespaced                  # Namespaced or Cluster
+  names:
+    plural: certificates             # kubectl get certificates
+    singular: certificate
+    kind: Certificate                # The kind value used in manifests
+    shortNames: [&quot;cert&quot;]             # kubectl get cert (optional alias)
+  versions:
+    - name: v1
+      served: true                   # Whether the API server serves this version
+      storage: true                  # Whether this version is the stored canonical form
+      subresources:
+        status: {}                   # Enable the status subresource (explained below)
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:                    # The desired state declared by the user
+              type: object
+              properties:
+                commonName:
+                  type: string
+                dnsNames:
+                  type: array
+                  items:
+                    type: string
+                renewBefore:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  default: 30        # API server injects this value if the field is omitted
+              required: [&quot;commonName&quot;]
+            status:                  # The actual state recorded by the controller
+              type: object
+              properties:
+                phase:
+                  type: string       # Pending / Ready / Expired, etc.
+                expiresAt:
+                  type: string
+                message:
+                  type: string
+</code></pre>
+<p>Here are the key points to understand:</p>
+<ul>
+<li><strong>group / names</strong>: The resource&#x27;s identity. The <code class='ic'>name</code> field must be in the <code class='ic'>&lt;plural&gt;.&lt;group&gt;</code> format for registration to succeed.</li>
+<li><strong>scope</strong>: <code class='ic'>Namespaced</code> means the resource belongs to a namespace (like a Pod); <code class='ic'>Cluster</code> means it is cluster-scoped (like a Node or ClusterRole).</li>
+<li><strong>versions</strong>: You can define multiple versions of the same resource (<code class='ic'>v1alpha1</code>, <code class='ic'>v1beta1</code>, <code class='ic'>v1</code>) simultaneously. <code class='ic'>served</code> controls whether the API server responds to requests for that version; <code class='ic'>storage</code> designates the canonical version stored in etcd. <strong>Exactly one version may have <code class='ic'>storage: true</code>.</strong></li>
+<li><strong>schema.openAPIV3Schema</strong>: Declares field types, required constraints, and validation rules in OpenAPI v3 format. This is the heart of schema validation. When a <code class='ic'>default</code> value is provided — as with <code class='ic'>renewBefore</code> above — the API server automatically injects it when the field is omitted.</li>
+</ul>
+<h4>spec and status — The Real Core of the CRD Pattern</h4>
+<p>The fact that the schema above places <code class='ic'>spec</code> and <code class='ic'>status</code> side by side is the most important thing to notice. Every core Kubernetes resource is split into these two sections:</p>
+<ul>
+<li><strong><code class='ic'>spec</code> (desired state)</strong>: Where users declare &quot;this is what I want.&quot; Written by humans.</li>
+<li><strong><code class='ic'>status</code> (actual state)</strong>: Where the controller records &quot;this is what it actually is right now.&quot; <strong>Written by the controller; humans only read it.</strong></li>
+</ul>
+<p>For example, with a <code class='ic'>Certificate</code> CR, the user only declares <code class='ic'>spec.commonName: web.example.com</code>. Whether the certificate was actually issued (<code class='ic'>status.phase: Ready</code>), when it expires (<code class='ic'>status.expiresAt</code>), or why it failed if it did (<code class='ic'>status.message</code>) — all of that is written by the controller into <code class='ic'>status</code>. An operator can run <code class='ic'>kubectl get certificate</code> and immediately see whether it is <code class='ic'>Pending</code>, <code class='ic'>Ready</code>, or <code class='ic'>Expired</code>. <strong>Without status, a CRD is just an input form — there is no way to observe what the resource is actually doing.</strong></p>
+<p>To use this properly, you must declare <strong><code class='ic'>subresources.status: {}</code></strong> to activate status as a subresource, as shown in the example above. This produces two important changes:</p>
+<p>1. <strong>Separation of authority</strong> — <code class='ic'>spec</code> (modified by users) and <code class='ic'>status</code> (modified by the controller) are split into separate endpoints (<code class='ic'>/status</code>). Users cannot accidentally modify status, and controllers cannot arbitrarily overwrite spec.</p>
+<p>2. <strong>Conflict prevention</strong> — A user&#x27;s spec update and a controller&#x27;s status update no longer overwrite each other.</p>
+<blockquote class='callout'>
+<p>The separation of spec and status is the foundation of Kubernetes&#x27; declarative model. <strong>Users speak through spec to declare desired state; controllers report through status to record actual state.</strong> The reconciliation work that controllers and Operators perform — reading spec, aligning reality with it, then writing the result to status — is exactly the subject of the next lecture.</p>
+</blockquote>
+<h4>OpenAPI Schema Validation — The Same Safety Net as Built-in Resources</h4>
+<p>Just as setting <code class='ic'>replicas</code> to a string in a Deployment manifest is rejected, a CRD rejects any CR that violates its schema. In the example above, <code class='ic'>renewBefore</code> has <code class='ic'>minimum: 1</code> and <code class='ic'>maximum: 90</code>, so setting it to 100 causes the API server to respond with:</p>
+<pre><code>
+The Certificate is invalid: spec.renewBefore: Invalid value: 100:
+spec.renewBefore in body should be less than or equal to 90
+</code></pre>
+<p>This validation is performed <strong>by the API server at the admission stage</strong>, not by the controller. Invalid data is blocked before it ever reaches etcd. Using <code class='ic'>required</code>, <code class='ic'>enum</code>, <code class='ic'>pattern</code> (regex), and <code class='ic'>default</code> (injecting default values) significantly reduces the chance of user error.</p>
+<h4>CEL Validation — Enforcing Cross-Field Constraints Declaratively</h4>
+<p>OpenAPI v3 schema validation is powerful, but it has a fundamental limitation: it validates each field in isolation. It cannot express constraints like &quot;if field A is set, field B must also be set&quot; or &quot;the end date must be later than the start date.&quot; In the past, enforcing these cross-field relationships required building and running a separate validating admission webhook — a non-trivial operational burden involving deployment, TLS certificates, and availability management.</p>
+<p><strong>CEL (Common Expression Language) validation rules</strong>, promoted to stable in Kubernetes 1.25, eliminate that burden. By embedding <code class='ic'>x-kubernetes-validations</code> expressions directly in the schema, the <strong>API server itself</strong> enforces cross-field constraints — no external webhook server required.</p>
+<pre><code>
+schema:
+  openAPIV3Schema:
+    type: object
+    properties:
+      spec:
+        type: object
+        properties:
+          autoRenew:
+            type: boolean
+          renewBefore:
+            type: integer
+        # Apply cross-field constraints at the spec object level
+        x-kubernetes-validations:
+          # If autoRenew is true, renewBefore must be specified
+          - rule: &quot;!self.autoRenew || has(self.renewBefore)&quot;
+            message: &quot;renewBefore is required when autoRenew is true&quot;
+</code></pre>
+<p>The <code class='ic'>rule</code> field is a CEL expression that must evaluate to a boolean; <code class='ic'>self</code> refers to the object the rule is attached to (here, <code class='ic'>spec</code>). The rule above reads: &quot;autoRenew must be false, or renewBefore must be present.&quot; If the constraint is violated, the API server returns the <code class='ic'>message</code> and rejects the request. You can also write numeric comparisons like <code class='ic'>self.endDate &gt; self.startDate</code>, or validate list length and uniqueness — all in a single expression.</p>
+<blockquote class='callout'>
+<p>The guiding principle: use OpenAPI schema for single-field constraints (type, range, regex), and use CEL (<code class='ic'>x-kubernetes-validations</code>) for cross-field relationships. This is the modern Kubernetes best practice. Reserve admission webhooks only for genuinely complex logic that CEL cannot express — such as lookups against external systems. Keeping webhooks to a minimum reduces operational overhead significantly.</p>
+</blockquote>
+<h4>CRD Evolution — Versioning and Conversion</h4>
+<p>CRDs evolve just like software. You might start with <code class='ic'>v1alpha1</code> for experimentation and graduate to <code class='ic'>v1</code> as the API stabilizes. The challenge is doing this without breaking existing resources already stored in the cluster or the clients that depend on them. That is why <code class='ic'>versions</code> can hold multiple entries simultaneously.</p>
+<pre><code>
+versions:
+  - name: v1alpha1
+    served: true       # Keep serving old clients
+    storage: false     # No longer the stored version
+  - name: v1
+    served: true
+    storage: true      # All objects are now stored in this form in etcd
+</code></pre>
+<ul>
+<li><strong><code class='ic'>served</code></strong>: Whether the API server accepts and responds to requests for this version. Multiple versions can be <code class='ic'>served: true</code> at the same time, allowing old and new clients to coexist.</li>
+<li><strong><code class='ic'>storage</code></strong>: The canonical version written to etcd. <strong>Exactly one version may be <code class='ic'>true</code>.</strong> Every object is ultimately stored in this form.</li>
+</ul>
+<p>This raises an obvious question: if a client sends a request in <code class='ic'>v1alpha1</code> but the storage version is <code class='ic'>v1</code>, who handles the format mismatch between them? This is called <strong>version conversion</strong>.</p>
+<ul>
+<li><strong><code class='ic'>strategy: None</code></strong> — For simple changes like adding or removing fields, the API server passes the object through without conversion (this is the default).</li>
+<li><strong><code class='ic'>strategy: Webhook</code> (Conversion Webhook)</strong> — When field names change or the structure is restructured in a way that cannot be mapped automatically, you register a conversion webhook. Whenever the API server needs to convert between versions, it calls your webhook and delegates the transformation — for example, &quot;convert this object from <code class='ic'>v1alpha1</code> to <code class='ic'>v1</code>.&quot; Regardless of which version a client requests, the webhook translates the stored object into that version on the fly, making it appear as though the requested version has always existed.</li>
+</ul>
+<blockquote class='callout'>
+<p>Operational guidance: once you expose a version as <code class='ic'>served: true</code>, clients will start depending on it, so you cannot remove it without warning. The safe evolution sequence is: (1) add the new version as <code class='ic'>served</code> → (2) add a conversion webhook if needed → (3) move <code class='ic'>storage</code> to the new version → (4) after a sufficient deprecation window, set the old version to <code class='ic'>served: false</code> → (5) remove it entirely. This mirrors the process Kubernetes itself uses to deprecate built-in APIs — for example, keeping <code class='ic'>v1beta1</code> around for an extended period before removing it.</p>
+</blockquote>
+<h4>Creating and Working with Custom Resources</h4>
+<p>Once you apply the CRD, the new endpoint is immediately live.</p>
+<pre><code>
+kubectl apply -f certificate-crd.yaml
+kubectl get crd certificates.training.example.com
+</code></pre>
+<p>Now you can create actual instances (CRs) using the CRD as a blueprint. The <code class='ic'>apiVersion</code> of a CR is the <code class='ic'>group/version</code> combination.</p>
+<pre><code>
+apiVersion: training.example.com/v1
+kind: Certificate
+metadata:
+  name: web-cert
+spec:
+  commonName: web.example.com
+  dnsNames: [&quot;web.example.com&quot;, &quot;www.example.com&quot;]
+  renewBefore: 30
+</code></pre>
+<pre><code>
+kubectl apply -f web-cert.yaml
+kubectl get certificates           # or: kubectl get cert
+kubectl describe certificate web-cert
+# Query schema documentation (using the full resource name is most reliable)
+kubectl explain certificates.training.example.com.spec
+</code></pre>
+<p>The fact that <code class='ic'>kubectl explain</code> works is significant. It does so because the API server <strong>exposes your OpenAPI schema as documentation</strong> — proof that custom resources participate in the same discovery mechanism as built-in resources.</p>
+<blockquote class='callout'>
+<p>Pro tip: Short names like <code class='ic'>kubectl explain certificate.spec</code> can collide when multiple groups share the same alias. Using the full resource name — <code class='ic'>kubectl explain certificates.training.example.com.spec</code> — unambiguously targets your CRD&#x27;s schema in any environment. For the same reason, when multiple CRDs share the same <code class='ic'>kind</code>, always use the full resource name with <code class='ic'>kubectl describe</code> to eliminate ambiguity. Make it a habit.</p>
+</blockquote>
+<h4>Why CRDs Behave Identically to Built-in Resources</h4>
+<p>What actually happens internally when you run <code class='ic'>kubectl get certificates</code>? kubectl first queries the API server&#x27;s <strong>discovery endpoint</strong> to ask &quot;what groups, versions, and resources exist?&quot; The moment you registered the CRD, <code class='ic'>certificates</code> under <code class='ic'>training.example.com/v1</code> was added to that list, so kubectl treats it no differently from any built-in resource. Requests go through the same API server, data is stored in the same etcd, and RBAC grants permissions using the same syntax — just with <code class='ic'>apiGroups: [&quot;training.example.com&quot;]</code>.</p>
+<p>The sequence diagram below shows the full flow: from CRD registration, through the discovery lookup, to <code class='ic'>kubectl get</code> treating the new resource just like a built-in one.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as User
+    participant K as kubectl
+    participant API as API Server
+    participant E as etcd
+    U-&gt;&gt;K: Apply CRD (kubectl apply)
+    K-&gt;&gt;API: Register CRD
+    API-&gt;&gt;E: Store CRD definition
+    API--&gt;&gt;API: Add new endpoint to discovery list
+    U-&gt;&gt;K: kubectl get certificates
+    K-&gt;&gt;API: Query discovery (group/version/resource)
+    API--&gt;&gt;K: Respond: certificates resource exists
+    K-&gt;&gt;API: Request certificates list
+    API-&gt;&gt;E: Query custom resources
+    E--&gt;&gt;API: Return stored CRs
+    API--&gt;&gt;K: Return CR list
+    K--&gt;&gt;U: Display output (same as built-in resources)</div><figcaption>CRD Registration and Custom Resource Discovery Flow</figcaption></figure>
+<blockquote class='callout'>
+<p>Pro tip: A well-crafted CRD should include <code class='ic'>additionalPrinterColumns</code> to surface key fields (e.g., <code class='ic'>status.phase</code>, <code class='ic'>status.expiresAt</code>) as columns in <code class='ic'>kubectl get</code> output — a huge quality-of-life improvement for operators. Also, real-world tools like cert-manager and the Prometheus Operator define all their resources as CRDs, so browsing their CRDs with <code class='ic'>kubectl get crd</code> is one of the best ways to learn by example.</p>
+</blockquote>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A CRD registers a new resource type with the Kubernetes API server; a CR is an instance of that type — the same relationship as a class and an object.</li>
+<li>A CRD defines its identity via <code class='ic'>group</code>, <code class='ic'>names</code>, <code class='ic'>scope</code>, and <code class='ic'>versions</code>, and its validation rules via <code class='ic'>openAPIV3Schema</code>. Exactly one version may have <code class='ic'>storage: true</code>. When a <code class='ic'>default</code> value is declared, the API server automatically injects it on admission.</li>
+<li>CRs are split into <code class='ic'>spec</code> (desired state, written by users) and <code class='ic'>status</code> (actual state, written by the controller). Enabling <code class='ic'>subresources.status: {}</code> separates authority and prevents conflicts, and provides the foundation for observing a resource&#x27;s current condition (Ready, Expired, etc.).</li>
+<li>Validation operates at two layers. Single-field constraints — type, range, <code class='ic'>enum</code>, <code class='ic'>pattern</code>, <code class='ic'>default</code> — belong in the OpenAPI schema. Cross-field relationships belong in CEL (<code class='ic'>x-kubernetes-validations</code>). Both are enforced by the API server at admission, so non-conforming CRs are rejected before reaching etcd.</li>
+<li>CRDs support multiple simultaneous versions (<code class='ic'>served</code> / <code class='ic'>storage</code>). When versions differ structurally, conversion handles the translation — either the default pass-through (<code class='ic'>None</code>) or a Conversion Webhook for complex remapping. The safe upgrade path is: add the new version → move <code class='ic'>storage</code> → deprecate the old version gradually.</li>
+<li>Registered CRs participate fully in discovery, <code class='ic'>kubectl</code>, RBAC, watches, and etcd storage — identical to built-in resources. Translating spec into reality and recording the outcome in status is the controller&#x27;s job, which is the subject of the next lecture.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Run kubectl api-resources to list all resource types registered in your cluster. Read the NAMESPACED, KIND, and APIVERSION columns in the output, then filter to show only resources that belong to the &#x27;apps&#x27; API group.</p></div>
+              <pre class='starter'><code># List all API resources
+kubectl api-resources
+
+# Filter to the apps group only
+kubectl api-resources --api-group=___
+
+# List CustomResourceDefinitions (CRDs) — none yet is fine
+kubectl get crd</code></pre>
+              <details><summary>Hint</summary><ul><li>If the output of kubectl api-resources is long, pipe it with &#x27;| grep apps&#x27; to filter.</li><li>NAMESPACED: true means the resource is namespace-scoped; false means it is cluster-scoped.</li><li>Add -o wide to kubectl api-resources to also see the VERBS column.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># List all API resources
+kubectl api-resources
+# Sample output (partial):
+# NAME                  SHORTNAMES  APIVERSION         NAMESPACED  KIND
+# pods                  po          v1                 true        Pod
+# deployments           deploy      apps/v1            true        Deployment
+# ...
+
+# Filter to the apps group only
+kubectl api-resources --api-group=apps
+# Sample output:
+# NAME                  SHORTNAMES  APIVERSION  NAMESPACED  KIND
+# controllerrevisions               apps/v1     true        ControllerRevision
+# daemonsets            ds          apps/v1     true        DaemonSet
+# deployments           deploy      apps/v1     true        Deployment
+# replicasets           rs          apps/v1     true        ReplicaSet
+# statefulsets          sts         apps/v1     true        StatefulSet
+
+# List CRDs (results vary by cluster)
+kubectl get crd
+# If nothing is installed: No resources found</code></pre>
+                <div class='exp2'><p>kubectl api-resources lists all resource types registered in the cluster. APIVERSION takes the form group/version (e.g., apps/v1); core-group resources (v1, etc.) show only the version without a group name. Adding a CRD inserts a new entry into this list, and from that point the custom resource is treated exactly like a built-in resource. The --api-group flag lets you filter by group.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Write and register a CRD named &#x27;databases.myapp.example.com&#x27; with the following schema: name (string, required), engine (string, default &#x27;postgresql&#x27;), and replicas (integer, range 1–5). After registering, confirm it with kubectl get crd, then attempt to create an invalid custom resource with replicas set to 10 to verify that schema validation rejects it.</p></div>
+              <pre class='starter'><code># Start writing database-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.myapp.example.com
+spec:
+  group: myapp.example.com
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - ___          # specify required field
+              properties:
+                name:
+                  type: ___
+                engine:
+                  type: string
+                  default: ___
+                replicas:
+                  type: integer
+                  minimum: ___
+                  maximum: ___
+  scope: Namespaced
+  names:
+    plural: databases
+    singular: database
+    kind: Database
+    shortNames:
+      - db</code></pre>
+              <details><summary>Hint</summary><ul><li>The CRD&#x27;s metadata.name must follow the &#x27;&lt;plural&gt;.&lt;group&gt;&#x27; format. Example: databases.myapp.example.com</li><li>Setting scope to Namespaced isolates resources per namespace; Cluster makes them cluster-wide.</li><li>After registering a CRD it may take a few seconds to reach the Established state. Check with: kubectl get crd &lt;name&gt; -o yaml | grep -A5 &#x27;status:&#x27;</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># database-crd.yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.myapp.example.com
+spec:
+  group: myapp.example.com
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                engine:
+                  type: string
+                  default: postgresql
+                replicas:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+  scope: Namespaced
+  names:
+    plural: databases
+    singular: database
+    kind: Database
+    shortNames:
+      - db
+
+---
+# Apply it
+kubectl apply -f database-crd.yaml
+# Output: customresourcedefinition.apiextensions.k8s.io/databases.myapp.example.com created
+
+# Confirm CRD registration
+kubectl get crd databases.myapp.example.com
+# NAME                           CREATED AT
+# databases.myapp.example.com    2024-01-01T00:00:00Z
+
+# Validation test: attempt replicas=10 (out of range)
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: bad-db
+spec:
+  name: test
+  replicas: 10
+EOF
+# Error example:
+# The Database &quot;bad-db&quot; is invalid:
+#   spec.replicas: Invalid value: 10: spec.replicas in body should be less than or equal to 5</code></pre>
+                <div class='exp2'><p>The spec.versions[].schema.openAPIV3Schema section of a CRD defines the field types and constraints for custom resources. Listing a field name in the required array causes the API server to reject creation attempts that omit it. minimum/maximum validates integer ranges, and default automatically fills in a value when the field is not specified. All of this validation happens at the API server level, so invalid resources are blocked even without a controller.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core Practice] Using the Database CRD you registered in the previous step, create two custom resources. The first should have name=&#x27;prod-db&#x27;, engine=&#x27;mysql&#x27;, and replicas=3. The second should specify only name=&#x27;dev-db&#x27; so you can confirm that the engine default is automatically applied. After creation, query the resources with kubectl get db, kubectl describe db prod-db, and kubectl get db -o yaml.</p></div>
+              <pre class='starter'><code># prod-db custom resource
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: prod-db
+  namespace: default
+spec:
+  name: ___
+  engine: ___
+  replicas: ___
+
+---
+# dev-db: omit engine to verify the default behavior
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: dev-db
+  namespace: default
+spec:
+  name: ___
+
+# Save to a file and apply
+# kubectl apply -f databases.yaml
+
+# Query commands (fill in the blanks and run)
+kubectl get ___
+kubectl describe ___ prod-db
+kubectl get ___ -o yaml</code></pre>
+              <details><summary>Hint</summary><ul><li>apiVersion is the CRD&#x27;s spec.group + &#x27;/&#x27; + spec.versions[].name. Example: myapp.example.com/v1</li><li>Both kubectl get databases and kubectl get db work. shortNames are convenience aliases.</li><li>To verify the dev-db engine default, look for &#x27;postgresql&#x27; in the spec section of the &#x27;-o yaml&#x27; output.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># databases.yaml
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: prod-db
+  namespace: default
+spec:
+  name: prod-db
+  engine: mysql
+  replicas: 3
+
+---
+apiVersion: myapp.example.com/v1
+kind: Database
+metadata:
+  name: dev-db
+  namespace: default
+spec:
+  name: dev-db
+
+# Apply
+kubectl apply -f databases.yaml
+# database.myapp.example.com/prod-db created
+# database.myapp.example.com/dev-db created
+
+# Query using the shortName &#x27;db&#x27;
+kubectl get db
+# NAME      AGE
+# dev-db    5s
+# prod-db   5s
+
+# Detailed query
+kubectl describe db prod-db
+
+# YAML output (verify the engine default)
+kubectl get db dev-db -o yaml
+# spec:
+#   engine: postgresql   &lt;-- default was automatically applied
+#   name: dev-db</code></pre>
+                <div class='exp2'><p>Once a CRD is registered, custom resources can be managed with the same kubectl get/describe/delete/apply commands as built-in resources (Pod, Deployment, etc.). Defining shortNames (e.g., db) enables abbreviated commands like kubectl get db. The API server persists custom resources to etcd, but this alone does not create an actual database. Reacting to the custom resource and performing real work is the role of a controller (Operator), which is covered in the next lecture.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Application] Clean up the custom resources you created and delete the CRD. Observe whether deleting the CRD also removes all custom resources that belonged to it. Then confirm that the Database kind has disappeared from kubectl api-resources output.</p></div>
+              <pre class='starter'><code># 1. Optionally delete the custom resources first
+kubectl delete db prod-db dev-db
+
+# 2. Delete the CRD
+kubectl delete crd ___
+
+# 3. Try querying db resources after deletion (error expected)
+kubectl get db
+
+# 4. Confirm it is gone from api-resources
+kubectl api-resources | grep ___</code></pre>
+              <details><summary>Hint</summary><ul><li>It is safer to delete custom resources before deleting the CRD. If finalizers are set, the CRD deletion may block until they are cleared.</li><li>kubectl delete crd &lt;name&gt; may complete asynchronously. Use kubectl get crd to confirm it has fully disappeared.</li><li>In production, always verify that no Operators or applications depend on a CRD before deleting it.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Delete custom resources
+kubectl delete db prod-db dev-db
+# database.myapp.example.com &quot;prod-db&quot; deleted
+# database.myapp.example.com &quot;dev-db&quot; deleted
+
+# 2. Delete the CRD
+kubectl delete crd databases.myapp.example.com
+# customresourcedefinition.apiextensions.k8s.io &quot;databases.myapp.example.com&quot; deleted
+
+# 3. Try querying after deletion
+kubectl get db
+# error: the server doesn&#x27;t have a resource type &quot;db&quot;
+
+# 4. Confirm removal from api-resources
+kubectl api-resources | grep databases
+# (no output — fully removed)
+
+# Note: deleting the CRD first cascades and removes all custom resources belonging to it
+# kubectl delete crd databases.myapp.example.com
+# (prod-db and dev-db are also deleted)</code></pre>
+                <div class='exp2'><p>Deleting a CRD cascades and removes all custom resources belonging to that group/version/kind. After deletion, kubectl queries for those resources return an error because the API server no longer recognizes the resource type. Since a CRD is an API extension mechanism, registering a CRD = adding a new API endpoint, and deleting a CRD = removing that endpoint.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=u1X5Rf7fWwM' target='_blank'>Kubernetes Custom Resource Definition (CRD) Explained with Demo</a></li><li><a href='https://www.youtube.com/watch?v=TScDYMym7LA' target='_blank'>What are Custom Resource Definitions (CRDs) in Kubernetes</a></li><li><a href='https://www.youtube.com/watch?v=3huz7lRzUQo' target='_blank'>Day 49 - Custom Resource Definition (CRD, CR) Kubernetes (explained with Demo)</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

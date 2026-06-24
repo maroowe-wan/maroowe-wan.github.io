@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Troubleshooting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-17-troubleshooting/index.html'>EN</a></div>
+  <h1>K8S-Troubleshooting</h1>
+  <div class="sub">쿠버네티스 기본 개념(Pod, Deployment, kubectl)을 알고 실제 운영 중 발생하는 Pod 장애를 스스로 진단하려는 중급 사용자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. Pod 장애 진단과 디버깅: CrashLoopBackOff부터 ephemeral container까지</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Pod 장애 진단과 디버깅: CrashLoopBackOff부터 ephemeral container까지 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>대표적인 Pod 장애 상태인 CrashLoopBackOff, ImagePullBackOff, Pending, OOMKilled의 의미와 각각의 근본 원인을 구분해 설명할 수 있다.</li>
+<li><code class='ic'>kubectl describe</code>, events, <code class='ic'>kubectl logs --previous</code>를 조합한 표준 진단 흐름으로 Pod 장애 원인을 체계적으로 좁혀 나갈 수 있다.</li>
+<li><code class='ic'>kubectl debug</code>와 ephemeral container(임시 컨테이너)를 활용해 실행 중인 Pod를 라이브로 디버깅할 수 있다. shell이 없는 Pod도 포함된다.</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 이 내용을 배워야 하는가</h4>
+<p>Kubernetes를 운영하다 보면 어느 순간 꼼짝도 하지 않는 Pod를 마주치게 된다. Deployment는 멀쩡해 보이고 YAML도 오류 없이 적용됐는데, <code class='ic'>kubectl get pods</code>를 치면 원하지 않던 상태가 찍혀 있다. <code class='ic'>CrashLoopBackOff</code>, <code class='ic'>ImagePullBackOff</code>, <code class='ic'>Pending</code>, 혹은 방금 <code class='ic'>OOMKilled</code>된 컨테이너. 다행인 점은 Kubernetes가 무슨 일이 일어났는지 꽤 솔직하게 알려준다는 것이다. 정보는 대부분 이미 거기 있다. 핵심은 <strong>어디를, 어떤 순서로 봐야 하는지</strong> 아는 것이다.</p>
+<p>황금률은 <strong>아래에서 위로(bottom-up) 디버깅</strong>하는 것이다. 가장 작은 작업 단위인 Pod부터 확인하고, Pod가 실제로 Running·Ready 상태임을 확인한 뒤에야 Service와 Ingress로 올라간다. Pod가 crash-looping 중인데 Ingress부터 뒤지는 건 시간 낭비다. 이 bottom-up 원칙은 Deployment, StatefulSet, DaemonSet, Job, CronJob 모두에 동일하게 적용된다.</p>
+<p>이번 강의에서는 먼저 네 가지 대표 장애 상태를 읽는 법을 익히고, 표준 진단 흐름을 단계별로 따라간 뒤, 로그만으로 원인을 찾지 못할 때 쓸 수 있는 라이브 디버깅 도구까지 살펴본다.</p>
+<h4>STATUS 컬럼이 첫 번째 단서다</h4>
+<p>아래 명령을 실행하고 <code class='ic'>STATUS</code> 컬럼을 꼼꼼히 읽는다. 지금 가진 신호 중 가장 유용한 것이 여기 있다.</p>
+<pre><code>
+kubectl get pods
+kubectl get pods -o wide        # 노드와 Pod IP 추가 표시
+kubectl get pods -w             # 실시간으로 상태 변화 감시
+</code></pre>
+<p>각 상태는 원인 계열이 다르다. 하나씩 살펴보자.</p>
+<h5>CrashLoopBackOff — 시작 후 컨테이너가 계속 죽는다</h5>
+<p>Pod에는 <strong>restart policy</strong>가 있고 기본값은 <code class='ic'>Always</code>다. 컨테이너가 종료되면 Kubernetes는 앱을 유지하기 위해 충실하게 재시작한다. 그런데 컨테이너가 시작하자마자 또 크래시가 난다면 — 예컨대 새 빌드가 초기화 중 예외를 던진다면 — 시작→크래시→재시작→크래시의 루프에 빠진다. 시스템에 부하를 주지 않으려고 Kubernetes는 재시작 간격을 점점 늘린다. 대략 몇 초, 10초, 1분 순으로 늘어나다 5분에서 고정된다. 이 늘어나는 대기 시간이 <strong>back-off</strong>이고, 전체 시작-크래시-재시작 사이클을 STATUS 컬럼이 <code class='ic'>CrashLoopBackOff</code>로 표시하는 것이다.</p>
+<blockquote class='callout'>
+<p>CrashLoopBackOff는 오류 그 자체가 아니라 증상이다. 컨테이너가 시작은 되지만 반복해서 종료된다는 뜻이다. 실제 버그는 컨테이너가 <em>왜</em> 종료되느냐에 있으며, 그 답은 거의 항상 크래시된 컨테이너의 로그에 있다.</p>
+</blockquote>
+<p>주요 원인: 애플리케이션 코드 버그, 누락된 환경 변수나 설정 파일, 시작 시 DB 연결 실패, 잘못 설정된 command/entrypoint, 실제로는 정상이지만 부팅이 느린 컨테이너를 죽여버리는 liveness probe 오설정 등.</p>
+<h5>ImagePullBackOff (및 ErrImagePull) — 이미지가 도착하지 않는다</h5>
+<p>컨테이너가 시작조차 못 하는 상태다. kubelet이 이미지를 pull하지 못한 것이다. <code class='ic'>ErrImagePull</code>은 첫 번째 시도 실패이고, <code class='ic'>ImagePullBackOff</code>는 이미 back-off 상태로 재시도 중임을 뜻한다. 흔한 원인: 이미지 이름이나 태그 오타, 존재하지 않는 이미지 태그, <code class='ic'>imagePullSecret</code>이 설정되지 않은 private 레지스트리, 레지스트리에 도달하지 못하는 네트워크 문제 또는 rate limit. 해결책은 거의 언제나 이미지 참조나 레지스트리 인증 정보에 있다. 애플리케이션 코드와는 무관하다.</p>
+<h5>Pending — Pod가 스케줄링되지 못한다</h5>
+<p><code class='ic'>Pending</code> 상태의 Pod는 클러스터에 수락됐지만 아직 노드에 배치되지 않은 것이다. 스케줄러가 Pod의 요구사항을 만족하는 노드를 찾지 못했다. 주요 원인: 전체 노드에 CPU나 메모리가 부족한 경우, 어떤 노드도 만족시키지 못하는 nodeSelector/affinity/taint 설정, 바인딩이 안 되는 PersistentVolumeClaim 등. Pending은 <em>스케줄링</em> 문제다. 따라서 단서는 Pod의 events와 노드 용량에 있지, 컨테이너 이미지나 코드에 있지 않다.</p>
+<h5>OOMKilled — 컨테이너가 메모리 한도를 초과했다</h5>
+<p>컨테이너가 설정된 <code class='ic'>limits.memory</code>를 초과하면 Linux 커널의 OOM killer가 프로세스를 종료하고, Kubernetes는 그 이유를 <code class='ic'>OOMKilled</code>(종료 코드 137)로 기록한다. 컨테이너가 재시작 후 다시 부하 하에 종료되기 때문에 crash loop처럼 보이는 경우가 많다. 해결책은 메모리 limit을 올리거나, 앱의 메모리 누수를 고치거나, 워크로드를 적절히 조정하는 것이다. 실제 애플리케이션 크래시와 OOM kill을 구분하려면 항상 컨테이너의 <code class='ic'>State</code>와 <code class='ic'>Last State</code> reason을 확인해야 한다.</p>
+<h4>표준 진단 흐름</h4>
+<p>STATUS가 무엇이든 진단은 동일한 세 단계로 진행된다. 한 번 익혀두면 오랫동안 쓸 수 있다.</p>
+<p><strong>1단계 — Pod를 <code class='ic'>describe</code>한다.</strong> 가장 풍부한 정보 원천이다. 각 컨테이너의 현재 <code class='ic'>State</code>, <code class='ic'>Last State</code>(종료 코드와 이유 포함 — <code class='ic'>OOMKilled</code>를 확인하는 곳이 바로 여기다), 재시작 횟수, 적용된 이미지, probe 설정, 그리고 가장 중요한 하단의 <strong>Events</strong> 섹션이 모두 나온다.</p>
+<pre><code>
+kubectl describe pod &lt;pod-name&gt;
+</code></pre>
+<p>Events 섹션을 아래에서 위로 읽는다. <code class='ic'>Failed to pull image</code>, <code class='ic'>Insufficient memory</code>, <code class='ic'>Back-off restarting failed container</code>, <code class='ic'>Liveness probe failed</code> 같은 메시지가 각각 해당 장애 계열로 곧장 안내한다.</p>
+<p><strong>2단계 — events를 읽는다. 더 넓은 맥락도 함께.</strong> Pod 수준의 events는 <code class='ic'>describe</code>에 있지만, 클러스터 전체 events는 더 넓은 맥락을 준다(예: 스케줄링 실패나 노드 압박 상황).</p>
+<pre><code>
+kubectl get events --sort-by=.lastTimestamp
+kubectl get events --field-selector involvedObject.name=&lt;pod-name&gt;
+</code></pre>
+<p><strong>3단계 — 로그를 읽는다. <em>이전</em> 컨테이너 로그도 확인한다.</strong> CrashLoopBackOff 상태에서는 현재 컨테이너가 막 재시작된 직후라 유용한 로그가 없을 수 있다. 필요한 예외 메시지는 <em>방금 죽은</em> 컨테이너 인스턴스에 있다. 그걸 보여주는 것이 바로 <code class='ic'>--previous</code>다.</p>
+<pre><code>
+kubectl logs &lt;pod-name&gt;                      # 현재 컨테이너 인스턴스
+kubectl logs &lt;pod-name&gt; --previous           # 방금 크래시된 컨테이너 — CrashLoopBackOff의 핵심
+kubectl logs &lt;pod-name&gt; -c &lt;container-name&gt;  # 멀티 컨테이너 Pod의 특정 컨테이너
+kubectl logs &lt;pod-name&gt; -f                   # 실시간 follow
+</code></pre>
+<blockquote class='callout'>
+<p>CrashLoopBackOff에서는 <code class='ic'>kubectl logs --previous</code>가 답을 건네주는 경우가 가장 많다. 현재 컨테이너에는 아직 아무것도 없고, 크래시된 컨테이너에 스택 트레이스가 있다.</p>
+</blockquote>
+<p>정리하면, <strong>STATUS</strong>로 장애 계열을 파악하고, <strong>describe</strong>로 상태와 events를 확인하고, <strong>logs(<code class='ic'>--previous</code> 포함)</strong>로 실제 오류 메시지를 읽는다. Pod 문제 대부분은 이 세 명령으로 해결된다. 아래 다이어그램이 이 흐름을 한눈에 보여준다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A[&quot;kubectl get pods (STATUS 확인)&quot;] --&gt; B{&quot;어떤 상태?&quot;}
+    B --&gt;|CrashLoopBackOff| C[&quot;kubectl describe pod (State, Last State, Events)&quot;]
+    B --&gt;|ImagePullBackOff| C
+    B --&gt;|Pending| C
+    B --&gt;|OOMKilled| C
+    C --&gt; D[&quot;kubectl get events (스케줄링, 노드 압박 맥락)&quot;]
+    D --&gt; E{&quot;Crash-looping?&quot;}
+    E --&gt;|Yes| F[&quot;kubectl logs --previous (크래시된 컨테이너 로그)&quot;]
+    E --&gt;|No| G[&quot;kubectl logs (현재 컨테이너 로그)&quot;]
+    F --&gt; H[&quot;근본 원인 발견&quot;]
+    G --&gt; H</div><figcaption>아래에서 위로 올라가는 Pod 진단 흐름: STATUS → describe → events → logs</figcaption></figure>
+<h4>로그만으로 부족할 때: <code class='ic'>kubectl debug</code>로 라이브 디버깅</h4>
+<p>로그가 침묵을 지키는 경우도 있다. 실행 중인 Pod 내부로 들어가 어떤 프로세스가 살아 있는지 확인하거나, 다른 서비스로의 네트워크 연결을 테스트하거나, 파일을 들여다볼 필요가 생긴다. 가장 익숙한 방법은 <code class='ic'>kubectl exec -it &lt;pod&gt; -- sh</code>다. 그런데 프로덕션 환경에서 점점 흔해지는 함정이 있다. <strong>distroless 이미지에는 shell이 없다.</strong></p>
+<p>distroless 컨테이너는 애플리케이션 바이너리만 남기고 나머지를 걷어낸 이미지다. 용량이 작고 pull이 빠르고 시작도 빠르다는 장점이 있지만, <code class='ic'>sh</code>, <code class='ic'>curl</code>, <code class='ic'>ps</code>가 없으니 <code class='ic'>exec</code>으로 들어갈 수 있는 게 아무것도 없다. 그렇다면 shell이 없는 라이브 Pod를 어떻게 디버깅할까?</p>
+<p>답은 <strong>ephemeral container(임시 컨테이너)</strong>이며, <code class='ic'>kubectl debug</code>로 구동한다. Pod를 내리지 않고 기존 Pod에 <em>임시 컨테이너를 붙이는</em> 방식이다. 이 debug 컨테이너는 busybox, curl, ps, netcat 등 원하는 도구를 직접 가져오고, 같은 Pod 안에 합류하기 때문에 네트워크 네임스페이스를 공유한다. shared process namespace가 활성화되어 있으면 문제 컨테이너의 프로세스도 볼 수 있다. 복제본이 아닌 <em>실제</em> 문제 Pod를 직접 디버깅하는 것이다.</p>
+<pre><code>
+# 실행 중인 Pod에 busybox debug 컨테이너를 붙이고 shell에 진입
+kubectl debug -it &lt;pod-name&gt; --image=busybox --target=&lt;container-name&gt;
+</code></pre>
+<p><code class='ic'>--target</code> 플래그는 ephemeral container가 대상 컨테이너의 프로세스 네임스페이스를 공유하도록 지정한다. 진입 후 라이브 상태를 바로 확인할 수 있다.</p>
+<pre><code>
+# ephemeral container 내부에서:
+ps aux                          # 대상 컨테이너의 프로세스 확인
+nslookup my-service             # 다른 Service로의 DNS 확인
+wget -qO- http://my-service:80  # 다른 Pod/Service로의 연결 테스트
+</code></pre>
+<p>ephemeral container는 문제 컨테이너와 같은 네트워크 컨텍스트에 있기 때문에, ping이나 telnet으로 앱이 의존하는 서비스에 왜 연결이 안 되는지 추적할 수 있다. <code class='ic'>kubectl debug</code> 계열 명령은 안전한 실험을 위해 Pod를 복사하거나, 노드에 debug shell을 붙이는 용도로도 쓸 수 있다. 하지만 일상적으로 가장 유용한 기능은 Pod를 재시작하지 않고 shell 없는 라이브 Pod를 검사하는 것이다.</p>
+<h4>더 큰 그림과의 연결</h4>
+<p>Pod가 진정으로 Running·Ready 상태가 된 <em>다음</em>에 비로소 상위 계층으로 올라간다. 그래도 앱이 응답하지 않는다면 Service를 의심한다(selector가 Pod label과 일치하는지, endpoints가 채워져 있는지 확인). 그 다음은 Ingress(<code class='ic'>service.name</code>과 <code class='ic'>service.port</code>를 검증하고 backend가 비어 있지 않은지 확인). Ingress나 인프라 문제를 빠르게 격리하는 방법은 Pod 또는 Ingress controller Pod로 <code class='ic'>kubectl port-forward</code>를 걸어 외부 계층을 우회했을 때 앱이 응답하는지 확인하는 것이다. 하지만 이건 <em>다음 단계</em>다. bottom-up 흐름으로 Pod 자체가 정상임을 확인한 뒤에야 이 단계를 밟을 자격이 생긴다.</p>
+<h3>핵심 정리</h3>
+<ul>
+<li><strong>STATUS를 먼저 읽는다.</strong> CrashLoopBackOff = 시작 후 반복 종료, ImagePullBackOff = 이미지 pull 실패, Pending = 스케줄러가 Pod를 배치하지 못함, OOMKilled = 컨테이너가 메모리 한도를 초과(종료 코드 137).</li>
+<li><strong>CrashLoopBackOff는 버그가 아니라 증상이다.</strong> 실제 원인은 크래시된 컨테이너의 로그에 있다. <code class='ic'>kubectl logs --previous</code>를 쓴다.</li>
+<li><strong>반복 가능한 흐름을 따른다:</strong> <code class='ic'>kubectl describe pod</code>(state + events) → <code class='ic'>kubectl get events</code> → <code class='ic'>kubectl logs [--previous]</code>. Pod 장애 대부분은 이 세 명령으로 해결된다.</li>
+<li><strong>아래에서 위로 디버깅한다.</strong> Service나 Ingress를 추적하기 전에 Pod가 Running·Ready 상태인지 먼저 확인한다.</li>
+<li><strong>shell 없는 라이브 Pod는 <code class='ic'>kubectl debug</code>와 ephemeral container를 쓴다.</strong> 도구가 갖춰진 컨테이너를 실행 중인 Pod에 붙여 네트워크·프로세스 네임스페이스를 공유하며 실제 문제를 그 자리에서 디버깅한다. shell도 필요 없고 Pod 재시작도 없다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 워밍업 — 의도적으로 고장낸 Pod를 배포하고 상태를 읽어본다.</p>
+<p>아래 매니페스트를 클러스터에 적용한다. 그런 다음 <code class='ic'>kubectl get pods</code>(필요하면 <code class='ic'>-o wide</code>, <code class='ic'>-w</code> 옵션 추가)를 실행하고 다음을 기록한다.</p>
+<p>1. 관찰된 STATUS 값.</p>
+<p>2. 약 60초 후의 RESTARTS 카운터.</p>
+<p>3. 이 상태가 속하는 장애 계열은 무엇이며, 그것이 근본 원인을 어디서 찾아야 한다는 것을 의미하는가?</p></div>
+              <pre class='starter'><code># broken-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-app
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo &#x27;starting...&#x27; &amp;&amp; exit 1&quot;]</code></pre>
+              <details><summary>힌트</summary><ul><li>`CrashLoopBackOff` 전에 `Error`가 보이면, 그것이 첫 번째 크래시다. back-off 레이블은 두 번째 시도부터 나타난다.</li><li>`kubectl get pods -w`를 실행한 채로 1분 정도 지켜본다. RESTARTS가 증가하는 간격이 점점 길어지는 것을 확인할 수 있다. 그것이 back-off가 동작하는 모습이다.</li><li>`-o wide`를 추가하면 Pod가 올라간 노드와 할당된 IP를 볼 수 있다. 나중에 멀티노드 환경을 조사할 때 유용한 정보다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. 매니페스트 적용
+kubectl apply -f broken-pod.yaml
+
+# 2. 상태 확인
+kubectl get pods
+# 예상 출력 (잠시 후):
+# NAME         READY   STATUS             RESTARTS   AGE
+# broken-app   0/1     CrashLoopBackOff   2          90s
+
+# 3. -o wide 옵션으로 노드와 Pod IP도 확인
+kubectl get pods -o wide
+
+# 4. 실시간 전환 감시 (Ctrl-C로 종료)
+kubectl get pods -w
+# 다음과 같이 변하는 걸 볼 수 있다: Running → Error → CrashLoopBackOff → ... (back-off가 길어질수록 간격 증가)</code></pre>
+                <div class='exp2'><p>컨테이너 command가 한 줄을 출력하자마자 종료 코드 1로 끝난다. Kubernetes는 기본 <code class='ic'>restartPolicy: Always</code>에 따라 컨테이너를 충실하게 재시작하지만 매번 크래시가 반복된다. 노드에 과부하를 주지 않기 위해 Kubernetes는 재시작 사이에 지수 back-off 지연을 적용한다(~0초 → 10초 → 20초 → 40초 … 최대 5분). STATUS 컬럼이 <code class='ic'>CrashLoopBackOff</code>로 표시하는 것이 바로 이 시작-크래시-재시작 사이클 전체다. RESTARTS 카운터는 이 사이클이 몇 번 발생했는지 보여준다. <code class='ic'>CrashLoopBackOff</code>는 &#x27;시작 후 즉시 종료&#x27; 장애 계열에 속하므로, 근본 원인은 스케줄링이나 이미지 pull 단계가 아닌 크래시된 컨테이너의 애플리케이션 로그에 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 핵심 #1 — 고장난 Pod에 세 단계 진단 흐름을 적용한다.</p>
+<p>Task 1에서 배포한 <code class='ic'>broken-app</code> Pod를 사용한다.</p>
+<p>1. <code class='ic'>kubectl describe pod broken-app</code>을 실행해 다음을 찾는다: (a) 컨테이너의 현재 <code class='ic'>State</code>와 <code class='ic'>Last State</code>, (b) <code class='ic'>Last State</code>의 종료 코드, (c) <code class='ic'>Events</code> 섹션.</p>
+<p>2. 이 Pod로 필터링한 <code class='ic'>kubectl get events</code>를 실행해 주목할 메시지를 확인한다.</p>
+<p>3. <code class='ic'>kubectl logs broken-app</code>과 <code class='ic'>kubectl logs broken-app --previous</code>를 각각 실행한다. 어떤 명령이 유용한 출력을 내고 그 이유는 무엇인지 정리한다.</p>
+<p>종료 코드와 마지막 로그 줄을 기록해둔다.</p></div>
+              <pre class='starter'><code># 새 매니페스트 없이 Task 1의 broken-app을 그대로 사용한다.
+# broken-app이 사라진 경우 broken-pod.yaml을 다시 적용하면 된다.
+#
+# 실행할 명령:
+kubectl describe pod broken-app
+kubectl get events --field-selector involvedObject.name=broken-app --sort-by=.lastTimestamp
+kubectl logs broken-app
+kubectl logs broken-app --previous</code></pre>
+              <details><summary>힌트</summary><ul><li>`describe` 출력에서 긴 메타데이터 블록은 건너뛴다. `Containers:` 섹션과 맨 아래 `Events:`가 가장 중요한 두 부분이다.</li><li>`kubectl logs broken-app`이 아무것도 출력하지 않으면 back-off 상태에서는 정상이다. 명령이 실패한 게 아니다. 즉시 `--previous`를 시도한다.</li><li>종료 코드는 빠른 분류 신호다: 0 = 정상 종료(크래시에서는 드묾), 1 = 애플리케이션 오류, 137 = OOMKill(128 + 시그널 9), 143 = SIGTERM, 127 = command not found.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1단계 — describe
+kubectl describe pod broken-app
+# 출력에서 찾아야 할 핵심 항목:
+#
+# Containers:
+#   app:
+#     State:          Waiting
+#       Reason:       CrashLoopBackOff
+#     Last State:     Terminated
+#       Reason:       Error
+#       Exit Code:    1          &lt;-- 컨테이너가 비정상 종료 코드로 끝남
+#       Started:      &lt;타임스탬프&gt;
+#       Finished:     &lt;타임스탬프&gt;
+#     Restart Count:  N
+#
+# Events (하단, 최신이 아래):
+#   Warning  BackOff   ...  Back-off restarting failed container
+
+# 2단계 — 이 Pod 범위로 필터링한 events
+kubectl get events --field-selector involvedObject.name=broken-app --sort-by=.lastTimestamp
+# 주목할 메시지: &#x27;Back-off restarting failed container app in pod broken-app&#x27;
+
+# 3단계a — 현재 컨테이너 (대개 비어 있거나 유용하지 않음)
+kubectl logs broken-app
+# 출력: &#x27;&#x27; (현재 인스턴스가 Waiting/back-off 상태라 Running이 아님)
+
+# 3단계b — 이전 컨테이너 (방금 크래시된 인스턴스)
+kubectl logs broken-app --previous
+# 출력:
+# starting...
+#
+# 종료 코드 1 직전의 마지막(이자 유일한) 로그 줄이 &#x27;starting...&#x27;이다.</code></pre>
+                <div class='exp2'><p>describe → events → logs(--previous 포함)로 이어지는 세 단계 흐름이 모든 Pod 장애의 핵심 진단 루프다. <code class='ic'>describe</code>는 컨테이너 상태와 종료 코드를 가장 권위 있게 보여준다. 하단의 Events 섹션은 클러스터가 무슨 일이 일어났는지 시간순으로 설명하는 곳이다. Pod 범위로 필터링한 <code class='ic'>kubectl get events</code>는 <code class='ic'>describe</code>가 놓칠 수 있는 스케줄링이나 노드 수준의 맥락을 추가로 제공한다. crash-looping 상태에서 <em>현재</em> 컨테이너 인스턴스는 <code class='ic'>Waiting</code> 상태이므로 로그가 없다. 아직 실행되지 않았기 때문이다. 실제로 크래시된 것은 <em>이전</em> 인스턴스이며, <code class='ic'>--previous</code>가 그 stdout/stderr 로그를 가져온다. 스택 트레이스나 설정 오류가 바로 여기 있다. 종료 코드 1은 일반적인 애플리케이션 오류, 종료 코드 137은 OOMKill, 종료 코드 127은 &#x27;command not found&#x27;를 뜻한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 핵심 #2 — ImagePullBackOff와 Pending Pod를 식별하고, 하나를 수정한다.</p>
+<p>아래 두 매니페스트를 모두 적용한다.</p>
+<p><strong>Part A (ImagePullBackOff):</strong> <code class='ic'>bad-image.yaml</code>을 적용한다. <code class='ic'>kubectl describe pod bad-image</code>를 실행해 이미지 pull이 정확히 어디서 잘못됐는지 알려주는 event를 찾는다. 그런 다음 이미지 참조를 수정해 Pod를 삭제 후 재생성하여 <code class='ic'>Running</code> 상태가 되도록 한다.</p>
+<p><strong>Part B (Pending):</strong> <code class='ic'>hungry-pod.yaml</code>을 적용한다. <code class='ic'>kubectl describe pod hungry-pod</code>로 스케줄러가 Pod를 배치하지 못한 이유를 찾는다. 어느 섹션에서 이유를 알 수 있으며, 근본 원인은 무엇인가?</p></div>
+              <pre class='starter'><code># bad-image.yaml  — 이미지 태그 오타
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-image
+spec:
+  containers:
+  - name: app
+    image: nginx:DOESNOTEXIST999
+
+---
+# hungry-pod.yaml  — 어떤 노드도 감당할 수 없는 메모리 요청
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hungry-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:stable
+    resources:
+      requests:
+        memory: &quot;9999Gi&quot;
+        cpu: &quot;1m&quot;</code></pre>
+              <details><summary>힌트</summary><ul><li>ImagePullBackOff에서 첫 번째 event는 보통 `ErrImagePull`(첫 번째 pull 실패)이고, 이후부터 `ImagePullBackOff`가 나타난다. 둘 다 `Warning  Failed` 아래에 표시된다.</li><li>bad-image Pod를 수정하려면 실행 중인 Pod의 `image` 필드를 직접 편집할 수 없다(대부분의 필드는 스케줄링 후 변경 불가). Pod를 삭제하고 수정한 YAML로 재생성해야 한다.</li><li>Pending Pod의 경우 `describe` 출력의 `Conditions` 블록을 확인한다. `PodScheduled: False`와 메시지가 있으면 Events 섹션을 보기 전에 스케줄링 실패임을 확인할 수 있다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># ── Part A: ImagePullBackOff ──────────────────────────────────────────────
+
+# 적용
+kubectl apply -f bad-image.yaml
+
+# 진단
+kubectl describe pod bad-image
+# Events에서 확인할 내용:
+#   Warning  Failed   ...  Failed to pull image &quot;nginx:DOESNOTEXIST999&quot;:
+#                          rpc error: ... manifest for nginx:DOESNOTEXIST999 not found
+#   Warning  Failed   ...  Error: ErrImagePull
+#   Warning  BackOff  ...  Back-off pulling image &quot;nginx:DOESNOTEXIST999&quot;
+
+# 수정: 삭제 후 유효한 태그로 재생성
+kubectl delete pod bad-image
+# bad-image.yaml 편집: image: nginx:DOESNOTEXIST999 → image: nginx:stable
+kubectl apply -f bad-image.yaml
+
+# 확인
+kubectl get pods bad-image
+# NAME        READY   STATUS    RESTARTS   AGE
+# bad-image   1/1     Running   0          15s
+
+# ── Part B: Pending ───────────────────────────────────────────────────────
+
+# 적용
+kubectl apply -f hungry-pod.yaml
+
+# 진단
+kubectl describe pod hungry-pod
+# Events에서 확인할 내용:
+#   Warning  FailedScheduling  ...  0/N nodes are available:
+#            N Insufficient memory.  preemption: 0/N nodes are available ...
+#
+# Events 섹션과 &#x27;Conditions:&#x27; 블록(PodScheduled = False) 모두
+# 메모리 부족으로 인한 스케줄링 실패를 확인해준다.
+
+# 근본 원인: 9999Gi 메모리 요청이 클러스터 전체 용량을 훨씬 초과.
+# 수정 방법(이 task에서는 적용하지 않음): requests.memory를 현실적인 값(예: 256Mi)으로 낮춘다.</code></pre>
+                <div class='exp2'><p>ImagePullBackOff와 Pending은 모두 <code class='ic'>describe</code>의 events로 진단한다. <code class='ic'>kubectl logs</code>로는 알 수 없다. 컨테이너가 시작조차 되지 않았기 때문이다. ImagePullBackOff의 경우 event 체인은 <code class='ic'>Failed</code>(첫 번째 시도의 ErrImagePull) → <code class='ic'>BackOff</code>(이후 재시도) 순서다. event 메시지에는 정확한 이미지 이름과 레지스트리 오류가 명시되어 있어 이미지 참조나 레지스트리 인증 정보로 바로 안내한다. Pending의 경우 스케줄러가 <code class='ic'>FailedScheduling</code> event에 어떤 리소스가 부족한지, 어떤 제약(affinity, taint/toleration)이 만족되지 않는지 정확히 기록한다. 스케줄링 문제이므로 해결책은 Pod spec(리소스, nodeSelector, toleration)이나 클러스터 용량에 있지, 컨테이너 이미지나 애플리케이션 코드에 있지 않다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. 응용 — <code class='ic'>kubectl debug</code>와 ephemeral container로 distroless(shell 없는) Pod를 디버깅한다.</p>
+<p>아래 <code class='ic'>distroless-app.yaml</code>을 적용한다. Pod는 정상 실행되지만, 프로덕션 상황을 가정해 다음 두 가지를 확인해야 한다.</p>
+<ul>
+<li>내부 프로세스가 실제로 포트 8080을 리슨하고 있는지.</li>
+<li>Pod 내부에서 <code class='ic'>kubernetes.default</code>로의 DNS 확인이 되는지.</li>
+</ul>
+<p>컨테이너가 distroless이므로 <code class='ic'>kubectl exec -it distroless-app -- sh</code>는 실패한다. <code class='ic'>kubectl debug</code>로 <code class='ic'>busybox</code> ephemeral container를 실행 중인 Pod에 붙인 뒤 두 가지 확인을 직접 수행한다.</p></div>
+              <pre class='starter'><code># distroless-app.yaml
+# 공식 distroless static 이미지 사용 (shell, 패키지 매니저 없음)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: distroless-app
+spec:
+  containers:
+  - name: app
+    # gcr.io/distroless/static-debian12는 shell 도구를 전혀 포함하지 않는다
+    image: gcr.io/distroless/static-debian12
+    # 이 실습에서는 기본 no-op entrypoint로 실행하여
+    # 디버깅하기에 충분한 시간 동안 Pod를 Running 상태로 유지한다.
+    command: [&quot;/bin/sleep&quot;, &quot;3600&quot;]
+
+# 참고: gcr.io/distroless/static-debian12는 /bin/sleep은 포함하지만 sh/bash/curl/ps는 없다.
+# 클러스터에서 gcr.io에 접근이 안 되면 다음으로 대체한다:
+#   image: busybox:1.36
+#   command: [&quot;sh&quot;, &quot;-c&quot;, &quot;while true; do sleep 3600; done&quot;]
+# 대체 이미지로는 먼저 sh exec을 시도해 확인한 뒤, ephemeral container도 붙여본다.
+
+---
+# 완성할 명령 (빈칸 채우기):
+# kubectl exec -it distroless-app -- sh          # &#x27;exec: sh: not found&#x27;로 실패해야 함
+# kubectl debug -it distroless-app --image=______ --target=______
+# ephemeral container 내부에서:
+# nslookup ______
+# wget -qO- ______   또는   nc -zv localhost ______</code></pre>
+              <details><summary>힌트</summary><ul><li>`kubectl debug`가 &#x27;unable to inject ephemeral container&#x27;를 반환하고 클러스터가 Kubernetes 1.23보다 오래됐다면 EphemeralContainers feature gate가 비활성화된 것일 수 있다. `kubectl version`으로 확인한다. ephemeral container는 v1.25부터 GA(안정)다.</li><li>ephemeral busybox shell 내부에서 `ps aux`가 busybox 프로세스만 보인다면 PID 네임스페이스가 공유되지 않은 것이다. `--target=&lt;container-name&gt;`이 `kubectl describe pod distroless-app`의 `Containers:` 아래 정확한 컨테이너 이름과 일치하는지 확인한다.</li><li>종료 후 `kubectl describe pod distroless-app`을 다시 실행하면 하단에 `Ephemeral Containers:` 섹션이 생긴 것을 볼 수 있다. `State: Terminated`로 표시되는 것은 정상이다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1단계 — 적용 후 Running 확인
+kubectl apply -f distroless-app.yaml
+kubectl get pods distroless-app
+# NAME             READY   STATUS    RESTARTS   AGE
+# distroless-app   1/1     Running   0          10s
+
+# 2단계 — exec 실패 확인 (distroless에는 shell 없음)
+kubectl exec -it distroless-app -- sh
+# error: Internal error occurred: error executing command in container:
+#        failed to exec in container: ... exec: &quot;sh&quot;: executable file not found in $PATH
+
+# 3단계 — busybox ephemeral container 붙이기
+kubectl debug -it distroless-app --image=busybox:1.36 --target=app
+# Kubernetes가 &#x27;debugger-XXXX&#x27;라는 ephemeral container를 실행 중인 Pod에 주입한다.
+# Pod의 네트워크 네임스페이스(동일 IP, 동일 포트)를 공유하고,
+# --target=app 설정으로 app 컨테이너의 PID 네임스페이스도 공유한다.
+# busybox shell 프롬프트로 진입한다.
+
+# 4단계 — ephemeral container shell 내부에서 확인:
+
+# 확인 1: DNS 확인
+nslookup kubernetes.default
+# 예상 출력 (클러스터 DNS가 kubernetes Service를 확인):
+# Server:    10.96.0.10
+# Address:   10.96.0.10:53
+# Name:      kubernetes.default.svc.cluster.local
+# Address:   10.96.0.1
+
+# 확인 2: 대상 컨테이너의 프로세스 확인 (--target / shared PID ns 필요)
+ps aux
+# distroless 컨테이너가 실행 중인 sleep 프로세스가 보여야 한다.
+
+# 확인 3 (보너스): Kubernetes API 연결 테스트
+wget -qO- https://kubernetes.default/healthz --no-check-certificate
+# 예상 출력: ok
+
+# 5단계 — ephemeral shell 종료
+exit
+# ephemeral container는 종료되지만 Pod spec에 계속 남는다.
+# Kubernetes는 ephemeral container를 종료 후 삭제하지 않는다 — &#x27;describe&#x27;에서 확인 가능.</code></pre>
+                <div class='exp2'><p>distroless 이미지는 이미지 크기와 공격 표면을 줄이기 위해 shell 바이너리를 제외한다. <code class='ic'>sh</code>를 요청하면 <code class='ic'>kubectl exec</code>이 실행할 것이 없으므로 실패한다. <code class='ic'>kubectl debug --image=busybox:1.36 --target=app</code>은 <em>ephemeral container</em>를 주입해 이 문제를 해결한다. ephemeral container는 Pod의 <code class='ic'>ephemeralContainers</code> 스펙 필드에 정의된 임시 네임스페이스 범위 컨테이너다. 같은 Pod의 일부이므로 Pod의 네트워크 네임스페이스를 자동으로 공유한다. 동일한 IP 주소, 동일한 루프백, 동일한 열린 포트. <code class='ic'>--target</code> 플래그는 추가로 지정된 컨테이너와 PID 네임스페이스를 공유하므로 <code class='ic'>ps aux</code>로 앱의 프로세스를 볼 수 있다. 즉 DNS 확인(<code class='ic'>nslookup</code>), 열린 포트 확인(<code class='ic'>nc -zv localhost 8080</code>), 내부 엔드포인트 curl, 파일 검사 등을 실제 라이브 Pod에서 수행할 수 있다. 재시작 없이, 원본 이미지에 shell이 없어도 된다. ephemeral container는 종료 후에도 Pod spec에 남는다(<code class='ic'>kubectl describe pod distroless-app</code>에서 <code class='ic'>Ephemeral Containers:</code> 섹션으로 확인 가능). 하지만 종료된 후에는 리소스를 소비하지 않는다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=hixs2GIGrUw' target='_blank'>How to debug Kubernetes? (Deployments, Services &amp; Ingress)</a></li><li><a href='https://www.youtube.com/watch?v=gKuu1toptm8' target='_blank'>Kubernetes CrashLoopBackoff explained in 3 minutes</a></li><li><a href='https://www.youtube.com/watch?v=xE_nlt8Lyk4' target='_blank'>DevOpsDays Seattle 2022: Debugging with Ephemeral Containers by Peter Valdez</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-DNS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-12-dns/index.html'>한국어</a></div>
+  <h1>K8S-DNS</h1>
+  <div class="sub">Intermediate learners who already understand Kubernetes fundamentals (Pods and Services) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Kubernetes DNS and Service Discovery</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Kubernetes DNS and Service Discovery </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Explain how CoreDNS acts as the cluster&#x27;s DNS server, and how kubelet wires up each Pod&#x27;s <code class='ic'>/etc/resolv.conf</code>.</li>
+<li>Distinguish the DNS naming rules for Services (<code class='ic'>service.namespace.svc.cluster.local</code>), Pods, and headless Services, including their A and SRV records.</li>
+<li>Understand <code class='ic'>dnsPolicy</code> (ClusterFirst, Default, and friends) and how the <code class='ic'>search</code> domains and <code class='ic'>ndots</code> setting drive name resolution.</li>
+<li>Verify service discovery yourself from inside a Pod using <code class='ic'>nslookup</code> and <code class='ic'>dig</code>.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why DNS exists in Kubernetes</h4>
+<p>A real cluster runs hundreds or thousands of objects, each with its own IP address. Worse, Pods are <em>ephemeral</em> (short-lived): when a Pod dies, its Deployment replaces it with a brand-new Pod that has a brand-new IP. If your application code hard-coded a Pod IP, it would break the moment that Pod restarted.</p>
+<p>DNS solves this by giving you a <strong>stable name</strong> instead of a moving IP. You create a Service, Kubernetes assigns it one durable virtual IP (the ClusterIP), and behind the scenes that name keeps pointing at whatever healthy Pods currently back it. Your code talks to <code class='ic'>payments</code> and never worries about the IPs churning underneath. This is what &quot;service discovery&quot; means in Kubernetes: finding a service by name, automatically.</p>
+<blockquote class='callout'>
+<p>Treat IPs as disposable and names as stable. In Kubernetes you address Services by name; the IPs are an implementation detail that the platform manages for you.</p>
+</blockquote>
+<h4>CoreDNS: the cluster&#x27;s DNS server</h4>
+<p>DNS is a built-in, automatically launched add-on, so you do not install it yourself. Before Kubernetes 1.11 this role was filled by kube-dns; from 1.11 onward it is <strong>CoreDNS</strong>, an open-source DNS server written in Go and designed for cloud-native environments.</p>
+<p>CoreDNS runs as an ordinary <strong>Deployment</strong> in the <code class='ic'>kube-system</code> namespace (which creates a ReplicaSet, which in turn runs the CoreDNS Pods, typically 2 replicas for availability). It is fronted by a Service — named <code class='ic'>kube-dns</code> for backward compatibility — that holds a fixed ClusterIP, commonly <code class='ic'>10.96.0.10</code>. CoreDNS watches the Kubernetes API for Service and Endpoint changes and keeps its DNS records up to date in real time, so a new Service is resolvable almost immediately. The diagram below shows how these objects fit together.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    CM[&quot;ConfigMap coredns (Corefile)&quot;] -.-&gt;|mounted into| Pod1
+    CM -.-&gt;|mounted into| Pod2
+    Deploy[&quot;Deployment coredns&quot;] --&gt; RS[&quot;ReplicaSet&quot;]
+    RS --&gt; Pod1[&quot;CoreDNS Pod 1&quot;]
+    RS --&gt; Pod2[&quot;CoreDNS Pod 2&quot;]
+    Svc[&quot;Service kube-dns (ClusterIP 10.96.0.10)&quot;] --&gt; Pod1
+    Svc --&gt; Pod2
+    Pod1 --&gt;|watch Services and Endpoints| API[&quot;Kubernetes API server&quot;]
+    Pod2 --&gt;|watch Services and Endpoints| API</div><figcaption>How CoreDNS is deployed in kube-system</figcaption></figure>
+<p>You can see all of this directly:</p>
+<pre><code>
+# The DNS Service and its stable ClusterIP
+kubectl -n kube-system get svc kube-dns
+
+# The CoreDNS Pods doing the actual work
+kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide
+
+# The Endpoints behind the Service, listening on port 53 (standard DNS port)
+kubectl -n kube-system get endpoints kube-dns
+</code></pre>
+<p>CoreDNS is configured through a ConfigMap named <code class='ic'>coredns</code>, whose key entry is the <strong>Corefile</strong>. Storing the config as a ConfigMap matters: if a CoreDNS Pod is recreated, the ReplicaSet re-attaches the same ConfigMap, so the configuration is never lost. A typical Corefile looks like this:</p>
+<pre><code>
+kubectl -n kube-system get configmap coredns -o yaml
+</code></pre>
+<pre><code>
+.:53 {
+    errors
+    health { lameduck 5s }
+    ready
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+        fallthrough in-addr.arpa ip6.arpa
+    }
+    prometheus :9153
+    forward . /etc/resolv.conf
+    cache 30
+    loop
+    reload
+    loadbalance
+}
+</code></pre>
+<p>A few plugins are worth knowing by name. <strong><code class='ic'>kubernetes</code></strong> is what synthesizes records for the <code class='ic'>cluster.local</code> zone. <strong><code class='ic'>forward . /etc/resolv.conf</code></strong> sends anything <em>not</em> in the cluster (like <code class='ic'>google.com</code>) up to the node&#x27;s own upstream resolver. <strong><code class='ic'>cache 30</code></strong> caches answers for a 30-second TTL. <strong><code class='ic'>health</code></strong> exposes a check on port 8080 — <code class='ic'>curl &lt;coredns-pod-ip&gt;:8080/health</code> returning <code class='ic'>OK</code> confirms DNS is healthy.</p>
+<h4>How kubelet wires up each Pod</h4>
+<p>When a Pod starts, <strong>kubelet</strong> writes its <code class='ic'>/etc/resolv.conf</code> so that every container resolves names through CoreDNS by default. Look inside any Pod and you&#x27;ll see something like this:</p>
+<pre><code>
+nameserver 10.96.0.10
+search default.svc.cluster.local svc.cluster.local cluster.local
+options ndots:5
+</code></pre>
+<p>Three lines, three jobs:</p>
+<ul>
+<li><strong><code class='ic'>nameserver</code></strong> is the CoreDNS ClusterIP — every lookup goes here first.</li>
+<li><strong><code class='ic'>search</code></strong> is the list of suffixes the resolver appends to short names (more on this below).</li>
+<li><strong><code class='ic'>options ndots:5</code></strong> controls <em>when</em> those suffixes get tried.</li>
+</ul>
+<p>This is the mechanism that lets your container say <code class='ic'>nslookup payments</code> instead of memorizing an IP.</p>
+<h4>The DNS naming rules</h4>
+<p>This is the part to commit to memory, because the format must be exact.</p>
+<p>A <strong>Service</strong> gets an A record in the form:</p>
+<pre><code>
+&lt;service-name&gt;.&lt;namespace&gt;.svc.cluster.local
+</code></pre>
+<p>So a Service named <code class='ic'>front-end-svc</code> in namespace <code class='ic'>core</code> is <code class='ic'>front-end-svc.core.svc.cluster.local</code>, resolving to the Service&#x27;s ClusterIP. From inside the same namespace you can shorten it to just <code class='ic'>front-end-svc</code>; from another namespace, <code class='ic'>front-end-svc.core</code> is enough.</p>
+<p>A <strong>Pod</strong> gets an A record too, but the rule is different and easy to trip over — the Pod&#x27;s IP becomes part of the name, with dots replaced by hyphens:</p>
+<pre><code>
+&lt;pod-ip-with-dashes&gt;.&lt;namespace&gt;.pod.cluster.local
+</code></pre>
+<p>A Pod at <code class='ic'>10.244.1.5</code> in <code class='ic'>default</code> is <code class='ic'>10-244-1-5.default.pod.cluster.local</code>. Note the zone is <code class='ic'>pod</code>, not <code class='ic'>svc</code>. Because the IP is baked into the name, you cannot look a Pod up by an arbitrary friendly name through this record — you already need to know its IP. This is why, in practice, you address workloads through Services, not through Pod A records.</p>
+<blockquote class='callout'>
+<p>The single most common DNS mistake: using the <code class='ic'>svc</code> zone for a Pod, or expecting a Pod&#x27;s name to resolve like a Service&#x27;s. Services use <code class='ic'>&lt;name&gt;.&lt;ns&gt;.svc.cluster.local</code>; Pod A records use <code class='ic'>&lt;ip-with-dashes&gt;.&lt;ns&gt;.pod.cluster.local</code>.</p>
+</blockquote>
+<h4>Headless Services: A records per Pod, plus SRV</h4>
+<p>A normal Service hides its Pods behind one virtual ClusterIP. Sometimes you want the <em>opposite</em> — you want DNS to hand back the individual Pod IPs directly. That is a <strong>headless Service</strong>: you set <code class='ic'>clusterIP: None</code>, and Kubernetes gives it no virtual IP.</p>
+<pre><code>
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: default
+spec:
+  clusterIP: None        # &lt;-- this makes it headless
+  selector:
+    app: db
+  ports:
+    - name: pg
+      port: 5432
+</code></pre>
+<p>Now <code class='ic'>db.default.svc.cluster.local</code> does not return one ClusterIP; it returns an <strong>A record for every ready backing Pod</strong>. The client gets the full set of Pod IPs and decides what to do with them. This is exactly what StatefulSets rely on, where each replica needs its own stable identity rather than being load-balanced anonymously.</p>
+<p>Headless Services also expose <strong>SRV records</strong>, which carry the port and target alongside the name — useful when a client needs to discover <em>which port</em> a named service endpoint lives on, not just its address. The SRV query form is <code class='ic'>_&lt;port-name&gt;._&lt;protocol&gt;.&lt;service&gt;.&lt;namespace&gt;.svc.cluster.local</code>, for example <code class='ic'>_pg._tcp.db.default.svc.cluster.local</code>.</p>
+<h4><code class='ic'>dnsPolicy</code>: who fills in resolv.conf</h4>
+<p>A Pod&#x27;s <code class='ic'>dnsPolicy</code> field decides how its <code class='ic'>/etc/resolv.conf</code> gets built:</p>
+<ul>
+<li><strong><code class='ic'>ClusterFirst</code></strong> — the default. Cluster-internal names go to CoreDNS; everything else is forwarded upstream. This is what you want almost always.</li>
+<li><strong><code class='ic'>Default</code></strong> — the Pod inherits the <em>node&#x27;s</em> resolv.conf and does <strong>not</strong> use CoreDNS. Cluster names won&#x27;t resolve. Useful for special infrastructure Pods.</li>
+<li><strong><code class='ic'>ClusterFirstWithHostNet</code></strong> — the variant you need when a Pod runs with <code class='ic'>hostNetwork: true</code>; without it, a host-network Pod would silently fall back to the node resolver and lose cluster DNS.</li>
+<li><strong><code class='ic'>None</code></strong> — you supply everything yourself via the <code class='ic'>dnsConfig</code> field (custom nameservers, searches, options).</li>
+</ul>
+<pre><code>
+spec:
+  dnsPolicy: ClusterFirst   # the default; shown here for clarity
+</code></pre>
+<h4><code class='ic'>search</code> domains and the <code class='ic'>ndots:5</code> rule</h4>
+<p>The <code class='ic'>search</code> line and <code class='ic'>ndots:5</code> together explain a behavior that surprises a lot of people.</p>
+<p>When you query a <strong>short</strong> name like <code class='ic'>payments</code>, the resolver counts the dots in it. If the name has <strong>fewer than <code class='ic'>ndots</code> (5) dots</strong>, the resolver treats it as <em>unqualified</em> and tries each <code class='ic'>search</code> suffix in turn before giving up:</p>
+<pre><code>
+payments.default.svc.cluster.local   (try 1)
+payments.svc.cluster.local           (try 2)
+payments.cluster.local               (try 3)
+</code></pre>
+<p>The first one that resolves wins. This is convenient — <code class='ic'>payments</code> &quot;just works&quot; inside the namespace — but it has a cost: an <em>external</em> lookup like <code class='ic'>api.github.com</code> has only 2 dots, so it is also treated as unqualified and fans out across all the search domains first (each failing) before the resolver finally queries it as-is. That is several wasted round-trips per external call. The sequence below traces a short-name lookup all the way to a CoreDNS answer.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant App as App container
+    participant Resolver as Pod resolver (resolv.conf)
+    participant CoreDNS as CoreDNS (10.96.0.10:53)
+    App-&gt;&gt;Resolver: lookup &quot;payments&quot;
+    Note over Resolver: 0 dots is fewer than ndots 5, so treat as unqualified
+    Resolver-&gt;&gt;CoreDNS: query payments.default.svc.cluster.local
+    CoreDNS--&gt;&gt;Resolver: A record = ClusterIP of payments
+    Resolver--&gt;&gt;App: return ClusterIP (first match wins)</div><figcaption>End-to-end resolution of a short name from inside a Pod</figcaption></figure>
+<p>You avoid the fan-out by writing a <strong>fully qualified domain name (FQDN)</strong> with a trailing dot, e.g. <code class='ic'>api.github.com.</code> — the trailing dot tells the resolver &quot;this is already complete, do not append anything.&quot; For latency-sensitive workloads making many external calls, FQDNs (or a tuned <code class='ic'>dnsConfig</code> with a lower <code class='ic'>ndots</code>) are a real optimization.</p>
+<blockquote class='callout'>
+<p>When the cluster &quot;feels down,&quot; nine times out of ten it is DNS, and the culprit is often <code class='ic'>ndots:5</code> quietly multiplying every external lookup into five or six queries. Check <code class='ic'>/etc/resolv.conf</code> before you blame the Service.</p>
+</blockquote>
+<h4>Verifying it yourself with nslookup and dig</h4>
+<p>The whole point of this lecture is that you can prove all of it from inside a Pod. Spin up a throwaway Pod with the right tools:</p>
+<pre><code>
+kubectl run dnsutils --rm -it --restart=Never \
+  --image=registry.k8s.io/e2e-test-images/agnhost:2.39 -- /bin/sh
+</code></pre>
+<p>(If your Pod&#x27;s base image lacks the tools, install them: <code class='ic'>apt-get update &amp;&amp; apt-get install -y dnsutils iputils-ping</code>.)</p>
+<p>Inside the Pod, walk through the checks:</p>
+<pre><code>
+# 1. Look at how kubelet configured this Pod
+cat /etc/resolv.conf
+
+# 2. Resolve a Service by short name (search domains do the work)
+nslookup kubernetes
+#  -&gt; Server:  10.96.0.10
+#     Address: 10.96.0.1   (the kubernetes Service ClusterIP)
+
+# 3. Resolve a Service by its FQDN
+nslookup kubernetes.default.svc.cluster.local
+
+# 4. Resolve a Service in another namespace
+nslookup kube-dns.kube-system.svc.cluster.local
+
+# 5. For a headless Service, see one A record per backing Pod
+dig +short db.default.svc.cluster.local
+
+# 6. Ask for the SRV record (name + port) on a headless Service
+dig +short SRV _pg._tcp.db.default.svc.cluster.local
+
+# 7. Reverse lookup: IP back to name (PTR record)
+dig -x 10.96.0.1 +short
+</code></pre>
+<p>When <code class='ic'>nslookup kubernetes</code> returns the ClusterIP of the <code class='ic'>kubernetes</code> Service, service discovery is working end-to-end: kubelet configured resolv.conf, the search domains expanded your short name, CoreDNS answered from the <code class='ic'>cluster.local</code> zone, and the answer came back. This same resolution works from <strong>any</strong> Pod in <strong>any</strong> namespace — DNS in Kubernetes is cluster-wide, not per-Pod.</p>
+<h4>A debugging story worth remembering</h4>
+<p>One classic outage: <code class='ic'>nslookup</code> fails from Pods on worker nodes but works elsewhere. The resolv.conf looks perfect — correct nameserver, correct search domains — yet nothing resolves. The real cause is that <strong>both CoreDNS replicas happened to be scheduled on the control-plane node</strong>, so worker Pods had no reachable DNS server. The fix is to spread CoreDNS across nodes (anti-affinity or more replicas), not to touch resolv.conf at all. The lesson: when DNS breaks, confirm <em>where CoreDNS is actually running and whether it is reachable</em> before you start editing config.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>CoreDNS is the cluster&#x27;s built-in DNS server: a Deployment in <code class='ic'>kube-system</code>, fronted by the <code class='ic'>kube-dns</code> Service (ClusterIP usually <code class='ic'>10.96.0.10</code>), configured by the <code class='ic'>coredns</code> ConfigMap&#x27;s Corefile, watching the API to keep records fresh.</li>
+<li>kubelet writes each Pod&#x27;s <code class='ic'>/etc/resolv.conf</code> — nameserver (CoreDNS), <code class='ic'>search</code> suffixes, and <code class='ic'>options ndots:5</code> — which is what makes short-name service discovery work.</li>
+<li>Services resolve as <code class='ic'>&lt;service&gt;.&lt;namespace&gt;.svc.cluster.local</code>; Pod A records are <code class='ic'>&lt;ip-with-dashes&gt;.&lt;namespace&gt;.pod.cluster.local</code>. The zones (<code class='ic'>svc</code> vs <code class='ic'>pod</code>) and formats are different and must be exact.</li>
+<li>A <strong>headless</strong> Service (<code class='ic'>clusterIP: None</code>) returns an A record per backing Pod instead of one virtual IP, plus SRV records for port discovery — the backbone of StatefulSet identity.</li>
+<li><code class='ic'>dnsPolicy</code> (default <code class='ic'>ClusterFirst</code>) decides how resolv.conf is built; <code class='ic'>ClusterFirstWithHostNet</code> is required for <code class='ic'>hostNetwork</code> Pods.</li>
+<li><code class='ic'>ndots:5</code> plus <code class='ic'>search</code> domains let short names resolve but make external lookups fan out — use FQDNs with a trailing dot to avoid the cost.</li>
+<li>Verify everything live with <code class='ic'>nslookup</code> and <code class='ic'>dig</code> from inside a Pod; when the cluster &quot;feels down,&quot; check DNS and resolv.conf first.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Without leaving your terminal, confirm that CoreDNS is running in the cluster and that a freshly launched Pod is wired to it.</p>
+<p>1. List the <code class='ic'>kube-dns</code> Service in <code class='ic'>kube-system</code> and note its ClusterIP.</p>
+<p>2. List the CoreDNS Pods and their node assignments.</p>
+<p>3. Launch a throwaway Pod using the <code class='ic'>agnhost</code> image and print its <code class='ic'>/etc/resolv.conf</code>. Confirm that the <code class='ic'>nameserver</code> line matches the ClusterIP you found in step 1, and record the <code class='ic'>search</code> suffixes and the <code class='ic'>ndots</code> value.</p></div>
+              <pre class='starter'><code># Step 1 – DNS Service
+kubectl -n kube-system get svc kube-dns
+
+# Step 2 – CoreDNS Pods
+kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide
+
+# Step 3 – Launch a throwaway Pod and inspect resolv.conf
+kubectl run dnsutils --rm -it --restart=Never \
+  --image=registry.k8s.io/e2e-test-images/agnhost:2.39 -- /bin/sh
+# Inside the Pod:
+# cat /etc/resolv.conf</code></pre>
+              <details><summary>Hint</summary><ul><li>If the `agnhost` image is not available in your registry, any image that includes `nslookup`/`cat` works (e.g., `busybox`, `nicolaka/netshoot`). With busybox: `kubectl run dnsutils --rm -it --restart=Never --image=busybox -- sh`.</li><li>The ClusterIP of `kube-dns` is set when kubeadm (or your installer) bootstraps the cluster. It may differ from `10.96.0.10` if a custom `--service-cidr` was used — always read it from `kubectl get svc`, do not assume.</li><li>If you see three or more search domains (e.g. `default.svc.cluster.local svc.cluster.local cluster.local`), that is normal: kubelet adds the Pod&#x27;s own namespace suffix first, then the broader ones.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Expected output of step 1 (ClusterIP is typically 10.96.0.10):
+# NAME       TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)         AGE
+# kube-dns   ClusterIP   10.96.0.10    &lt;none&gt;        53/UDP,53/TCP   ...
+
+# Expected output of step 2:
+# NAME                       READY   STATUS    NODE
+# coredns-&lt;hash&gt;-&lt;id1&gt;       1/1     Running   &lt;node-name&gt;
+# coredns-&lt;hash&gt;-&lt;id2&gt;       1/1     Running   &lt;node-name&gt;
+
+# Expected /etc/resolv.conf inside the Pod (namespace = default):
+# nameserver 10.96.0.10
+# search default.svc.cluster.local svc.cluster.local cluster.local
+# options ndots:5</code></pre>
+                <div class='exp2'><p>kubelet writes <code class='ic'>/etc/resolv.conf</code> for every Pod at startup. The <code class='ic'>nameserver</code> is the ClusterIP of the <code class='ic'>kube-dns</code> Service, which load-balances across the two CoreDNS Pods. The <code class='ic'>search</code> suffixes let short names like <code class='ic'>kubernetes</code> expand automatically to <code class='ic'>kubernetes.default.svc.cluster.local</code>. The <code class='ic'>ndots:5</code> option means any name with fewer than 5 dots is treated as unqualified and the search list is tried first — which is why a single-word name resolves inside the cluster without typing the full FQDN.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. From inside the throwaway Pod (<code class='ic'>agnhost</code> or <code class='ic'>busybox</code>), resolve Services three different ways to understand how the search-domain expansion works.</p>
+<p>1. Resolve the built-in <code class='ic'>kubernetes</code> Service by its <strong>short name</strong>: <code class='ic'>nslookup kubernetes</code>. Note the server address and the resolved IP.</p>
+<p>2. Resolve the same Service by its <strong>full FQDN</strong>: <code class='ic'>nslookup kubernetes.default.svc.cluster.local</code>. Confirm both return the same IP.</p>
+<p>3. Resolve the <code class='ic'>kube-dns</code> Service which lives in <code class='ic'>kube-system</code> — a <strong>different namespace</strong> — using its cross-namespace short form: <code class='ic'>nslookup kube-dns.kube-system</code>.</p>
+<p>4. Use <code class='ic'>dig</code> to do a <strong>reverse (PTR) lookup</strong> on the IP you got in step 1: <code class='ic'>dig -x &lt;ClusterIP&gt; +short</code>.</p>
+<p>For each lookup, record what the resolver sends to CoreDNS (use <code class='ic'>dig +search</code> to see the expanded name).</p></div>
+              <pre class='starter'><code># Inside the throwaway Pod shell:
+
+# 1. Short name
+nslookup kubernetes
+
+# 2. FQDN
+nslookup kubernetes.default.svc.cluster.local
+
+# 3. Cross-namespace short form
+nslookup kube-dns.kube-system
+
+# 4. Reverse lookup (replace IP with the actual ClusterIP from step 1)
+dig -x 10.96.0.1 +short
+
+# Bonus – see the expanded query name
+dig +search kubernetes +short</code></pre>
+              <details><summary>Hint</summary><ul><li>If `dig` is not available, `nslookup -type=PTR &lt;IP&gt;` gives the same PTR record. With busybox, `nslookup &lt;IP&gt;` also issues a PTR query by default.</li><li>If the lookup of `kube-dns.kube-system` fails, check that you are in the Pod shell (not on the host) — the host&#x27;s resolv.conf does not have the cluster search domains.</li><li>To watch the search expansion live, run `dig +search +showsearch kubernetes` — it prints each attempted name before the final answer.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Short-name lookup – resolver appends search suffixes until one hits:
+#    nslookup kubernetes
+#    Server:   10.96.0.10
+#    Address:  10.96.0.10#53
+#    Name:     kubernetes.default.svc.cluster.local
+#    Address:  10.96.0.1
+#
+# 2. FQDN lookup – same result, no search expansion needed:
+#    nslookup kubernetes.default.svc.cluster.local
+#    Name:     kubernetes.default.svc.cluster.local
+#    Address:  10.96.0.1
+#
+# 3. Cross-namespace – two-label name still has fewer than 5 dots,
+#    so search expansion runs; kube-dns.kube-system.svc.cluster.local resolves:
+#    Name:     kube-dns.kube-system.svc.cluster.local
+#    Address:  10.96.0.10
+#
+# 4. Reverse (PTR) lookup:
+#    dig -x 10.96.0.1 +short
+#    kubernetes.default.svc.cluster.local.</code></pre>
+                <div class='exp2'><p>This exercise traces the full resolution path: short name → search-domain expansion → CoreDNS → A record. Step 1 vs step 2 shows that both reach the same record; the difference is purely in how many DNS queries are made before CoreDNS is hit. Step 3 confirms that cross-namespace lookups work as long as you include the namespace label: <code class='ic'>kube-dns.kube-system</code> has 1 dot (&lt; ndots 5), so the search list turns it into <code class='ic'>kube-dns.kube-system.svc.cluster.local</code> automatically. Step 4 demonstrates PTR records, which CoreDNS synthesizes for Service ClusterIPs in the <code class='ic'>in-addr.arpa</code> zone.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Normal Services hide Pods behind one ClusterIP. A headless Service returns individual Pod IPs. Prove this difference with a real Deployment.</p>
+<p>1. Create a Deployment <code class='ic'>db-app</code> (2 replicas, image <code class='ic'>nginx:alpine</code>, label <code class='ic'>app: db</code>) in namespace <code class='ic'>default</code>.</p>
+<p>2. Create a <strong>normal</strong> (ClusterIP) Service named <code class='ic'>db-normal</code> targeting <code class='ic'>app: db</code> on port 80.</p>
+<p>3. Create a <strong>headless</strong> Service named <code class='ic'>db-headless</code> targeting the same Pods on port 80 with a named port <code class='ic'>http</code>.</p>
+<p>4. From inside a throwaway Pod, run <code class='ic'>dig +short db-normal.default.svc.cluster.local</code> and <code class='ic'>dig +short db-headless.default.svc.cluster.local</code>. Record the number of IP addresses returned by each.</p>
+<p>5. Query the SRV record for the headless Service: <code class='ic'>dig +short SRV _http._tcp.db-headless.default.svc.cluster.local</code>.</p></div>
+              <pre class='starter'><code># 1. Deployment
+kubectl create deployment db-app --image=nginx:alpine --replicas=2
+kubectl label deployment db-app app=db --overwrite
+# (or apply the YAML below)
+
+# 2. Normal Service
+kubectl expose deployment db-app --name=db-normal --port=80 --target-port=80
+
+# 3. Headless Service – must use YAML (kubectl expose cannot set clusterIP: None)
+cat &lt;&lt;&#x27;EOF&#x27; | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-headless
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: db
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+EOF
+
+# 4. DNS queries from a throwaway Pod
+kubectl run dnsutils --rm -it --restart=Never \
+  --image=registry.k8s.io/e2e-test-images/agnhost:2.39 -- /bin/sh
+# Inside:
+# dig +short db-normal.default.svc.cluster.local
+# dig +short db-headless.default.svc.cluster.local
+
+# 5. SRV record
+# dig +short SRV _http._tcp.db-headless.default.svc.cluster.local</code></pre>
+              <details><summary>Hint</summary><ul><li>If `dig +short db-headless...` returns only one IP instead of two, wait a few seconds — CoreDNS only includes *ready* endpoints (pods whose readiness probe passes). Check `kubectl get endpoints db-headless` to see how many addresses are registered.</li><li>The `kubectl create deployment` command does not set a label `app: db` by default — it sets `app: db-app`. Use `--labels` or patch with `kubectl label` to make the selector match.</li><li>SRV target names like `&lt;hash&gt;.db-headless.default.svc.cluster.local` are assigned by Kubernetes for StatefulSet Pods; for ordinary Deployment Pods the format may differ slightly across Kubernetes versions. The important field to read is column 3 (port number).</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 4 results:
+#
+# dig +short db-normal.default.svc.cluster.local
+# 10.108.x.x          &lt;- one ClusterIP, regardless of replica count
+#
+# dig +short db-headless.default.svc.cluster.local
+# 10.244.x.x          &lt;- Pod IP 1 (actual pod IP, not a virtual IP)
+# 10.244.y.y          &lt;- Pod IP 2
+# (order may vary; CoreDNS randomizes the set)
+#
+# Step 5 – SRV record:
+# dig +short SRV _http._tcp.db-headless.default.svc.cluster.local
+# 0 50 80 &lt;pod-hash-1&gt;.db-headless.default.svc.cluster.local.
+# 0 50 80 &lt;pod-hash-2&gt;.db-headless.default.svc.cluster.local.
+# Format: &lt;priority&gt; &lt;weight&gt; &lt;port&gt; &lt;target&gt;</code></pre>
+                <div class='exp2'><p>The <code class='ic'>clusterIP: None</code> field is the only difference between the two Service manifests, but it completely changes DNS behaviour. A normal Service owns a stable virtual IP managed by kube-proxy; CoreDNS returns that one IP. A headless Service has no virtual IP, so CoreDNS synthesizes one A record per <em>ready</em> Pod endpoint instead. Clients therefore receive the actual Pod IPs and can implement their own load-balancing or sticky routing — which is exactly why StatefulSets use headless Services (each Pod has a stable DNS identity). SRV records additionally encode the port number, which allows service-mesh sidecars and GRPC load-balancers to discover both address <em>and</em> port from a single DNS query.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. You have learned that <code class='ic'>ClusterFirst</code> is the default and <code class='ic'>ndots:5</code> causes external names to fan out across search domains before querying the real DNS. In this task you will observe both effects and apply a fix.</p>
+<p><strong>Part A – dnsPolicy: Default</strong></p>
+<p>1. Launch a Pod with <code class='ic'>dnsPolicy: Default</code> and print its <code class='ic'>/etc/resolv.conf</code>. Confirm it does <em>not</em> contain CoreDNS as the nameserver and does <em>not</em> have <code class='ic'>cluster.local</code> search domains.</p>
+<p>2. From inside that Pod, try <code class='ic'>nslookup kubernetes</code> and confirm it fails (no cluster DNS).</p>
+<p><strong>Part B – ndots and FQDN optimisation</strong></p>
+<p>3. Launch a second Pod with <code class='ic'>dnsPolicy: ClusterFirst</code> (the default) and a custom <code class='ic'>dnsConfig</code> that sets <code class='ic'>ndots: 2</code> instead of 5.</p>
+<p>4. From inside, run <code class='ic'>dig +search api.github.com +short</code> twice — once on the default Pod (ndots:5) to count the failing search-domain queries, and once on your ndots:2 Pod to confirm it queries <code class='ic'>api.github.com</code> directly (fewer round-trips).</p></div>
+              <pre class='starter'><code># Part A – Pod with dnsPolicy: Default
+cat &lt;&lt;&#x27;EOF&#x27; | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dns-default-policy
+  namespace: default
+spec:
+  dnsPolicy: Default
+  containers:
+    - name: shell
+      image: busybox
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+EOF
+
+kubectl exec -it dns-default-policy -- sh
+# Inside:
+# cat /etc/resolv.conf
+# nslookup kubernetes
+
+# Part B – Pod with ndots:2
+cat &lt;&lt;&#x27;EOF&#x27; | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dns-ndots2
+  namespace: default
+spec:
+  dnsPolicy: ClusterFirst
+  dnsConfig:
+    options:
+      - name: ndots
+        value: &quot;2&quot;
+  containers:
+    - name: shell
+      image: busybox
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+EOF
+
+kubectl exec -it dns-ndots2 -- sh
+# Inside:
+# cat /etc/resolv.conf          # confirm ndots:2
+# nslookup api.github.com       # should go directly, no search expansion</code></pre>
+              <details><summary>Hint</summary><ul><li>After applying the `dnsPolicy: Default` Pod, if `/etc/resolv.conf` still shows `10.96.0.10`, double-check that you spelled `dnsPolicy` correctly — a typo causes Kubernetes to silently use `ClusterFirst` as the fallback.</li><li>The `dnsConfig.options` field is a list, so `ndots` must be a string value (`&quot;2&quot;`, not `2`). A common mistake is omitting the quotes and getting a validation error.</li><li>To count the extra queries fired by ndots:5, run `dig +search +showsearch api.github.com` — each `SEARCH` line is a separate DNS query being attempted before the final answer.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Part A expected results:
+#
+# /etc/resolv.conf inside dns-default-policy:
+#   nameserver &lt;node-upstream-IP&gt;   # e.g. 8.8.8.8 or the node&#x27;s own resolver
+#   (no cluster.local search domains, no 10.96.0.10)
+#
+# nslookup kubernetes (inside dns-default-policy):
+#   Server:   &lt;node-upstream-IP&gt;
+#   ** server can&#x27;t find kubernetes: NXDOMAIN
+#   (cluster names are not in the node&#x27;s resolver, so this correctly fails)
+#
+# Part B expected results:
+#
+# /etc/resolv.conf inside dns-ndots2:
+#   nameserver 10.96.0.10
+#   search default.svc.cluster.local svc.cluster.local cluster.local
+#   options ndots:2
+#
+# nslookup api.github.com (ndots:2 Pod):
+#   api.github.com has 2 dots, which equals the threshold, so the resolver
+#   tries it as a fully qualified name FIRST (no search expansion).
+#   Result: direct answer from CoreDNS&#x27;s upstream forwarder, one query.
+#
+# Contrast with ndots:5 default Pod:
+#   nslookup api.github.com fires 4+ queries:
+#   api.github.com.default.svc.cluster.local -&gt; NXDOMAIN
+#   api.github.com.svc.cluster.local         -&gt; NXDOMAIN
+#   api.github.com.cluster.local             -&gt; NXDOMAIN
+#   api.github.com                           -&gt; answer
+
+# Cleanup after the task:
+# kubectl delete pod dns-default-policy dns-ndots2</code></pre>
+                <div class='exp2'><p><strong>Part A</strong> demonstrates that <code class='ic'>dnsPolicy: Default</code> completely bypasses CoreDNS: the Pod uses the node&#x27;s resolver, which knows nothing about <code class='ic'>cluster.local</code>. This mode is correct for DaemonSet Pods that need to query external DNS before the cluster&#x27;s DNS stack is healthy, but it breaks any service-to-service communication using cluster DNS names. <strong>Part B</strong> shows the practical consequence of <code class='ic'>ndots:5</code>: a name like <code class='ic'>api.github.com</code> (2 dots &lt; 5) is treated as unqualified, so the resolver fires search-domain queries that all fail before finally querying the real name — typically 3–4 extra round-trips per external hostname. Reducing <code class='ic'>ndots</code> to <code class='ic'>2</code> (or writing FQDNs with a trailing dot) eliminates those round-trips. The right trade-off: lower <code class='ic'>ndots</code> means fewer wasted external queries but requires more explicit naming for short in-cluster names; the default <code class='ic'>5</code> optimises for cluster-internal convenience at the cost of external lookup latency.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=KAwzZXjG0sE' target='_blank'>Understanding of CoreDNS in Kubernetes | ndots in resolv.conf file | coredns configmap | kube-dns</a></li><li><a href='https://www.youtube.com/watch?v=E0D0TBHkBhQ' target='_blank'>Kubernetes - Debugging CoreDNS</a></li><li><a href='https://www.youtube.com/watch?v=tnxgCc_pYtk' target='_blank'>K8s Networking Explained — Lesson 05 (CNI · kube-proxy · DNS)</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

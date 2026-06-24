@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Troubleshooting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-17-troubleshooting/index.html'>한국어</a></div>
+  <h1>K8S-Troubleshooting</h1>
+  <div class="sub">Intermediate Kubernetes users who are familiar with core concepts (Pod, Deployment, kubectl) and want to diagnose Pod failures in production on their own. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. &quot;Pod Troubleshooting: From CrashLoopBackOff to Ephemeral Containers&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;Pod Troubleshooting: From CrashLoopBackOff to Ephemeral Containers&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Tell apart the most common Pod failure states — CrashLoopBackOff, ImagePullBackOff, Pending, and OOMKilled — and explain the root cause behind each one.</li>
+<li>Apply a repeatable diagnostic flow using <code class='ic'>kubectl describe</code>, events, and <code class='ic'>kubectl logs --previous</code> to narrow down why a Pod is broken.</li>
+<li>Use <code class='ic'>kubectl debug</code> and ephemeral containers to inspect a live, running Pod — even one with no shell — and pinpoint runtime, networking, or resource problems.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why this matters</h4>
+<p>Sooner or later, every Kubernetes operator stares at a Pod that simply will not behave. The deployment looks fine, the YAML applied cleanly, and yet <code class='ic'>kubectl get pods</code> shows a status you didn&#x27;t ask for: <code class='ic'>CrashLoopBackOff</code>, <code class='ic'>ImagePullBackOff</code>, <code class='ic'>Pending</code>, or a container that was just <code class='ic'>OOMKilled</code>. The good news is that Kubernetes is unusually honest about what went wrong — the information is almost always there. The skill is knowing <strong>where to look and in what order</strong>.</p>
+<p>The golden rule is to debug <strong>from the bottom up</strong>. Start at the Pod, the lowest healthy unit of work, and only move up the stack to Services and Ingress once you&#x27;ve confirmed the Pod itself is actually running and ready. Chasing an Ingress problem when your Pod is crash-looping is wasted effort. This same bottom-up instinct applies to Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs alike.</p>
+<p>In this lecture we&#x27;ll first learn to read the four headline failure states, then walk a standard diagnostic flow, and finally reach for live-debugging tools when the logs alone don&#x27;t tell the whole story.</p>
+<h4>The status field is your first clue</h4>
+<p>Run this and read the <code class='ic'>STATUS</code> column carefully — it is the single most useful signal you have:</p>
+<pre><code>
+kubectl get pods
+kubectl get pods -o wide        # adds node and Pod IP
+kubectl get pods -w             # watch status change in real time
+</code></pre>
+<p>Each status points you toward a different family of root causes. Let&#x27;s take them one at a time.</p>
+<h5>CrashLoopBackOff — the container keeps dying after it starts</h5>
+<p>A Pod has a <strong>restart policy</strong>, and by default it is <code class='ic'>Always</code>. When a container exits, Kubernetes faithfully restarts it to keep your app available. But if the container crashes <em>again right after starting</em> — say, your new build throws an exception during initialization — you fall into a loop: start, crash, restart, crash. To avoid hammering the system, Kubernetes waits a little longer before each restart attempt: roughly a few seconds, then ten seconds, then a minute, and so on, capped at five minutes. That growing delay is the <strong>back-off</strong>, and the whole start-crash-restart cycle is what you see reported as <code class='ic'>CrashLoopBackOff</code>.</p>
+<blockquote class='callout'>
+<p>CrashLoopBackOff is not itself an error — it&#x27;s a symptom. It tells you the container starts but then exits repeatedly. The real bug is <em>why</em> it exits, and that&#x27;s almost always visible in the logs of the crashed container.</p>
+</blockquote>
+<p>Typical culprits: a bug in application code, a missing environment variable or config file, a failing database connection at startup, a misconfigured command/entrypoint, or a liveness probe that kills a container that was actually healthy but slow to boot.</p>
+<h5>ImagePullBackOff (and ErrImagePull) — the image never arrived</h5>
+<p>Here the container never even starts because the kubelet couldn&#x27;t pull the image. <code class='ic'>ErrImagePull</code> is the first failed attempt; <code class='ic'>ImagePullBackOff</code> means Kubernetes is now backing off and retrying. Common causes: a typo in the image name or tag, an image tag that doesn&#x27;t exist, a private registry with no <code class='ic'>imagePullSecret</code> configured, or rate limits and network issues reaching the registry. The fix is almost always in the image reference or your registry credentials — not in your application.</p>
+<h5>Pending — the Pod can&#x27;t be scheduled</h5>
+<p>A <code class='ic'>Pending</code> Pod has been accepted by the cluster but has not been placed on a node. The scheduler couldn&#x27;t find a node that satisfies the Pod&#x27;s requirements. Usual reasons: not enough CPU or memory available across nodes (insufficient resources), node selectors / affinity / taints that no node tolerates, or a PersistentVolumeClaim that can&#x27;t be bound. Pending is a <em>scheduling</em> problem, so the answer lives in the Pod&#x27;s events and in node capacity — not in the container image or code.</p>
+<h5>OOMKilled — the container exceeded its memory limit</h5>
+<p>When a container tries to use more memory than its configured <code class='ic'>limits.memory</code>, the Linux kernel&#x27;s out-of-memory killer terminates it, and Kubernetes records the reason as <code class='ic'>OOMKilled</code> (exit code 137). This often <em>looks</em> like a crash loop, because the container restarts and then gets killed again under load. The fix is either to raise the memory limit, fix a memory leak in the app, or right-size the workload. Always check the container&#x27;s <code class='ic'>State</code> and <code class='ic'>Last State</code> reason to distinguish a true application crash from an OOM kill.</p>
+<h4>The standard diagnostic flow</h4>
+<p>Whatever the status, the investigation follows the same three-step rhythm. Learn it once and you&#x27;ll use it for years.</p>
+<p><strong>Step 1 — <code class='ic'>describe</code> the Pod.</strong> This is your richest source of truth. It shows each container&#x27;s current <code class='ic'>State</code>, its <code class='ic'>Last State</code> (with the exit code and reason — this is where you&#x27;ll spot <code class='ic'>OOMKilled</code>), restart counts, the resolved image, probe configuration, and — crucially — the <strong>Events</strong> at the bottom.</p>
+<pre><code>
+kubectl describe pod &lt;pod-name&gt;
+</code></pre>
+<p>Read the Events section from the bottom up. <code class='ic'>Failed to pull image</code>, <code class='ic'>Insufficient memory</code>, <code class='ic'>Back-off restarting failed container</code>, and <code class='ic'>Liveness probe failed</code> each point you straight at the right failure family.</p>
+<p><strong>Step 2 — read the events, including the broader picture.</strong> Pod-level events are in <code class='ic'>describe</code>, but cluster events give context (for example, scheduling failures or node pressure):</p>
+<pre><code>
+kubectl get events --sort-by=.lastTimestamp
+kubectl get events --field-selector involvedObject.name=&lt;pod-name&gt;
+</code></pre>
+<p><strong>Step 3 — read the logs, including the <em>previous</em> container.</strong> For a CrashLoopBackOff, the live container may be too young to have logged anything useful — it just restarted. The exception you need is in the container instance that <em>just died</em>. That&#x27;s exactly what <code class='ic'>--previous</code> gives you:</p>
+<pre><code>
+kubectl logs &lt;pod-name&gt;                     # current container instance
+kubectl logs &lt;pod-name&gt; --previous          # the container that just crashed — key for CrashLoopBackOff
+kubectl logs &lt;pod-name&gt; -c &lt;container-name&gt;  # a specific container in a multi-container Pod
+kubectl logs &lt;pod-name&gt; -f                   # follow live
+</code></pre>
+<blockquote class='callout'>
+<p>For CrashLoopBackOff, <code class='ic'>kubectl logs --previous</code> is the command that most often hands you the answer. The current container has nothing yet; the crashed one has the stack trace.</p>
+</blockquote>
+<p>The flow, then, is: read the <strong>status</strong> to pick the failure family, run <strong>describe</strong> to see state and events, then pull <strong>logs (with <code class='ic'>--previous</code> when crash-looping)</strong> to read the actual error. Most Pod problems surrender to these three commands, as the diagnostic flow below summarizes.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A[&quot;kubectl get pods (read STATUS)&quot;] --&gt; B{&quot;Which status?&quot;}
+    B --&gt;|CrashLoopBackOff| C[&quot;kubectl describe pod (State, Last State, Events)&quot;]
+    B --&gt;|ImagePullBackOff| C
+    B --&gt;|Pending| C
+    B --&gt;|OOMKilled| C
+    C --&gt; D[&quot;kubectl get events (scheduling, node pressure context)&quot;]
+    D --&gt; E{&quot;Crash-looping?&quot;}
+    E --&gt;|Yes| F[&quot;kubectl logs --previous (read the crashed container)&quot;]
+    E --&gt;|No| G[&quot;kubectl logs (read the current container)&quot;]
+    F --&gt; H[&quot;Root cause found&quot;]
+    G --&gt; H</div><figcaption>Bottom-up Pod diagnostic flow: status to describe to events to logs</figcaption></figure>
+<h4>When logs aren&#x27;t enough: live debugging with <code class='ic'>kubectl debug</code></h4>
+<p>Sometimes the logs are silent and you need to get <em>inside</em> a running Pod — to check what processes are alive, test network connectivity to another service, or inspect files. The classic move is <code class='ic'>kubectl exec -it &lt;pod&gt; -- sh</code>. But there&#x27;s a catch that&#x27;s increasingly common in production: <strong>distroless images have no shell</strong>.</p>
+<p>Distroless containers are stripped down to little more than your application binary. That makes them small and fast to pull, cheaper to store, and quicker to start — but with no <code class='ic'>sh</code>, <code class='ic'>curl</code>, or <code class='ic'>ps</code> baked in, there&#x27;s nothing to <code class='ic'>exec</code> into. So how do you debug a live Pod that has no shell?</p>
+<p>The answer is <strong>ephemeral containers</strong>, driven by <code class='ic'>kubectl debug</code>. Instead of taking the Pod down, you <em>attach a temporary container</em> into the existing Pod. That debug container brings its own toolset (busybox, curl, ps, netcat, whatever you choose), and — because it joins the same Pod — it shares the network namespace and (with shared process namespace enabled) can even see the troubled container&#x27;s processes. You&#x27;re debugging the <em>actual</em> Pod with the problem, not a replica.</p>
+<pre><code>
+# Attach a busybox debug container to a running Pod and drop into a shell
+kubectl debug -it &lt;pod-name&gt; --image=busybox --target=&lt;container-name&gt;
+</code></pre>
+<p>The <code class='ic'>--target</code> flag points the ephemeral container at the troubled container so they share a process namespace. Once you&#x27;re in, you can investigate live:</p>
+<pre><code>
+# Inside the ephemeral container:
+ps aux                          # see processes in the target container
+nslookup my-service             # check DNS resolution to another Service
+wget -qO- http://my-service:80  # test connectivity to another Pod/Service
+</code></pre>
+<p>Because the ephemeral container lives in the same network context as the broken one, networking problems become tractable: you can ping and <code class='ic'>telnet</code> around to discover <em>why</em> the app can&#x27;t reach the service it depends on. This same <code class='ic'>kubectl debug</code> family can also copy a Pod for safe experimentation or attach a debug shell onto a node — but the day-to-day win is inspecting a live, shell-less Pod without disrupting it.</p>
+<h4>Tying it back to the bigger picture</h4>
+<p>Once the Pod is genuinely running and ready, <em>then</em> you climb the stack. If the app still doesn&#x27;t respond, suspect the Service (check that its selector matches the Pod labels and that its endpoints are populated) and then the Ingress (verify the <code class='ic'>service.name</code> and <code class='ic'>service.port</code>, and confirm the backend isn&#x27;t empty). A quick way to isolate an Ingress or infrastructure problem is to <code class='ic'>kubectl port-forward</code> directly to the Pod or the Ingress controller Pod and see whether the app answers when you bypass the outer layers. But that&#x27;s the <em>next</em> step — and you only earn the right to take it after the bottom-up flow has proven the Pod itself is healthy.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>Read the status first.</strong> CrashLoopBackOff = container starts then keeps dying; ImagePullBackOff = the image couldn&#x27;t be pulled; Pending = the scheduler can&#x27;t place the Pod; OOMKilled = the container blew past its memory limit (exit code 137).</li>
+<li><strong>CrashLoopBackOff is a symptom, not the bug.</strong> The real cause is in the logs of the crashed container — reach for <code class='ic'>kubectl logs --previous</code>.</li>
+<li><strong>Follow one repeatable flow:</strong> <code class='ic'>kubectl describe pod</code> (state + events) → <code class='ic'>kubectl get events</code> → <code class='ic'>kubectl logs [--previous]</code>. Most Pod failures fall out of these three commands.</li>
+<li><strong>Debug from the bottom up:</strong> confirm the Pod is running and ready before chasing Service or Ingress problems.</li>
+<li><strong>For live, shell-less Pods, use <code class='ic'>kubectl debug</code> with ephemeral containers.</strong> You attach a tool-rich container into the running Pod, share its network and process namespace, and debug the real problem in place — no shell required, no Pod restart needed.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warmup — Deploy a deliberately broken Pod and read its status.</p>
+<p>Apply the manifest below to your cluster. Then run <code class='ic'>kubectl get pods</code> (and optionally <code class='ic'>-o wide</code> and <code class='ic'>-w</code>) and record:</p>
+<p>1. The STATUS value you observe.</p>
+<p>2. The RESTARTS counter after waiting about 60 seconds.</p>
+<p>3. Which failure family does this status belong to, and what does that tell you about where the root cause will be found?</p></div>
+              <pre class='starter'><code># broken-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-app
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo &#x27;starting...&#x27; &amp;&amp; exit 1&quot;]</code></pre>
+              <details><summary>Hint</summary><ul><li>If you see `Error` before `CrashLoopBackOff`, that is the very first crash; the back-off label appears on the second attempt and beyond.</li><li>Use `kubectl get pods -w` and leave it running for a minute. Notice how the gap between RESTARTS increments grows longer over time — that is the back-off in action.</li><li>Add `-o wide` to see which node the Pod landed on and what IP it was assigned. These details are useful in later, multi-node investigations.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Apply the manifest
+kubectl apply -f broken-pod.yaml
+
+# 2. Observe status
+kubectl get pods
+# Expected output (after a short wait):
+# NAME         READY   STATUS             RESTARTS   AGE
+# broken-app   0/1     CrashLoopBackOff   2          90s
+
+# 3. With -o wide to also see Node and Pod IP
+kubectl get pods -o wide
+
+# 4. Watch real-time transitions (Ctrl-C to stop)
+kubectl get pods -w
+# You will see:  Running → Error → CrashLoopBackOff → ... as the back-off grows</code></pre>
+                <div class='exp2'><p>The container command exits with code 1 immediately after printing one line. Kubernetes honours the default <code class='ic'>restartPolicy: Always</code> and faithfully restarts the container — but it crashes again every time. To avoid overwhelming the node, Kubernetes applies an exponential back-off delay between restart attempts (~0 s → 10 s → 20 s → 40 s … capped at 5 minutes). The combined start-crash-restart cycle is what the STATUS column reports as <code class='ic'>CrashLoopBackOff</code>. The RESTARTS counter confirms how many times this cycle has fired. <code class='ic'>CrashLoopBackOff</code> belongs to the &#x27;container starts then immediately dies&#x27; failure family, so the root cause will be in the application logs of the crashed container — not in scheduling or in the image pull step.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core #1 — Run the full three-step diagnostic flow on the broken Pod.</p>
+<p>Using the <code class='ic'>broken-app</code> Pod you deployed in Task 1:</p>
+<p>1. Run <code class='ic'>kubectl describe pod broken-app</code> and locate: (a) the container&#x27;s current <code class='ic'>State</code> and <code class='ic'>Last State</code>, (b) the exit code in <code class='ic'>Last State</code>, and (c) the <code class='ic'>Events</code> section.</p>
+<p>2. Run <code class='ic'>kubectl get events</code> filtered to this Pod and identify any notable messages.</p>
+<p>3. Run <code class='ic'>kubectl logs broken-app</code> and then <code class='ic'>kubectl logs broken-app --previous</code>. Note which command produces the useful output and why.</p>
+<p>Write down the exit code and the last log line you see.</p></div>
+              <pre class='starter'><code># No new manifest needed — use broken-app from Task 1.
+# Hint: if broken-app is no longer present, re-apply broken-pod.yaml first.
+#
+# Commands to fill in:
+kubectl describe pod broken-app
+kubectl get events --field-selector involvedObject.name=broken-app --sort-by=.lastTimestamp
+kubectl logs broken-app
+kubectl logs broken-app --previous</code></pre>
+              <details><summary>Hint</summary><ul><li>In the `describe` output, scroll past the long metadata block. The `Containers:` section and then `Events:` at the very bottom are the two sections that matter most.</li><li>If `kubectl logs broken-app` returns nothing, that is expected for a back-off state. Do not assume the command failed — try `--previous` immediately.</li><li>Exit codes are a quick triage signal: 0 = clean exit (unusual for a crash), 1 = application error, 137 = OOMKill (128 + signal 9), 143 = SIGTERM, 127 = command not found.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 — describe
+kubectl describe pod broken-app
+# Key fields to find in the output:
+#
+# Containers:
+#   app:
+#     State:          Waiting
+#       Reason:       CrashLoopBackOff
+#     Last State:     Terminated
+#       Reason:       Error
+#       Exit Code:    1          &lt;-- the container exited with a non-zero code
+#       Started:      &lt;timestamp&gt;
+#       Finished:     &lt;timestamp&gt;
+#     Restart Count:  N
+#
+# Events (at the bottom, read newest last):
+#   Warning  BackOff   ...  Back-off restarting failed container
+
+# Step 2 — events filtered to this Pod
+kubectl get events --field-selector involvedObject.name=broken-app --sort-by=.lastTimestamp
+# Notable message: &#x27;Back-off restarting failed container app in pod broken-app&#x27;
+
+# Step 3a — current container (likely empty or not useful)
+kubectl logs broken-app
+# Output: &#x27;&#x27; (empty, because the current instance is in Waiting/back-off, not Running)
+
+# Step 3b — PREVIOUS container (the one that just crashed)
+kubectl logs broken-app --previous
+# Output:
+# starting...
+#
+# &#x27;starting...&#x27; is the last (and only) log line before exit code 1.</code></pre>
+                <div class='exp2'><p>The three-step flow — describe → events → logs (with --previous) — is the core diagnostic loop for every Pod failure. <code class='ic'>describe</code> gives you the authoritative view of container state and exit codes; the Events section at the bottom is where the cluster narrates what happened in chronological order. <code class='ic'>kubectl get events</code> scoped to the Pod adds scheduling or node-level context that <code class='ic'>describe</code> can miss. For a crash-looping Pod, the <em>current</em> container instance is in <code class='ic'>Waiting</code> state with zero log output because it hasn&#x27;t run yet (it is in back-off). The container that actually crashed is the <em>previous</em> instance, and <code class='ic'>--previous</code> fetches its stdout/stderr log — which is where the stack trace or configuration error lives. Exit code 1 is a generic application error; exit code 137 would indicate OOMKill, and exit code 127 would mean &#x27;command not found&#x27;.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core #2 — Identify an ImagePullBackOff and a Pending Pod, then fix one.</p>
+<p>Apply both manifests below.</p>
+<p><strong>Part A (ImagePullBackOff):</strong> Apply <code class='ic'>bad-image.yaml</code>. Run <code class='ic'>kubectl describe pod bad-image</code> and pinpoint the event that tells you exactly what went wrong with image pulling. Then fix the image reference and patch the Pod (or delete-and-recreate) so the Pod reaches <code class='ic'>Running</code>.</p>
+<p><strong>Part B (Pending):</strong> Apply <code class='ic'>hungry-pod.yaml</code>. Use <code class='ic'>kubectl describe pod hungry-pod</code> to find out why the scheduler could not place it. What section tells you the reason, and what is the root cause?</p></div>
+              <pre class='starter'><code># bad-image.yaml  — typo in image tag
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-image
+spec:
+  containers:
+  - name: app
+    image: nginx:DOESNOTEXIST999
+
+---
+# hungry-pod.yaml  — requests more memory than any node has
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hungry-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:stable
+    resources:
+      requests:
+        memory: &quot;9999Gi&quot;
+        cpu: &quot;1m&quot;</code></pre>
+              <details><summary>Hint</summary><ul><li>For ImagePullBackOff, the first event is usually `ErrImagePull` (first failed pull) and then `ImagePullBackOff` starts appearing. Both are reported under `Warning  Failed`.</li><li>To fix the bad-image Pod, you cannot edit the `image` field of a running Pod in-place (spec.containers[].image is immutable after scheduling for most fields). Delete the Pod and re-create it with the corrected YAML.</li><li>For the Pending Pod, look at the `Conditions` block in `describe` output — `PodScheduled: False` with a message confirms a scheduling failure before you even reach the Events section.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># ── Part A: ImagePullBackOff ──────────────────────────────────────────────
+
+# Apply
+kubectl apply -f bad-image.yaml
+
+# Diagnose
+kubectl describe pod bad-image
+# Look for in Events:
+#   Warning  Failed   ...  Failed to pull image &quot;nginx:DOESNOTEXIST999&quot;:
+#                          rpc error: ... manifest for nginx:DOESNOTEXIST999 not found
+#   Warning  Failed   ...  Error: ErrImagePull
+#   Warning  BackOff  ...  Back-off pulling image &quot;nginx:DOESNOTEXIST999&quot;
+
+# Fix: delete and recreate with a valid tag
+kubectl delete pod bad-image
+# Edit bad-image.yaml: change  image: nginx:DOESNOTEXIST999  to  image: nginx:stable
+kubectl apply -f bad-image.yaml
+
+# Confirm
+kubectl get pods bad-image
+# NAME        READY   STATUS    RESTARTS   AGE
+# bad-image   1/1     Running   0          15s
+
+# ── Part B: Pending ───────────────────────────────────────────────────────
+
+# Apply
+kubectl apply -f hungry-pod.yaml
+
+# Diagnose
+kubectl describe pod hungry-pod
+# Look for in Events:
+#   Warning  FailedScheduling  ...  0/N nodes are available:
+#            N Insufficient memory.  preemption: 0/N nodes are available ...
+#
+# The Events section AND the &#x27;Conditions:&#x27; block (PodScheduled = False) both
+# confirm this is a scheduling failure due to insufficient memory on all nodes.
+
+# Root cause: 9999Gi memory request far exceeds cluster capacity.
+# Fix (not applied in this task, but the answer): lower requests.memory to a
+# realistic value, e.g. 256Mi.</code></pre>
+                <div class='exp2'><p>ImagePullBackOff and Pending are diagnosed entirely through <code class='ic'>describe</code> events — never through <code class='ic'>kubectl logs</code>, because the container never even started. For ImagePullBackOff, the event chain is: <code class='ic'>Failed</code> (ErrImagePull on first attempt) → <code class='ic'>BackOff</code> (subsequent retries). The event message names the exact image and the registry error, pointing you straight at the image reference or registry credentials. For Pending, the scheduler writes a <code class='ic'>FailedScheduling</code> event that lists <em>exactly</em> which resources are exhausted or which constraints (affinity, taint/toleration) are unsatisfied. Because this is a scheduling problem, the fix lives in the Pod spec (resources, node selectors, tolerations) or in cluster capacity — not in the container image or application code.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied — Debug a distroless (shell-less) Pod with <code class='ic'>kubectl debug</code> and an ephemeral container.</p>
+<p>Apply <code class='ic'>distroless-app.yaml</code> below. The Pod will run successfully, but imagine that in production you need to verify:</p>
+<ul>
+<li>Whether the process inside is actually listening on port 8080.</li>
+<li>Whether DNS resolution for <code class='ic'>kubernetes.default</code> works from inside the Pod.</li>
+</ul>
+<p>Because the container is distroless, <code class='ic'>kubectl exec -it distroless-app -- sh</code> will fail. Use <code class='ic'>kubectl debug</code> to attach a <code class='ic'>busybox</code> ephemeral container to the running Pod, then run the two checks inside it.</p></div>
+              <pre class='starter'><code># distroless-app.yaml
+# Uses the official distroless static image (no shell, no package manager)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: distroless-app
+spec:
+  containers:
+  - name: app
+    # gcr.io/distroless/static-debian12 ships zero shell tooling
+    image: gcr.io/distroless/static-debian12
+    # The entrypoint is overridden with &#x27;sleep&#x27; from a shared volume trick;
+    # for this exercise we just let it run its default no-op entrypoint so
+    # the Pod stays Running long enough to debug.
+    command: [&quot;/bin/sleep&quot;, &quot;3600&quot;]
+
+# NOTE: gcr.io/distroless/static-debian12 does include /bin/sleep but NO sh/bash/curl/ps.
+# If your cluster cannot reach gcr.io, substitute:
+#   image: busybox:1.36
+#   command: [&quot;sh&quot;, &quot;-c&quot;, &quot;while true; do sleep 3600; done&quot;]
+# and then try to exec sh into it first to confirm, then attach the ephemeral container anyway.
+
+---
+# Commands to complete (fill in the blanks):
+# kubectl exec -it distroless-app -- sh          # should fail with &#x27;exec: sh: not found&#x27;
+# kubectl debug -it distroless-app --image=______ --target=______
+# Inside the ephemeral container:
+# nslookup ______
+# wget -qO- ______   OR   nc -zv localhost ______</code></pre>
+              <details><summary>Hint</summary><ul><li>If `kubectl debug` returns &#x27;unable to inject ephemeral container&#x27; and your cluster is older than Kubernetes 1.23, the EphemeralContainers feature gate may be disabled. Check `kubectl version` — ephemeral containers are stable (GA) from v1.25.</li><li>Inside the ephemeral busybox shell, `ps aux` might show only the busybox processes if the PID namespace is not shared. Confirm `--target=&lt;container-name&gt;` matches the exact container name from `kubectl describe pod distroless-app` under `Containers:`.</li><li>After you exit and re-run `kubectl describe pod distroless-app`, look for the `Ephemeral Containers:` section near the bottom. The container is listed with `State: Terminated` — this is expected and normal.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 — apply and verify the Pod is Running
+kubectl apply -f distroless-app.yaml
+kubectl get pods distroless-app
+# NAME             READY   STATUS    RESTARTS   AGE
+# distroless-app   1/1     Running   0          10s
+
+# Step 2 — confirm exec fails (no shell in distroless)
+kubectl exec -it distroless-app -- sh
+# error: Internal error occurred: error executing command in container:
+#        failed to exec in container: ... exec: &quot;sh&quot;: executable file not found in $PATH
+
+# Step 3 — attach a busybox ephemeral container
+kubectl debug -it distroless-app --image=busybox:1.36 --target=app
+# Kubernetes injects a new ephemeral container named &#x27;debugger-XXXX&#x27; into the
+# running Pod. It shares the Pod&#x27;s network namespace (same IP, same ports)
+# and, because --target=app is set, also shares the app container&#x27;s PID namespace.
+# You land inside a busybox shell prompt.
+
+# Step 4 — run checks INSIDE the ephemeral container shell:
+
+# Check 1: DNS resolution
+nslookup kubernetes.default
+# Expected output (cluster DNS resolves the kubernetes Service):
+# Server:    10.96.0.10
+# Address:   10.96.0.10:53
+# Name:      kubernetes.default.svc.cluster.local
+# Address:   10.96.0.1
+
+# Check 2: see processes from the target container (requires --target / shared PID ns)
+ps aux
+# You should see the sleep process owned by the distroless container.
+
+# Check 3 (bonus): test connectivity to the Kubernetes API
+wget -qO- https://kubernetes.default/healthz --no-check-certificate
+# Expected: ok
+
+# Step 5 — exit the ephemeral shell
+exit
+# The ephemeral container stops but stays attached to the Pod spec (Kubernetes does
+# not remove ephemeral containers after exit — they are visible in &#x27;describe&#x27;).</code></pre>
+                <div class='exp2'><p>Distroless images exclude shell binaries to reduce image size and attack surface. <code class='ic'>kubectl exec</code> therefore has nothing to execute when you request <code class='ic'>sh</code>. <code class='ic'>kubectl debug --image=busybox:1.36 --target=app</code> solves this by injecting an <em>ephemeral container</em> — a temporary, namespaced-scoped container defined in the Pod&#x27;s <code class='ic'>ephemeralContainers</code> spec field. Because the ephemeral container is part of the same Pod, it automatically shares the Pod&#x27;s network namespace: same IP address, same loopback, same open ports. The <code class='ic'>--target</code> flag additionally enables shared PID namespace with the named container, so <code class='ic'>ps aux</code> can see the app&#x27;s processes. This means you can test DNS (<code class='ic'>nslookup</code>), check open ports (<code class='ic'>nc -zv localhost 8080</code>), curl internal endpoints, or inspect files — all on the real, live Pod — without restarting it or needing a shell in the original image. Ephemeral containers are persistent in the Pod spec after exit (run <code class='ic'>kubectl describe pod distroless-app</code> to see them under <code class='ic'>Ephemeral Containers</code>), but they consume no resources once stopped.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hixs2GIGrUw' target='_blank'>How to debug Kubernetes? (Deployments, Services &amp; Ingress)</a></li><li><a href='https://www.youtube.com/watch?v=gKuu1toptm8' target='_blank'>Kubernetes CrashLoopBackoff explained in 3 minutes</a></li><li><a href='https://www.youtube.com/watch?v=xE_nlt8Lyk4' target='_blank'>DevOpsDays Seattle 2022: Debugging with Ephemeral Containers by Peter Valdez</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""강의 감수(5단계)를 Gemini CLI에 위임하는 얇은 래퍼.
+"""강의 감수(5단계)를 Gemini API에 위임하는 래퍼.
 
 content-reviewer 에이전트(Claude)는 직접 감수하지 않고 이 스크립트를 호출한다.
 판단은 Gemini가 하고, 이 스크립트는 입출력·JSON 검증·재시도 한계 처리만 한다.
 
 사용:
-    python scripts/review_with_gemini.py <course_slug> <lecture_no> [--model M] [--revision-count N]
+    python scripts/review_with_gemini.py <course_slug> <lecture_no> [--api-key KEY] [--revision-count N]
 
 성공 시 courses/<slug>/lectures/<NN>_*/review.json 을 쓰고 종료코드 0.
 gemini 실패(인증/네트워크) 또는 JSON 파싱 실패 시 stderr에 사유를 출력하고
@@ -16,11 +16,30 @@ import argparse
 import glob
 import json
 import os
-import shutil
-import subprocess
 import sys
 
+try:
+    from google import genai
+except ImportError:
+    sys.stderr.write("[review_with_gemini] ERROR: google-genai 패키지를 설치하세요: "
+                     "pip install google-genai\n")
+    sys.exit(1)
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def load_dotenv():
+    """저장소 루트의 .env를 읽어 환경변수로 채운다(이미 설정된 값은 보존). 표준 라이브러리만 사용."""
+    path = os.path.join(REPO_ROOT, ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))  # 기존 환경변수가 우선
 
 ISSUE_TYPES = (
     "accuracy", "objective_miss", "insufficient", "difficulty",
@@ -93,11 +112,10 @@ def find_lecture_dir(course_dir, no):
 
 
 def extract_json(text):
-    """gemini 출력에서 JSON 객체만 추출한다. ```json 펜스/머리말이 섞여 있어도 처리."""
+    """Gemini 출력에서 JSON 객체만 추출한다."""
     t = text.strip()
     # 코드펜스 제거
     if "```" in t:
-        # 첫 ``` 이후 ~ 마지막 ``` 사이를 취한다
         first = t.find("```")
         body = t[first + 3:]
         # 언어 토큰(json) 줄 제거
@@ -138,11 +156,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("slug")
     ap.add_argument("lecture_no", type=int)
-    ap.add_argument("--model", default="gemini-2.5-pro")
+    ap.add_argument("--api-key", default=None,
+                    help="Gemini API key (기본값: 환경변수 GEMINI_API_KEY)")
+    ap.add_argument("--model", default="gemini-2.5-flash")  # 무료 티어는 2.5-pro 미제공(limit 0) → flash 기본
     ap.add_argument("--revision-count", type=int, default=None,
                     help="현재까지 재작성 횟수. 생략 시 기존 review.json 값 사용")
     ap.add_argument("--timeout", type=int, default=300)
     args = ap.parse_args()
+
+    # API 키 결정 (.env의 GEMINI_API_KEY도 자동 로드)
+    load_dotenv()
+    api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        die("Gemini API key가 필요합니다. .env에 GEMINI_API_KEY를 추가하거나 --api-key 옵션을 쓰세요.")
+
+    client = genai.Client(api_key=api_key)
 
     course_dir = os.path.join(REPO_ROOT, "courses", args.slug)
     if not os.path.isdir(course_dir):
@@ -160,7 +188,6 @@ def main():
 
     lec_dir = find_lecture_dir(course_dir, args.lecture_no)
     # 영문이 원본(canonical). 감수는 content.en.md 를 대상으로 한다.
-    # (레거시 강좌처럼 영문본이 없으면 한국어 content.md 로 폴백한다.)
     content_path = os.path.join(lec_dir, "content.en.md")
     if not os.path.isfile(content_path):
         content_path = os.path.join(lec_dir, "content.md")
@@ -192,36 +219,20 @@ def main():
         issue_types=" / ".join(ISSUE_TYPES),
     )
 
-    # 지침(prompt)과 본문을 모두 stdin으로 보내고 -p 는 짧은 지시만 둔다.
-    # (거대 프롬프트를 argv로 넘길 때의 길이·특수문자 인용 문제를 피한다.)
     payload = prompt + "\n\n===== content under review =====\n" + content
-    directive = ("Follow the review instructions in the input and output ONLY raw JSON "
-                 "per the given schema. No markdown fences, no prose.")
 
-    exe = shutil.which("gemini")
-    if not exe:
-        die("gemini CLI 를 찾을 수 없음. 설치/PATH 를 확인하라.")
-    flags = ["-p", directive, "-y", "--skip-trust", "-m", args.model]
-    # Windows 의 .cmd/.bat 래퍼는 subprocess 가 직접 실행하지 못하므로 셸로 실행한다.
-    use_shell = exe.lower().endswith((".cmd", ".bat"))
-    run_cmd = subprocess.list2cmdline([exe] + flags) if use_shell else [exe] + flags
     try:
-        proc = subprocess.run(
-            run_cmd, input=payload, capture_output=True, text=True,
-            encoding="utf-8", timeout=args.timeout, shell=use_shell,
+        response = client.models.generate_content(
+            model=args.model,
+            contents=payload
         )
-    except FileNotFoundError:
-        die("gemini CLI 실행 실패(경로: %s)." % exe)
-    except subprocess.TimeoutExpired:
-        die("gemini 호출 타임아웃(%ds)." % args.timeout)
+        output = response.text
+    except Exception as e:
+        die("Gemini API 호출 실패: %s" % str(e))
 
-    if proc.returncode != 0:
-        die("gemini 비정상 종료(code=%d). 인증/네트워크 확인 필요.\nstderr: %s"
-            % (proc.returncode, (proc.stderr or "")[-800:]))
-
-    raw = extract_json(proc.stdout or "")
+    raw = extract_json(output or "")
     if not raw:
-        die("gemini 출력에서 JSON 을 찾지 못함.\n출력: %s" % (proc.stdout or "")[-800:])
+        die("Gemini 출력에서 JSON을 찾지 못함.\n출력: %s" % (output or "")[-800:])
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as e:
@@ -229,13 +240,13 @@ def main():
 
     verdict = result.get("verdict", "").upper()
     if verdict not in ("PASS", "REVISE"):
-        die("verdict 값이 PASS/REVISE 가 아님: %r" % result.get("verdict"))
+        die("verdict 값이 PASS/REVISE가 아님: %r" % result.get("verdict"))
 
     issues = result.get("issues", []) or []
     missing = result.get("missing_topics", []) or []
     minor = result.get("minor_notes", []) or []
 
-    # 재시도 한계: 4회 후에도 REVISE면 escalate=true 로 통과시키고 파이프라인을 멈추지 않는다.
+    # 재시도 한계: 4회 후에도 REVISE면 escalate=true로 통과시키고 파이프라인을 멈추지 않는다.
     escalate = False
     if verdict == "REVISE" and revision_count >= 4:
         verdict = "PASS"

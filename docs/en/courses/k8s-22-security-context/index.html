@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-SecurityContext</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-22-security-context/index.html'>한국어</a></div>
+  <h1>K8S-SecurityContext</h1>
+  <div class="sub">Intermediate developers and platform engineers who are already comfortable writing Pod and Deployment manifests and are applying container security hardening for the first time. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Building Least-Privilege Containers with Kubernetes SecurityContext</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Building Least-Privilege Containers with Kubernetes SecurityContext </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the difference between Pod-level and container-level <code class='ic'>securityContext</code>, and how the two merge so you place each setting where it belongs.</li>
+<li>Explain the meaning and security impact of the core fields: <code class='ic'>runAsNonRoot</code>/<code class='ic'>runAsUser</code>, <code class='ic'>allowPrivilegeEscalation</code>, <code class='ic'>readOnlyRootFilesystem</code>, capability <code class='ic'>drop</code>/<code class='ic'>add</code>, and <code class='ic'>seccompProfile</code>.</li>
+<li>Combine those fields into a least-privilege container manifest that strips root and unnecessary kernel capabilities, then verify the result inside a running Pod.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why secure a Pod at all?</h4>
+<p>Kubernetes makes it trivially easy to run a container, but it does nothing to <em>secure</em> that container by default. Spin up a plain Pod, exec into it, and run <code class='ic'>id</code> — chances are you are <strong>UID 0</strong>, the root user, a member of the <code class='ic'>root</code> and <code class='ic'>wheel</code> groups. In other words, the process inside your container has administrator-equivalent power within its namespace.</p>
+<p>That default is the opposite of how production systems should be built. The guiding rule of container security is the <strong>principle of least privilege</strong>: grant a process only the permissions it actually needs, and nothing more. Running as root violates that rule in several concrete ways:</p>
+<ul>
+<li><strong>Privilege escalation.</strong> If an attacker compromises a root container, they already hold root inside it and can attempt to break out toward the host kernel.</li>
+<li><strong>Host exposure.</strong> In environments without user namespaces or strict isolation, a root container can reach elevated access to the underlying node.</li>
+<li><strong>Accidental damage.</strong> A workload that only needs to read data has no business being able to overwrite system files. Root makes those mistakes possible.</li>
+<li><strong>Compliance.</strong> Many third-party security standards explicitly require workloads to run as non-root. If your platform must meet them, this is not optional.</li>
+</ul>
+<blockquote class='callout'>
+<p>The cost of hardening a container is a few lines of YAML. The cost of <em>not</em> hardening it is the entire blast radius of a container breakout. Make least privilege your baseline, not an afterthought.</p>
+</blockquote>
+<p>Kubernetes gives you two tools to enforce this: the <strong><code class='ic'>securityContext</code></strong> (settings that constrain users, filesystems, and privileges) and <strong>Linux capabilities</strong> (fine-grained slices of root power that you can grant or deny individually).</p>
+<h4>Pod-level vs. container-level securityContext</h4>
+<p>A <code class='ic'>securityContext</code> block can live in two places, and knowing the difference is the whole game:</p>
+<ul>
+<li><strong>Pod-level</strong> — under <code class='ic'>spec.securityContext</code>. It applies to <em>every</em> container in the Pod and is the right home for settings that should be uniform across the workload.</li>
+<li><strong>Container-level</strong> — under <code class='ic'>spec.containers[].securityContext</code>. It applies to a single container.</li>
+</ul>
+<p>Think of the fields as falling into three buckets:</p>
+<p>| Bucket | Where it can be set | Examples |</p>
+<p>|--------|--------------------|----------|</p>
+<p>| Pod-only | Pod level only | <code class='ic'>fsGroup</code> |</p>
+<p>| Pod <strong>and</strong> container | Either, container wins on conflict | <code class='ic'>runAsUser</code>, <code class='ic'>runAsGroup</code>, <code class='ic'>runAsNonRoot</code>, <code class='ic'>seccompProfile</code> |</p>
+<p>| Container-only | Container level only | <code class='ic'>allowPrivilegeEscalation</code>, <code class='ic'>readOnlyRootFilesystem</code>, <code class='ic'>privileged</code>, <code class='ic'>capabilities</code> |</p>
+<p>The <strong>merge rule</strong> is the key takeaway: when a field is set in <em>both</em> places, the container-level value overrides the Pod-level value for that container. So a common, clean pattern is to set safe organization-wide defaults at the Pod level, then override them per container only where a specific workload genuinely needs something different.</p>
+<p>The merge behavior works like this, as the diagram below shows for the <code class='ic'>runAsUser</code> field:</p>
+<ul>
+<li>Set <code class='ic'>runAsUser: 1000</code> at the Pod level → all containers run as 1000.</li>
+<li>One container also sets <code class='ic'>runAsUser: 2000</code> at its own level → that container runs as 2000; the others still run as 1000.</li>
+</ul>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Pod[&quot;Pod-level securityContext\nrunAsUser: 1000&quot;] --&gt; Q{&quot;Container also sets\nthis field?&quot;}
+    Q --&gt;|&quot;No (Container A)&quot;| Inherit[&quot;Inherit Pod value\nruns as UID 1000&quot;]
+    Q --&gt;|&quot;Yes (Container B sets runAsUser 2000)&quot;| Override[&quot;Container value wins\nruns as UID 2000&quot;]</div><figcaption>How Pod-level and container-level securityContext merge per container</figcaption></figure>
+<h4>The core fields, one by one</h4>
+<p><strong><code class='ic'>runAsUser</code> / <code class='ic'>runAsGroup</code>.</strong> Force the container&#x27;s processes to run with a specific numeric UID and GID. Linux cares about numbers, not names — if no matching username exists, <code class='ic'>id</code> will print <code class='ic'>uid=1000(unknown)</code>, which is normal, not an error.</p>
+<p><strong><code class='ic'>runAsNonRoot: true</code>.</strong> A safety gate. It does not pick a UID for you; it simply refuses to start the container if the resolved user would be root (UID 0). If you apply this to a stock <code class='ic'>nginx</code> image (which defaults to root) without also providing a non-root <code class='ic'>runAsUser</code>, the Pod will fail to start — that failure is the feature working as intended.</p>
+<p><strong><code class='ic'>allowPrivilegeEscalation: false</code>.</strong> Prevents a process from gaining <em>more</em> privileges than its parent. Without it, a <code class='ic'>setuid</code>-root binary could let a UID-1000 process execute with root power inside the container. Setting it to <code class='ic'>false</code> closes that door and should be your default.</p>
+<p><strong><code class='ic'>privileged: false</code>.</strong> <code class='ic'>privileged: true</code> hands the container near-total access to the host, including kernel-level operations. In production this should essentially always be <code class='ic'>false</code> (which is also the default).</p>
+<p><strong><code class='ic'>readOnlyRootFilesystem: true</code>.</strong> Mounts the container&#x27;s root filesystem (<code class='ic'>/</code>) as read-only, so the process cannot create or modify files there. If your app only reads, give it nothing to write. When the app <em>does</em> need a writable path — logs, caches, mounted data — you carve out exactly that path with a volume instead of leaving the whole filesystem open.</p>
+<p><strong><code class='ic'>fsGroup</code>.</strong> A Pod-level field that sets the group owner of mounted volumes. It is the companion to <code class='ic'>readOnlyRootFilesystem</code>: the root filesystem stays read-only, but a volume owned by <code class='ic'>fsGroup</code> becomes writable by the container&#x27;s user, because that user is a member of the group.</p>
+<p><strong><code class='ic'>capabilities</code> (drop / add).</strong> Root is not one monolithic permission; it is a bundle of distinct kernel powers called <em>capabilities</em> — <code class='ic'>CHOWN</code> (change file ownership), <code class='ic'>NET_ADMIN</code> (modify network interfaces and routing), <code class='ic'>SYS_TIME</code> (change the system clock), and many more. The least-privilege pattern is <strong><code class='ic'>drop: [&quot;ALL&quot;]</code></strong> to revoke every capability, then <strong><code class='ic'>add</code></strong> back only the specific ones the workload provably needs. Start by dropping everything; if the app breaks, read its error, and add the single capability that fixes it. Never start from <code class='ic'>add: [&quot;ALL&quot;]</code>.</p>
+<p><strong><code class='ic'>seccompProfile</code>.</strong> Seccomp filters which Linux <em>syscalls</em> a process may make, shrinking the kernel attack surface further. Setting <code class='ic'>type: RuntimeDefault</code> applies the container runtime&#x27;s curated default filter and is the recommended baseline for almost every workload.</p>
+<h4>Putting it together: a least-privilege manifest</h4>
+<p>Here is a Pod that combines all of the above into a hardened, least-privilege workload. Defaults that should be uniform live at the Pod level; the write-sensitive flags live at the container level.</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-app
+spec:
+  securityContext:                  # Pod-level: applies to every container
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000                   # mounted volumes are group-owned by 2000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:              # container-level: overrides + container-only fields
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]             # remove every kernel capability
+      volumeMounts:
+        - name: writable
+          mountPath: /writable      # the one path the app may write to
+  volumes:
+    - name: writable
+      emptyDir: {}
+</code></pre>
+<p>What this manifest guarantees:</p>
+<ul>
+<li>The process runs as UID 1000 / GID 3000, never as root, and the Pod will refuse to start if anything would force root.</li>
+<li>No privilege escalation, no extra capabilities, a default seccomp filter — the kernel attack surface is minimal.</li>
+<li>The root filesystem is read-only, <strong>except</strong> <code class='ic'>/writable</code>, which is backed by an <code class='ic'>emptyDir</code> volume group-owned by <code class='ic'>fsGroup</code> 2000, so UID 1000 can write there.</li>
+</ul>
+<h4>Verifying the result</h4>
+<p>Apply it and inspect the running container:</p>
+<pre><code>
+kubectl apply -f secure-app.yaml
+kubectl exec -it secure-app -- sh
+</code></pre>
+<p>Inside the Pod, run these checks:</p>
+<pre><code>
+$ id
+uid=1000 gid=3000 ...            # confirmed non-root; &quot;unknown&quot; name is fine
+
+$ mkdir /test
+mkdir: can&#x27;t create directory &#x27;/test&#x27;: Read-only file system
+
+$ touch /writable/hello
+$ ls -l /writable
+-rw-r--r--  1 1000  2000  ...    # owner 1000, group 2000 — writable as designed
+</code></pre>
+<p>The denial on <code class='ic'>/test</code> proves <code class='ic'>readOnlyRootFilesystem</code> is enforced; the success on <code class='ic'>/writable</code> proves <code class='ic'>fsGroup</code> granted exactly the access you intended. Because capabilities were dropped, a command like <code class='ic'>chown 0:0 /writable/hello</code> returns <code class='ic'>Operation not permitted</code> — the container has no <code class='ic'>CHOWN</code> capability to change ownership.</p>
+<p>You can also let the cluster enforce these rules for you. <strong>Pod Security Admission</strong> can reject any manifest that omits these settings at the namespace level, so a deployment with an empty <code class='ic'>securityContext</code> is denied before it ever runs. That turns least privilege from a convention developers must remember into a guardrail the platform enforces.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Containers run as <strong>root by default</strong> — least privilege means stripping that root and every capability the workload does not strictly need.</li>
+<li><code class='ic'>securityContext</code> lives at two levels; when a field is set in both, <strong>container-level overrides Pod-level</strong>. Set uniform defaults at the Pod level, override per container only when required.</li>
+<li>The hardening baseline is: <code class='ic'>runAsNonRoot: true</code> + a non-root <code class='ic'>runAsUser</code>, <code class='ic'>allowPrivilegeEscalation: false</code>, <code class='ic'>readOnlyRootFilesystem: true</code>, <code class='ic'>capabilities.drop: [&quot;ALL&quot;]</code>, and <code class='ic'>seccompProfile.type: RuntimeDefault</code>.</li>
+<li>Use <code class='ic'>fsGroup</code> plus a mounted volume to grant writes to exactly one path while keeping the root filesystem read-only.</li>
+<li>For capabilities, <strong>drop all, then add back only what breaks</strong> — never start from <code class='ic'>add: [&quot;ALL&quot;]</code>.</li>
+<li>Verify with <code class='ic'>kubectl exec</code> (<code class='ic'>id</code>, a write attempt on <code class='ic'>/</code>, a write on the volume), and enforce the policy cluster-wide with Pod Security Admission.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Observe what a Pod looks like WITHOUT any securityContext.</p>
+<p>Create a Pod manifest named <code class='ic'>insecure-pod.yaml</code> using the <code class='ic'>busybox:1.36</code> image that runs <code class='ic'>sleep 3600</code>. Apply it to the cluster, exec into it, and run <code class='ic'>id</code>. Record the UID and GID you see. Then describe in one sentence why this is a security problem.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: insecure-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      # TODO: no securityContext at all</code></pre>
+              <details><summary>Hint</summary><ul><li>If `kubectl exec` hangs, check that the Pod reached the `Running` state first: `kubectl get pod insecure-pod`.</li><li>The `id` command prints numeric UID, GID, and all supplementary groups. Focus on the `uid=` part — anything that says `0` means root.</li><li>You do not need a cluster with real nodes for this step — a local `kind` or `minikube` cluster is fine.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Save the manifest and apply it
+# insecure-pod.yaml:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insecure-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+
+# kubectl apply -f insecure-pod.yaml
+# kubectl wait --for=condition=Ready pod/insecure-pod --timeout=60s
+# kubectl exec -it insecure-pod -- id
+
+# Expected output (typical):
+# uid=0(root) gid=0(root) groups=0(root),10(wheel)
+
+# One-sentence explanation:
+# The container process runs as UID 0 (root), so any bug or
+# exploit in the application immediately grants attacker-level
+# root access inside the container namespace.</code></pre>
+                <div class='exp2'><p>When no securityContext is configured, Kubernetes inherits whatever user the container image declares. Most general-purpose images default to root (UID 0). This directly violates the principle of least privilege: the process has far more power than it needs to run <code class='ic'>sleep</code>. Seeing <code class='ic'>uid=0(root)</code> in the output is the baseline you are about to fix in the next tasks.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice 1: Write a least-privilege Pod manifest that enforces non-root execution and blocks privilege escalation.</p>
+<p>Create <code class='ic'>secure-pod.yaml</code> that:</p>
+<ul>
+<li>Runs <code class='ic'>busybox:1.36</code> with <code class='ic'>sleep 3600</code>.</li>
+<li>At the <strong>Pod level</strong>: sets <code class='ic'>runAsNonRoot: true</code>, <code class='ic'>runAsUser: 1000</code>, <code class='ic'>runAsGroup: 3000</code>, and <code class='ic'>seccompProfile.type: RuntimeDefault</code>.</li>
+<li>At the <strong>container level</strong>: sets <code class='ic'>allowPrivilegeEscalation: false</code> and <code class='ic'>capabilities.drop: [&quot;ALL&quot;]</code>.</li>
+</ul>
+<p>Apply it, exec in, and verify with <code class='ic'>id</code> that the process is no longer root.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+spec:
+  securityContext:
+    # TODO: add Pod-level fields here
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        # TODO: add container-level fields here</code></pre>
+              <details><summary>Hint</summary><ul><li>If the Pod enters `CreateContainerConfigError` with a message like &quot;container has runAsNonRoot and image will run as root&quot;, that means the image itself declares `USER root`. Switch to an image that accepts a non-root UID (busybox:1.36 does), or add an explicit `runAsUser` that forces a non-zero UID.</li><li>`allowPrivilegeEscalation` and `capabilities` are **container-level only** fields. Putting them under `spec.securityContext` (the Pod block) will cause a validation error.</li><li>The drop list is case-sensitive and must use ALL-CAPS names such as `&quot;ALL&quot;`, `&quot;NET_ADMIN&quot;`, `&quot;CHOWN&quot;`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 3000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [&quot;ALL&quot;]
+
+# Apply and verify:
+# kubectl apply -f secure-pod.yaml
+# kubectl exec -it secure-pod -- id
+#
+# Expected output:
+# uid=1000 gid=3000 groups=3000
+#
+# &quot;unknown&quot; next to the UID/GID is normal — the image has no /etc/passwd
+# entry for 1000, but Linux only cares about the numeric UID.</code></pre>
+                <div class='exp2'><p>Placing <code class='ic'>runAsNonRoot</code>, <code class='ic'>runAsUser</code>, <code class='ic'>runAsGroup</code>, and <code class='ic'>seccompProfile</code> at the <strong>Pod level</strong> means those defaults apply automatically to every container you add later. <code class='ic'>allowPrivilegeEscalation: false</code> and <code class='ic'>capabilities.drop: [&quot;ALL&quot;]</code> must live at the <strong>container level</strong> because they are container-only fields — the API rejects them at the Pod level. Together, the container now: (1) runs as UID 1000, never root; (2) cannot call <code class='ic'>setuid</code> binaries to gain extra permissions; (3) has zero Linux capabilities, so even if an attacker lands inside the container they have no kernel levers to pull; (4) is covered by the runtime&#x27;s seccomp filter, which blocks unusual syscalls.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice 2: Add a read-only root filesystem with a writable volume escape hatch, then verify both behaviors.</p>
+<p>Extend <code class='ic'>secure-pod.yaml</code> from the previous task by adding:</p>
+<ul>
+<li><code class='ic'>readOnlyRootFilesystem: true</code> at the container level.</li>
+<li>An <code class='ic'>emptyDir</code> volume named <code class='ic'>writable</code> mounted at <code class='ic'>/writable</code>.</li>
+<li><code class='ic'>fsGroup: 2000</code> at the Pod level so the volume is group-owned by GID 2000.</li>
+</ul>
+<p>After applying:</p>
+<p>1. Try to create a directory at the root (<code class='ic'>mkdir /test</code>) — this must fail.</p>
+<p>2. Create a file under <code class='ic'>/writable</code> (<code class='ic'>touch /writable/hello</code>) — this must succeed.</p>
+<p>3. Try to change the file&#x27;s ownership (<code class='ic'>chown 0:0 /writable/hello</code>) — this must be denied.</p>
+<p>Explain what each result proves.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000          # TODO: this is already placed; make sure you keep it
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: # TODO: set this
+        capabilities:
+          drop: [&quot;ALL&quot;]
+      volumeMounts:
+        - name: writable
+          mountPath: # TODO: set the mount path
+  volumes:
+    - name: writable
+      emptyDir: {} # TODO: confirm this is an emptyDir</code></pre>
+              <details><summary>Hint</summary><ul><li>If you update an existing Pod with `kubectl apply`, Kubernetes will reject the change because most Pod spec fields are immutable after creation. Delete the Pod first (`kubectl delete pod secure-pod`) then re-apply.</li><li>`fsGroup` belongs at the **Pod level**, not the container level. It affects how volumes are group-owned at mount time; the container does not need any write permission to `/` itself.</li><li>If `touch /writable/hello` returns `Permission denied`, double-check that `fsGroup: 2000` is set and that `runAsUser: 1000` is not overriding to a UID that is not in group 2000. The kubelet adds the fsGroup GID to the container&#x27;s supplementary groups automatically.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 3000
+    fsGroup: 2000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]
+      volumeMounts:
+        - name: writable
+          mountPath: /writable
+  volumes:
+    - name: writable
+      emptyDir: {}
+
+# Verification commands and expected output:
+
+# kubectl apply -f secure-pod.yaml
+# kubectl exec -it secure-pod -- sh
+
+# 1. Read-only root check:
+# $ mkdir /test
+# mkdir: can&#x27;t create directory &#x27;/test&#x27;: Read-only file system   ✓
+
+# 2. Writable volume check:
+# $ touch /writable/hello
+# $ ls -l /writable
+# -rw-r--r--  1 1000  2000  0  ...  hello                        ✓
+
+# 3. Capability check:
+# $ chown 0:0 /writable/hello
+# chown: /writable/hello: Operation not permitted                 ✓
+
+# What each result proves:
+# (1) readOnlyRootFilesystem: true is active — the container cannot
+#     modify its own filesystem image.
+# (2) fsGroup: 2000 made the emptyDir volume writable to UID 1000
+#     because it is group-owned by 2000 and UID 1000 is a member
+#     of that group (via fsGroup injection).
+# (3) capabilities.drop: [&quot;ALL&quot;] removed CHOWN — even root-equivalent
+#     file ownership changes are blocked.</code></pre>
+                <div class='exp2'><p><code class='ic'>readOnlyRootFilesystem: true</code> mounts the container image&#x27;s root filesystem with the kernel <code class='ic'>MS_RDONLY</code> flag. This prevents any write to the container&#x27;s own layers — configuration tampering, binary replacement, and log injection all fail at the kernel level. The <code class='ic'>emptyDir</code> volume sidesteps this for the specific path <code class='ic'>/writable</code> because it is a <em>separate</em> mount, not part of the read-only root. <code class='ic'>fsGroup</code> ensures that Kubernetes <code class='ic'>chown</code>s the volume to GID 2000 at Pod startup, and because UID 1000 is injected into that group by the kubelet, the container user can write there without needing elevated privileges. Finally, the <code class='ic'>chown</code> denial proves that <code class='ic'>CHOWN</code> capability is gone — the container cannot reassign file ownership, which is a classic step in privilege escalation attacks.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge: Debug a broken multi-container Pod by fixing its securityContext configuration.</p>
+<p>The manifest below has four deliberate mistakes that prevent it from meeting the least-privilege baseline. Find each mistake, correct it, and apply the fixed manifest. Then exec into the <code class='ic'>web</code> container and confirm that <code class='ic'>id</code> shows a non-root UID and <code class='ic'>mkdir /break</code> fails.</p>
+<p>Hints are available if you get stuck, but try to spot all four issues from the YAML alone first.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 0          # mistake 1
+    fsGroup: 5000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: web
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        allowPrivilegeEscalation: true   # mistake 2
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;NET_ADMIN&quot;]            # mistake 3
+    - name: sidecar
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        runAsUser: 0                     # mistake 4
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]</code></pre>
+              <details><summary>Hint</summary><ul><li>Start by checking whether the Pod even starts: `kubectl describe pod broken-pod`. An admission error from `runAsNonRoot` usually appears as a `CreateContainerConfigError` event with a message like &#x27;container has runAsNonRoot and image will run as root (container specified runAsUser is 0)&#x27;.</li><li>For mistake 3, ask yourself: if you drop only `NET_ADMIN`, what capabilities does the process still have? The answer is all the rest — including `SYS_ADMIN`, `CHOWN`, `DAC_OVERRIDE`, and many others. `drop: [&quot;ALL&quot;]` is the correct starting point.</li><li>For mistake 4, remember the merge rule: container-level `runAsUser` always wins over Pod-level `runAsUser`. The `runAsNonRoot` check happens *after* the merge, so a container that declares `runAsUser: 0` passes the UID resolution as root before `runAsNonRoot` can stop it.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: broken-pod
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000        # fix 1: was 0 (root). Must be non-zero because
+                           # runAsNonRoot: true would reject UID 0 at startup.
+    fsGroup: 5000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: web
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        allowPrivilegeEscalation: false  # fix 2: was true. Allows setuid
+                                         # escalation, defeating least-privilege.
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]    # fix 3: was [&quot;NET_ADMIN&quot;] which drops only one
+                           # capability and leaves all others (including CHOWN,
+                           # SYS_ADMIN, etc.) intact. Correct baseline is ALL.
+    - name: sidecar
+      image: busybox:1.36
+      command: [&quot;sleep&quot;, &quot;3600&quot;]
+      securityContext:
+        runAsUser: 1000    # fix 4: was 0. Container-level runAsUser: 0
+                           # overrides the Pod-level runAsNonRoot: true
+                           # guard and forces root execution.
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]
+
+# Verify web container:
+# kubectl apply -f broken-pod.yaml
+# kubectl exec -it broken-pod -c web -- sh
+# $ id
+# uid=1000 gid=0 groups=5000   ✓ (non-root)
+# $ mkdir /break
+# mkdir: can&#x27;t create directory &#x27;/break&#x27;: Read-only file system  ✓</code></pre>
+                <div class='exp2'><p>Each mistake targets a common real-world misunderstanding:</p>
+<p><strong>Mistake 1 — <code class='ic'>runAsUser: 0</code> at Pod level.</strong> Setting <code class='ic'>runAsUser: 0</code> explicitly chooses root and conflicts directly with <code class='ic'>runAsNonRoot: true</code>. Kubernetes rejects the Pod at admission because these two settings contradict each other. The fix is any non-zero UID.</p>
+<p><strong>Mistake 2 — <code class='ic'>allowPrivilegeEscalation: true</code>.</strong> This re-opens the door for setuid-root binaries to elevate the process from UID 1000 back to UID 0 inside the container. Correct default is <code class='ic'>false</code>.</p>
+<p><strong>Mistake 3 — <code class='ic'>capabilities.drop: [&quot;NET_ADMIN&quot;]</code>.</strong> Dropping only one named capability is not a baseline — it strips <code class='ic'>NET_ADMIN</code> but leaves dozens of others (including <code class='ic'>CHOWN</code>, <code class='ic'>DAC_OVERRIDE</code>, <code class='ic'>SYS_ADMIN</code>) fully active. The least-privilege pattern is always <code class='ic'>drop: [&quot;ALL&quot;]</code> first, then add back only what the workload specifically requires.</p>
+<p><strong>Mistake 4 — <code class='ic'>runAsUser: 0</code> at container level on <code class='ic'>sidecar</code>.</strong> Because container-level settings override Pod-level settings, <code class='ic'>runAsUser: 0</code> on the sidecar container takes precedence over the Pod&#x27;s <code class='ic'>runAsUser: 1000</code> and <code class='ic'>runAsNonRoot: true</code>. The sidecar ends up running as root despite the Pod-level guard. Always audit every container&#x27;s securityContext block, not just the Pod level.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=ZoTKkmY6VSw' target='_blank'>Day 41: Pod Security in Kubernetes – Mastering Security Context &amp; Linux Capabilities | CKA 2025</a></li><li><a href='https://www.youtube.com/watch?v=fyMiIM_UReU' target='_blank'>Kubernetes Pod Security Deep-Dive: Deny Privilege Escalation, Drop Capabilities &amp; Run as Non-Root</a></li><li><a href='https://www.youtube.com/watch?v=Nppym_oFdYQ' target='_blank'>Pod Security Context: Running as Non-Root | Kubernetes Security Tutorial</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

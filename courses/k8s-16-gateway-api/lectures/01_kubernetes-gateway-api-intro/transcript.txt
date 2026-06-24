@@ -1,0 +1,390 @@
+## Video 1: How to Migrate Ingress NGINX to Gateway API (FULL Step-by-Step Kubernetes Demo + Zero-Downtime)
+https://www.youtube.com/watch?v=hN6eGkFd2ME
+
+Hello everyone, welcome back to the channel. I am Nikhil Kumar. Today we are doing one of the most important Kubernetes setup that is migrating your existing ingress nginx application to a gateway API using nginx gateway fabric. This is video five in my gateway API series. If you haven't watched my initial four videos where we installed gateway API, created gateway, created HTTP route and configured both manual and automated TLS, I highly recommend to watch those videos first because in this video, we are building on that particular knowledge.
+
+So in this demo we will take a real application which is being exposed using ingress nginx and then we will fully migrate it to a modern gateway API configuration.
+
+Let's begin with our starting point. The application which is currently running using ingress nginx. This will be our source system from where we will start the migration.
+
+All right, let's start with what we already have running in our cluster. This is our existing setup using ingress nginx, and this is exactly what we are going to migrate to Gateway API. So first of all let's check the application status. So for that we can run kubectl get pods and we can see that my nginx pod is working fine. This is the app that is currently being exposed through our ingress.
+
+So let's check the service because ingress internally routes traffic to the service. So kubectl get service. Here we can see my-nginx service is been created. It's a cluster IP service and the ingress controller forwards external traffic to this particular service.
+
+Now check the ingress. So kubectl get ingress. As we can see there is one ingress controller already created with the name nginx-ingress and here we can see the ports that is 80 and the 443 that means it works for HTTP and HTTPS both. So let's describe this resource. So kubectl describe ingress and the ingress name. It has a host, in my case it's master01 and it has a rule for path that is '/' routes a traffic to service that is my-nginx. This is the classic common index setup that most Kubernetes clusters uses today.
+
+So let's test this as well. So using curl -k https://master01 and we can see that the nginx application is working fine via ingress controller. As we can see, the HTTPS is working for the ingress controller as well. The traffic come through the ingress controller. TLS is handled using the secret we created and the request is finally reaches to our nginx application.
+
+So this is our baseline a fully working ingress based application.
+
+Now let's talk about the migration plan. Before we start the hands-on on migration, I want you to clearly understand what is changing when we move from ingress to a gateway API.
+
+On the left hand side, we have a traditional ingress which is a very monolithic object. A single YAML does everything your routes, hostnames, backend services, TLS configuration, rewrite annotation and lots of controller specific behavior. So the ingress become a big block of configuration, and the moment you add multiple apps or the multiple teams things get messy very quickly.
+
+Now on the right hand side we have the gateway API which follows a modular and modern architecture. Everything is broken into clear, independent components. It has a gateway class. It defines which controller will implement the gateway. Then we have a gateway. It defines the front-end listeners like port, TLS and the IPs. And it has a HTTProute which defines the backend routing like paths, host and the services. And instead of controller specific annotation, we now use standardized features and the filters.
+
+So the idea is simple. Ingress is equal to one big file. And gateway is like a small clean, modular files with clear responsibilities. This separation is what makes gateway API much easier to manage in production especially when you have a multiple apps, multiple teams or complex routing logic.
+
+So we are not deleting the application, the service or the TLS secret. We are only replacing the ingress layer with the gateway API layer.
+
+All right. Now the architecture is clear. Let's jump into the actual migration. Before we start writing an YAML, let's look at the exact migration step we are going to follow. We will create a step-by-step process for the migration plan from ingress to the gateway API so that you can use that particular approach in the production environments.
+
+The first step is export existing ingress. We first take the current ingress yaml and understand how it works. The host, the path and the TLS certificate and the backend services. This is our starting point.
+
+Next, we will create a gateway resource. This replaces the entry point part of the ingress, basically the ports, protocols and the TLS termination.
+
+Then we are going to create a HTTProute. Here we move the routing rules from the ingress into a separate HTTP router resource. This is where we define host hostname and the backend services.
+
+Then we need to attach the TLS to the gateway. In the gateway API, TLS doesn't sit inside the HTTP route. It always lives on the gateway listener. So we attach the same TLS secret that the ingress is using right now.
+
+Next we are going to test it. This is very important because ingress and gateway API can run together. So we test everything with a zero down time and at last we are going to remove the old ingress.
+
+So once we are fully confident that routing works through the gateway API, we finally delete the old ingress. So these are the six essential step you can follow to migrate any ingress based application to gateway API whether you are working in dev, staging or even a strict production environment. If you follow this six-step plan, you can easily migrate your application from ingress to a gateway API.
+
+Now that the plan is clear, let's start the actual hands-on migration. So before we write any new YAML, let's extract and understand our existing ingress. This is something you always do in a real migration. So first of all, we need to get the YAML for the currently working ingress controller. So, for that first of all, we get the name. So kubectl get ingress. So the name is nginx-ingress. So to get the yaml for that we can use kubectl get ingress and the ingress name and we need to specify the old-ingress.yaml.
+
+So the file got created. So if I open this file old-ingress.yaml. I missed -o yaml in this command. So let me update that. So -ingress -o yaml. So if I open this file again. So this is the complete manifest file which is being used by the ingress controller.
+
+Now let me break it down for you so that you can easily understand the ingress controller and you can easily migrate it to a gateway API as well. So if we come here in the specification we can see under the rule we have a host that is the hostname of our server that is master01. So we will move this to a HTTP route. Then we have a path that is for the slash and specifying the backend services as well. So this becomes a rule inside the HTTP route.
+
+Then we have a TLS block where we are specifying the hostname and the secret information. So this moves from ingress to a gateway listener. And if we go above, we can see the annotations. Ingress uses annotations heavily, but the gateway API replaces this with standardized feature for this basic migration. We don't need a rewrite one.
+
+So now we know exactly what need to be moved from where. So let's start by creating a gateway API object. So the gateway replaces the ingress controller entry point. So let me create a file for that. Create one folder migration ingress to gateway API. And let me go inside this and here I'm going to create all the files for this particular demo.
+
+Before we continue, just a quick note the gateway API with nginx gateway fabric is already installed in this particular cluster. So if we want to check that so we can run this command that is kubectl get all and under the names that is nginx-gateway and we can see all the pods and the services for the nginx gateway fabric is running fine and I have already covered the full installation and the configuration step for the TLS in my previous video. So you can watch that first if you need the basics understanding of the gateway API and the TLS configuration in the gateway API.
+
+Now let's move on to a gateway creation part. So let me create a file. So vi gateway.yaml. So this is our gateway file. So let's understand this file in a simple way. At the top we are creating a gateway resource. So we are placing it into a default namespace. The important part here is the gateway class name that is nginx. So this tells kubernetes to use the nginx gateway fabric controller which we already installed earlier using the helm chart.
+
+Then we define two listeners. These are the entry points for our application. The first one is for the HTTP. Here we are specifying the protocol that is HTTP, the port that is 80 and we are allowing HTTP routes only from the same name space. So this is the most secure and the beginner friendly option.
+
+The second is HTTPS listener. In this we are using the protocol HTTPS and the port number 443. And here we are setting up the TLS to terminate, which means the gateway decrypts the HTTPS before forwarding the traffic. And here we reference the same TLS secret that our ingress was using that is myapp-TLS.
+
+And remember in the gateway API the TLS termination always happens on the gateway not inside the HTTP route. So this is the correct place to configure the certificates. So let me apply this. So we can use kubectl apply -f gateway.yaml. So the gateway got created.
+
+So if we run kubectl get gateway. So we can see the gateway got created and we can see the IP address that is a clusterIP and we can see that program is equivalent to true.
+
+Now let's see the service for that. So if we run kubectl get service we can see it internally created a two service. One is the my nginx that is a cluster IP service and another is a nodeport service that is a nginx gateway nginx that is a notebook services which exposes the port 80 and the 443.
+
+During the migration, we will use this note port service for the testing purpose and I have already covered this particular thing in very much detail if you want to understand how to configure the TLS certificate using the manual or the cert manager. So I will add a link in the description. So I would suggest you to check it out to get a better understanding that how these particular things works in the gateway API.
+
+Now that our gateway is created and fully configured with HTTP and the HTTPS listener, the next step is to migrate the actual routing rules. Basically, everything that was inside the spec under the rules section of the ingress will now move into a HTTP route.
+
+So what I mean that spec rules. So if I open the old ingress file here if we see under specification under the rules we have this particular section where we are specifying the path and the service that is a backend service to route the traffic.
+
+Think of the gateway as a door and the HTTP route as the rule book that decides how the traffic flow inside.
+
+Now let me create a file for the HTTP route. So vi httproute.yaml and let me update the content here. So this is our httproute file. So let me break this down for you.
+
+So first of all, we are specifying the metadata that is the name and the namespace information. So we are going to create this particular http route under the default namespace because our application and the gateway is in the default namespace.
+
+Under the specification we are going to specifying the gateway information, the hostname name and the rules. The parentref section attaches this HTTP route to a gateway which we created earlier. So this is similar to the ingress class name but much more explicit and the flexible.
+
+Next we add a hostname. This comes directly from the ingress. So whatever host the ingress was matching, we put the same value here. So this ensures routing only applies for request coming to this hostname. Then we define the rules. So here we match the / path using the path prefix which give us the same behavior as the ingress path type, and finally we point the traffic to the backend service using the backend refs. So this replaces the backend service.name and the backend.port from the ingress file.
+
+So this single HTTP route file completely replaces the routing logic of the ingress. So let me apply this. So kubectl apply -f httproute.yaml. So the http route got created.
+
+So let's verify that kubectl get http route. And we can see the http route got created. And here we can see the hostname information that is master01.
+
+Now our gateway api setup is fully in place. The gateway handles the entry point, and the http route handles all the routing logic. Now it's time to test everything side by side without touching the ingress.
+
+In production, migration must always be zero downtime. So instead of deleting the ingress, we test the gateway API while the ingress is still alive. So let me get the gateway nodeport. So we can use the kubectl get service and this is the nodeport for that.
+
+So here it exposes the port 80 via node port 32708 and 443 port number via 30985 port number. So let's test this one. So curl -k https and the hostname that is master01 and the port number 30985. And we can see the application is working fine.
+
+And if I want to test the same application using the ingress. So if I run curl -k https://master01 and from ingress as well it's working fine.
+
+Now we are ready to switch the traffic to the gateway API completely. You might be confused that I use a nodeport here and it doesn't look good while we are working in the production. So here I use the service type as a nodeport while deploying the nginx gateway fabric. But so in the production you generally use the load balancer as a service type for the engine gateway fabric. So you don't need to worry about these things in the production environment with the load balancer as a service type.
+
+Now, in a real production migration the final step would be to update the DNS to point to the new gateway entry point, and this could be your cloud load balancer IP, a node IP or a custom virtual IP address, depending on your environment.
+
+And once the traffic is flowing smoothly through the gateway API, we can safely retire the old ingress. So for that what we can do kubectl get ingress. So this is our ingress name. Let me delete this. So kubectl delete ingress. So the ingress got deleted successfully.
+
+And if I run kubectl get gateway. So this is our gateway. And if I run the same command again, now our application is not accessible via ingress. Now if you want to test the application or access the application using gateway API, we can use the same configuration with the nodeport and the domain name. And we can see that our application is fully migrated to a gateway API.
+
+And that's it. All your traffic is now flowing through the gateway API using nginx gateway fabric.
+
+But before we end the video, here are some real world tips that I personally follow whenever I migrate applications from ingress to a gateway API.
+
+So first of all, do not delete the ingress first. Always test the gateway API side by side. So this ensures the zero downtime. So in the demo you just saw. So I didn't deleted the ingress first. I just tested the gateway API. If it works fine, then only I deleted the ingress controller.
+
+Second is to keep the same TLS secret. This makes the migration seamless because both ingress and the gateway API reuse the same certificate.
+
+Third is to verify all host name and the path. Even a small typo in the hostname can break routing.
+
+And fourth is to use the cert manager. For real production cluster always automate certificate renewal. So you can seamlessly automate the certificate creation creation of the secret via cert manager and you just need to update the secret information in the gateway file.
+
+Fifth is to use the multiple HTTP routes. Don't put everything into one giant YAML file. Split route by service or by microservices.
+
+Sixth is to move read rules or the headers. This should be moved into a gateway API filters and do not try to replicate annotation behavior manually.
+
+And at last separate apps by namespace and allowed rules. So this gives team clean boundaries and avoid accidental routing conflicts.
+
+So these are simple but extremely powerful practices and they will save you a lot of troubleshooting when you manage large Kubernetes cluster and that completes our full migration from existing ingress application to a gateway API.
+
+So we analyze the existing ingress created equivalent gateway, created HTTP route migrated TLS tested traffic side by side and retired the old ingress.
+
+If you found this video helpful, hit like, share it with your friends, and subscribe for more content like this. And definitely check the previous video if you want a strong foundation. Thanks for watching. I will see you in the next one.
+
+---
+
+## Video 2: Stop Using Ingress! The Complete Gateway API Guide (GKE & NGINX)
+https://www.youtube.com/watch?v=xj8KzHfEEcU
+
+Hello everyone, welcome back to channel. I am Nikhil Kumar. Today's video is complete end to end gateway API project where we will deploy a real microservice architecture on Google Kubernetes engine and secure it using cert manager and let's encrypt and route everything to nginx gateway fabric.
+
+If you followed my gateway API playlist, this video will feel like a perfect final project because we are using all the concept we learned, like gateway API fundamental, deploying nginx gateway fabric, doing HTTPS using openssl and cert manager and even migrating an ingress to a gateway API.
+
+Each of those topic has its own deep type. But today we are putting everything together and building it as one clean production grade setup. So let's dive in and start building this production grade architecture.
+
+Before we touch any command, let me show you what we are building today. Here is the architecture diagram for the same. A client sends an HTTP or HTTPS request, and that request first lands on a GCP external load balancer. This load balancer is automatically created by a nginx gateway fabric because NGF exposes a load balancer service in Kubernetes.
+
+From the load balancer, traffic goes to the NGF, which is our gateway API controller and the NGF look at the gateway and the HTTP route. Here we have configured the two microservice. One is the API service, another is a front-end service.
+
+Now for the HTTPS here how the flow work in the production. We are using the cert manager here to handle a TLS certificates automatically. Then the cert manager requests a certificate from let's encrypt and the let's encrypt verifies domain ownership using an HTTP01 challenge and the nginx gateway fabric temporarily exposes this challenge endpoint and the cert manager completes this verification.
+
+Once everything is validated, let's encrypt issues the certificate. Then the search manager stores the certificate as a Kubernetes secret, and the NGF will automatically start serving HTTPS using that certificate. So there is no manual TLS configuration required in this particular setup.
+
+So what you are seeing here is a fully automated production grade HTTPS flow.
+
+Before we start with the hands-on, I want to explain why this architecture matters.
+
+First, the ingress nginx is getting deprecated. Gateway API is a new standardized vendor neutral way to do traffic routing. nginx gateway fabric is an official production ready implementation, and the cert manager gives us automatic certificates. So there is no manual OpenSSL and no copying keys. And at last, GKE provides a real cloud environment with real load balancers. This project shows you exactly how modern workloads should be exposed to the internet.
+
+So all right, let's start from the beginning. We will first deploy the GKE cluster on the GCP. So let me go to the GCP console. So here, as you can see there is no GKE cluster on this particular console. So first of all we will create a one for us. So we need to click on create and inside this we have a two option. First is autopilot. Another is a standard one. So I'm going with the standard one, where we are going to manage our cluster.
+
+Here, we need to give a name to this particular cluster. So I'm giving a gateway API demo. So this is the name of the cluster. I'm here using the default values for the location and the region. So here I'm going with a 1.33.5 version of the GKE. And here, if I go to the node pools, this is the name of the pool. And here I am going with the one node on each zone. And in totality, I have a three nodes in this particular cluster. And I'm going with the standard VMs here. And if I go to the nodes, if we scroll down, I'm going with the E2 medium. So for that we have a 2vCPU, one core, and the 4GB memory. I'm giving the value which is coming as a by default here. So I'm not going to change anything.
+
+And if I click on create, so it will take around 5 to 7 minutes to create a GKE cluster.
+
+Now, right now it's doing the configuration on the cluster. As you can see it shows the status as provisioning mode as standard, and the number of nodes is three because we have selected one node on each region and here the region is US central one and right now it's in the configuration state and that's why we are not able to see the endpoint.
+
+So GKE will now provision everything for us, nodes, networking, firewalls and the control plane and once the cluster is ready we can connect with it using this particular option.
+
+Now the cluster got configured successfully. Now it's in the deployment state. And here we can see the endpoint as well because it deployed the three nodes for us and the cluster got deployed successfully and at last it's running the health checks on the particular cluster so that it can verify all the networking all the node and all the firewall are in the place.
+
+Now it's almost done. If we click on details we can get all the information about this particular cluster. This is the name which we set, and this is the mode which we selected. And if we scroll down, this is a default zone where the node got deployed and here the total size of node is three because on each zone one node got deployed and if we scroll down this is the version we selected and if we scroll up the cluster got deployed successfully and it's in the running state as well.
+
+And here we can see we have a connect option. If we click on that it will open a cloud shell. So here we can click the cloud shell and if I click on open in new window let me open in the new window. So it will open a new window for us.
+
+Now we need to retrieve the credentials. So for that I can run this command to get the credential of this particular cluster. It will start fetching the cluster endpoint and the authentication data. Will also generate the kube config file for the gateway API demo cluster.
+
+And if I run kubectl get nodes, I can see the cluster got deployed successfully and it's having the three nodes.
+
+Now our GKE cluster is up and running. But before installing nginx gateway fabric, we must install the gateway API CRDs. These are the definition for gateway, HTTP route, TLS route at extra. And we will install both experimental and the standard CRD.
+
+So first of all, let's install the experimental CRD. So for that we can run the kubectl command along with the GitHub repository. So here it will start installing the all the CRDs which is required for the gateway API and the experiment CRDs include resources like backend TLS policy TLS route which nginx uses internally and here we can see it installed all the CRD backend TLS gateway class gateway and everything to verify that if the CRD got installed.
+
+So we can run kubectl get CRD and grep for gateway and we can see all the gateway CRDs got installed successfully.
+
+Now we need to install the gateway API fabric using the helm chart. Before that I will create a values.yaml file. So nginx gateway fabric generate its internal TLS certificates automatically.
+
+So let me clear out the screen first and create one file ngf-values.yaml. So here we are specifying the certificate generation parameters. So I will explain it very quickly. So first of all we are specifying the cert generator. I am enabling it via enable equal to true. So it turn on the NGF internal certificate generation because we are going to use a cert manager using the HTTP01.
+
+So for that we need to enable this. After that we are specifying the server TLS secret name and we are specifying the name that is server-TLS. This is the name of the TLS secret used by the server component of NGINX gateway fabric.
+
+Below that we are specifying the agent TLS secret name and we are giving a name agent-TLS and this secret is used by the agent communicating with the control plane. And at last we are specifying override equal to true. That means if the secret is already exist it will regenerate them.
+
+So this values dovy file removes the manual step of creating internal secrets. So when we run the helm install command so it will automatically create a secret for the same.
+
+So let me save and exit. Now I will run the helm install command to install the nginx gateway fabric. So this is the command for the same. So here I'm specifying the ngf and the repository name. And here I'm specifying the namespace and I'm also specifying the option that is create namespace. If the nameace is not there so it will create that. And at last I'm specifying the values.yaml file we just created.
+
+If I hit enter. So now it's installing the nginx gateway fabric. So it will take around 1 to two minute to install that.
+
+Now the nginx gateway fabric got installed. Let's verify it very quickly. So for that we can run kubectl get pods -n nginx-gateway. This is the namespace which we specified in the helm install command. So if I hit enter we can see the pod is in the running state that is for the nginx gateway fabric.
+
+And here if you see there is one more pod that is for the cert generator because in the value yaml we specified the variables to create a certificate. So this is the pod which does those job and it got completed because the certificate got created.
+
+And if I run kubectl get all -n nginx-gateway we can see the pod is in the running state. It created one service and there is one deployment as well which is managing this pod with the help of replica set.
+
+If you remember in the last video, when I deployed the nginx gateway fabric I use a node port as a service type for the nginx gateway fabric and specified the same in the values.yaml and this time I didn't specify anything in the values for the service type. I just specify the information about the certificate generation. If I open this file there is nothing related to that. So this time it will use external load balancer to assign a IP address to the service and the gateway.
+
+Next, let's deploy two simple applications so we can test the routing. So for that I have a manifest file. So let me open that vi apps.yaml. If I go to the top of this file. So this is our front-end application and this is a service for that. So here I'm creating a service with a name called frontend-service and below that we have a manifest for the deployment where we are creating a two replica for the front-end application.
+
+If I go down and this is the section for the API application where I am creating a service for the API application and this is the deployment for the same. So let me apply this very quickly. So kubectl apply -f apps.yaml. So the application got deployed.
+
+Let's verify it very quickly. So kubectl get pods. We can see our frontend and API application are running fine. And if I run kubectl get service we can see the service also got created. The first one is the API service and another one is a frontend hyphen service and both are the cluster IP type and that means the both the application are accessible within the cluster as of now.
+
+So now we have a two working kubernetes application but it's waiting for gateway API to route traffic to them. So now let's create our gateway. So for that I have a manifest file. So let me open that vi gateway.yaml. This is our gateway manifest file.
+
+So here I'm specifying the name of the gateway that is a main hyphen gateway and I'm creating it into the default name space because our application is also running in the default name space and after that I am specifying the gateway class name which is being created by the nginx gateway fabric and the name of the gateway class is nginx. So here I have a two listener one is for the HTTP request and another is for the HTTPS request.
+
+So here we can see I'm specifying the name of that particular listener that is HTTP protocol is HTTP and the port is 80 and here you can see I use the allowed routes and under the name space I use the same that means only HTTP route object from the same namespace that is default can attach to this gateway and below that I have a listener for the HTTPS request.
+
+I will cover it later once I will create a cert manager object. So let me save and apply. And if I apply this kubectl apply -f gateway.yaml. So the gateway got created.
+
+Let's verify that kubectl get gateway. So right now we can see the gateway got created with a name called main-gateway and this is the gateway class. As we can see it didn't assign any IP address to it as of now and programmed is equal to true.
+
+And let's verify the service. So kubectl get service we can see it created another service with a name called main-gateway-nginx and the type is load balancer because we deployed nginx gateway fabric as a load balancer type that's why it using a load balancer as a type for the service which and right now it's waiting for assign an IP address that is a load balancer IP address and if I run the same command again we can see the IP address which is a load balancer IP and if I run the kubectl get gateway again and here we can see this is the same load balancer IP we are getting from the gateway as well.
+
+Now let's try to access this application using the load balancer IP. If I run this with HTTP, it's working fine but it's not showing any information here because we didn't set the HTTP route.
+
+Now let's route traffic to both the services based on the URL path. For that, let's open the routes.yaml file. So this is the file for the same. So this is the manifest file for the HTTProute.
+
+So here I'm giving a name to the HTTP route that is app-route and under the specification here we have a parent reference where we are referencing to the gateway which we created just now and the name of the gateways main-gateway.
+
+And below that we have a host name. So we need a DNS name for the HTTPS. And here I use the .SSLP.io which converts your public IP into a DNS name automatically. So there is no domain configuration is required for that and SSL IP is very amazing because we don't need to buy or configure any domain. Just put your IP in the host name and SSLIP.io take care of the DNS for you. This makes testing HTTPS very easy.
+
+So let me update the load balancer IP here. So this is the IP address for the same. So let me update it here. So this is the one. So we just need to update the IP address of the load balancer here and rest of the information will remain same.
+
+So below that we have a rules. We have a two rules here. One is for the API path and another is for the frontend path because we have a two application running. One is an API application and another is a frontend application.
+
+For the API application we are specifying the path that is /api and its back end is API-service which we created earlier. Below that we have a another rule for the front end application where we are specifying the path that is / and its back end is frontend-service.
+
+So let me apply this. So kubectl apply -f routes.yaml. So the httproute got created. So let's verify it very quickly. So kubectl get httproute. So the http route got created with a name called app-route. And this is the hostname we are getting because this is the same hostname which we gave.
+
+Now if I copy this hostname and try to access our application. So if I copy paste it here, we can see our front end application is working fine. Now if I update the path to / API, we can see our API application is also accessible. That means our both the endpoints is working fine.
+
+But right now it's working on the HTTP and it's not secure. So we need to secure it. For that we are going to install the cert manager which will handle the automatic certificate creation for us.
+
+So let's get back to our terminal. So first of all we need to add the repository for the helm. So let me clear out the screen and run helm repo add jetstack and the jetstack url and it's jet stack and the URL. So the repository is already created. So let's run the helm install command.
+
+So this is the command for the same. By default the cert manager is not enabled the gateway API object. So we need to enable it. So for that I'm specifying this particular variables. And here you can see the config dot enable gateway API is equivalent to true. This is very important because without enable gateway API the challenge will fail and we will not able to serve our application over the https.
+
+So let's press enter. So it will take around one or two minute to install it.
+
+So the cert manager got installed successfully. Let's verify it very quickly. So for that we can run kubectl get pods -n cert-manager because this namespace is being created by the helm install command and we can see our three pods are running. One is for the cert manager another is for the cainjector and at last we have a webhook pod.
+
+Now let's create a cluster issuer for us. For that I have already created a file. So vi clusterissuer.yaml. So this is the cluster issuer file. So let me explain it very quickly. So here we are creating a cluster issuer which can issue a certificate for any namespace.
+
+So here I'm giving a name that is let'sencrypt- HTTP01 because I'm using HTTP01 challenge. In the specification I am specifying the ACME and the server and I'm specifying the production let's encrypt API. This URL points cert manager to the real let's encrypt servers not the staging environment. So we will get the real trusted certificate that browser accept and let's encrypt needs an email so that they can notify you when a certificate is about to expire and this is required for the acme as well.
+
+Below that we are specifying the private key secret reference. This is the private key for the account is stored in the kubernetes secret as so it doesn't have to register again and this is the most important section.
+
+Yes, this section is the real magic. We tell the cert manager to use the HTTP01 challenge and here we are specifying the gateway API instead of ingress. So we are updating the gateway API HTTP route and specify the parent reference kind as a gateway and we are specifying to use our main gateway to expose that challenge because we just created a gateway that is a main hyphen gateway and we are specifying the same and here I'm also specifying the namespace that is a default.
+
+Normally cert manager uses ingress to expose HTTP01 challenge but here we are using the gateway API. So we must tell cert manager which gateway will serve that challenge. So we point it to the main gateway only. So whenever let's encrypt ask for verification nginx gateway fabric will expose the challenge file on port 80. So let's encrypt will check it and once it passes we get the certificate.
+
+So let me save and exit and let's apply it very quickly. kubectl apply -f clusterissuer.yaml. So the cluster is got created. Let's verify it. kubectl get clusterissuer. So the cluster is got created with a name called let's encrypt http01 and it's in the ready state.
+
+Now it's time to request for a certificate. For that let's let me open the file vi certificate.yaml. This is the manifest file for the same. So we want a certificate name app-cert here in the default namespace and under specification we are specifying the secret name. That means we will store the certificate in this particular secret in the kubernetes. Below that we are specifying the issuer we just created. That is the name of the issuer is let's encrypt http01 and the kind is cluster issuer.
+
+Below that we need to specify the DNS name. So let me update it here because the IP address got changed. So let me copy paste it here and update it here. And let's remove the HTTP header here because it only accepts the hostname. So the DNS name must match exactly what the user will type in the browser.
+
+So if the hostname in certificate and the host name in the HTTP route does not match. So let's encrypt won't verify it. So whatever hostname we put in the HTTProute, we need to use the same here. That's why I copied it from the browser itself. So that there is no typo error will happen.
+
+So let's apply it very quickly. So kubectl apply -f certificate.yaml. So the certificate request got created. So let's run kubectl get certificate with an watch option because right now it's in the false state. At the back end it's doing a lot of stuff.
+
+So let me come out of it and run kubectl get challenge because at the back end it will create one challenge for us and I think it got completed and let's run the same command again to get the certificate.
+
+We can see the certificate got created and the certificate information got stored in the app-TLS secret. And if I run kubectl get secret, we can see the secret got created 27 seconds ago and with the name called app-tls. And this is the same information we are getting from the certificate as well because we have specified the name in the certificate manifest file.
+
+Now we have deployed the cert manager and we have a Kubernetes secret with a TLS certificate information. Now let's update the gateway to serve it with the HTTPS. So let me open this file and at the end I have another listener that is for the HTTPS.
+
+So this listener handles encrypted HTTPS traffic on port 443. So here I'm specifying the name that is HTTPS protocol is HTTPS and the port is 443 and below that I am specifying the TLS information and here the mode is dominate. Basically the nginx gateway fabric will hold the certificate and do the HTTPS handshake. And after that I'm specifying the certificate reference. And here I'm specifying the name that is app-tls. This is the same secret which we created using the cert manager. And inside this only we have a TLS certificate information. And below that we have a same allowed roots equal to same.
+
+Let's apply this very quickly. So kubectl apply -f gateway.yaml. It's doublep. So it got updated successfully. Let's verify it very quickly. So kubectl get gateway it's up and running.
+
+And if I update HTTPS here and we can see our application is working fine with the HTTPS as well. If I hit the another endpoint with that is slash for the front end application that two is also working fine.
+
+If I click on this particular view side information and if I see the connection is secure and if I click on this and if I click on certificate is valid and we can see the certificate is issued by the let's encrypt and this is the same issuer which we use using the cert manager.
+
+Now we have a valid let's encrypt certificate and we are able to access our application using HTTPS and HTTP both.
+
+All right everyone, we did a lot in this video. We didn't deploy an application but we built a proper production ready cloud architecture using a modern tools like Google Kubernetes, nginx gateway fabric gateway API cert manager and let's encrypt and this video completes the foundation of my gateway API series from here we will start diving into more advanced real world scenarios things like production grade gateway setup advanced routing techniques cannary releases and real enterprise patterns those upcoming video will make you extremely strong in the modern kubernetes networking.
+
+But if you want deeper understanding, go back and watch the dedicated videos. All those videos go step by step and will make everything even clearer.
+
+If you found this helpful, hit like, share it with your friends and subscribe for more content like this and enable the bell icon so you don't miss the notification about the upcoming video. Thanks for watching. I will see you in the next one.
+
+---
+
+## Video 3: Multi-Tenant Kubernetes Gateway API: Stop Cross-Team Outages with Secure Namespace Isolation
+https://www.youtube.com/watch?v=DNPWfoMvgaI
+
+When more than one team shares a Kubernetes cluster, traffic management becomes the most fragile part of the platform. One team updates the routing, another team application goes down. And the scary part is nobody intended to break anything.
+
+This is not a Kubernetes problem. This is an architectural problem. So in this video, I will build a real multi-tenant gateway API setup. Two teams, one gateway, one cluster, and zero interference. Everything in this video is mapped to this diagram.
+
+At the very top is the internet. User access application using hostnames like app1 and app2. And all the traffic enters through one shared gateway. That gateway exposes two listeners. First is HTTP which is running on port 80 and another is HTTPS which is running on port 443.
+
+So the port 80 exists for one reason only, that is certificate automation, but end users never touches it. We have another listener which is running on port 443 where the real tenant traffic flows. This is where the isolation matters. So the TLS is terminated once by the platform. After that, traffic is routed internally. So this separation, like automation on HTTP and tenants on HTTPS it what keeps team for breaking each other.
+
+We will start from the bottom of the stack and move upwards. First, we will deploy the namespaces and the application on each of the namespaces. Then we will slow down where the gateway API actually matters. Here everything starts with the ownership boundaries. So let's start by creating tenant boundaries first.
+
+In Kubernetes, the strongest isolation primitive is a namespace. So each tenant starts with its own name spaces. So first of all, let's create a namespace for our tenants and the gateway as well. So let me go under the directory that is multi-tenant.
+
+So, in this, I have already created all the manifest files. So let me open the namespaces one. So here you can see I am creating a three namespaces. The first one is tenant-a. Second is tenant-b. So in these two namespaces, we are going to deploy our applications. And at last we are creating another namespace that is gateway-system. In this namespace I am going to deploy our shared gateway.
+
+So if you notice in the tenant A and the tenant B namespaces, I am using the labels as well. So this label might look simple right now, but later this single label will decide who is allowed to attach route. So if there is no labels to the namespaces so there will be no traffic routing. So let's apply this manifest file very quickly.
+
+So let me save and exit and run kubectl apply -f namespaces.yaml. So all the three namespaces got created. Let's verify it very quickly. So kubectl get ns. So we can see the tenant-a and the tenant-b got created, and the gateway-system namespace also got created and we have also attached labels to the tenant A and the tenant B name pace.
+
+So we can see that using the --show-labels option. So --show-labels along with the kubectl get ns command. So we can see these are the labels which we have attached to the namespaces.
+
+At this point, we have defined who is allowed to participate. Now let's give each tenant something to run. So we are going to deploy a same application on both the tenants. Let me open the manifest file for the same.
+
+So this is the manifest file for our tenant A application. So this is a deployment resource I'm deploying here. And this application is going to be deployed under the tenant-a namespace. And here under the specification I have specified replicas and the selectors. So as of now I'm going with the one replica of this application. So here I'm using a simple application to showcase how the multi-tenant gateway works, and below that I have a manifest file for the service.
+
+So this service will look for a label that is app equal to app1. The same label which we have defined in the deployment definition as well. So let's deploy the application very quickly for the tenant A. So kubectl apply -f. So the deployment and the service got created.
+
+Let's verify it very quickly. kubectl get pods -n tenant-a we can see the pod got created similarly if I run kubectl get service so we can see the service also got created now I will deploy another application in tenant B namespace so let me open the file for the same this is same manifest file which we saw for the tenant A application it's similar we just use a different labels and a different name as well so earlier we were using app1 but for the tenant B I'm using the app2-deployment and I also change the label that is app2.
+
+Similarly, I created a service for the application 2 in the tenant B namespace. So let me apply this as well. So kubectl apply -f and the manifest file name. And we can see the deployment and the service got created. So let's verify it very quickly. get pods kubectl get pod -n tenant-b and we can see the pod is running in the tenant B as well similarly if I run kubectl get service so the service also got created.
+
+At this point both tenants are running workloads they are isolated from each other as well and they are also completely isolated from the internet so now the question isn't about routing yet the real question is where does the traffic even enter this cluster so before we talk about TLS is before routing we need a gateway and this is where most people misunderstand gateway API in gateway API the gateway is not routing logic it is a infrastructure its first job is very boring gets a public IP from the cloud provider so let's deploy our gateway first so let me open a manifest file for the same so I have already created a manifest file for the same that is shared-gateway.yaml.
+
+So this is the manifest file for the gateway here I'm specifying the name of the gateway gateway that is shared gateway and I'm going to deploy this particular gateway under the namespace that is gateway-system which we just created and under the specification I am specifying the gateway class name that is nginx this is the most important section that is a listener one we are starting with only HTTP not because we like insecure traffic but because certificate need a way to prove domain ownership so if you see I'm using the HTTP only and below that I'm allowing all the routes from all the name spaces so this is for the temporary purpose only. So we are not opening traffic for users. We are just opening traffic for an automation. So the port 80 is open but not for the users. It exists only so cert manager can work properly. That's why allowed routes is open for all the namespaces right now.
+
+So let's create a namespace very quickly. So let me come out of this file and run kubectl apply -f shared-gateway.yaml file. And we can see the gateway got created. Let's verify it very quickly. So kubectl get gateway -n gateway-system.
+
+So we can see the gateway got created. But right now we are not able to see any IP address because it's waiting to get an IP address from our cloud provider that is a GCP. If I run kubectl get service -n gateway-system we can see internally it created a service that is shared-gateway-nginx with a type called load balancer and here we can see it didn't assign any external IP as of now and if I run with the hyphen w option we can see the IP address got attached to this as well if I run the get gateway command again so we can see the IP address is reflecting here as well that is the same IP address which we got from the cloud provider for the service as well.
+
+So this gateway is now alive but it does nothing useful yet and that's an intentional thing.
+
+Now let's add an TLS here. So gateway do not create any certificates, and they should not as well. Certificates are a security concern. So we delegate that to a cert manager. So I have already deployed a cert manager in this particular cluster. So if I run kubectl get pod -n cert-manager. So we can see the set manager pods are already running because I have already deployed the cert manager in this particular cluster.
+
+Now we need to create a cluster issuer for this. So let me open a manifest file for the same cluster-issuer.yaml. So here I am creating a cluster issuer with a name called let'sencrypt HTTP01 gateway. So here under specification, I have specified the let's encrypt server URL, and below that I have specified the email address and the private key reference as well. Under the solvers, I am specifying the HTTP01 and below that I am specifying the gateway HTTP route. So this block is very critical. Here I'm telling cert manager don't create an ingress use gateway API instead.
+
+So let's apply this cluster issuer file. So kubectl apply -f clusterissuer.yaml we can see the cluster issuer got created. And if I run kubectl get clusterissuer, our cluster issuer got created successfully.
+
+Now the platform is capable of issuing certificates. So the next decision is simple. Who actually owns the TLS? We could give each tenant its own certificate. But in real platform, that gets expensive very fast because we are going to manage renewals, debugging failures and coordinating expireies across teams, and that's an additional overhead.
+
+So instead of that, the platform owns the TLS, and the tenant owns the routing. So let's request for a certificate as well. So let me open a file for the same that is gateway-san-cert.yaml. So this is a cert manager the certificate resource file. This is where we define what certificate we want not how it issued.
+
+So under the metadata I'm defining the name and the namespace. So I'm giving a name that is platform-cert. I'm also specifying the namespace that is a gateway hyphen system. So this certificate lives in the gateway namespace. This is the same namespace under which we have created our gateway as well. So this certificates belongs to the platform not to any tenant.
+
+So under the specification we can see the secret name. So here I am specified the platform-tls. So when this certificate is issued the site manager stores it in a kubernetes secret and that secret is what the gateway will later reference. This is the name which I defined for the kubernetes secret. Below that I am specifying the DNS name for both the application and this is the most important part as this is the SAN certificate. So one certificate but multiple host name and these host name represent different tenant but they all terminate TLS at the same gateway.
+
+So here we need to update the IP address of the gateway. So let me copy it very quickly. So this is the gateway IP address, and if I open this and update the IP address here. So now I have updated the IP address of the gateway in the DNS name as well.
+
+So here I am referencing to the clusterissuer which we just created. So this tells cert manager who is allowed to issue this certificate. So this is the cert cluster issuer because this is a platform level infrastructure. So the pattern is simple. The platform owns the certificate. The gateway terminate the TLS and tenant only defines the routing rules.
+
+So let's create a certificate resource as well. Let me save and exit, and kubectl apply -f gateway san-cert.yaml. So the certificate got created. So kubectl get certificate -n gateway-system we can see the certificate resource got created but as of now it's not ready so if I run cubectl get order -n gateway-system so it's a valid one and let's verify the same again and we can see the status got changed to true because we got a certificate issued and stored under the secret called platform-TLS and if I run kubectl get secret -n gateway-system so we can see the platform-TLS certificate got created that is 36 seconds ago now that TLS exists we can finally expose https but this time with the guardrails because this is where the platform becomes safe.
+
+So let's update the gateway so for that gateway https is a manifest file so if you notice this is the same block which we used to deploy a shared gateway only for the certificate issuing and below that I'm specifying the another listener that is for the HTTPS because we are going to use a TLS certificate and our traffic should be encrypted.
+
+So if you notice, I'm using the protocol that is HTTPS port that is 443 and here I'm specifying the hostname. Anything ends with the IP address and then nip.io. Here, I need to update the IP address of the gateway, which we just created.
+
+So let me get that first very quickly. So this is the IP address for the gateway, and let me open the file again, and here after the star and dot and let me update the IP address. So this is the hostname because we are going to use the same certificate for all the tenants. Below that, I am specifying the TLS, and the mode is terminate and under that we are specifying the certificate reference. And here we are referencing to the same certificate which we just created and which is stored under the platform-TLS secret under the gateway-system name space.
+
+So if you notice gateway only referencing to the secret it doesn't own the certificate and below that is a allowed route section and this is very important section because if you notice we have created labels at the namespace label as well. So we are going to use those labels here as well. Using that only we are going to route the traffic to the application. So under the namespaces, we are using the selector option and another selector, we are using the match label and tenant equal to true.
+
+So this single selector prevents accidental outages. A team cannot attach route unless platform allows it.
+
+So let me apply this very quickly. So, kubectl apply -f gateway-tls.yaml. So the gateway got configured successfully. Let's verify it very quickly. So, kubectl get gateway -n gateway-system. So everything seems to be fine here.
+
+Let's describe this kubectl describe gateway shared-gateway, and the namespace. So here we can see the listener got accepted and the listener is also got programmed, and all the references are resolved here. And if we go a little bit up. So here we can see we have a listeners. One is for the all the namespaces which is only running for the port 80 that we are using for the HTTP and the certificate issuing. Below that we have another listener that is only for the application. And here we are using the HTTPS and the certificate which we just created. And if you notice, here we are using the labels for the namespace level. So we have created a label at the namespace that is tenant equal to true. So this is the same label which we have used for the gateway.
+
+Now the tenant can safely control the routing. So let's create the HTTP route for both the tenants. And this this is the heart of the gateway API. Each tenant defines routes without touching the shared infrastructure because till here, what we have did for the gateway level it's a platform thing. Now we are going to create the HTTP route that is only for the tenant basis.
+
+So if I open tenant-a-route.yaml. So this is the http route for that tenant a application that is application one. So this is the http route. This is where the routing decision lives in the gateway API. So if you notice under the metadata, I am specifying the name of the httproute that is app1-route. And I'm going to create under the namespace that is tenant-a under which our applications also exist. So this particular route is belongs to a tenant A only because tenant A owns this resources not the platform.
+
+So under the specification, we are specifying the gateway information. So if you notice, we are specifying the parent reference. This is how the tenant attaches to the platform gateway. They don't create a gateway. They just reference the one. So if you notice, I am referencing to the shared hyphen gateway and the namespace as well that is a gateway hyphen system because the gateway exists under the gateway hyphen system and below that, I am specifying the section name. The section name points to the https listener so tls is already handled the tenant never touches the certificate. So that's why I am just only referencing to the https listener of the shared gateway, and below that I am specifying the hostname which we are going to use for our application.
+
+So we need to update the IP address of our gateway here. So let me update this very quickly. So if I run kubectl get gateway and this is the one and let me update the IP address. So I have used the same hostname here because this hostname must match the certificate that that platform already owns. So that's a contract because we have used the same hostname to create a certificate or issue the certificate. So we need to use the same hostname for our application routing as well. So the certificate and the hostname can match with each other.
+
+And below that we have a rules for the backend reference. This is where the tenant decides where traffic goes. And this route sends traffic to their own service that is app1-service. So this is the clean separation. The platform owns the gateway. The platform owns the TLS and tenant only owns the route and the application.
+
+So let me apply it very quickly. kubectl apply -f tenant-a-route.yaml the route got created successfully. If I run kubectl get httproute httproute -n tenant-a. We can see the route got created. And if I try to access the application, our application is working fine. So we are able to access our application of the tenant A. And if I click on the certificate information, we can see the connection is secured. And if I click here, I can see the certificate is valid. And here we can notice that the certificate is issued by the let's encrypt the one which we used for the gateway. That means our application is working fine. And the TLS is also got configured successfully.
+
+Now let's do the same thing for the another application which is running under the tenant B. So let me open the file for the tenant B route. So this is the route for the tenant B application. So here as well I'm specifying the name and the name space and here the name space is tenant-b and here also I'm referencing to the shared gateway and the https section and here we need to update the hostname. So let me update it very quickly because this thing must match with the certificate.
+
+So let me update this and I've used this one. So we have updated the host name to match with the certificate and the rules I have specifying the backend reference which is referencing to the service of our application only.
+
+So let's apply this as well and kubectl apply -f. So the httproute got created for the tenant B as well. And if I run kubectl get http route, we can see the httproute got created successfully. If I try to access the application for the tenant B as well, we can see I'm able to access the application. And we got a response from the app2-deployment pod. And if I click for the https verification, the connection is secured and certificate is valid. And the certificate is issued by the let's encrypt only.
+
+So the same IP, same gateway but the different tenants. So in this particular setup application are unaware of the gateway tenant owns the routing, and the platform owns the TLS and the gateway, and that separation is the gateway API model. This is not a demo pattern. This is how the real platforms are built.
+
+I have already uploaded all the manifest file in the GitHub repository, and I will add a link in the description. So you can use the same to perform a demo at your end as well.
+
+If you found this helpful, hit like, share it with your friends and subscribe for more content like this. Thanks for watching. I will see you in the next one.

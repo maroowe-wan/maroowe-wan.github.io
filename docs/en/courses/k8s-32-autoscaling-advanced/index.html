@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Autoscaling-Advanced</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-32-autoscaling-advanced/index.html'>한국어</a></div>
+  <h1>K8S-Autoscaling-Advanced</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Advanced Autoscaling — VPA, Cluster Autoscaler, and KEDA</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Advanced Autoscaling — VPA, Cluster Autoscaler, and KEDA </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand how Vertical Pod Autoscaler (VPA) automatically adjusts Pod requests/limits and explain its differences from HPA</li>
+<li>Understand how Cluster Autoscaler scales nodes up and down at the infrastructure level</li>
+<li>Configure KEDA to scale workloads based on event-driven metrics such as queue length or message count</li>
+</ul>
+<h3>Content</h3>
+<h4>Three Orthogonal Axes of Autoscaling</h4>
+<p>You are already familiar with HPA (Horizontal Pod Autoscaler), which adjusts the number of Pods based on CPU or memory usage. In practice, however, autoscaling happens along three distinct axes. Keeping them straight from the start is essential.</p>
+<ul>
+<li><strong>Horizontal</strong> — Adjusts the <strong>number</strong> of Pods. HPA, and the event-driven KEDA. Changes how many replicas to run.</li>
+<li><strong>Vertical</strong> — Adjusts the <strong>size</strong> (requests/limits) of each individual Pod. VPA. <strong>The replica count stays the same; the amount of resources given to each Pod changes.</strong></li>
+<li><strong>Node-level</strong> — Adjusts the <strong>number of nodes</strong> available for Pods to run on. Cluster Autoscaler and Karpenter.</li>
+</ul>
+<p>The most common misconception is worth addressing upfront. <strong>VPA is not playing the same role as HPA or KEDA.</strong> Where HPA/KEDA answer &quot;how many Pods should we run?&quot;, VPA answers &quot;how much resource should we give each Pod?&quot;. The axes are orthogonal. When HPA or KEDA scale out, newly created Pods need nodes to land on; if no node has capacity, they go Pending, and that is when Cluster Autoscaler adds nodes. Likewise, when VPA restarts a Pod at a larger size, if no node can accommodate it, the Pod also goes Pending — not because the count increased, but because the size did. VPA can therefore indirectly trigger node scaling, but through size increase rather than count increase.</p>
+<p>The diagram below shows what each scaler adjusts (count vs. size vs. node count) and how they complement one another. Horizontal (HPA/KEDA) and vertical (VPA) are separate orthogonal axes; when either causes Pods to go Pending, the node axis (CA) steps in.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    subgraph HORI[&quot;Horizontal Axis — Adjust Pod Count&quot;]
+        HPA[&quot;HPA - adjust replica count by CPU/memory&quot;]
+        KEDA[&quot;KEDA - adjust replica count by event/queue length&quot;]
+    end
+    subgraph VERT[&quot;Vertical Axis — Adjust Pod Size (count stays the same)&quot;]
+        VPA[&quot;VPA - grow requests/limits, recreate Pod&quot;]
+    end
+    subgraph NODEAXIS[&quot;Node Axis — Adjust Node Count&quot;]
+        CA[&quot;Cluster Autoscaler / Karpenter - adjust node count&quot;]
+    end
+    HPA --&gt;|&quot;Pod count increases&quot;| PENDING{&quot;Is there a node available?&quot;}
+    KEDA --&gt;|&quot;Pod count increases&quot;| PENDING
+    VPA --&gt;|&quot;Larger Pod recreated&quot;| PENDING
+    PENDING --&gt;|&quot;No (Pending)&quot;| CA
+    CA --&gt; ADD[&quot;Add node, then schedule Pod&quot;]
+    PENDING --&gt;|&quot;Yes&quot;| SCHED[&quot;Schedule on existing node&quot;]</div><figcaption>Three Orthogonal Axes of Autoscaling — Count (HPA/KEDA), Size (VPA), Node Count (CA)</figcaption></figure>
+<h4>VPA — Automatically Right-Sizing Pods</h4>
+<p>Nobody knows exactly what <code class='ic'>requests</code>/<code class='ic'>limits</code> to set when first creating a Deployment. Set them too low and you get OOMKills and throttling; set them too high and you waste node resources. VPA observes a Pod&#x27;s actual usage and either <strong>recommends</strong> or <strong>automatically applies</strong> appropriate requests and limits.</p>
+<p>VPA consists of three components. The <strong>Recommender</strong> analyzes usage history and computes target values; the <strong>Updater</strong> evicts Pods whose resource allocation has drifted far from the recommendation; and the <strong>Admission Controller</strong> injects the recommended values into newly created Pods.</p>
+<pre><code>
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: web-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web
+  updatePolicy:
+    updateMode: &quot;Auto&quot;        # Off / Initial / Auto
+  resourcePolicy:
+    containerPolicies:
+      - containerName: &quot;*&quot;
+        minAllowed: { cpu: &quot;50m&quot;, memory: &quot;64Mi&quot; }
+        maxAllowed: { cpu: &quot;2&quot;,   memory: &quot;2Gi&quot; }
+</code></pre>
+<p><code class='ic'>updateMode</code> has three options:</p>
+<ul>
+<li><strong><code class='ic'>Off</code></strong> — Only computes and displays recommendations without touching running Pods (check with <code class='ic'>kubectl describe vpa web-vpa</code>). The safest option when first introducing VPA.</li>
+<li><strong><code class='ic'>Initial</code></strong> — Applies the recommended values <strong>only when a Pod is newly created</strong>, without evicting running Pods. A good middle ground when the frequent restarts of <code class='ic'>Auto</code> mode are disruptive.</li>
+<li><strong><code class='ic'>Auto</code></strong> — Actively evicts Pods that have drifted far from the recommendation and recreates them at the new size. The highest level of automation, but it involves Pod restarts.</li>
+</ul>
+<p>The recommended approach is to start with <code class='ic'>Off</code>, observe for a few days, then move to <code class='ic'>Initial</code> if restarts are a concern, or <code class='ic'>Auto</code> if you want full automation.</p>
+<blockquote class='callout'>
+<p><strong>HPA vs VPA — The Most Important Pitfall.</strong> Never apply HPA and VPA to the <strong>same CPU/memory metric simultaneously</strong>. They will invalidate each other&#x27;s decisions (HPA tries to adjust Pod count, VPA tries to adjust Pod size, both driven by the same signal, creating a feedback loop). The key is <strong>not letting them compete over the same metric</strong> — it does not mean you can never use both for the same workload. One effective advanced pattern is to run <strong>VPA in <code class='ic'>Off</code> mode to get recommendations, then use those recommendations to tune HPA&#x27;s <code class='ic'>requests</code> and <code class='ic'>targetCPUUtilizationPercentage</code></strong> (VPA recommends, HPA scales). If you must run both in automatic mode simultaneously, separate their signals — for example, give HPA a custom or external metric while letting VPA manage only memory. Also note that <code class='ic'>Auto</code> mode evicts Pods, so always configure a PodDisruptionBudget alongside it to protect availability.</p>
+</blockquote>
+<h4>Cluster Autoscaler — Adding and Removing Nodes</h4>
+<p>Cluster Autoscaler (CA) monitors <strong>unschedulable (Pending) Pods</strong> in the cluster. When Pods are stuck in the Pending state due to insufficient resources, CA requests that the cloud provider&#x27;s node group (AWS ASG, GKE node pool, etc.) add a node. Once the new node becomes Ready, the scheduler places the waiting Pods on it.</p>
+<p>CA also scales down. It removes a node only when <strong>all</strong> of the following conditions are met:</p>
+<ul>
+<li>The combined resource <strong>requests</strong> on that node fall below a utilization threshold (roughly 50% by default),</li>
+<li>All Pods on the node <strong>can be rescheduled</strong> on other nodes (capacity exists elsewhere),</li>
+<li>Doing so would <strong>not violate any PodDisruptionBudget</strong>, and</li>
+<li>None of the Pods on the node have local storage or a <code class='ic'>safe-to-evict: false</code> annotation.</li>
+</ul>
+<p>When all conditions pass, CA safely drains the Pods and removes the node to reduce cost. This is not simply &quot;shut it down when idle&quot; — it is <strong>draining a node while respecting availability and PDB constraints</strong>.</p>
+<p>For CA to work correctly, <strong>every Pod must have sensible resource requests</strong>. CA uses requests to calculate &quot;is there room on this node?&quot; and &quot;can this node be safely emptied?&quot; Without requests, CA may incorrectly conclude a node has capacity, or miscalculate whether a node can be drained. Always set <code class='ic'>min</code>/<code class='ic'>max</code> sizes on the node group to cap both cost and scaling behavior.</p>
+<pre><code>
+# Pods need requests for CA&#x27;s node calculations to be accurate
+resources:
+  requests:
+    cpu: &quot;500m&quot;
+    memory: &quot;256Mi&quot;
+</code></pre>
+<p><strong>Karpenter</strong> is increasingly popular and takes a different approach. Where Cluster Autoscaler adjusts the size of predefined node groups (ASG/node pool), <strong>Karpenter is not bound to any node group</strong>. It looks at the actual requirements of pending Pods (CPU, memory, architecture, availability zone, etc.) and directly selects the most suitable instance type from the cloud API on the fly. This eliminates the need to pre-partition node groups into fine-grained pools and improves bin-packing efficiency and cost optimization. The concept is the same — &quot;if Pods have nowhere to go, provision a node; if a node is empty, remove it&quot; — but the key difference is that &quot;which node to provision&quot; is decided dynamically based on workload requirements rather than being constrained to a predefined group.</p>
+<h4>KEDA — Events as the Scaling Signal</h4>
+<p>HPA fundamentally reacts to resource metrics like CPU and memory. But consider a message queue worker: the CPU might be idle while <strong>100,000 messages are backed up in the queue</strong>. What is needed is scaling in proportion to queue depth. <strong>KEDA (Kubernetes Event-Driven Autoscaling)</strong> solves this problem.</p>
+<p>KEDA&#x27;s power comes from two features. First, it ships with <strong>dozens of built-in event sources (scalers)</strong> — Kafka, RabbitMQ, AWS SQS, Prometheus queries, Redis, cron, and more. Second, it supports <strong>scale-to-zero</strong>: when there are no events, Pods drop to 0 to save resources and wake up the moment messages arrive. Pure HPA must keep at least 1 replica running, which makes this a decisive difference.</p>
+<p>Internally, KEDA acts as an adapter that reads external metrics and converts them into a form that HPA can consume. KEDA polls the event source, generates metrics, and HPA adjusts the Pod count based on those metrics.</p>
+<pre><code>
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: order-worker-scaler
+spec:
+  scaleTargetRef:
+    name: order-worker          # target Deployment
+  minReplicaCount: 0            # scale to zero when no events
+  maxReplicaCount: 30
+  triggers:
+    - type: rabbitmq
+      metadata:
+        queueName: orders
+        host: amqp://guest:guest@rabbitmq.default.svc:5672/
+        queueLength: &quot;20&quot;       # target message count per Pod
+</code></pre>
+<p>This configuration means &quot;keep enough workers so that each Pod handles roughly 20 messages.&quot; With 200 messages in the queue, it scales out to approximately 10 workers; when the queue is empty, it converges to 0.</p>
+<blockquote class='callout'>
+<p>KEDA is optimal for workloads like queues, streams, and batch workers where <strong>external event volume is what determines load</strong>. For web servers that handle user requests directly, HPA with CPU/latency metrics or a gateway-level metric is usually more natural. The key is choosing the right scaling signal to match your workload&#x27;s characteristics.</p>
+</blockquote>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Autoscaling spans three axes — <strong>horizontal</strong> (HPA/KEDA, Pod count), <strong>vertical</strong> (VPA, Pod size), and <strong>node-level</strong> (Cluster Autoscaler/Karpenter, node count). VPA&#x27;s role is distinct from HPA/KEDA (size vs. count).</li>
+<li>VPA observes usage and either recommends (<code class='ic'>Off</code>), applies at creation time (<code class='ic'>Initial</code>), or automatically applies and evicts (<code class='ic'>Auto</code>). Running VPA and HPA on the same metric causes conflicts; separate their signals, or use VPA&#x27;s recommendations to tune HPA instead.</li>
+<li>Cluster Autoscaler adds nodes in response to Pending Pods and removes underutilized nodes only after verifying PDB compliance and reschedulability. Accurate resource requests on every Pod are required for correct calculations.</li>
+<li>Karpenter goes beyond predefined node groups, dynamically selecting the most cost-efficient instance type for each workload.</li>
+<li>KEDA uses external events such as queue length and message count as scaling signals and supports scale-to-zero (0↔N). Internally it creates HPA-compatible external metrics.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Install Vertical Pod Autoscaler (VPA) and query recommended resource values for a Deployment in recommender mode. Create a Deployment with intentionally low requests/limits, then create a VPA object in &#x27;Off&#x27; mode (recommend only, no automatic changes) and inspect the recommended CPU and memory values.</p></div>
+              <pre class='starter'><code># 1. Install VPA (metrics-server must be running first)
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-v1-crd-gen.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/autoscaler/master/vertical-pod-autoscaler/deploy/vpa-rbac.yaml
+
+# Or use the official script:
+# git clone https://github.com/kubernetes/autoscaler.git
+# cd autoscaler/vertical-pod-autoscaler
+# ./hack/vpa-up.sh
+
+# 2. Test Deployment with intentionally low requests
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpa-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vpa-demo
+  template:
+    metadata:
+      labels:
+        app: vpa-demo
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        args: [&quot;--cpu&quot;, &quot;1&quot;, &quot;--timeout&quot;, &quot;600&quot;]
+        resources:
+          requests:
+            cpu: &quot;10m&quot;      # intentionally low
+            memory: &quot;10Mi&quot;
+EOF
+
+# 3. Create VPA object (Off mode = recommend only)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-demo-vpa
+spec:
+  targetRef:
+    apiVersion: &quot;apps/v1&quot;
+    kind: Deployment
+    name: vpa-demo
+  updatePolicy:
+    updateMode: &quot;___&quot;   # Off, Initial, Recreate, or Auto
+
+# 4. Check recommendations after a few minutes
+kubectl describe vpa vpa-demo-vpa</code></pre>
+              <details><summary>Hint</summary><ul><li>VPA recommendations take a few minutes to appear. metrics-server must be running and the Pods must be under load.</li><li>If the polinux/stress image is unavailable, substitute with: kubectl run load-gen --image=busybox -- sh -c &quot;while true; do :; done&quot;</li><li>Applying VPA and HPA to the same Deployment simultaneously causes conflicts: VPA raises requests, HPA sees high CPU utilization and scales out, creating a loop.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 3. Create VPA in Off mode
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: vpa-demo-vpa
+spec:
+  targetRef:
+    apiVersion: &quot;apps/v1&quot;
+    kind: Deployment
+    name: vpa-demo
+  updatePolicy:
+    updateMode: &quot;Off&quot;
+EOF
+
+# 4. Check recommendations after a few minutes
+kubectl describe vpa vpa-demo-vpa
+# Sample output:
+# Recommendation:
+#   Container Recommendations:
+#     Container Name: stress
+#     Lower Bound:
+#       Cpu:    100m
+#       Memory: 262144k
+#     Target:
+#       Cpu:    587m
+#       Memory: 262144k
+#     Uncapped Target:
+#       Cpu:    587m
+#       Memory: 262144k
+#     Upper Bound:
+#       Cpu:    1
+#       Memory: 262144k
+
+# 5. Switch to Auto mode to observe automatic application
+kubectl patch vpa vpa-demo-vpa --type=&#x27;json&#x27; -p=&#x27;[{&quot;op&quot;: &quot;replace&quot;, &quot;path&quot;: &quot;/spec/updatePolicy/updateMode&quot;, &quot;value&quot;: &quot;Auto&quot;}]&#x27;
+
+# After a moment Pods are recreated with the new requests
+kubectl get pods -l app=vpa-demo -o custom-columns=&#x27;NAME:.metadata.name,CPU-REQ:.spec.containers[0].resources.requests.cpu,MEM-REQ:.spec.containers[0].resources.requests.memory&#x27;</code></pre>
+                <div class='exp2'><p>Unlike HPA, VPA adjusts the CPU/memory requests size of each Pod rather than the number of Pods. updateMode: Off computes recommendations without modifying any Pods. Switching to Auto mode causes VPA to evict and recreate Pods with the new requests applied. HPA is suited for scale-out (horizontal scaling); VPA is suited for scale-up (vertical scaling). Using both on the same Deployment at the same time causes conflicts.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Install KEDA (Kubernetes Event-Driven Autoscaling) and create a CPU-based ScaledObject to observe scale-out and scale-in as load changes. Monitor Pod count changes and ScaledObject status before and after generating load.</p></div>
+              <pre class='starter'><code># 1. Install KEDA
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+helm install keda kedacore/keda --namespace keda --create-namespace
+
+# 2. Create a test Deployment
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keda-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keda-demo
+  template:
+    metadata:
+      labels:
+        app: keda-demo
+    spec:
+      containers:
+      - name: app
+        image: nginx
+        resources:
+          requests:
+            cpu: 100m
+          limits:
+            cpu: 200m
+EOF
+
+# 3. Create a ScaledObject (scale out when CPU &gt; 50%)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-demo-scaler
+spec:
+  scaleTargetRef:
+    name: ___              # target Deployment name
+  minReplicaCount: ___     # minimum Pod count
+  maxReplicaCount: ___     # maximum Pod count
+  triggers:
+  - type: cpu
+    metricType: Utilization
+    metadata:
+      value: &quot;50&quot;          # scale out when CPU &gt; 50%</code></pre>
+              <details><summary>Hint</summary><ul><li>Run kubectl get hpa to see the HPA object KEDA creates automatically. Deleting the ScaledObject also deletes the HPA.</li><li>The CPU trigger relies on metrics-server internally, so metrics-server must be installed.</li><li>If the ScaledObject READY column is False, check the Conditions section of kubectl describe scaledobject &lt;name&gt; for the reason.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 3. Create the ScaledObject
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-demo-scaler
+spec:
+  scaleTargetRef:
+    name: keda-demo
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  cooldownPeriod: 30
+  triggers:
+  - type: cpu
+    metricType: Utilization
+    metadata:
+      value: &quot;50&quot;
+EOF
+
+# 4. Check ScaledObject status
+kubectl get scaledobject keda-demo-scaler
+# NAME                SCALETARGETKIND      SCALETARGETNAME   MIN   MAX   TRIGGERS   READY   ACTIVE
+# keda-demo-scaler    apps/v1.Deployment   keda-demo         1     5     cpu        True    False
+
+# 5. Generate load (in a separate terminal)
+kubectl run -it load-gen --rm --image=busybox --restart=Never -- \
+  sh -c &quot;while true; do wget -q -O- http://keda-demo; done&quot;
+
+# 6. Watch Pod count change (in another terminal)
+kubectl get pods -l app=keda-demo -w
+# NAME                        READY   STATUS    RESTARTS   AGE
+# keda-demo-xxxx              1/1     Running   0          2m
+# keda-demo-yyyy              0/1     Pending   0          5s   &lt;-- scaling out
+# keda-demo-yyyy              1/1     Running   0          8s
+
+# After stopping load, check ScaledObject status
+kubectl describe scaledobject keda-demo-scaler | grep -A10 &#x27;Conditions:&#x27;</code></pre>
+                <div class='exp2'><p>KEDA extends HPA to support scaling based on external event sources (Kafka message count, Redis queue length, Prometheus metrics, etc.) in addition to CPU and memory. A ScaledObject automatically creates and manages an HPA object. Setting minReplicaCount: 0 enables scale-to-zero, reducing Pods to none when there are no events and saving cost. cooldownPeriod is the wait time before scaling in, preventing unnecessary oscillation.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Application] Use KEDA&#x27;s ScaledJob to set up event-driven scaling that creates a Job for each message in a Redis List queue. Deploy Redis, push messages to the queue, and simulate a scenario where a Job is created and processed for each message.</p></div>
+              <pre class='starter'><code># 1. Deploy Redis
+kubectl run redis --image=redis --port=6379
+kubectl expose pod redis --port=6379 --name=redis-service
+
+# 2. TriggerAuthentication (Redis connection info)
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: redis-auth
+spec:
+  secretTargetRef: []   # empty array if Redis has no password
+
+# 3. Create a ScaledJob
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: queue-worker
+spec:
+  jobTargetRef:
+    template:
+      spec:
+        containers:
+        - name: worker
+          image: busybox
+          command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo &#x27;Processing job&#x27;; sleep 10; echo &#x27;Done&#x27;&quot;]
+        restartPolicy: Never
+  minReplicaCount: ___
+  maxReplicaCount: ___
+  triggers:
+  - type: redis
+    metadata:
+      address: redis-service:6379
+      listName: job-queue
+      listLength: &quot;1&quot;   # 1 Job per queue item
+
+# 4. Push messages to the queue and watch Jobs being created
+kubectl exec redis -- redis-cli rpush job-queue &quot;task1&quot; &quot;task2&quot; &quot;task3&quot;
+kubectl get jobs -w</code></pre>
+              <details><summary>Hint</summary><ul><li>If Redis is in a different namespace, specify the address as &#x27;&lt;service&gt;.&lt;namespace&gt;.svc.cluster.local:&lt;port&gt;&#x27;.</li><li>ScaledJob&#x27;s maxReplicaCount is the maximum number of concurrently running Jobs. Even if 100 messages are in the queue, only up to maxReplicaCount Jobs run simultaneously.</li><li>Completed Jobs are not automatically removed. Use successfulJobsHistoryLimit and failedJobsHistoryLimit to control how many are retained.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Deploy Redis
+kubectl run redis --image=redis --port=6379
+kubectl expose pod redis --port=6379 --name=redis-service
+
+# 2. Create the ScaledJob
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: queue-worker
+spec:
+  jobTargetRef:
+    template:
+      spec:
+        containers:
+        - name: worker
+          image: busybox
+          command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo &#x27;Processing job&#x27;; sleep 5; echo &#x27;Done&#x27;&quot;]
+        restartPolicy: Never
+  minReplicaCount: 0
+  maxReplicaCount: 5
+  triggers:
+  - type: redis
+    metadata:
+      address: redis-service.default.svc.cluster.local:6379
+      listName: job-queue
+      listLength: &quot;1&quot;
+EOF
+
+# 3. Push 3 messages to the queue
+kubectl exec redis -- redis-cli rpush job-queue &quot;task1&quot; &quot;task2&quot; &quot;task3&quot;
+# (integer) 3
+
+# 4. Watch Jobs being created
+kubectl get jobs -w
+# NAME                 COMPLETIONS   DURATION   AGE
+# queue-worker-xxxxx   0/1                      2s   &lt;-- task1
+# queue-worker-yyyyy   0/1                      2s   &lt;-- task2
+# queue-worker-zzzzz   0/1                      2s   &lt;-- task3
+# queue-worker-xxxxx   1/1           8s         8s   &lt;-- completed
+
+# 5. Confirm no more Jobs are created when queue is empty
+kubectl exec redis -- redis-cli llen job-queue
+# (integer) 0
+
+# 6. Clean up
+kubectl delete scaledjob queue-worker
+kubectl delete scaledobject keda-demo-scaler
+kubectl delete deploy keda-demo
+kubectl delete pod redis
+kubectl delete service redis-service</code></pre>
+                <div class='exp2'><p>ScaledJob creates Jobs to process a work queue rather than scaling a Deployment. When messages accumulate in the Redis List, Jobs are created in proportion to listLength, and they are destroyed upon completion. This pattern is ideal for batch processing, image conversion, email sending, and other queue-based tasks. KEDA makes it easy to integrate with diverse event sources such as Kafka, RabbitMQ, Azure Service Bus, and AWS SQS.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hsJ2qtwoWZw' target='_blank'>Kubernetes Autoscaling: HPA vs. VPA vs. Keda vs. CA vs. Karpenter vs. Fargate</a></li><li><a href='https://www.youtube.com/watch?v=3lcaawKAv6s' target='_blank'>KEDA: Kubernetes Event-Driven Autoscaling</a></li><li><a href='https://www.youtube.com/watch?v=jM36M39MA3I' target='_blank'>Kubernetes cluster autoscaling for beginners</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

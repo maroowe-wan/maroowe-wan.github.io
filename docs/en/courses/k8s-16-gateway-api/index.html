@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-GatewayAPI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-16-gateway-api/index.html'>한국어</a></div>
+  <h1>K8S-GatewayAPI</h1>
+  <div class="sub">Intermediate Kubernetes users — developers and platform engineers who have hands-on experience with Ingress and want to adopt the Gateway API for production workloads. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. &quot;Kubernetes Gateway API: The Next-Generation Standard for Traffic Routing Beyond Ingress&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;Kubernetes Gateway API: The Next-Generation Standard for Traffic Routing Beyond Ingress&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Describe the Gateway API resource model (GatewayClass, Gateway, HTTPRoute), understand where each resource&#x27;s responsibility begins and ends, and explain which Ingress limitations it solves.</li>
+<li>Explain how role separation — infrastructure admins owning GatewayClass and Gateway, while application developers own HTTPRoute — pays off for multi-tenancy and day-to-day operations.</li>
+<li>Write manifests for path-based and header-based routing, and for weighted traffic splitting, so you can apply them to canary and blue-green deployments.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why Ingress eventually hits a wall</h4>
+<p>If you have run Kubernetes in production for any length of time, you have written an Ingress. It works — until your cluster grows. The trouble is that the classic <code class='ic'>Ingress</code> object is <strong>monolithic</strong>: a single YAML file tries to do everything at once. Hostnames, paths, backend services, TLS certificates, redirects, rewrites — all of it crammed into one resource. And because the standard Ingress spec is so thin, anything beyond the basics gets bolted on through <strong>controller-specific annotations</strong> (those long <code class='ic'>nginx.ingress.kubernetes.io/...</code> strings). Those annotations are not portable: an Ingress tuned for NGINX will not behave the same on Traefik or a cloud load balancer.</p>
+<p>This becomes painful the moment you have more than one app or more than one team. Everyone edits the same kind of object, the configuration grows into a tangled block, and a single careless change can break routing for an unrelated service. There is no clean line between &quot;the person who owns the load balancer&quot; and &quot;the person who owns this app&#x27;s routes.&quot;</p>
+<blockquote class='callout'>
+<p>The Gateway API is the Kubernetes community&#x27;s official, vendor-neutral successor to Ingress. Ingress is now effectively in maintenance mode — new networking features land in the Gateway API, so learning it is no longer optional for a platform engineer.</p>
+</blockquote>
+<h4>The resource model: three layers, three owners</h4>
+<p>The Gateway API solves the monolith problem by <strong>splitting one big object into three focused resources</strong>, each with a clear responsibility and, crucially, a clear owner. The structure is as follows.</p>
+<p><strong>1. GatewayClass — &quot;which controller implements this?&quot;</strong></p>
+<p>A <code class='ic'>GatewayClass</code> is the cluster-wide template that says <em>which implementation</em> will fulfill your gateways — for example NGINX Gateway Fabric, Istio, or a cloud provider&#x27;s controller. Think of it as the analogue of a <code class='ic'>StorageClass</code>. You typically install it once with the controller, and most app teams never touch it. It is owned by the infrastructure team or the platform provider.</p>
+<p><strong>2. Gateway — the front door (listeners, ports, TLS)</strong></p>
+<p>A <code class='ic'>Gateway</code> is the actual entry point into the cluster. It defines <strong>listeners</strong>: which ports are open, which protocols (HTTP/HTTPS), and where TLS is terminated. It is the resource that gets a public IP from your cloud&#x27;s load balancer. A useful mental model: the Gateway is the <em>door</em> to the building. It decides who can knock and on which port, but it does not decide where inside the building each visitor goes. The Gateway is owned by the infrastructure / platform team.</p>
+<p><strong>3. HTTPRoute — the routing rules</strong></p>
+<p>An <code class='ic'>HTTPRoute</code> is the <em>rule book</em> that decides how traffic flows once it is through the door. It matches on hostname, path, and headers, and forwards to one or more backend Services. This is where application developers live. They attach their HTTPRoute to a Gateway via a <code class='ic'>parentRef</code> and define their own routing — without ever editing the shared Gateway. HTTPRoute is owned by the application team.</p>
+<p>This split is the heart of the Gateway API. The relationship is <strong>GatewayClass → Gateway → HTTPRoute</strong>, flowing from infrastructure down to application, with each layer owned by a different team, as the diagram below makes explicit.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    subgraph INFRA[&quot;Infrastructure / Platform team&quot;]
+        GC[&quot;GatewayClass&lt;br/&gt;which controller implements this&quot;]
+        GW[&quot;Gateway&lt;br/&gt;listeners, ports, TLS termination&quot;]
+    end
+    subgraph APP[&quot;Application teams&quot;]
+        R1[&quot;HTTPRoute A&lt;br/&gt;hostnames, paths, headers&quot;]
+        R2[&quot;HTTPRoute B&lt;br/&gt;hostnames, paths, headers&quot;]
+    end
+    GC --&gt;|&quot;selected by gatewayClassName&quot;| GW
+    R1 --&gt;|parentRef| GW
+    R2 --&gt;|parentRef| GW
+    GW --&gt;|&quot;allowedRoutes guardrail&quot;| R1
+    GW --&gt;|&quot;allowedRoutes guardrail&quot;| R2</div><figcaption>Gateway API resource model and owner separation</figcaption></figure>
+<h4>Why role separation matters in practice</h4>
+<p>Mapping each layer to a different owner is not just tidy diagram-drawing — it directly enables safe <strong>multi-tenancy</strong>. Picture a shared cluster with two teams. With Ingress, both teams edit Ingress objects, and one team&#x27;s mistake can take the other down with nobody intending any harm. With the Gateway API, the platform team owns a single shared Gateway (and the TLS certificate on it), and each team owns only its own HTTPRoute in its own namespace.</p>
+<p>The Gateway then controls <em>who is allowed to attach</em> through its <code class='ic'>allowedRoutes</code> field — typically gated by a namespace label. A team simply cannot attach a route unless the platform has granted permission. That single guardrail prevents the accidental cross-team outages that plague shared Ingress setups. The contract is clean: <strong>the platform owns the gateway and the TLS, the tenant owns only the route.</strong> As the saying goes in platform engineering, this is not a demo pattern — it is how real multi-tenant platforms are built.</p>
+<h4>A minimal working example</h4>
+<p>Let&#x27;s make this concrete. First, the Gateway. Note that it declares a <code class='ic'>gatewayClassName</code> (the controller to use) and two listeners — one HTTP, one HTTPS — with TLS terminated <strong>on the Gateway, not on the route</strong>.</p>
+<pre><code>
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: main-gateway
+  namespace: default
+spec:
+  gatewayClassName: nginx          # which controller implements this Gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same               # only routes in this namespace may attach
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate            # the Gateway decrypts TLS here
+        certificateRefs:
+          - name: app-tls          # reuse your existing TLS Secret
+      allowedRoutes:
+        namespaces:
+          from: Same
+</code></pre>
+<blockquote class='callout'>
+<p>A common point of confusion: in the Gateway API, TLS <strong>always</strong> lives on the Gateway listener, never inside the HTTPRoute. When migrating from Ingress, the <code class='ic'>tls:</code> block moves to the Gateway, and the routing rules move to the HTTPRoute.</p>
+</blockquote>
+<p>Now the HTTPRoute. It attaches to the Gateway via <code class='ic'>parentRefs</code>, matches a hostname, and routes by path to backend Services:</p>
+<pre><code>
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: app-route
+  namespace: default
+spec:
+  parentRefs:
+    - name: main-gateway           # attach to the Gateway above
+  hostnames:
+    - &quot;app.example.com&quot;
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: api-service
+          port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend-service
+          port: 80
+</code></pre>
+<p>Apply both with <code class='ic'>kubectl apply -f</code>, then verify with <code class='ic'>kubectl get gateway</code> and <code class='ic'>kubectl get httproute</code>. A request to <code class='ic'>app.example.com/api</code> reaches <code class='ic'>api-service</code>; everything else reaches <code class='ic'>frontend-service</code>. That single HTTPRoute fully replaces the routing logic that an Ingress would have buried in annotations.</p>
+<h4>Header-based routing and weighted traffic splitting</h4>
+<p>Two capabilities that were awkward or impossible with stock Ingress become first-class here.</p>
+<p><strong>Header matching</strong> lets you route on request headers — perfect for internal testing or feature flags. The same <code class='ic'>matches</code> block accepts a <code class='ic'>headers</code> condition:</p>
+<pre><code>
+rules:
+  - matches:
+      - headers:
+          - name: x-env
+            value: canary
+    backendRefs:
+      - name: api-service-v2
+        port: 80
+</code></pre>
+<p>Any request carrying the header <code class='ic'>x-env: canary</code> is sent to the new version, while everyone else stays on the stable one.</p>
+<p><strong>Weighted backends</strong> are the killer feature for progressive delivery. A single rule can list multiple <code class='ic'>backendRefs</code>, each with a <code class='ic'>weight</code>, and the controller splits traffic proportionally. This is how you run a <strong>canary</strong> release — sending, say, 10% of traffic to a new version — or a <strong>blue-green</strong> cutover by flipping the weights:</p>
+<pre><code>
+rules:
+  - matches:
+      - path:
+          type: PathPrefix
+          value: /
+    backendRefs:
+      - name: api-service-v1
+        port: 80
+        weight: 90               # 90% to the stable version
+      - name: api-service-v2
+        port: 80
+        weight: 10               # 10% to the canary
+</code></pre>
+<p>The diagram below shows how that single rule fans traffic out across the two backends by weight.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    C[&quot;Client request&quot;] --&gt; GW[&quot;Gateway listener&quot;]
+    GW --&gt; RT[&quot;HTTPRoute weighted rule&quot;]
+    RT --&gt;|&quot;weight 90 percent&quot;| V1[&quot;api-service-v1&lt;br/&gt;stable&quot;]
+    RT --&gt;|&quot;weight 10 percent&quot;| V2[&quot;api-service-v2&lt;br/&gt;canary&quot;]</div><figcaption>Weighted backend split for a canary release</figcaption></figure>
+<p>Roll the weights from 90/10 to 50/50 to 0/100 as your confidence grows, then remove the old backend. No annotations, no controller-specific tricks — just a standard, portable field.</p>
+<h4>Migrating without downtime</h4>
+<p>The best part of moving from Ingress is that you do not have to do it in one risky leap. <strong>A Gateway and an Ingress can serve the same app at the same time.</strong> The safe migration path is: read your existing Ingress, build an equivalent Gateway (ports + TLS) and HTTPRoute (hostnames + paths), reuse the <em>same</em> TLS Secret so certificates carry over seamlessly, then test the Gateway side by side while the Ingress still serves live traffic. Only once you are fully confident — and after pointing DNS at the new entry point — do you delete the old Ingress. Test first, delete last; that is what makes it zero-downtime.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>The Gateway API replaces the monolithic Ingress with three focused resources: <strong>GatewayClass</strong> (which controller), <strong>Gateway</strong> (listeners, ports, TLS — the front door), and <strong>HTTPRoute</strong> (the routing rules).</li>
+<li>That split maps cleanly to owners — infrastructure teams own GatewayClass and Gateway, app teams own HTTPRoute — which enables safe multi-tenancy through <code class='ic'>allowedRoutes</code> guardrails.</li>
+<li>TLS always terminates on the <strong>Gateway listener</strong>, never inside the HTTPRoute.</li>
+<li>HTTPRoute supports portable, standardized <strong>path and header matching</strong> and <strong>weighted backends</strong>, making canary and blue-green deployments straightforward without controller-specific annotations.</li>
+<li>You can migrate from Ingress with <strong>zero downtime</strong> by running both side by side, reusing the same TLS Secret, testing the Gateway, and deleting the Ingress only after DNS has cut over.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warmup — Resource model mapping.</p>
+<p>Without writing any YAML, answer the following by filling in the blanks:</p>
+<p>1. A cluster-wide template that names which controller (e.g., NGINX Gateway Fabric) fulfills gateways is called a ________.</p>
+<p>2. The resource that owns listeners, open ports, and TLS termination is called a ________.</p>
+<p>3. The resource that application developers write to define hostname/path routing rules and attach to an entry point is called a ________.</p>
+<p>4. TLS certificates are referenced inside the ________ resource, NOT inside the ________.</p>
+<p>5. An HTTPRoute tells the controller which Gateway to attach to via a field named ________.</p>
+<p>Write your answers as a short numbered list.</p></div>
+              <pre class='starter'><code>No code needed. Answer in plain text.</code></pre>
+              <details><summary>Hint</summary><ul><li>Re-read the &#x27;The resource model: three layers, three owners&#x27; section — each layer heading names the resource directly.</li><li>For question 4, look for the callout box that starts &#x27;A common point of confusion&#x27;.</li><li>For question 5, scan the minimal HTTPRoute YAML example for a field that starts with &#x27;parent&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>1. GatewayClass
+2. Gateway
+3. HTTPRoute
+4. Gateway (listener) / HTTPRoute
+5. parentRefs</code></pre>
+                <div class='exp2'><p>These five answers map directly to the three-layer ownership model. GatewayClass is the cluster-scoped template (analogous to StorageClass) owned by the infra/platform team. Gateway is the actual entry point (listeners, ports, TLS) also owned by the platform team — TLS always terminates here, never in the HTTPRoute. HTTPRoute is the per-app rule book owned by the application team; it links to a Gateway via parentRefs so developers never need to touch the shared Gateway object.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core task 1 — Write a minimal Gateway + HTTPRoute.</p>
+<p>You are a platform engineer on a shared cluster. Write two Kubernetes manifests:</p>
+<p><strong>Manifest A — Gateway</strong> named <code class='ic'>shop-gateway</code> in namespace <code class='ic'>platform</code>, using gatewayClassName <code class='ic'>nginx</code>. It must have:</p>
+<ul>
+<li>One HTTP listener on port 80 named <code class='ic'>http</code>.</li>
+<li>Routes from the <code class='ic'>Same</code> namespace only (allowedRoutes).</li>
+</ul>
+<p><strong>Manifest B — HTTPRoute</strong> named <code class='ic'>shop-route</code> in namespace <code class='ic'>platform</code> that:</p>
+<ul>
+<li>Attaches to <code class='ic'>shop-gateway</code>.</li>
+<li>Matches hostname <code class='ic'>shop.example.com</code>.</li>
+<li>Routes path prefix <code class='ic'>/products</code> to backend Service <code class='ic'>product-svc</code> on port 8080.</li>
+<li>Routes path prefix <code class='ic'>/</code> (catch-all) to backend Service <code class='ic'>frontend-svc</code> on port 80.</li>
+</ul>
+<p>Save both manifests into a single file <code class='ic'>shop.yaml</code> separated by <code class='ic'>---</code>.</p></div>
+              <pre class='starter'><code># shop.yaml
+# Manifest A — Gateway
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ???
+  namespace: ???
+spec:
+  gatewayClassName: ???
+  listeners:
+    - name: ???
+      protocol: ???
+      port: ???
+      allowedRoutes:
+        namespaces:
+          from: ???
+---
+# Manifest B — HTTPRoute
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ???
+  namespace: ???
+spec:
+  parentRefs:
+    - name: ???
+  hostnames:
+    - ???
+  rules:
+    - matches:
+        - path:
+            type: ???
+            value: ???
+      backendRefs:
+        - name: ???
+          port: ???
+    - matches:
+        - path:
+            type: ???
+            value: ???
+      backendRefs:
+        - name: ???
+          port: ???</code></pre>
+              <details><summary>Hint</summary><ul><li>Double-check you replaced every `???` placeholder. A single missed field will cause `kubectl apply` to fail with a validation error.</li><li>The HTTPRoute and Gateway are in the same namespace (`platform`), so parentRefs only needs `name:`, not a `namespace:` qualifier.</li><li>Put the `/products` rule first. If you put `/` first, every request matches it and traffic never reaches `product-svc`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># shop.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: shop-gateway
+  namespace: platform
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shop-route
+  namespace: platform
+spec:
+  parentRefs:
+    - name: shop-gateway
+  hostnames:
+    - &quot;shop.example.com&quot;
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /products
+      backendRefs:
+        - name: product-svc
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend-svc
+          port: 80</code></pre>
+                <div class='exp2'><p>Order matters: the more specific <code class='ic'>/products</code> rule must come before the <code class='ic'>/</code> catch-all, because the controller evaluates rules top-to-bottom and stops at the first match. <code class='ic'>allowedRoutes.namespaces.from: Same</code> restricts attachment to routes in the same namespace (<code class='ic'>platform</code>), which is the multi-tenancy guardrail described in the lecture. The HTTPRoute&#x27;s <code class='ic'>parentRefs</code> names the Gateway object; no namespace qualifier is needed when both resources share the same namespace. Both manifests use API group <code class='ic'>gateway.networking.k8s.io/v1</code>, which became stable (GA) in Gateway API v1.0.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core task 2 — Add header-based routing and a weighted canary split.</p>
+<p>Extend the HTTPRoute from Core task 1 with two additional rules <strong>prepended above</strong> the existing path rules:</p>
+<p><strong>Rule 1 — Header match (canary opt-in):</strong></p>
+<p>Any request to <code class='ic'>shop.example.com</code> that carries header <code class='ic'>x-env: canary</code> must go to Service <code class='ic'>product-svc-v2</code> on port 8080. This rule has <strong>no path match</strong> (matches all paths for that header).</p>
+<p><strong>Rule 2 — Weighted split on <code class='ic'>/products</code>:</strong></p>
+<p>Replace the existing <code class='ic'>/products</code> → <code class='ic'>product-svc</code> rule with a weighted split:</p>
+<ul>
+<li>80% of traffic to <code class='ic'>product-svc</code> (stable, port 8080)</li>
+<li>20% of traffic to <code class='ic'>product-svc-v2</code> (canary, port 8080)</li>
+</ul>
+<p>Leave the <code class='ic'>/</code> catch-all rule for <code class='ic'>frontend-svc</code> unchanged at the bottom.</p>
+<p>Write the complete updated HTTPRoute manifest.</p></div>
+              <pre class='starter'><code>apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shop-route
+  namespace: platform
+spec:
+  parentRefs:
+    - name: shop-gateway
+  hostnames:
+    - &quot;shop.example.com&quot;
+  rules:
+    # Rule 1: header match — add here
+
+    # Rule 2: weighted /products split — replace original rule here
+
+    # Rule 3: catch-all / — keep unchanged
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend-svc
+          port: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>A `matches` block with only a `headers` condition (no `path`) matches every request that has that header regardless of path — this is intentional for a global canary opt-in.</li><li>To add weights, keep the same `backendRefs` list structure but add a `weight:` field to each entry. If you omit `weight` on one backend but set it on another, the controller treats the missing one as weight 1.</li><li>Rule order still matters: place the header rule first so opt-in canary users are caught before the weighted `/products` rule evaluates them.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shop-route
+  namespace: platform
+spec:
+  parentRefs:
+    - name: shop-gateway
+  hostnames:
+    - &quot;shop.example.com&quot;
+  rules:
+    - matches:
+        - headers:
+            - name: x-env
+              value: canary
+      backendRefs:
+        - name: product-svc-v2
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /products
+      backendRefs:
+        - name: product-svc
+          port: 8080
+          weight: 80
+        - name: product-svc-v2
+          port: 8080
+          weight: 20
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: frontend-svc
+          port: 80</code></pre>
+                <div class='exp2'><p>Rule 1 uses a <code class='ic'>headers</code> match with no <code class='ic'>path</code> condition, so it intercepts any request carrying the opt-in header before any path-based rule fires. This is a common technique for internal QA or feature-flag traffic without exposing a separate hostname. Rule 2 replaces the single-backend ref with two <code class='ic'>backendRefs</code> each carrying a <code class='ic'>weight</code>. The controller distributes requests proportionally: 80 parts to v1, 20 parts to v2 — a classic 80/20 canary. Weights are relative integers; they do not have to sum to 100, but 100 makes the percentages obvious. Rule 3 is unchanged: the <code class='ic'>/</code> catch-all still sends everything else to <code class='ic'>frontend-svc</code>. All three capabilities — header matching, weighted backends, path routing — are standard Gateway API fields with no controller-specific annotations.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied task — Zero-downtime migration plan + HTTPS Gateway.</p>
+<p>You have an existing Nginx Ingress that serves <code class='ic'>store.example.com</code>:</p>
+<pre><code>
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: store-ingress
+  namespace: store
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  tls:
+    - hosts:
+        - store.example.com
+      secretName: store-tls
+  rules:
+    - host: store.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-svc
+                port:
+                  number: 3000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web-svc
+                port:
+                  number: 80
+</code></pre>
+<p>Part A — Write the equivalent Gateway API manifests (Gateway + HTTPRoute) that reproduce this routing. The Gateway must:</p>
+<ul>
+<li>Sit in namespace <code class='ic'>store</code>.</li>
+<li>Use gatewayClassName <code class='ic'>nginx</code>.</li>
+<li>Expose an HTTPS listener on port 443 with TLS mode <code class='ic'>Terminate</code>, referencing the existing Secret <code class='ic'>store-tls</code>.</li>
+<li>Also expose an HTTP listener on port 80 (plain, no TLS) for completeness.</li>
+<li>Allow routes from the <code class='ic'>Same</code> namespace.</li>
+</ul>
+<p>The HTTPRoute must reproduce the same two path rules (<code class='ic'>/api</code> → <code class='ic'>api-svc:3000</code>, <code class='ic'>/</code> → <code class='ic'>web-svc:80</code>).</p>
+<p>Part B — Describe in 3–5 bullet points the steps you would take to migrate with zero downtime (no code required, prose only).</p></div>
+              <pre class='starter'><code># Part A — write your manifests below
+
+# Gateway
+
+
+# HTTPRoute
+
+
+# Part B — migration steps (prose)
+</code></pre>
+              <details><summary>Hint</summary><ul><li>For Part A: the HTTPS listener needs both `protocol: HTTPS` and a `tls:` block. The `certificateRefs` list takes the Secret name exactly as it appears in the cluster — here `store-tls`.</li><li>The Ingress annotation `nginx.ingress.kubernetes.io/rewrite-target: /` does not have a direct counterpart in this basic HTTPRoute. For plain path-prefix forwarding without a URL rewrite, you can omit it. Only add an `URLRewrite` filter if the backend actually requires the path to be stripped.</li><li>For Part B: think about the order — apply → test → switch DNS → observe → delete. Deleting the Ingress before DNS cutover would cause downtime.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Part A
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: store-gateway
+  namespace: store
+spec:
+  gatewayClassName: nginx
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: store-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: store-route
+  namespace: store
+spec:
+  parentRefs:
+    - name: store-gateway
+  hostnames:
+    - &quot;store.example.com&quot;
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: api-svc
+          port: 3000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: web-svc
+          port: 80
+
+# Part B — zero-downtime migration steps
+# 1. Apply the Gateway and HTTPRoute manifests to the cluster while the Ingress is
+#    still live. The old Ingress and the new Gateway serve traffic in parallel.
+# 2. Reuse the same TLS Secret (store-tls) in the Gateway listener — no certificate
+#    re-issuance needed, so HTTPS continuity is maintained immediately.
+# 3. Smoke-test the Gateway entry point (via its LoadBalancer IP or a temporary
+#    /etc/hosts override) to confirm routing, TLS handshake, and backend responses
+#    are identical to the Ingress.
+# 4. Update DNS to point store.example.com at the Gateway&#x27;s external IP / hostname.
+#    Monitor error rates and latency for a short window (e.g., 5–15 minutes).
+# 5. Once confident, delete the old Ingress object. Traffic is now 100% on the
+#    Gateway API path with no downtime.</code></pre>
+                <div class='exp2'><p>Part A highlights the key migration difference: the <code class='ic'>tls:</code> block moves from the Ingress <code class='ic'>spec.tls</code> section into the Gateway listener&#x27;s <code class='ic'>tls.certificateRefs</code>. The rewrite annotation (<code class='ic'>nginx.ingress.kubernetes.io/rewrite-target</code>) has no equivalent here because basic path-prefix routing does not require a rewrite — only remove that annotation concern when you actually need URL rewriting (HTTPRoute has a <code class='ic'>URLRewrite</code> filter for that). Part B codifies the &#x27;test first, delete last&#x27; principle from the lecture: the old Ingress and new Gateway can coexist because they acquire separate IPs; you validate the new path under real traffic conditions before cutting DNS and only delete the Ingress after a clean observation window. Reusing the same TLS Secret is critical — it avoids a certificate mismatch window and eliminates the need to re-provision or re-issue certificates.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hN6eGkFd2ME' target='_blank'>How to Migrate Ingress NGINX to Gateway API (FULL Step-by-Step Kubernetes Demo + Zero-Downtime)</a></li><li><a href='https://www.youtube.com/watch?v=xj8KzHfEEcU' target='_blank'>Stop Using Ingress! The Complete Gateway API Guide (GKE &amp; NGINX)</a></li><li><a href='https://www.youtube.com/watch?v=DNPWfoMvgaI' target='_blank'>Multi-Tenant Kubernetes Gateway API: Stop Cross-Team Outages with Secure Namespace Isolation</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

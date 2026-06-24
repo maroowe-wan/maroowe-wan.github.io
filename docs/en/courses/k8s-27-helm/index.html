@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Helm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-27-helm/index.html'>한국어</a></div>
+  <h1>K8S-Helm</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 1 (ConfigMap/Secret, PV/PVC, Probes, rolling updates and rollback, requests/limits and HPA, Ingress) and want to broaden their real-world cluster operations skills. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Packaging Applications with Helm - Charts, Values, and Release Management</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Packaging Applications with Helm - Charts, Values, and Release Management </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the pain points of managing repetitive manifests and the problem Helm solves</li>
+<li>Describe the Chart structure (templates, values.yaml, Chart.yaml) and how template variable substitution works</li>
+<li>Deploy, upgrade, and roll back a release using <code class='ic'>helm install</code>, <code class='ic'>helm upgrade</code>, and <code class='ic'>helm rollback</code></li>
+</ul>
+<h3>Content</h3>
+<h4>Why Package Manifests Together</h4>
+<p>Up to this point, we have been writing each Kubernetes object — Deployment, Service, ConfigMap, Ingress — as its own YAML file and deploying it with <code class='ic'>kubectl apply</code>. For a small application, that works fine. In real-world operations, however, a single application rarely fits in one file.</p>
+<p>Consider deploying a Node.js backend for an e-commerce site. To handle traffic you need a <strong>Deployment (2 replicas)</strong>, a <strong>MongoDB</strong> instance for data storage, a <strong>Service</strong> for external access, and a <strong>ConfigMap</strong> for environment-specific configuration — four or five manifests in total. Two problems immediately surface.</p>
+<ul>
+<li><strong>Values differ across environments.</strong> In development you want 1 replica and <code class='ic'>NodePort</code>; in production you want 5 replicas and <code class='ic'>LoadBalancer</code>. That means copying nearly identical YAML files and changing a handful of values for each environment.</li>
+<li><strong>Nobody knows what to change or where.</strong> The original author knows that &quot;the replica count is on line 23 of deployment.yaml.&quot; But when ownership changes, the next maintainer has to hunt through scattered files to find what needs updating.</li>
+</ul>
+<p><strong>Helm is the package manager for Kubernetes.</strong> Just as <code class='ic'>apt</code> on Ubuntu or <code class='ic'>brew</code> on macOS installs, upgrades, and removes complex programs with a single command, Helm bundles a collection of manifests into <strong>one package (a Chart)</strong> and deploys it to a cluster with a single command. The core idea is simple: <strong>separate the unchanging structure (templates) from the values that vary per environment (configuration).</strong></p>
+<h4>The Two Pillars of Helm: Chart (Templates) and Values (Configuration)</h4>
+<p>Helm splits an application stack into two concerns.</p>
+<ul>
+<li><strong>Chart</strong> — a bundle of all the manifest templates that make up the application. It holds the <strong>structure (the mold)</strong> — &quot;this app consists of a Deployment + Service + ...&quot;</li>
+<li><strong>Values</strong> — the <strong>configuration</strong> that fills in the blanks of that mold. These are the environment-specific values that change: replica count, image tag, service type, and so on.</li>
+</ul>
+<p>Combining the two produces the final manifests that are applied to the cluster. By plugging different values into the same Chart, you can stamp out development and production environments from the exact same template.</p>
+<blockquote class='callout'>
+<p>The key insight is &quot;build the Chart once, reuse it everywhere by swapping only the values.&quot; Replace the habit of copy-pasting manifests with the mindset of extracting anything that changes into <code class='ic'>values.yaml</code>.</p>
+</blockquote>
+<p>One term worth defining up front: when a Chart is installed into a cluster, each <strong>installed instance is called a &quot;Release.&quot;</strong> The same Chart can create multiple releases such as <code class='ic'>frontend-dev</code> and <code class='ic'>frontend-prod</code>. Every upgrade to a release increments a revision number (revision 1, 2, 3 …), and that revision history is exactly what makes rollback possible.</p>
+<h4>Tiller Is Gone (Helm 3)</h4>
+<p>If you search for Helm, you will often see the word &quot;Tiller.&quot; <strong>In the older Helm 2, a server component called Tiller ran inside the cluster</strong>, acting as a middleman that received commands from the Helm client and forwarded them to the Kubernetes API. The problem was that Tiller operated with broad cluster-wide permissions, making it an easy security vulnerability.</p>
+<p><strong>Helm 3 removes Tiller entirely.</strong> The Helm client now communicates <strong>directly with the Kubernetes API</strong> using the permissions from your <code class='ic'>kubeconfig</code> (the cluster access configuration file). There is no separate server to install, and the security model is clear: &quot;Helm can only do what your kubectl can do.&quot; Release history is no longer stored in a separate location — it is stored as <strong>Secrets in the namespace where the release is deployed</strong>.</p>
+<p>Since we are using Helm 3, the only thing to keep in mind is that <code class='ic'>helm init</code> (the old Tiller installation command you see in older articles) is no longer needed.</p>
+<p>As shown in the diagram below, Helm 3 combines the Chart templates with the values to produce completed manifests and sends them directly to the Kubernetes API for deployment.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    C[&quot;Chart&lt;br/&gt;templates/*.yaml&quot;] --&gt; R[&quot;Helm Client&lt;br/&gt;Template Rendering&quot;]
+    V[&quot;values.yaml&lt;br/&gt;Environment-specific config&quot;] --&gt; R
+    R --&gt;|&quot;Completed manifests&quot;| API[&quot;Kubernetes API&lt;br/&gt;Direct communication, no Tiller&quot;]
+    API --&gt; K[&quot;Deploy to cluster&lt;br/&gt;= Release created&quot;]
+    K -.-&gt;|&quot;History stored as Secrets&quot;| H[&quot;Revision 1, 2, 3 ...&lt;br/&gt;Rollback reference&quot;]</div><figcaption>How Helm 3 combines a Chart and values and deploys to the cluster</figcaption></figure>
+<h4>Inside the Chart Structure</h4>
+<p>You can scaffold an empty Chart with a single command.</p>
+<pre><code>
+helm create myapp
+</code></pre>
+<p>This generates the following directory. Focus on the key files.</p>
+<pre><code>
+myapp/
+├── Chart.yaml          # Metadata: chart name, version, etc.
+├── values.yaml         # Default values (configuration) to fill into the templates
+├── templates/          # Manifest templates where variable substitution occurs
+│   ├── deployment.yaml
+│   ├── service.yaml
+│   ├── _helpers.tpl    # Reusable name and label snippets
+│   └── ...
+└── charts/             # Sub-charts this chart depends on
+</code></pre>
+<ul>
+<li><strong><code class='ic'>Chart.yaml</code></strong> — the identity card of the package. It holds the chart name, chart version (<code class='ic'>version</code>), and application version (<code class='ic'>appVersion</code>).</li>
+<li><strong><code class='ic'>values.yaml</code></strong> — the <strong>default values</strong> for all configuration. Users can use these as-is or override individual values.</li>
+<li><strong><code class='ic'>templates/</code></strong> — standard manifests, but with blanks marked by <code class='ic'>{{ ... }}</code> expressions that pull values from <code class='ic'>values.yaml</code>.</li>
+</ul>
+<p>A typical <code class='ic'>Chart.yaml</code> looks like this:</p>
+<pre><code>
+apiVersion: v2
+name: myapp
+description: Our company&#x27;s shopping backend
+version: 0.1.0        # version of the chart itself
+appVersion: &quot;1.0.0&quot;   # version of the application being packaged
+</code></pre>
+<h4>How Template Variable Substitution Works</h4>
+<p>The core mechanic is <strong>replacing hard-coded values in <code class='ic'>templates/</code> manifests with <code class='ic'>{{ .Values.&lt;path&gt; }}</code></strong>. <code class='ic'>.Values</code> refers to the contents of <code class='ic'>values.yaml</code>.</p>
+<p>Define the values that vary per environment in <code class='ic'>values.yaml</code>:</p>
+<pre><code>
+# values.yaml
+replicaCount: 2
+image:
+  repository: myorg/node-shop
+  tag: &quot;1.0.0&quot;
+service:
+  type: NodePort
+  port: 8080
+</code></pre>
+<p>Then reference those values in <code class='ic'>templates/deployment.yaml</code>:</p>
+<pre><code>
+# templates/deployment.yaml (excerpt)
+spec:
+  replicas: {{ .Values.replicaCount }}          # → substituted with 2
+  template:
+    spec:
+      containers:
+        - name: app
+          image: &quot;{{ .Values.image.repository }}:{{ .Values.image.tag }}&quot;
+          ports:
+            - containerPort: {{ .Values.service.port }}
+</code></pre>
+<p>At <code class='ic'>helm install</code> time, Helm reads the templates and substitutes <code class='ic'>{{ .Values.replicaCount }}</code> with <code class='ic'>2</code> and <code class='ic'>{{ .Values.image.tag }}</code> with <code class='ic'>&quot;1.0.0&quot;</code>, producing <strong>ordinary, fully-formed Kubernetes manifests</strong> that are then applied to the cluster.</p>
+<blockquote class='callout'>
+<p>To preview the generated manifests before deploying, use <code class='ic'>helm template myapp/</code> or <code class='ic'>helm install myapp ./myapp --dry-run --debug</code>. Making a habit of reviewing the rendered output before applying dramatically reduces mistakes.</p>
+</blockquote>
+<p>Now suppose you want production to run 5 replicas with a LoadBalancer service. Do not touch the templates — <strong>change only the values</strong>. Keeping overrides in a separate file is the cleanest approach.</p>
+<pre><code>
+# values-prod.yaml — only the values that differ in production
+replicaCount: 5
+service:
+  type: LoadBalancer
+</code></pre>
+<h4>Hands-On: Deploying, Upgrading, and Rolling Back a Release</h4>
+<p>With a Chart ready, let&#x27;s deploy it to a real cluster. The examples assume a local cluster (minikube, Docker Desktop Kubernetes, etc.) is up and running.</p>
+<p><strong>Step 1: Install — <code class='ic'>helm install</code></strong></p>
+<p>Starting with Helm 3, you must always specify the release name explicitly (auto-generated names are no longer the default).</p>
+<pre><code>
+# helm install &lt;release-name&gt; &lt;chart-path&gt;
+helm install myshop ./myapp
+
+# Override with a production values file using -f
+helm install myshop ./myapp -f values-prod.yaml
+
+# Override one or two values quickly with --set
+helm install myshop ./myapp --set replicaCount=3
+</code></pre>
+<p>Verify the installed release.</p>
+<pre><code>
+helm list                 # list releases in the current namespace
+helm list --all-namespaces  # list releases across all namespaces
+kubectl get pods            # confirm the Pods were actually created
+</code></pre>
+<blockquote class='callout'>
+<p>Caution: Helm 3 does not automatically create namespaces that do not exist. If you deploy with <code class='ic'>-n team-a</code>, you must first run <code class='ic'>kubectl create namespace team-a</code> or add the <code class='ic'>--create-namespace</code> flag. This is a common pitfall in CI/CD pipelines.</p>
+</blockquote>
+<p><strong>Step 2: Upgrade — <code class='ic'>helm upgrade</code></strong></p>
+<p>Traffic has dropped after the holidays, so you want to reduce the replica count. There is no need to tear down and redeploy the entire application — just change <code class='ic'>install</code> to <code class='ic'>upgrade</code>.</p>
+<pre><code>
+helm upgrade myshop ./myapp --set replicaCount=1
+</code></pre>
+<p>Helm calculates the diff and applies it to the cluster, incrementing the release&#x27;s revision number by 1. Every upgrade is preserved as a new revision in the history.</p>
+<pre><code>
+helm history myshop   # revision history for this release (who deployed what, and when)
+</code></pre>
+<p>In automation scripts where it is uncertain whether an initial install has already occurred, use the <code class='ic'>helm upgrade --install myshop ./myapp</code> idiom. It installs if the release does not exist, and upgrades if it does.</p>
+<p><strong>Step 3: Rollback — <code class='ic'>helm rollback</code></strong></p>
+<p>Something went wrong with the upgraded configuration? Because Helm retains a complete revision history, you can revert to any previous revision with a single command.</p>
+<p>Say you installed (revision 1), then upgraded twice, and are now at <strong>revision 3</strong> — but that revision 3 has a bad configuration. You want to return to the last known-good state, <strong>revision 2</strong>. First check <code class='ic'>helm history</code> to confirm which revision was healthy, then roll back to that number.</p>
+<pre><code>
+# Check the history to identify the healthy revision
+helm history myshop
+
+# helm rollback &lt;release-name&gt; &lt;target-revision-number&gt;
+helm rollback myshop 2     # restore to revision 2, the last known-good state
+
+helm history myshop        # the rollback is itself recorded as a new revision (revision 4 here)
+</code></pre>
+<p>This is the core reason Helm is more powerful than manually reverting scattered YAML files with <code class='ic'>kubectl apply</code>. You can <strong>return to the last known-good state in a single line.</strong></p>
+<p>The release lifecycle flows like the state diagram below. Revisions accumulate with each upgrade, and when something breaks, a rollback restores the healthy revision. The rollback itself becomes a new revision (revision 4 in this example), preserving the full audit trail.</p>
+<figure class='diagram'><div class='mermaid'>stateDiagram-v2
+    state &quot;Revision 1 (install)&quot; as Rev1
+    state &quot;Revision 2 (healthy)&quot; as Rev2
+    state &quot;Revision 3 (bad config)&quot; as Rev3
+    state &quot;Revision 4 (restored from revision 2)&quot; as Rev4
+    [*] --&gt; Rev1: helm install myshop
+    Rev1 --&gt; Rev2: helm upgrade myshop
+    Rev2 --&gt; Rev3: helm upgrade myshop
+    Rev3 --&gt; Rev4: helm rollback myshop 2
+    Rev4 --&gt; [*]: helm uninstall myshop</div><figcaption>Release lifecycle: install → upgrade → rollback</figcaption></figure>
+<p><strong>Step 4: Uninstall — <code class='ic'>helm uninstall</code></strong></p>
+<pre><code>
+helm uninstall myshop      # removes all objects created by the release
+</code></pre>
+<p>(Helm 2&#x27;s <code class='ic'>helm delete --purge</code> is unified into <code class='ic'>helm uninstall</code> in Helm 3. Add <code class='ic'>--keep-history</code> to preserve the revision history after removal.)</p>
+<h4>Using Charts Others Have Built — Repositories</h4>
+<p>You do not have to build every Chart yourself. Well-known software like nginx, Prometheus, and Jenkins has already been packaged into Charts and published in <strong>Chart repositories</strong>. This is exactly the same concept as a package repository on an operating system.</p>
+<pre><code>
+# Add a repository (Helm 3 ships with no default repos, so you must add them manually)
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update                       # refresh the local index
+helm search repo nginx                 # search for a chart
+helm install web bitnami/nginx         # install the chart you found
+</code></pre>
+<p>Your own Charts can be packaged with <code class='ic'>helm package myapp</code> and published to an internal repository, allowing other teams to reproduce the exact same configuration with the same one-line command — no more handing off manifests with a note saying &quot;change this value here.&quot;</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>When manifests multiply and values differ across environments, copy-and-paste management becomes unmanageable. Helm is a Kubernetes package manager that bundles them into a <strong>package (Chart)</strong> and handles everything with a single command.</li>
+<li>Helm separates the <strong>unchanging structure (Chart/templates)</strong> from the <strong>environment-specific values (values.yaml)</strong>. The <code class='ic'>{{ .Values.&lt;path&gt; }}</code> placeholders in templates are substituted with values at install time to produce the final manifests.</li>
+<li>The core of a Chart is <code class='ic'>Chart.yaml</code> (metadata), <code class='ic'>values.yaml</code> (default configuration), and <code class='ic'>templates/</code> (the substitutable manifests).</li>
+<li>An installed Chart instance is called a <strong>release</strong>. Use <code class='ic'>helm install</code> to deploy, <code class='ic'>helm upgrade</code> to update (increments the revision), <code class='ic'>helm rollback &lt;number&gt;</code> to restore a healthy revision (e.g., if revision 3 is broken, run <code class='ic'>helm rollback myshop 2</code>), and <code class='ic'>helm history</code> to inspect the revision log.</li>
+<li>Helm 3 <strong>removes Tiller</strong> and communicates with the API directly using your kubeconfig permissions. Namespaces are not auto-created — use <code class='ic'>--create-namespace</code> when needed.</li>
+<li>Fetch well-known software with <code class='ic'>helm repo add</code> followed by a search and install. Share your own Charts via <code class='ic'>helm package</code>.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>IBM Technology, &quot;What is Helm?&quot; — https://www.youtube.com/watch?v=fy8SHvNZGeE</li>
+<li>Docker, &quot;Hands-On Helm&quot; — https://www.youtube.com/watch?v=6d6L4-ADF-M</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. 1. Run helm create myapp to scaffold the Chart skeleton.</p>
+<p>2. Open the following files in order and review their contents.</p>
+<ul>
+<li>myapp/Chart.yaml — locate the name, version, and appVersion fields.</li>
+<li>myapp/values.yaml — locate the replicaCount, image.repository, image.tag, service.type, and service.port fields.</li>
+<li>myapp/templates/deployment.yaml — find at least three places that reference .Values using the {{ .Values.&lt;path&gt; }} syntax.</li>
+</ul>
+<p>3. Run helm template myapp ./myapp to render the substituted output (the completed manifests), and verify that the replicas value in the Deployment matches the replicaCount in values.yaml.</p></div>
+              <pre class='starter'><code># 1. Scaffold the Chart
+helm create myapp
+
+# 2. Inspect the structure (tree view)
+find myapp -type f | sort
+
+# 3. Review the file contents
+cat myapp/Chart.yaml
+cat myapp/values.yaml
+cat myapp/templates/deployment.yaml
+
+# 4. Preview the rendered manifests (fill in the blanks)
+helm template __release-name__ __chart-path__</code></pre>
+              <details><summary>Hint</summary><ul><li>You can use tree myapp instead of find. If tree is not available, ls -R myapp is a suitable alternative.</li><li>The first argument to helm template is the release name (any string), and the second is the chart path. Example: helm template myapp ./myapp</li><li>To quickly spot the replica count in the rendered output, pipe through grep: helm template myapp ./myapp | grep replicas</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Scaffold the Chart
+helm create myapp
+
+# 2. Inspect the structure
+find myapp -type f | sort
+# Key output:
+# myapp/Chart.yaml
+# myapp/values.yaml
+# myapp/templates/_helpers.tpl
+# myapp/templates/deployment.yaml
+# myapp/templates/service.yaml
+# myapp/templates/hpa.yaml
+# myapp/templates/serviceaccount.yaml
+
+# 3. Review metadata
+cat myapp/Chart.yaml
+# name: myapp
+# version: 0.1.0
+# appVersion: &quot;1.16.0&quot;
+
+# Review default values
+cat myapp/values.yaml
+# replicaCount: 1
+# image:
+#   repository: nginx
+#   tag: &quot;&quot;
+# service:
+#   type: ClusterIP
+#   port: 80
+
+# 4. Preview rendered manifests
+helm template myapp ./myapp
+# Confirm replicas: 1 in the rendered Deployment output
+# (matches replicaCount: 1 in values.yaml)</code></pre>
+                <div class='exp2'><p>helm create generates a ready-to-use skeleton containing Deployment, Service, HPA, and ServiceAccount templates. Chart.yaml is the package&#x27;s identity card, holding the chart name and version. values.yaml is the central location for all default configuration. The files in templates/ contain {{ .Values.&lt;path&gt; }} placeholders that are left blank until helm install or helm template fills them in with the actual values, producing complete Kubernetes manifests. helm template is a safe debug tool — it renders the output without deploying anything to the cluster.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. 1. Edit myapp/values.yaml and change the following values.</p>
+<ul>
+<li>replicaCount: 1 → 2</li>
+<li>service.type: ClusterIP → NodePort</li>
+</ul>
+<p>2. Deploy the release by running helm install myshop ./myapp.</p>
+<p>3. Verify the deployment with the following commands.</p>
+<ul>
+<li>helm list — check the release name, chart, revision, and status.</li>
+<li>kubectl get pods — confirm that 2 Pods are in the Running state.</li>
+<li>kubectl get service — confirm that the service type is NodePort.</li>
+</ul>
+<p>4. Run helm install myshop ./myapp a second time and observe what error occurs. Explain why.</p></div>
+              <pre class='starter'><code># 1. Edit values.yaml (use vi, nano, or your preferred editor)
+vi myapp/values.yaml
+# Change replicaCount to 2 and service.type to NodePort, then save
+
+# 2. Deploy the release (fill in the blanks)
+helm __command__ __release-name__ __chart-path__
+
+# 3. Verify the deployment
+helm list
+kubectl get pods
+kubectl get service
+
+# 4. Attempt to reinstall with the same name
+helm install myshop ./myapp</code></pre>
+              <details><summary>Hint</summary><ul><li>When editing values.yaml manually, preserve the 2-space YAML indentation. Using tab characters will cause a parse error.</li><li>If Pods are in ContainerCreating after helm install, wait a moment. Use kubectl get pods -w to watch the status change in real time.</li><li>If kubectl get service shows TYPE as ClusterIP instead of NodePort, confirm that the values.yaml edit was saved by running cat myapp/values.yaml | grep type.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Changes to values.yaml (modified lines only)
+# replicaCount: 2
+# service:
+#   type: NodePort
+#   port: 80
+
+# Alternatively, use sed to apply the changes:
+sed -i &#x27;s/replicaCount: 1/replicaCount: 2/&#x27; myapp/values.yaml
+sed -i &#x27;s/type: ClusterIP/type: NodePort/&#x27; myapp/values.yaml
+
+# Confirm the changes
+grep -E &#x27;replicaCount|type&#x27; myapp/values.yaml
+# replicaCount: 2
+# type: NodePort
+
+# 2. Deploy the release
+helm install myshop ./myapp
+# Example output:
+# NAME: myshop
+# LAST DEPLOYED: ...
+# NAMESPACE: default
+# STATUS: deployed
+# REVISION: 1
+
+# 3. Verify the deployment
+helm list
+# NAME     NAMESPACE  REVISION  STATUS    CHART       APP VERSION
+# myshop   default    1         deployed  myapp-0.1.0  1.16.0
+
+kubectl get pods
+# NAME                             READY   STATUS    RESTARTS
+# myshop-myapp-xxxxxxxxx-aaaaa     1/1     Running   0
+# myshop-myapp-xxxxxxxxx-bbbbb     1/1     Running   0
+
+kubectl get service
+# NAME           TYPE       CLUSTER-IP    EXTERNAL-IP  PORT(S)
+# myshop-myapp   NodePort   10.96.x.x     &lt;none&gt;       80:3xxxx/TCP
+
+# 4. Attempt to reinstall with the same name -&gt; error
+helm install myshop ./myapp
+# Error: INSTALLATION FAILED: cannot re-use a name that is still in use
+# Reason: a release named &#x27;myshop&#x27; already exists in this namespace.
+# An existing release must be updated with upgrade, not re-installed.</code></pre>
+                <div class='exp2'><p>Editing values.yaml changes the result of every {{ .Values.&lt;path&gt; }} substitution in templates/. Setting replicaCount: 2 sets spec.replicas to 2 in the Deployment, causing 2 Pods to be created. Setting service.type: NodePort is reflected in the type field of the Service object. helm install fails with an error if a release with the same name already exists. In that case, use upgrade to update the release, or uninstall it first and reinstall. In automation scripts where you do not want to distinguish between the two cases, use the helm upgrade --install idiom.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. 1. Use helm upgrade --set to reduce the replicaCount of the myshop release to 1.</p>
+<p>2. Use kubectl get pods to confirm the Pod count drops to 1.</p>
+<p>3. Run helm history myshop to view the revision history and describe the difference between revision 1 and revision 2.</p>
+<p>4. Run another upgrade using --set to raise replicaCount to 3.</p>
+<p>5. Run helm history myshop again and confirm that revision 3 has been added.</p></div>
+              <pre class='starter'><code># 1. Upgrade to reduce replicaCount to 1 (fill in the blanks)
+helm upgrade myshop ./myapp --set ____=____
+
+# 2. Check Pod count
+kubectl get pods
+
+# 3. Review release history
+helm history ____
+
+# 4. Upgrade to raise replicaCount to 3
+helm upgrade myshop ./myapp __flag__
+
+# 5. Review history again
+helm history myshop</code></pre>
+              <details><summary>Hint</summary><ul><li>The KEY in --set uses dot notation to represent nested values.yaml hierarchy. Examples: image.tag=1.2.0, service.port=8080</li><li>In helm history, the revision with STATUS deployed is the currently active revision; superseded indicates a previous revision.</li><li>If the Pod count change is not immediately visible, use kubectl get pods -w to track it in real time, or wait a few seconds and re-run. Pods are replaced sequentially according to the Deployment&#x27;s rolling update strategy.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Upgrade to reduce replicaCount to 1
+helm upgrade myshop ./myapp --set replicaCount=1
+# Example output:
+# Release &quot;myshop&quot; has been upgraded. Happy Helming!
+# REVISION: 2
+
+# 2. Check Pod count
+kubectl get pods
+# NAME                             READY   STATUS    RESTARTS
+# myshop-myapp-xxxxxxxxx-aaaaa     1/1     Running   0
+# (only 1 Pod remaining)
+
+# 3. Review release history
+helm history myshop
+# REVISION  UPDATED       STATUS      CHART         APP VERSION  DESCRIPTION
+# 1         ...           superseded  myapp-0.1.0   1.16.0       Install complete
+# 2         ...           deployed    myapp-0.1.0   1.16.0       Upgrade complete
+# Revision 1: initial install (replicaCount=2, service.type=NodePort)
+# Revision 2: upgrade (replicaCount reduced to 1)
+
+# 4. Upgrade to raise replicaCount to 3
+helm upgrade myshop ./myapp --set replicaCount=3
+# REVISION: 3
+
+# 5. Review history again
+helm history myshop
+# REVISION  UPDATED       STATUS      CHART         APP VERSION  DESCRIPTION
+# 1         ...           superseded  myapp-0.1.0   1.16.0       Install complete
+# 2         ...           superseded  myapp-0.1.0   1.16.0       Upgrade complete
+# 3         ...           deployed    myapp-0.1.0   1.16.0       Upgrade complete
+
+kubectl get pods
+# Confirm 3 Pods are in the Running state</code></pre>
+                <div class='exp2'><p>helm upgrade --set KEY=VALUE is the fastest way to override a specific key in values.yaml directly from the command line. You can specify values inline without editing any file, which is why this pattern is common in CI/CD pipelines. The revision number increments by 1 with each upgrade, and the previous revision is retained in the history with a superseded status. This revision history in helm history is exactly what makes rollback possible. Note that values not explicitly passed with --set do not carry over from the previous upgrade — they revert to the chart&#x27;s values.yaml defaults. For managing multiple values together, using -f values-override.yaml is safer.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. 1. Simulate a &#x27;bad upgrade&#x27;. Run helm upgrade --set replicaCount=10 --set image.tag=broken-9.9.9 to upgrade myshop.</p>
+<ul>
+<li>Use kubectl get pods to check whether any Pods enter a Pending or ImagePullBackOff state. (In a real cluster, a non-existent image tag will trigger ImagePullBackOff.)</li>
+</ul>
+<p>2. Run helm history myshop to review the current history and identify the &#x27;last known-good revision number&#x27;.</p>
+<p>3. Run helm rollback myshop &lt;revision-number&gt; to restore the last healthy revision.</p>
+<p>4. Use kubectl get pods to confirm the Pods have recovered, and check helm history myshop to confirm that the rollback itself was recorded as a new revision.</p>
+<p>5. Run helm uninstall myshop to delete the release, then use kubectl get pods and kubectl get service to confirm all objects have been removed.</p></div>
+              <pre class='starter'><code># 1. Upgrade with a bad configuration (fill in the blanks)
+helm upgrade myshop ./myapp \
+  --set replicaCount=____ \
+  --set image.tag=____
+
+# Check Pod state
+kubectl get pods
+
+# 2. Review history — identify the healthy revision number
+helm history ____
+
+# 3. Roll back (fill in the blanks)
+helm rollback __release-name__ __revision-number__
+
+# 4. Verify after rollback
+kubectl get pods
+helm history myshop
+
+# 5. Delete the release
+helm __uninstall-command__ myshop
+kubectl get pods
+kubectl get service</code></pre>
+              <details><summary>Hint</summary><ul><li>image.tag=broken-9.9.9 is a deliberately non-existent tag. Depending on your cluster, ImagePullBackOff may not appear immediately — run kubectl get pods several times at a few-second interval, or use the -w flag.</li><li>The second argument to helm rollback is the revision number you identified from helm history. The number may differ depending on how you proceeded through the steps, so always check the history first.</li><li>After helm uninstall, a few Pods may briefly linger in a Terminating state. It is normal for them to take a few seconds to a few tens of seconds to disappear completely.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Upgrade with a bad configuration
+helm upgrade myshop ./myapp \
+  --set replicaCount=10 \
+  --set image.tag=broken-9.9.9
+# REVISION: 4
+
+# Check Pod state (non-existent image → ImagePullBackOff or ErrImagePull)
+kubectl get pods
+# NAME                             READY   STATUS             RESTARTS
+# myshop-myapp-xxxxxxxxx-ccccc     0/1     ImagePullBackOff   0
+# myshop-myapp-xxxxxxxxx-ddddd     0/1     ImagePullBackOff   0
+# ... (10 attempted, most in ImagePullBackOff)
+
+# 2. Review history — identify the healthy revision
+helm history myshop
+# REVISION  UPDATED  STATUS      CHART         APP VERSION  DESCRIPTION
+# 1         ...      superseded  myapp-0.1.0   1.16.0       Install complete
+# 2         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete
+# 3         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete
+# 4         ...      deployed    myapp-0.1.0   1.16.0       Upgrade complete
+# → Revision 3 is the last healthy revision (replicaCount=3, default image tag)
+
+# 3. Roll back to revision 3
+helm rollback myshop 3
+# Rollback was a success! Happy Helming!
+
+# 4. Verify after rollback
+kubectl get pods
+# NAME                             READY   STATUS    RESTARTS
+# myshop-myapp-xxxxxxxxx-aaaaa     1/1     Running   0
+# myshop-myapp-xxxxxxxxx-bbbbb     1/1     Running   0
+# myshop-myapp-xxxxxxxxx-eeeee     1/1     Running   0
+# (restored to replicaCount=3, back to the nginx default image, all Running)
+
+helm history myshop
+# REVISION  UPDATED  STATUS      CHART         APP VERSION  DESCRIPTION
+# 1         ...      superseded  myapp-0.1.0   1.16.0       Install complete
+# 2         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete
+# 3         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete
+# 4         ...      superseded  myapp-0.1.0   1.16.0       Upgrade complete
+# 5         ...      deployed    myapp-0.1.0   1.16.0       Rollback to 3
+# (the rollback itself is recorded as revision 5)
+
+# 5. Delete the release
+helm uninstall myshop
+# release &quot;myshop&quot; uninstalled
+
+kubectl get pods
+# No resources found in default namespace.
+
+kubectl get service
+# NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+# kubernetes   ClusterIP   10.96.0.1    &lt;none&gt;        443/TCP   ...
+# (all myshop-related Services have been removed)</code></pre>
+                <div class='exp2'><p>This exercise covers the complete Helm release lifecycle — install → upgrade → failure → rollback → uninstall — in a single session. The key insight behind helm rollback is that Helm stores the state of every revision as Secrets in the namespace, allowing you to restore the cluster to any revision&#x27;s manifests with a single command. The rollback itself is recorded as a new revision (revision 5), so &#x27;when the rollback happened&#x27; is also part of the permanent history. helm uninstall removes all Kubernetes objects created by the release — Deployment, Service, ServiceAccount, and so on — in one shot. By default, the history Secrets are also deleted; add --keep-history if you want to preserve them.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=fy8SHvNZGeE' target='_blank'>What is Helm?</a></li><li><a href='https://www.youtube.com/watch?v=6d6L4-ADF-M' target='_blank'>Hands-On Helm</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

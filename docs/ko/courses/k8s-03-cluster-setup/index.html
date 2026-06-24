@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-ClusterSetup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-03-cluster-setup/index.html'>EN</a></div>
+  <h1>K8S-ClusterSetup</h1>
+  <div class="sub">쿠버네티스 기본 개념(파드/디플로이먼트)을 알고 직접 클러스터를 띄워보려는 초중급 개발자/인프라 입문자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. 로컬 쿠버네티스 클러스터 만들기: minikube·kind부터 첫 배포까지</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. 로컬 쿠버네티스 클러스터 만들기: minikube·kind부터 첫 배포까지 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li><strong>minikube</strong>와 <strong>kind</strong>로 로컬 클러스터를 각각 생성하고, 두 도구의 차이(단일 VM/도커 노드 vs. 멀티노드 컨테이너)와 각각 어떤 상황에 어울리는지 설명할 수 있다.</li>
+<li><strong>kubeadm 부트스트랩 흐름</strong> — 컨트롤 플레인 초기화, kubeconfig 발급, 노드 join — 을 개념적으로 이해하고, kubeconfig 파일이 어떻게 <code class='ic'>kubectl</code>을 클러스터에 연결하는지 설명할 수 있다.</li>
+<li>새로 만든 클러스터를 <code class='ic'>kubectl get nodes</code>로 검증한 뒤, <strong>첫 Deployment</strong>를 배포하고 실제로 동작하는지 확인할 수 있다.</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 노트북에서 쿠버네티스를 돌리는가?</h4>
+<p>프로덕션에서 쿠버네티스를 운영하기 전에, 마음껏 실험할 수 있는 안전한 공간이 필요하다. 실험할 때마다 클라우드 클러스터를 빌리는 건 느리고 돈도 든다. 게다가 처음 치는 <code class='ic'>kubectl delete</code>가 실제 서비스에 닿으면 곤란하다. <strong>로컬 클러스터</strong>는 내 컴퓨터 위에서 쿠버네티스 API 전체를 그대로 제공한다. 앱을 배포하고, 스케일을 조정하고, 자가 복구를 관찰하고, 다 끝나면 몇 초 만에 날려버릴 수 있다. 대부분의 사람들이 처음 접하는 도구는 <strong>minikube</strong>와 <strong>kind</strong>다. 둘 다 동작하는 클러스터를 만들어주지만 접근 방식은 완전히 다르다. 어떤 걸 골라야 하는지 아는 것이 이번 강의의 첫 번째 핵심 기술이다.</p>
+<blockquote class='callout'>
+<p>&quot;클러스터&quot;란 쿠버네티스를 함께 실행하는 노드(머신)들의 묶음이다. 로컬에서는 그 &quot;머신&quot;이 보통 VM이나 Docker 컨테이너처럼 행세하지만, 쿠버네티스 입장에서는 실제 서버와 전혀 차이가 없다.</p>
+</blockquote>
+<h4>minikube vs. kind: 같은 API로 가는 두 가지 길</h4>
+<p><strong>minikube</strong>는 VM 또는 Docker 컨테이너 안에서 단일 노드 클러스터를 띄운다. 입문자에게 친절하고 기능이 충실하다. 대시보드, Ingress 애드온, <code class='ic'>minikube service</code> 헬퍼(앱을 브라우저에서 바로 열어주는 도구) 같은 편의 기능이 기본 제공된다. 기본 구성은 컨트롤 플레인과 워크로드를 모두 담당하는 <strong>노드 하나</strong>다. 이 단순함이 학습과 간단한 데모에는 딱 맞다.</p>
+<p><strong>kind</strong> — <strong>Kubernetes IN Docker</strong>의 약자 — 는 클러스터의 각 <em>노드</em>를 Docker 컨테이너로 실행한다. 노드가 컨테이너이기 때문에, 컨트롤 플레인 컨테이너 하나와 워커 컨테이너 여러 개로 구성된 <strong>멀티노드</strong> 클러스터를 몇 초 만에 만들 수 있다. 여러 클러스터를 동시에 독립적으로 운용하는 것도 가능하다. 가볍고 스크립트 친화적이어서 <strong>CI/CD 파이프라인</strong>의 사실상 표준으로 자리 잡았다. 테스트 클러스터를 띄우고, 테스트를 돌리고, 날려버리는 용도에 최적이다.</p>
+<p>실용적인 선택 기준은 다음과 같다:</p>
+<blockquote class='callout'>
+<p>애드온이 포함된 가장 친절한 단일 노드 샌드박스가 필요하면 <strong>minikube</strong>. 빠르고 스크립트 자동화가 가능한 멀티노드 클러스터 — 특히 자동화 테스트 파이프라인 안 — 가 필요하면 <strong>kind</strong>.</p>
+</blockquote>
+<p>한 가지 더 알아둘 옵션이 있다. <strong>Docker Desktop</strong>에는 쿠버네티스 토글이 내장되어 있다(설정 → Kubernetes → 활성화). Docker Desktop을 이미 쓰고 있다면 가장 손쉬운 시작점이고, <code class='ic'>kubectl</code>도 같이 설치해준다. 다만 클러스터 구성을 깊이 커스터마이징할 수 없다는 단점이 있다. 포트 매핑 추가, 퍼시스턴트 볼륨 마운트, 클러스터 동시 운용이 필요한 경우엔 여전히 독립적인 kind를 선호한다.</p>
+<h4>kubeadm이 내부에서 하는 일</h4>
+<p>minikube와 kind는 편의를 위한 래퍼다. 그 아래에서 실제 쿠버네티스 클러스터는 <strong>kubeadm</strong>이라는 도구로 부트스트랩된다. 이 흐름을 이해하면 로컬 도구들이 자동으로 처리해주는 것들이 무엇인지 명확해진다. 부트스트랩은 개념적으로 세 단계로 진행된다.</p>
+<p>1. <strong>컨트롤 플레인 초기화</strong> — 첫 번째 머신에서 <code class='ic'>kubeadm init</code>을 실행한다. 클러스터의 &quot;두뇌&quot;에 해당하는 구성 요소들이 시작된다. <strong>API 서버</strong>(모든 명령이 통과하는 입구), <strong>etcd</strong>(클러스터 상태를 저장하는 키-값 저장소), <strong>스케줄러</strong>(파드를 어느 노드에 배치할지 결정), <strong>컨트롤러 매니저</strong>(현실을 선언된 상태로 지속적으로 맞춰가는 루프)가 여기에 해당한다.</p>
+<p>2. <strong>kubeconfig 발급</strong> — <code class='ic'>kubeadm init</code>이 <strong>관리자 kubeconfig</strong> 파일을 생성한다. 이 파일에는 세 가지 정보가 담긴다. API 서버 주소, 서버를 신뢰할 수 있다는 것을 증명하는 CA 인증서, 클라이언트 자격증명이다. 이 파일 없이는 <code class='ic'>kubectl</code>이 어느 클러스터에 연결해야 하는지, 어떻게 인증해야 하는지 알 수 없다.</p>
+<p>3. <strong>워커 노드 join</strong> — <code class='ic'>kubeadm init</code>이 컨트롤 플레인 주소와 단기 join 토큰이 담긴 <code class='ic'>kubeadm join</code> 명령을 출력한다. 추가할 각 머신에서 이 명령을 실행하면 <strong>워커 노드</strong>로 등록되어 컨트롤 플레인이 워크로드를 스케줄할 수 있게 된다.</p>
+<p>개념적인 흐름은 다음과 같다. 단일 컨트롤 플레인 init이 자격증명과 join 토큰을 만들고, 모든 워커가 그 토큰을 사용해 컨트롤 플레인에 합류한다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Init[&quot;1단계: 첫 번째 머신에서 kubeadm init&quot;]
+    CP[&quot;컨트롤 플레인 시작: API 서버, etcd, 스케줄러, 컨트롤러 매니저&quot;]
+    Kubeconfig[&quot;2단계: 관리자 kubeconfig 발급 (API 주소 + CA + 자격증명)&quot;]
+    Token[&quot;Join 토큰 + 컨트롤 플레인 주소 출력&quot;]
+    Kubectl[&quot;이제 kubectl이 클러스터와 통신 가능&quot;]
+    Worker1[&quot;3단계: 워커에서 kubeadm join&quot;]
+    Worker2[&quot;3단계: 워커에서 kubeadm join&quot;]
+    Joined[&quot;워커들이 스케줄 가능한 노드로 등록됨&quot;]
+
+    Init --&gt; CP
+    CP --&gt; Kubeconfig
+    Kubeconfig --&gt; Kubectl
+    CP --&gt; Token
+    Token --&gt; Worker1
+    Token --&gt; Worker2
+    Worker1 --&gt; Joined
+    Worker2 --&gt; Joined</div><figcaption>kubeadm 3단계 부트스트랩 흐름</figcaption></figure>
+<pre><code>
+# (개념 설명용 — 실제 멀티노드 클러스터에서 kubeadm이 실행하는 내용)
+
+# 첫 번째 머신 — 컨트롤 플레인 초기화:
+kubeadm init --pod-network-cidr=10.244.0.0/16
+
+# kubeadm이 관리자 kubeconfig를 제자리에 복사하도록 안내한다:
+mkdir -p $HOME/.kube
+cp /etc/kubernetes/admin.conf $HOME/.kube/config
+
+# 각 워커 머신 — kubeadm이 출력한 토큰으로 join:
+kubeadm join 192.168.0.10:6443 --token &lt;token&gt; \
+  --discovery-token-ca-cert-hash sha256:&lt;hash&gt;
+</code></pre>
+<p><code class='ic'>minikube start</code>나 <code class='ic'>kind create cluster</code>를 실행하면 이 모든 과정이 자동으로 처리되고, 생성된 kubeconfig가 <code class='ic'>~/.kube/config</code>에 병합된다. 그래서 &quot;그냥 되는&quot; 것이다.</p>
+<h4>kubeconfig가 kubectl을 클러스터에 연결하는 방식</h4>
+<p><code class='ic'>kubectl</code>은 상태가 없다. 어떤 클러스터도 기억하지 않는다. 명령을 실행할 때마다 <strong>kubeconfig</strong> 파일(기본값: <code class='ic'>~/.kube/config</code>)을 읽어 <em>어디에</em> 연결할지, <em>누구로서</em> 인증할지를 파악한다. kubeconfig에는 <strong>컨텍스트</strong>를 구성하는 세 종류의 항목이 담겨 있다.</p>
+<ul>
+<li><strong>clusters</strong> — API 서버 URL과 CA 인증서.</li>
+<li><strong>users</strong> — 자격증명(클라이언트 인증서 또는 토큰).</li>
+<li><strong>contexts</strong> — &quot;이 클러스터 + 이 사용자 + 기본 네임스페이스&quot;를 묶은 이름 붙은 쌍.</li>
+</ul>
+<p><strong>현재 컨텍스트(current context)</strong>가 <code class='ic'>kubectl</code>이 지금 사용하는 항목이다. 하나의 파일에 여러 컨텍스트를 담을 수 있기 때문에, minikube 클러스터와 kind 클러스터 사이를 오가는 것이 명령 하나로 끝난다. 재구성이 필요 없다. 아래 다이어그램은 이 항목들이 어떻게 조합되고, 현재 컨텍스트가 <code class='ic'>kubectl</code>을 어떻게 이끄는지 보여준다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    Kubectl[&quot;kubectl (상태 없음)&quot;]
+    Current[&quot;현재 컨텍스트&quot;]
+    Ctx[&quot;contexts: 클러스터 + 사용자 + 네임스페이스&quot;]
+    Cluster[&quot;clusters: API 서버 URL + CA 인증서&quot;]
+    User[&quot;users: 클라이언트 인증서 또는 토큰&quot;]
+    API[&quot;클러스터 API 서버&quot;]
+
+    Kubectl --&gt; Current
+    Current --&gt; Ctx
+    Ctx --&gt; Cluster
+    Ctx --&gt; User
+    Cluster --&gt; API
+    User --&gt; API</div><figcaption>kubeconfig가 kubectl을 클러스터에 연결하는 구조</figcaption></figure>
+<pre><code>
+# 보유한 모든 컨텍스트 확인 (* 표시가 현재 활성 컨텍스트):
+kubectl config get-contexts
+
+# 활성 클러스터 전환:
+kubectl config use-context kind-kind
+
+# kubectl이 현재 가리키는 클러스터 확인:
+kubectl config current-context
+</code></pre>
+<blockquote class='callout'>
+<p>핵심 개념: kubeconfig는 주소록이다. <code class='ic'>kubectl get nodes</code>는 어떤 서버도 직접 알지 못한다. 현재 컨텍스트를 조회해 주소와 자격증명을 읽고, 그 API 서버를 호출할 뿐이다.</p>
+</blockquote>
+<h4>실습: 클러스터 생성부터 동작 확인까지</h4>
+<p>두 가지 클러스터를 모두 만들고 정상 동작하는지 확인해보자. 매번 가장 먼저 해야 할 일은 노드가 <strong>Ready</strong> 상태인지 확인하는 것이다. 이것이 컨트롤 플레인이 정상이라는 신호다.</p>
+<pre><code>
+# --- 방법 A: minikube (단일 노드, Docker 드라이버) ---
+minikube start --driver=docker
+minikube status          # control plane, kubelet, apiserver가 모두 &quot;Running&quot;이어야 한다
+
+# --- 방법 B: kind (여기서는 3노드 클러스터) ---
+# kind-config.yaml:
+#   kind: Cluster
+#   apiVersion: kind.x-k8s.io/v1alpha4
+#   nodes:
+#     - role: control-plane
+#     - role: worker
+#     - role: worker
+kind create cluster --name dev --config kind-config.yaml
+
+# --- 어느 클러스터든 동일하게 검증: ---
+kubectl get nodes
+</code></pre>
+<p>정상적인 단일 노드 minikube라면 노드 하나가 <code class='ic'>Ready</code> 상태로 보인다. 3노드 kind 클러스터라면 컨트롤 플레인 노드 하나와 워커 두 개가 모두 <code class='ic'>Ready</code>로 표시된다. 노드가 <code class='ic'>NotReady</code> 상태에서 멈춰 있다면 클러스터 네트워킹이 아직 초기화 중인 경우가 많다. 잠시 기다리거나 <code class='ic'>kubectl describe node &lt;이름&gt;</code>으로 상태를 확인하자.</p>
+<h4>첫 Deployment</h4>
+<p>클러스터가 Ready 상태라면 뭔가를 배포해보자. <strong>Deployment</strong>는 선언적 오브젝트다. 쿠버네티스에 <em>원하는 상태</em>(&quot;이 이미지를 N개 실행해줘&quot;)를 말하면, 조정 루프가 현실을 계속 그 상태에 맞춰간다. 빌드할 것이 없도록 작은 공개 이미지를 사용한다.</p>
+<pre><code>
+# 작은 웹 서버 이미지를 2개 레플리카로 실행하는 Deployment 생성:
+kubectl create deployment hello --image=nginx:alpine --replicas=2
+
+# 파드가 뜨는 것 확인:
+kubectl get pods
+# hello-xxxx-aaaa   1/1   Running
+# hello-xxxx-bbbb   1/1   Running
+
+# 클러스터 안에 서비스 노출 후 접근:
+kubectl expose deployment hello --type=NodePort --port=80
+
+# minikube라면 URL을 바로 얻을 수 있다:
+minikube service hello --url
+</code></pre>
+<p>이제 쿠버네티스를 특별하게 만드는 <strong>자가 복구</strong> 동작을 직접 확인해보자. 파드 하나를 삭제하면 거의 즉시 교체 파드가 생긴다. 레플리카 수를 2로 <em>선언</em>했기 때문에 컨트롤러가 그 수를 내려가게 두지 않는다.</p>
+<pre><code>
+kubectl delete pod &lt;파드-이름&gt;
+kubectl get pods     # 여전히 2개 — 쿠버네티스가 없어진 파드를 새로 만들었다
+</code></pre>
+<p>조정 루프가 동작하는 모습이다. 선언된 상태(2) vs. 현재 상태(1) → 쿠버네티스가 새 파드를 스케줄해 차이를 메운다. 반대 방향으로도 마찬가지다.</p>
+<pre><code>
+kubectl scale deployment hello --replicas=5
+kubectl get pods     # 이제 5개
+</code></pre>
+<p>파드가 <code class='ic'>Pending</code>, <code class='ic'>ImagePullBackOff</code>, <code class='ic'>CrashLoopBackOff</code> 상태에 빠져 있을 때는 <code class='ic'>kubectl describe pod &lt;이름&gt;</code>으로 이벤트 타임라인을, <code class='ic'>kubectl logs &lt;이름&gt;</code>으로 앱 자체의 로그를 확인하면 된다. 이 두 명령에 지금 익숙해져 두자. 프로덕션에서도 똑같이 쓴다.</p>
+<h3>핵심 정리</h3>
+<ul>
+<li><strong>minikube</strong> = 애드온이 포함된 친절한 단일 노드 샌드박스. <strong>kind</strong> = 빠르고 스크립트 친화적인 멀티노드 클러스터(여러 클러스터 동시 운용 가능), CI/CD에 최적. Docker Desktop 토글은 시작이 가장 쉽지만 커스터마이징이 제한된다.</li>
+<li>실제 클러스터는 <strong>kubeadm</strong>으로 부트스트랩된다. <code class='ic'>init</code>이 컨트롤 플레인을 시작하고 kubeconfig를 발급하면, 각 워커가 토큰으로 <code class='ic'>join</code>한다. 로컬 도구들이 이 전체 흐름을 자동화해준다.</li>
+<li><strong>kubeconfig</strong>는 상태 없는 <code class='ic'>kubectl</code>을 클러스터에 연결하는 주소록이다. clusters + users + contexts 구조로 이루어지고, 클러스터 전환은 현재 컨텍스트만 바꾸면 된다.</li>
+<li>항상 <code class='ic'>kubectl get nodes</code>로 <code class='ic'>Ready</code> 상태를 확인한 뒤 <code class='ic'>kubectl create deployment</code>로 배포하자. 파드를 삭제해도 선언한 레플리카 수를 유지하는 조정 루프를 눈으로 확인할 수 있다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 워밍업 — minikube 클러스터를 시작하고 정상 동작을 확인하라.</p>
+<p>1. Docker 드라이버를 사용해 minikube를 시작한다.</p>
+<p>2. minikube 자체 내부 상태 보고를 확인한다.</p>
+<p>3. kubectl로 노드가 목록에 있고 Ready 상태인지 확인한다.</p>
+<p>최종 출력에서 컨트롤 플레인 노드 이름, 역할, &#x27;Ready&#x27; 문자열을 확인할 수 있어야 한다.</p></div>
+              <pre class='starter'><code># 사전 조건: minikube와 Docker가 설치되어 있어야 한다.
+# 아래 명령을 터미널에서 하나씩 실행한다.
+
+# 1단계 — 클러스터 시작:
+minikube start --driver=docker
+
+# 2단계 — minikube 내부 상태 확인:
+# (올바른 minikube 하위 명령을 채워 넣으시오)
+minikube ______
+
+# 3단계 — kubectl로 노드 확인:
+kubectl get ______</code></pre>
+              <details><summary>힌트</summary><ul><li>모든 구성 요소 상태를 한 번에 보여주는 minikube 하위 명령은 &#x27;minikube status&#x27;다.</li><li>클러스터의 머신 목록을 보는 kubectl 리소스 타입은 &#x27;nodes&#x27;다. 전체 명령은 &#x27;kubectl get nodes&#x27;.</li><li>1분이 지나도 노드가 &#x27;NotReady&#x27;라면 클러스터 네트워킹이 아직 초기화 중일 수 있다. 30초 기다린 뒤 &#x27;kubectl get nodes&#x27;를 다시 실행해보자.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1단계 — 클러스터 시작:
+minikube start --driver=docker
+
+# 2단계 — minikube 자체 상태 보고:
+minikube status
+# 예상 출력:
+#   host: Running
+#   kubelet: Running
+#   apiserver: Running
+#   kubeconfig: Configured
+
+# 3단계 — kubectl로 노드 검증:
+kubectl get nodes
+# 예상 출력 (단일 노드, 두 역할 모두 담당):
+#   NAME       STATUS   ROLES           AGE   VERSION
+#   minikube   Ready    control-plane   Xm    v1.x.x</code></pre>
+                <div class='exp2'><p>minikube start --driver=docker는 내 컴퓨터의 Docker 컨테이너 안에 단일 노드 쿠버네티스 클러스터를 띄운다. 뒤에서는 kubeadm 부트스트랩 전체 흐름(init, kubeconfig 발급)을 자동으로 처리하고 결과를 ~/.kube/config에 병합해 kubectl이 바로 클러스터를 인식할 수 있게 한다. &#x27;minikube status&#x27;는 minikube 내부 상태를 조회한다. &#x27;kubectl get nodes&#x27;는 범용 클러스터 상태 확인 명령이다. 노드가 &#x27;Ready&#x27; 상태라는 것은 해당 노드의 kubelet이 살아 있고 컨트롤 플레인이 워크로드를 스케줄할 수 있다는 뜻이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 핵심 — 설정 파일로 멀티노드 kind 클러스터를 만들어라.</p>
+<p>1. 컨트롤 플레인 노드 하나와 워커 노드 두 개를 정의하는 kind 클러스터 설정 파일 &#x27;kind-config.yaml&#x27;을 작성한다.</p>
+<p>2. 그 설정 파일을 사용해 &#x27;dev&#x27;라는 이름으로 클러스터를 생성한다.</p>
+<p>3. kubectl로 전체 노드를 나열하고 세 개 모두 Ready 상태인지 확인한다.</p>
+<p>4. 현재 활성 kubectl 컨텍스트를 확인한다.</p>
+<p>kind는 Docker 컨테이너만으로 현실적인 멀티노드 환경을 시뮬레이션할 수 있다. minikube의 단일 노드 구조로는 기본 옵션만으로는 하기 어려운 일이다.</p></div>
+              <pre class='starter'><code># kind-config.yaml — 빈 칸을 채우시오:
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: ______       # 첫 번째 노드 — 컨트롤 플레인
+  - role: ______       # 두 번째 노드 — 워커
+  - role: ______       # 세 번째 노드 — 워커
+
+---
+# 터미널 명령:
+# 클러스터 생성:
+kind create cluster --name ______ --config ______
+
+# 노드 확인:
+kubectl get nodes
+
+# kubectl이 현재 사용 중인 컨텍스트 확인:
+kubectl config ______-context</code></pre>
+              <details><summary>힌트</summary><ul><li>kind 설정에서 유효한 역할 값은 &#x27;control-plane&#x27;과 &#x27;worker&#x27; 두 가지다. 컨트롤 플레인 항목은 정확히 하나여야 한다.</li><li>--config 플래그에 YAML 파일 경로를 넘긴다: &#x27;kind create cluster --name dev --config kind-config.yaml&#x27;.</li><li>노드가 2분이 지나도 NotReady라면 &#x27;kubectl describe node dev-worker&#x27;로 이벤트 로그를 읽어 무엇이 빠졌는지 확인한다. 보통 kind가 자동 설치하는 CNI 네트워크 플러그인 때문이니 조금 더 기다려보자.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># kind-config.yaml:
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+
+---
+# 터미널:
+kind create cluster --name dev --config kind-config.yaml
+# kind가 노드 이미지를 받아 연결한다 — 약 1분 소요.
+
+kubectl get nodes
+# 예상 출력:
+#   NAME                STATUS   ROLES           AGE   VERSION
+#   dev-control-plane   Ready    control-plane   Xm    v1.x.x
+#   dev-worker          Ready    &lt;none&gt;          Xm    v1.x.x
+#   dev-worker2         Ready    &lt;none&gt;          Xm    v1.x.x
+
+kubectl config current-context
+# 예상 출력: kind-dev</code></pre>
+                <div class='exp2'><p>kind는 쿠버네티스의 각 노드를 Docker 컨테이너로 표현한다. 3노드 클러스터는 노트북 위의 컨테이너 3개다. YAML 설정에서 역할을 지정한다. 컨트롤 플레인 노드 하나(API 서버, etcd, 스케줄러, 컨트롤러 매니저 실행)와 원하는 만큼의 워커 노드다. &#x27;kind create cluster --name dev&#x27;는 클러스터 이름을 지정하고, 이 이름이 kubectl 컨텍스트 이름(&#x27;kind-dev&#x27;)이 된다. 생성 후 kind가 자동으로 ~/.kube/config를 업데이트하고 현재 컨텍스트를 새 클러스터로 전환한다. 그래서 별도 조작 없이 &#x27;kubectl config current-context&#x27;가 &#x27;kind-dev&#x27;를 반환한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 핵심 — 앱을 배포하고, 노출하고, 쿠버네티스 자가 복구를 직접 관찰하라.</p>
+<p>&#x27;dev&#x27; kind 클러스터가 활성 상태인 채로:</p>
+<p>1. &#x27;nginx:alpine&#x27; 이미지를 2개 레플리카로 실행하는 &#x27;hello&#x27;라는 이름의 Deployment를 생성한다.</p>
+<p>2. 두 파드가 모두 Running 상태가 될 때까지 기다린다.</p>
+<p>3. Deployment를 포트 80으로 NodePort 서비스로 노출한다.</p>
+<p>4. 실행 중인 파드 하나를 직접 삭제한다.</p>
+<p>5. 즉시 파드 목록을 다시 조회해 레플리카 수가 자동으로 2로 돌아오는 것을 확인한다.</p>
+<p>목표는 조정 루프를 직접 눈으로 보는 것이다. 레플리카 2개를 선언했으니 쿠버네티스는 1개로 떨어지는 상태를 그냥 두지 않는다.</p></div>
+              <pre class='starter'><code># 1. 레플리카 2개로 Deployment 생성:
+kubectl create deployment hello \
+  --image=______ \
+  --replicas=______
+
+# 2. 파드 상태 확인 (둘 다 Running이 될 때까지 반복 실행):
+kubectl get ______
+
+# 3. Deployment 노출:
+kubectl expose deployment hello \
+  --type=______ \
+  --port=______
+
+# 4. 파드 이름 확인 후 하나 삭제:
+kubectl get pods
+kubectl delete pod ______   # 목록에서 실제 파드 이름으로 교체
+
+# 5. 파드 목록을 바로 다시 확인:
+kubectl get pods</code></pre>
+              <details><summary>힌트</summary><ul><li>&#x27;kubectl get pods&#x27;로 정확한 파드 이름을 복사한 뒤 삭제하자. 이름 형식은 &#x27;hello-&lt;레플리카셋-해시&gt;-&lt;파드-접미사&gt;&#x27;다.</li><li>새 파드가 느리게 나타나는 것 같다면 &#x27;kubectl get pods -w&#x27;(watch 모드)로 명령을 반복 실행하지 않고 실시간 업데이트를 스트리밍할 수 있다.</li><li>파드가 ContainerCreating이나 ImagePullBackOff에 멈춰 있으면 &#x27;kubectl describe pod &lt;이름&gt;&#x27;을 실행해 아래쪽 Events 섹션을 읽어보자. 무엇이 실패했는지 정확히 나온다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. Deployment 생성:
+kubectl create deployment hello --image=nginx:alpine --replicas=2
+
+# 2. 파드 확인 (둘 다 1/1 Running이 될 때까지 반복):
+kubectl get pods
+# hello-&lt;hash&gt;-&lt;id1&gt;   1/1   Running   0   Xs
+# hello-&lt;hash&gt;-&lt;id2&gt;   1/1   Running   0   Xs
+
+# 3. 포트 80으로 NodePort 노출:
+kubectl expose deployment hello --type=NodePort --port=80
+
+# 4. 2단계에서 파드 이름 하나를 복사해 삭제:
+kubectl delete pod hello-&lt;hash&gt;-&lt;id1&gt;
+
+# 5. 바로 다시 목록 확인 — 삭제된 파드는 Terminating 상태,
+#    새 파드는 이미 시작 중인 것을 볼 수 있다:
+kubectl get pods
+# hello-&lt;hash&gt;-&lt;id2&gt;   1/1   Running            0   Xm
+# hello-&lt;hash&gt;-&lt;id3&gt;   0/1   ContainerCreating   0   2s
+# 몇 초 후 둘 다 Running 상태가 된다.</code></pre>
+                <div class='exp2'><p>Deployment는 선언적 오브젝트다. 원하는 상태(nginx:alpine 2개)를 etcd에 저장한다. ReplicaSet 컨트롤러가 선언된 상태와 현재 상태를 지속적으로 비교한다. 파드를 직접 삭제하면 현재 수가 1로 떨어진다. 컨트롤러가 차이를 감지하고(선언 2, 현재 1) 즉시 사용 가능한 노드에 새 파드를 스케줄해 맞춘다. 이 조정 루프가 쿠버네티스 안정성의 기반이다. 개별 파드를 일일이 돌볼 필요가 없다. 선언한 의도에서 벗어나면 쿠버네티스가 알아서 복구한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. 응용 — kubectl 컨텍스트를 전환하고 Deployment를 스케일 조정하라.</p>
+<p>지금 두 개의 클러스터가 있다. minikube(컨텍스트 이름 &#x27;minikube&#x27;)와 kind-dev(컨텍스트 이름 &#x27;kind-dev&#x27;)다. 컨텍스트 전환과 스케일 조정을 연습하자.</p>
+<p>1. 사용 가능한 모든 kubectl 컨텍스트를 나열하고 현재 활성 컨텍스트를 확인한다.</p>
+<p>2. 활성 컨텍스트를 minikube 클러스터로 전환한다.</p>
+<p>3. 현재 컨텍스트와 minikube 노드 목록을 확인해 전환이 됐는지 검증한다.</p>
+<p>4. minikube에서 &#x27;nginx:alpine&#x27; 이미지를 레플리카 1개로 실행하는 &#x27;webserver&#x27; Deployment를 생성한다.</p>
+<p>5. 명령 하나로 레플리카를 5개로 늘린다.</p>
+<p>6. 5개 파드가 모두 Running 상태인지 확인한다.</p>
+<p>7. 마지막으로 kind-dev 컨텍스트로 다시 전환한다.</p>
+<p>이 실습은 아무것도 재구성하지 않고 여러 클러스터를 오가는 근육 기억을 키운다. kubeconfig 주소록이 모든 것을 처리한다.</p></div>
+              <pre class='starter'><code># 1. 모든 컨텍스트 나열 (* 표시가 활성 컨텍스트):
+kubectl config ______-contexts
+
+# 2. minikube 컨텍스트로 전환:
+kubectl config ______-context ______
+
+# 3. 검증: 현재 컨텍스트 확인 후 노드 조회:
+kubectl config ______-context
+kubectl get nodes
+
+# 4. 레플리카 1개로 Deployment 생성:
+kubectl create deployment webserver --image=nginx:alpine --replicas=______
+
+# 5. 레플리카 5개로 스케일:
+kubectl scale deployment webserver --replicas=______
+
+# 6. 파드 5개 Running 확인:
+kubectl get pods
+
+# 7. kind-dev로 다시 전환:
+kubectl config use-context ______</code></pre>
+              <details><summary>힌트</summary><ul><li>컨텍스트 목록 명령은 &#x27;kubectl config get-contexts&#x27;(복수형)다. 전환 명령은 &#x27;kubectl config use-context &lt;이름&gt;&#x27;(단수형, 그 다음에 이름)이다.</li><li>정확한 컨텍스트 이름이 불확실하면 &#x27;kubectl config get-contexts&#x27;에서 Name 열을 확인하자. kind 클러스터라면 &#x27;kind-&#x27; 접두사를 포함해 정확히 복사한다.</li><li>스케일 후 일부 파드가 &#x27;Running&#x27; 대신 &#x27;Pending&#x27;이라면 노드의 CPU/메모리가 부족한 경우가 많다. &#x27;kubectl describe node minikube&#x27;로 확인하고 Allocated resources 섹션을 읽어보자.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1. 모든 컨텍스트 나열:
+kubectl config get-contexts
+# &#x27;minikube&#x27;와 &#x27;kind-dev&#x27; 두 항목이 보이고, 활성 항목에 * 표시가 있다.
+
+# 2. minikube로 전환:
+kubectl config use-context minikube
+# Switched to context &quot;minikube&quot;.
+
+# 3. 검증:
+kubectl config current-context
+# minikube
+kubectl get nodes
+# NAME       STATUS   ROLES           AGE
+# minikube   Ready    control-plane   Xm
+
+# 4. Deployment 생성 (레플리카 1개):
+kubectl create deployment webserver --image=nginx:alpine --replicas=1
+
+# 5. 레플리카 5개로 스케일:
+kubectl scale deployment webserver --replicas=5
+
+# 6. 파드 5개 확인 (약 30초 기다리자):
+kubectl get pods
+# webserver-&lt;hash&gt;-&lt;1&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;2&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;3&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;4&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;5&gt;   1/1   Running   0   Xs
+
+# 7. 다시 전환:
+kubectl config use-context kind-dev
+# Switched to context &quot;kind-dev&quot;.</code></pre>
+                <div class='exp2'><p>kubectl은 상태가 없다. 명령을 실행할 때마다 ~/.kube/config를 읽는다. 이 파일에 두 클러스터가 각각 다른 컨텍스트 이름(&#x27;minikube&#x27;와 &#x27;kind-dev&#x27;)으로 저장되어 있다. &#x27;kubectl config get-contexts&#x27;는 전체 주소록을 보여준다. &#x27;kubectl config use-context &lt;이름&gt;&#x27;은 설정 파일의 current-context 필드 하나만 바꾼다. 이후 kubectl 호출이 다른 API 서버와 자격증명으로 연결된다. 네트워크 재연결도, 재인증도 없다. 포인터만 바뀌는 것이다. 스케일 조정은 3번 실습에서 본 것과 같은 조정 원리로 동작한다. 선언된 레플리카 수를 업데이트하면 ReplicaSet 컨트롤러가 파드 4개를 추가로 스케줄한다. minikube는 단일 노드이므로 5개 파드가 모두 같은 노드에 올라간다. kind-dev 클러스터에서라면 워커 노드들에 분산 배치된다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=hDBgeUuPgXo' target='_blank'>Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube &amp; kubectl</a></li><li><a href='https://www.youtube.com/watch?v=oyD048gDg_k' target='_blank'>Docker Desktop vs Kind - Which Is The BEST For Local Kubernetes?</a></li><li><a href='https://www.youtube.com/watch?v=T1k7Clx3tNo' target='_blank'>How to Install Kubernetes Cluster using Minikube | Ubuntu 22.04</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-AdmissionControl</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-31-admission-control/index.html'>한국어</a></div>
+  <h1>K8S-AdmissionControl</h1>
+  <div class="sub">Learners who have completed Kubernetes Intermediate 2 (already familiar with RBAC, scheduling, NetworkPolicy, Helm, and monitoring) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Admission Control and Policy Enforcement — Webhooks, OPA/Kyverno, and Pod Security</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Admission Control and Policy Enforcement — Webhooks, OPA/Kyverno, and Pod Security </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand where Validating and Mutating Admission Webhooks sit in the API request processing pipeline</li>
+<li>Define policies with OPA Gatekeeper or Kyverno to block or mutate non-compliant resources</li>
+<li>Apply Pod Security Admission to enforce security standards at the namespace level</li>
+</ul>
+<h3>Content</h3>
+<h4>Where Does an API Request Get Inspected?</h4>
+<p>When you run <code class='ic'>kubectl apply</code>, the request passes through a series of checkpoints before it is persisted to etcd. Knowing the exact order is the starting point for this lecture.</p>
+<p>1. <strong>Authentication</strong> — Who is making this request?</p>
+<p>2. <strong>Authorization (RBAC)</strong> — Does this identity have permission to perform this action?</p>
+<p>3. <strong>Mutating Admission</strong> — <strong>Transforms</strong> the request object (field injection, default value assignment).</p>
+<p>4. <strong>Schema Validation (OpenAPI)</strong> — Is the object structure valid?</p>
+<p>5. <strong>Validating Admission</strong> — <strong>Allows or denies</strong> the object against defined policies.</p>
+<p>6. <strong>etcd persistence</strong></p>
+<p>The flowchart below shows the checkpoint order and where a request stops when each stage rejects it. Note that <strong>Mutating Admission can also reject a request</strong>: if a registered webhook server is unavailable (e.g., the service is down) and <code class='ic'>failurePolicy: Fail</code> is set, the request is rejected right there. In other words, admission can block a request at both the Mutating and Validating stages.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    R[&quot;kubectl request&quot;] --&gt; AUTHN[&quot;Authentication&quot;]
+    AUTHN --&gt; AUTHZ[&quot;Authorization (RBAC)&quot;]
+    AUTHZ --&gt; MUT[&quot;Mutating Admission - transform object&quot;]
+    MUT --&gt; SCHEMA[&quot;Schema Validation (OpenAPI)&quot;]
+    SCHEMA --&gt; VAL[&quot;Validating Admission - allow/deny&quot;]
+    VAL --&gt; ETCD[&quot;etcd persistence&quot;]
+    AUTHN -. failure .-&gt; X[&quot;Request rejected&quot;]
+    AUTHZ -. failure .-&gt; X
+    MUT -. &quot;failure (failurePolicy: Fail / policy violation)&quot; .-&gt; X
+    SCHEMA -. failure .-&gt; X
+    VAL -. denial .-&gt; X</div><figcaption>API Request Processing Flow — Auth, Admission, and Rejection Paths</figcaption></figure>
+<p>Steps 3 and 5 constitute the Admission Control phase. Where RBAC asks &quot;can this user create a Pod?&quot;, Admission asks &quot;does the <strong>content</strong> of this Pod comply with our policies?&quot; Even with the right permission, a request is blocked if the content violates the rules.</p>
+<p><strong>Mutating runs before Validating</strong> for a clear reason: the object must first be corrected (e.g., inject a missing label, add a sidecar), and then the finalized form is validated for consistency. Sidecar injection and default resource limit injection are typical examples of what happens at the Mutating stage.</p>
+<blockquote class='callout'>
+<p>Both webhooks can reject a request, but their <strong>roles</strong> differ. Think of Validating Admission as a &quot;checkpoint&quot; and Mutating Admission as a &quot;transformation step.&quot; If any Validating Webhook denies the request, the entire request is rejected. Multiple Mutating Webhooks run sequentially and each cumulatively transforms the object — but a webhook can also reject mid-transformation, or fail entirely when <code class='ic'>failurePolicy: Fail</code> is set, causing the request to be blocked at that point.</p>
+</blockquote>
+<h4><code class='ic'>failurePolicy</code> — What Happens When a Webhook Is Down?</h4>
+<p>A webhook server is an external service and can go down. <code class='ic'>failurePolicy</code> tells the API server how to handle a failed webhook call.</p>
+<ul>
+<li><strong><code class='ic'>Fail</code> (default)</strong> — If the webhook call fails, the request is <strong>rejected</strong>. Use this for security policies where &quot;no exceptions&quot; is the requirement. The downside is that if the webhook server goes down, all resource creation guarded by it is blocked.</li>
+<li><strong><code class='ic'>Ignore</code></strong> — If the webhook call fails, the request <strong>proceeds</strong>. Availability takes priority, but policies will not be enforced during the outage, leaving a window of exposure.</li>
+</ul>
+<p>This is a security vs. availability trade-off. The standard approach is to set critical security webhooks to <code class='ic'>Fail</code> while operating the webhook server itself in a highly available configuration.</p>
+<h4>How Admission Webhooks Work</h4>
+<p>Kubernetes uses <code class='ic'>ValidatingWebhookConfiguration</code> and <code class='ic'>MutatingWebhookConfiguration</code> resources to plug an external service into the admission pipeline. When a specified operation arrives (e.g., <code class='ic'>CREATE</code> on <code class='ic'>pods</code>), the API server sends an <code class='ic'>AdmissionReview</code> request over HTTPS to the registered webhook server and processes the <code class='ic'>allowed: true/false</code> response (or a JSON patch for mutations).</p>
+<p>Implementing a webhook server directly is powerful but burdensome — TLS certificate management, high availability, and logic authoring all add overhead. In practice, the standard approach is to run a <strong>policy engine</strong> (OPA Gatekeeper or Kyverno) as the webhook server and write policies declaratively.</p>
+<h4>Defining and Enforcing Policies with OPA Gatekeeper</h4>
+<p>OPA (Open Policy Agent) Gatekeeper operates on a CRD-based model. You need to understand two resource types:</p>
+<ul>
+<li><strong>ConstraintTemplate</strong> — A reusable template that encodes policy <em>logic</em> in the Rego language (analogous to a parameterized function).</li>
+<li><strong>Constraint</strong> — An instance that specifies <em>where and with what parameters</em> to apply the template.</li>
+</ul>
+<p>For example, the policy &quot;every Namespace must have a <code class='ic'>team</code> label&quot; looks like this:</p>
+<pre><code>
+# ConstraintTemplate: policy logic (Rego)
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items: { type: string }
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+        violation[{&quot;msg&quot;: msg}] {
+          required := input.parameters.labels
+          provided := input.review.object.metadata.labels
+          missing := required[_]
+          not provided[missing]
+          msg := sprintf(&quot;Required label missing: %v&quot;, [missing])
+        }
+</code></pre>
+<pre><code>
+# Constraint: apply the template above to Namespaces
+apiVersion: constraints.gatekeeper.sh/v1
+kind: K8sRequiredLabels
+metadata:
+  name: ns-must-have-team
+spec:
+  match:
+    kinds:
+      - apiGroups: [&quot;&quot;]
+        kinds: [&quot;Namespace&quot;]
+  parameters:
+    labels: [&quot;team&quot;]
+</code></pre>
+<blockquote class='callout'>
+<p>The <code class='ic'>apiVersion</code> for a Constraint in current versions of Gatekeeper is <code class='ic'>constraints.gatekeeper.sh/v1</code>. Older examples commonly show <code class='ic'>v1beta1</code>, which remains compatible, but for anything written today the stable <code class='ic'>v1</code> API is the recommended practice.</p>
+</blockquote>
+<p>After applying these, attempting to create a Namespace without the <code class='ic'>team</code> label is denied at the admission stage:</p>
+<pre><code>
+admission webhook &quot;validation.gatekeeper.sh&quot; denied the request:
+[ns-must-have-team] Required label missing: team
+</code></pre>
+<blockquote class='callout'>
+<p>Set Gatekeeper&#x27;s <code class='ic'>enforcementAction</code> to <code class='ic'>dryrun</code> or <code class='ic'>warn</code> to record or warn about violations without blocking them. When introducing policies to an existing cluster, always start with <code class='ic'>dryrun</code> to <strong>audit how many existing resources are affected</strong>, then switch to <code class='ic'>deny</code> once you have confirmed it is safe. Jumping straight to <code class='ic'>deny</code> can block running deployments.</p>
+</blockquote>
+<h4>Kyverno — Policies Written in YAML</h4>
+<p>Kyverno&#x27;s appeal is that policies are written in <strong>standard Kubernetes YAML syntax</strong> rather than Rego. The learning curve is low, adoption is fast, and validate, mutate, and generate (automatic creation of subordinate resources) are all handled by a single tool.</p>
+<pre><code>
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-team-label
+spec:
+  validationFailureAction: Enforce   # Audit means warn only
+  rules:
+    - name: check-team-label
+      match:
+        any:
+          - resources: { kinds: [&quot;Pod&quot;] }
+      validate:
+        message: &quot;Pod requires a &#x27;team&#x27; label.&quot;
+        pattern:
+          metadata:
+            labels:
+              team: &quot;?*&quot;             # requires a non-empty value
+</code></pre>
+<p>In summary: OPA Gatekeeper excels at complex rules thanks to Rego&#x27;s expressiveness, while Kyverno wins on ease of operation with its YAML-native syntax and integrated mutate/generate support. Choose based on your organization&#x27;s needs.</p>
+<h4>Pod Security Admission — Built-In Security Standards</h4>
+<p>Even without installing a webhook or policy engine, Kubernetes ships with <strong>Pod Security Admission (PSA)</strong> built in (the successor to PodSecurityPolicy). PSA evaluates Pod specs against three standard profiles:</p>
+<ul>
+<li><strong>privileged</strong> — No restrictions (for system and infrastructure workloads)</li>
+<li><strong>baseline</strong> — Minimum protections against known privilege escalation vectors</li>
+<li><strong>restricted</strong> — Strongly hardened (enforces non-root, blocks privilege escalation, etc.)</li>
+</ul>
+<p>Applying PSA requires nothing more than <strong>namespace labels</strong>. The recommended practice is to use all three modes together (<code class='ic'>enforce</code>/<code class='ic'>audit</code>/<code class='ic'>warn</code>).</p>
+<pre><code>
+kubectl label namespace payments \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/audit=restricted \
+  pod-security.kubernetes.io/warn=restricted
+</code></pre>
+<p>Now any attempt to run a root-privileged Pod in the <code class='ic'>payments</code> namespace will be rejected, and <code class='ic'>warn</code> will surface a warning in kubectl output even before <code class='ic'>enforce</code> blocks it. This lets you enforce a namespace-level security tier without installing any additional components, making it an excellent first line of defense before deploying a full policy engine.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>API requests are processed in the order: Authentication → Authorization (RBAC) → Mutating → Schema Validation → Validating → etcd. Admission inspects and transforms <strong>content</strong>; RBAC checks <strong>permissions</strong> — they serve different roles.</li>
+<li>Mutating Webhooks transform objects (e.g., sidecar injection); Validating Webhooks allow or deny requests. Mutating runs first. <strong>Both stages can reject a request</strong> — particularly if <code class='ic'>failurePolicy: Fail</code> is set and the webhook is unreachable.</li>
+<li>OPA Gatekeeper enforces policies through a ConstraintTemplate (Rego logic) + Constraint (application) structure. Use <code class='ic'>constraints.gatekeeper.sh/v1</code> for the Constraint <code class='ic'>apiVersion</code>, and start with <code class='ic'>dryrun</code>/<code class='ic'>audit</code> before enabling <code class='ic'>deny</code>.</li>
+<li>Kyverno provides validate, mutate, and generate in a unified tool using familiar Kubernetes YAML syntax, resulting in a low learning curve.</li>
+<li>Pod Security Admission is a built-in feature that enforces security standards via namespace labels (privileged/baseline/restricted × enforce/audit/warn) without any additional components.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Use Pod Security Admission to create a &#x27;psa-test&#x27; namespace and apply the &#x27;restricted&#x27; standard in warn mode. Then attempt to create a Pod with a privileged container (privileged: true) in that namespace and observe the warning message.</p></div>
+              <pre class='starter'><code># 1. Create the namespace
+kubectl create namespace psa-test
+
+# 2. Apply the restricted standard in warn mode (not yet blocking)
+kubectl label namespace psa-test \
+  pod-security.kubernetes.io/warn=___
+
+# 3. Verify the namespace label
+kubectl get namespace psa-test --show-labels
+
+# 4. Attempt to create a privileged Pod (warning expected)
+kubectl apply -n psa-test -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: v1
+kind: Pod
+metadata:
+  name: priv-pod
+spec:
+  containers:
+  - name: test
+    image: nginx
+    securityContext:
+      privileged: true
+EOF</code></pre>
+              <details><summary>Hint</summary><ul><li>You can set all three PSA modes simultaneously. Example: pod-security.kubernetes.io/enforce=baseline, pod-security.kubernetes.io/warn=restricted</li><li>First confirm the Kubernetes version supports PSA (1.23 alpha, 1.25 stable): kubectl version --short</li><li>Adding the enforce label to a namespace where Pods are already running does not affect existing Pods — only new Pod creation is blocked.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create namespace
+kubectl create namespace psa-test
+
+# 2. Apply warn mode with restricted standard
+kubectl label namespace psa-test \
+  pod-security.kubernetes.io/warn=restricted
+
+# 3. Verify label
+kubectl get namespace psa-test --show-labels
+# NAME       STATUS   AGE   LABELS
+# psa-test   Active   10s   kubernetes.io/metadata.name=psa-test,pod-security.kubernetes.io/warn=restricted
+
+# 4. Attempt to create a privileged Pod
+kubectl apply -n psa-test -f priv-pod.yaml
+# Warning: would violate PodSecurity &quot;restricted:latest&quot;:
+#   privileged (container &quot;test&quot; must not set securityContext.privileged=true),
+#   allowPrivilegeEscalation != false (container &quot;test&quot; must set securityContext.allowPrivilegeEscalation=false),
+#   unrestricted capabilities (container &quot;test&quot; must set securityContext.capabilities.drop=[&quot;ALL&quot;]),
+#   runAsNonRoot != true (pod or container &quot;test&quot; must set securityContext.runAsNonRoot=true),
+#   seccompProfile (pod or container &quot;test&quot; must set securityContext.seccompProfile.type to &quot;RuntimeDefault&quot; or &quot;Localhost&quot;)
+# pod/priv-pod created   &lt;-- created because we&#x27;re only in warn mode
+
+# 5. Delete the Pod
+kubectl delete pod priv-pod -n psa-test</code></pre>
+                <div class='exp2'><p>Pod Security Admission (PSA) is the built-in admission controller that replaced PodSecurityPolicy in Kubernetes 1.25+. It combines three standards (privileged/baseline/restricted) with three modes (enforce/audit/warn), applied via namespace labels. In warn mode, violations produce a warning but the resource is still created. Starting with warn to understand the blast radius is the recommended approach when gradually tightening policies.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core Practice] Install Kyverno via Helm and create a ClusterPolicy in enforce mode that requires all Pods to have an &#x27;app&#x27; label. Verify that Pods without the label are blocked and Pods with it are allowed.</p></div>
+              <pre class='starter'><code># 1. Install Kyverno
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+
+# 2. Wait for Kyverno Pods to be Ready
+kubectl get pods -n kyverno -w
+
+# 3. Write the ClusterPolicy (enforce mode)
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-app-label
+spec:
+  validationFailureAction: ___   # Enforce or Audit
+  rules:
+    - name: check-app-label
+      match:
+        any:
+        - resources:
+            kinds:
+              - Pod
+      validate:
+        message: &quot;Pod must have an &#x27;app&#x27; label.&quot;
+        pattern:
+          metadata:
+            labels:
+              app: &quot;?*&quot;    # requires a non-empty value
+
+# 4. Attempt to create a Pod without a label (should be blocked)
+kubectl run no-label-pod --image=nginx
+
+# 5. Create a Pod with a label (should be allowed)
+kubectl run labeled-pod --image=nginx -l app=web</code></pre>
+              <details><summary>Hint</summary><ul><li>Applying a policy before the Kyverno webhook is fully ready may produce &#x27;connection refused&#x27; errors. Ensure all Pods in the kyverno namespace are Running before proceeding.</li><li>Use a namespaced Policy instead of ClusterPolicy to apply the rule only to a specific namespace.</li><li>Review the policy violation history with kubectl get policyreport -A.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1~2. Install Kyverno (run the commands above)
+# Wait 1–2 minutes
+
+# 3. Create the ClusterPolicy
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-app-label
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: check-app-label
+      match:
+        any:
+        - resources:
+            kinds:
+              - Pod
+      validate:
+        message: &quot;Pod must have an &#x27;app&#x27; label.&quot;
+        pattern:
+          metadata:
+            labels:
+              app: &quot;?*&quot;
+EOF
+# clusterpolicy.kyverno.io/require-app-label created
+
+# 4. Pod without label → blocked
+kubectl run no-label-pod --image=nginx
+# Error from server: admission webhook &quot;validate.kyverno.svc-fail&quot; denied the request:
+# resource Pod/default/no-label-pod was blocked due to the following policies
+# require-app-label:
+#   check-app-label: Pod must have an &#x27;app&#x27; label.
+
+# 5. Pod with label → allowed
+kubectl run labeled-pod --image=nginx -l app=web
+# pod/labeled-pod created
+
+kubectl get pod labeled-pod --show-labels
+# NAME          READY   STATUS    RESTARTS   AGE   LABELS
+# labeled-pod   1/1     Running   0          10s   app=web</code></pre>
+                <div class='exp2'><p>Kyverno is a Kubernetes-native policy engine that declares policies as CRD-based YAML. With validationFailureAction: Enforce, the Validating Admission Webhook rejects violating requests directly at the API server. With Audit, violations are recorded but creation is allowed, which is useful for incrementally rolling out policies. Unlike OPA Gatekeeper, Kyverno requires no Rego — policies are written as YAML patterns, lowering the barrier to entry.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core Practice] Write a Kyverno mutate policy that automatically injects an &#x27;app&#x27; label into Pods that are created without one. Apply the policy, create a Pod without a label, and confirm the label was injected automatically.</p></div>
+              <pre class='starter'><code># Mutate policy: auto-inject app label
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-app-label
+spec:
+  rules:
+    - name: add-app-label
+      match:
+        any:
+        - resources:
+            kinds:
+              - Pod
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              +(app): ___    # &#x27;+()&#x27; adds the value only if the field is absent
+
+# First delete or set the existing enforce policy to Audit
+kubectl delete clusterpolicy require-app-label
+
+# Apply the mutate policy
+kubectl apply -f mutate-policy.yaml
+
+# Create a Pod without a label
+kubectl run auto-labeled --image=nginx
+
+# Verify the label was injected automatically
+kubectl get pod auto-labeled --show-labels</code></pre>
+              <details><summary>Hint</summary><ul><li>The +(field) syntax in patchStrategicMerge means conditional addition — it preserves existing values and only fills in the missing ones.</li><li>Mutate and validate policies can coexist; mutate runs first and then validate inspects the result.</li><li>To verify that mutation occurred, run kubectl get pod auto-labeled -o yaml | grep -A5 &#x27;labels:&#x27; to inspect the full metadata.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Delete the existing enforce policy
+kubectl delete clusterpolicy require-app-label
+
+# 2. Apply the mutate policy
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-app-label
+spec:
+  rules:
+    - name: add-app-label
+      match:
+        any:
+        - resources:
+            kinds:
+              - Pod
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            labels:
+              +(app): default
+EOF
+
+# 3. Create a Pod without a label
+kubectl run auto-labeled --image=nginx
+# pod/auto-labeled created  (no rejection this time)
+
+# 4. Confirm the label was injected automatically
+kubectl get pod auto-labeled --show-labels
+# NAME           READY   STATUS    RESTARTS   AGE   LABELS
+# auto-labeled   1/1     Running   0          5s    app=default  &lt;-- auto-injected!
+
+# 5. Clean up
+kubectl delete pod labeled-pod auto-labeled
+kubectl delete clusterpolicy add-default-app-label</code></pre>
+                <div class='exp2'><p>A Mutating Admission Webhook can modify the request body before a resource is persisted to etcd. Kyverno&#x27;s +(field) syntax is a conditional patch that adds a value only when the field is absent — it does not overwrite an existing value. Pods that already have an app label are left untouched; the default is injected only when the label is missing. While a Validating Webhook allows or denies requests, a Mutating Webhook transforms them to automatically satisfy policies. In production this is used for sidecar injection, setting default resource values, and adding common labels.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Application] Apply the &#x27;restricted&#x27; Pod Security Admission standard in enforce mode to the psa-test namespace. Then write a security-hardened Pod that fully complies with the restricted standard (non-root, capabilities drop ALL, seccompProfile RuntimeDefault) and verify it is created successfully.</p></div>
+              <pre class='starter'><code># 1. Add enforce mode to the existing psa-test namespace
+kubectl label namespace psa-test \
+  pod-security.kubernetes.io/enforce=restricted \
+  --overwrite
+
+# 2. Write a Pod YAML compliant with the restricted standard
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+  namespace: psa-test
+  labels:
+    app: secure
+spec:
+  securityContext:
+    runAsNonRoot: ___
+    seccompProfile:
+      type: ___
+  containers:
+  - name: app
+    image: nginx:alpine
+    securityContext:
+      allowPrivilegeEscalation: ___
+      capabilities:
+        drop:
+          - ___
+    ports:
+    - containerPort: 8080
+
+# 3. Apply and verify
+kubectl apply -f secure-pod.yaml</code></pre>
+              <details><summary>Hint</summary><ul><li>The nginx image runs as root by default and may fail the restricted standard. Specify runAsUser: 1000 with nginx:alpine, or use the nginx:unprivileged image.</li><li>The recommended pattern after &#x27;capabilities.drop: [ALL]&#x27; is to add back only the capabilities the service actually needs. For example, NET_BIND_SERVICE is required for ports below 1024.</li><li>The full requirements of each PSA standard are documented at kubernetes.io/docs/concepts/security/pod-security-standards/</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Apply enforce mode
+kubectl label namespace psa-test \
+  pod-security.kubernetes.io/enforce=restricted \
+  --overwrite
+
+# 2. Compliant Pod
+kubectl apply -f - &lt;&lt;&#x27;EOF&#x27;
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-pod
+  namespace: psa-test
+  labels:
+    app: secure
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: app
+    image: nginx:alpine
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+EOF
+# pod/secure-pod created  (passes restricted standard)
+
+kubectl get pod secure-pod -n psa-test
+# NAME         READY   STATUS    RESTARTS   AGE
+# secure-pod   1/1     Running   0          10s
+
+# 3. Confirm enforce blocking with a non-compliant Pod
+kubectl run blocked-pod --image=nginx -n psa-test
+# Error from server (Forbidden): pods &quot;blocked-pod&quot; is forbidden:
+#   violates PodSecurity &quot;restricted:latest&quot;:
+#   allowPrivilegeEscalation != false, ...
+
+# 4. Clean up
+kubectl delete pod secure-pod -n psa-test
+kubectl delete namespace psa-test</code></pre>
+                <div class='exp2'><p>The restricted standard is the most stringent security level in Kubernetes PSA. Its key requirements are: runAsNonRoot: true (forbid root execution), allowPrivilegeEscalation: false (block privilege escalation), capabilities.drop: [ALL] (remove all Linux capabilities), and seccompProfile.type: RuntimeDefault or Localhost (restrict syscalls). Setting all four fields minimizes the container&#x27;s blast radius on the host kernel. Unlike warn/audit, enforce mode completely blocks non-compliant Pod creation.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=urvSPmlU69k' target='_blank'>Kubernetes Policy using OPA Gatekeeper</a></li><li><a href='https://www.youtube.com/watch?v=ocSgbSCX34M' target='_blank'>Kubernetes Security - Open Policy Agent - OPA Gatekeeper</a></li><li><a href='https://www.youtube.com/watch?v=iZTQv4F7Djk' target='_blank'>Day 38: Admission Controllers in Kubernetes | Mutating &amp; Validating | CKA Course 2025</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

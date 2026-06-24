@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Labels&amp;Selectors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-06-labels-selectors/index.html'>EN</a></div>
+  <h1>K8S-Labels&amp;Selectors</h1>
+  <div class="sub">쿠버네티스 기초(Pod/Deployment/Service)를 접해본 초중급 사용자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. Kubernetes 라벨과 셀렉터: 리소스 조직화의 핵심</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Kubernetes 라벨과 셀렉터: 리소스 조직화의 핵심 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>라벨(key/value 쌍)로 Kubernetes 리소스를 조직화하고, equality-based 셀렉터와 set-based 셀렉터로 리소스를 필터링하는 방법을 익힌다.</li>
+<li>Deployment의 <code class='ic'>selector.matchLabels</code>와 Service의 <code class='ic'>selector</code>가 Pod 템플릿 라벨과 어떻게 매칭되어 실제로 Pod를 선택하는지 원리를 이해한다.</li>
+<li>라벨 설계 모범 사례(권장 라벨인 <code class='ic'>app</code>/<code class='ic'>version</code>/<code class='ic'>tier</code> 등)를 적용하고, 라벨과 어노테이션(annotation)의 용도 차이를 구분한다.</li>
+</ul>
+<h3>본문</h3>
+<h4>라벨이 필요한 이유</h4>
+<p>실제 Kubernetes 클러스터는 금방 수백 개의 Pod, 수십 개의 Deployment, Service, ConfigMap 등으로 채워진다. 이 오브젝트들을 묶고 찾을 방법이 없다면 클러스터 운영은 감(感)에 의존하게 된다. Kubernetes는 이 문제를 <strong>라벨</strong>로 해결한다. 라벨은 오브젝트에 붙이는 단순한 key/value 쌍으로, 해당 오브젝트가 무엇인지 설명하는 역할을 한다.</p>
+<p>핵심은 라벨이 단순한 설명 문서가 아니라는 점이다. 라벨은 Kubernetes 자체가 읽어 시스템을 연결하는 <strong>기능적 메타데이터</strong>다. Service가 특정 Pod 집합으로 트래픽을 보내거나, Deployment가 자신이 소유한 Pod를 판별할 때 모두 라벨 매칭으로 동작한다. 라벨을 올바르게 설계하면 클러스터가 스스로 정돈되고, 잘못 설계하면 트래픽이 조용히 어디에도 도달하지 못한다.</p>
+<p>라벨의 형식은 다음과 같다.</p>
+<pre><code>
+metadata:
+  labels:
+    app: nginx
+    tier: frontend
+    version: &quot;1.21&quot;
+</code></pre>
+<p>라벨은 모든 오브젝트의 <code class='ic'>metadata</code> 섹션에 위치한다. 키에는 선택적으로 접두사를 붙일 수 있고(예: <code class='ic'>app.kubernetes.io/name</code>), 값은 짧은 문자열이다. YAML 매니페스트에서 오브젝트를 생성할 때 지정하거나, 이미 실행 중인 오브젝트에 나중에 추가할 수도 있다.</p>
+<h4>kubectl로 라벨 다루기</h4>
+<p>파일을 편집하지 않고도 라벨을 조회·추가·변경할 수 있다. 일상적으로 자주 쓰는 명령어들이다.</p>
+<pre><code>
+# 모든 Pod와 라벨을 함께 출력
+kubectl get pods --show-labels
+
+# 실행 중인 Pod에 라벨 추가(또는 덮어쓰기)
+kubectl label pod nginx demo=true
+
+# 기존 라벨 값 덮어쓰기(--overwrite 플래그 필수)
+kubectl label pod nginx tier=backend --overwrite
+
+# 키 뒤에 마이너스 부호를 붙여 라벨 삭제
+kubectl label pod nginx demo-
+</code></pre>
+<blockquote class='callout'>
+<p>영구적으로 반영해야 할 내용은 매니페스트를 수정하고 apply하는 방식이 맞다. <code class='ic'>kubectl label</code>은 트러블슈팅 중 빠르게 임시 변경할 때 쓴다 — YAML에서 재배포하면 이 변경은 사라진다.</p>
+</blockquote>
+<h4>리소스 선택: equality-based vs set-based</h4>
+<p>라벨 자체만으로는 정적인 태그에 불과하다. 라벨의 힘은 <strong>셀렉터</strong>에서 나온다 — 셀렉터는 라벨을 기준으로 오브젝트를 찾는 쿼리다. Kubernetes는 두 가지 셀렉터 문법을 지원한다.</p>
+<p><strong>Equality-based 셀렉터</strong>는 정확한 값 하나와 매칭한다. <code class='ic'>=</code>, <code class='ic'>==</code>, <code class='ic'>!=</code>를 사용한다.</p>
+<pre><code>
+# app이 nginx인 Pod
+kubectl get pods -l app=nginx
+
+# tier가 frontend가 아닌 Pod
+kubectl get pods -l &#x27;tier!=frontend&#x27;
+
+# 여러 조건은 AND로 결합된다
+kubectl get pods -l &#x27;app=nginx,tier=frontend&#x27;
+</code></pre>
+<p><strong>Set-based 셀렉터</strong>는 <code class='ic'>in</code>, <code class='ic'>notin</code>, <code class='ic'>exists</code>를 사용해 더 복잡한 조건을 표현한다.</p>
+<pre><code>
+# version이 지정된 값 중 하나인 Pod
+kubectl get pods -l &#x27;version in (1.20, 1.21)&#x27;
+
+# tier가 cache도 backend도 아닌 Pod
+kubectl get pods -l &#x27;tier notin (cache, backend)&#x27;
+
+# &quot;release&quot; 라벨이 어떤 값이든 존재하는 Pod
+kubectl get pods -l &#x27;release&#x27;
+</code></pre>
+<p>Set-based 셀렉터는 &quot;이 값들 중 하나&quot;(<code class='ic'>in</code>), &quot;이 값들 모두 아님&quot;(<code class='ic'>notin</code>), &quot;값에 관계없이 이 키가 존재함&quot;(<code class='ic'>exists</code>)을 표현할 수 있다. Equality-based 셀렉터가 더 단순하고 대부분의 일상적인 용도에 충분하다. OR 조건 매칭이나 키 존재 여부 확인이 필요할 때 set-based를 쓰면 된다.</p>
+<h4>Deployment와 Service가 Pod를 선택하는 방식</h4>
+<p>라벨이 단순한 장식을 벗어나 애플리케이션을 실제로 구동하는 지점이 바로 여기다. Kubernetes에서 가장 중요한 두 오브젝트인 Deployment와 Service는 오로지 라벨 매칭으로 자신의 Pod를 찾는다.</p>
+<p><strong>Deployment</strong>는 <code class='ic'>spec.selector.matchLabels</code>로 자신이 관리할 Pod를 선언하고, <code class='ic'>spec.template.metadata.labels</code>를 통해 생성하는 모든 Pod에 동일한 라벨을 찍는다. 이 두 값이 일치하지 않으면 Kubernetes는 Deployment를 거부한다.</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx          # 이 라벨을 가진 Pod를 Deployment가 소유
+  template:
+    metadata:
+      labels:
+        app: nginx        # 생성되는 각 Pod에 동일한 라벨을 찍음
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+</code></pre>
+<p><strong>Service</strong>도 같은 방식으로 트래픽을 보낼 대상을 결정한다. <code class='ic'>spec.selector</code>에 지정된 라벨을 모두 가진 Pod가 Service의 엔드포인트(endpoint)가 되어 로드밸런싱 대상이 된다.</p>
+<pre><code>
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx            # app=nginx 라벨을 가진 모든 Pod로 트래픽 전달
+  ports:
+    - port: 80
+      targetPort: 80
+</code></pre>
+<p>클라이언트 요청이 컨테이너에 도달하는 흐름은 이렇다. 트래픽이 Service에 닿으면, Service는 <code class='ic'>selector</code>로 <code class='ic'>app: nginx</code> 라벨을 가진 Pod를 모두 찾고, 그 Pod들이 바로 Deployment가 생성해 라벨을 찍어둔 것들이다. <code class='ic'>app: nginx</code>라는 라벨 하나가 Deployment, Pod, Service를 하나로 묶는 실이 된다. 아래 다이어그램이 이 관계를 보여준다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    Client[&quot;클라이언트 요청&quot;]
+    Svc[&quot;Service nginx-service&lt;br/&gt;selector: app=nginx&quot;]
+    Dep[&quot;Deployment nginx-deployment&lt;br/&gt;selector.matchLabels: app=nginx&quot;]
+    P1[&quot;Pod&lt;br/&gt;라벨 app=nginx&quot;]
+    P2[&quot;Pod&lt;br/&gt;라벨 app=nginx&quot;]
+    P3[&quot;Pod&lt;br/&gt;라벨 app=nginx&quot;]
+
+    Client --&gt;|트래픽| Svc
+    Dep --&gt;|생성 및 라벨 부여| P1
+    Dep --&gt;|생성 및 라벨 부여| P2
+    Dep --&gt;|생성 및 라벨 부여| P3
+    Svc -.-&gt;|라벨로 선택| P1
+    Svc -.-&gt;|라벨로 선택| P2
+    Svc -.-&gt;|라벨로 선택| P3</div><figcaption>&quot;app: nginx&quot; 라벨이 Deployment, Pod, Service를 하나로 연결</figcaption></figure>
+<blockquote class='callout'>
+<p>Service가 엔드포인트를 반환하지 않으면, 가장 먼저 확인할 것은 Service의 <code class='ic'>selector</code>가 실제 Pod 라벨과 일치하는지 여부다. 철자 하나 차이(<code class='ic'>app: nginx</code> vs <code class='ic'>app: ngnix</code>)만으로도 아무런 오류 메시지 없이 라우팅이 끊긴다.</p>
+</blockquote>
+<p>Deployment의 셀렉터는 <code class='ic'>matchExpressions</code>를 통해 set-based 조건도 지원하며, <code class='ic'>matchLabels</code>와 조합할 수 있다.</p>
+<pre><code>
+selector:
+  matchLabels:
+    app: nginx
+  matchExpressions:
+    - key: tier
+      operator: In
+      values: [frontend, web]
+</code></pre>
+<p><code class='ic'>matchLabels</code>와 <code class='ic'>matchExpressions</code>가 함께 있으면 <strong>모든 조건이 참이어야</strong> 매칭된다 — AND로 결합되는 것이다. 동일한 매칭 메커니즘이 <code class='ic'>nodeAffinity</code>와 <code class='ic'>podAffinity</code> 같은 고급 스케줄링 기능에서도 쓰이며, <code class='ic'>In</code>, <code class='ic'>NotIn</code>, <code class='ic'>Exists</code> 연산자로 Pod가 어느 노드에 배치될지 결정한다.</p>
+<h4>라벨 vs 어노테이션</h4>
+<p>Kubernetes에는 라벨과 비슷해 보이지만 정반대 목적을 가진 두 번째 메타데이터가 있다. 바로 <strong>어노테이션(annotation)</strong>이다. 둘 다 <code class='ic'>metadata</code>의 key/value 쌍이지만 용도가 전혀 다르다.</p>
+<ul>
+<li><strong>라벨</strong>은 <strong>식별과 선택</strong>에 쓴다. 짧고, 인덱싱되어 있으며, 쿼리할 수 있다. Service, Deployment, <code class='ic'>kubectl -l</code>처럼 오브젝트 그룹을 <em>찾아야</em> 할 때 쓴다.</li>
+<li><strong>어노테이션</strong>은 <strong>비식별 정보를 첨부</strong>하는 데 쓴다. 셀렉터로 선택할 수 없고, 빌드 ID, Git 커밋 SHA, 담당자 이메일, 도구 설정처럼 크거나 구조적인 값을 담을 수 있다. 셀렉터가 아닌 사람이나 도구가 읽을 목적으로 존재한다.</li>
+</ul>
+<pre><code>
+metadata:
+  labels:
+    app: nginx            # 이 오브젝트를 SELECT할 때 사용
+  annotations:
+    kubernetes.io/change-cause: &quot;rollout to v1.21&quot;   # 정보성 기록, 선택에 사용 안 함
+    team-contact: &quot;platform@example.com&quot;
+</code></pre>
+<p>간단한 기준을 하나 제시하자면, 셀렉터로 쓸 가능성이 있는 값은 라벨로, 그렇지 않으면 어노테이션으로 저장한다.</p>
+<h4>라벨 설계 모범 사례</h4>
+<p>Kubernetes 프로젝트는 다양한 도구가 애플리케이션을 일관된 방식으로 이해할 수 있도록 <code class='ic'>app.kubernetes.io/</code> 접두사 아래 <strong>권장 라벨</strong> 세트를 제공한다.</p>
+<pre><code>
+metadata:
+  labels:
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/instance: nginx-prod
+    app.kubernetes.io/version: &quot;1.21&quot;
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: storefront
+    app.kubernetes.io/managed-by: helm
+</code></pre>
+<p>실무에서는 팀마다 <code class='ic'>app</code>, <code class='ic'>version</code>, <code class='ic'>tier</code> 같은 소수의 일관된 라벨 어휘로 수렴하는 경향이 있다. 몇 가지 지침을 소개한다.</p>
+<ul>
+<li><strong>팀 전체에서 일관성을 유지한다.</strong> 라벨 키는 한 번 정하면 모든 곳에 통일해서 쓴다. <code class='ic'>tier</code>의 철자가 제각각이면 셀렉터가 동작하지 않는다.</li>
+<li><strong>셀렉터 라벨은 안정적으로 유지한다.</strong> Deployment의 <code class='ic'>selector</code>는 생성 후 변경할 수 없으므로, 식별용 라벨은 신중하게 선택한다. <code class='ic'>version</code>처럼 자주 바뀌는 값은 셀렉터에 포함시키지 말고 별도의 추가 라벨로 관리한다.</li>
+<li><strong>하나의 라벨에 모든 것을 담지 않는다.</strong> 거대한 복합 값 하나 대신 <code class='ic'>app</code>, <code class='ic'>tier</code>, <code class='ic'>environment</code>처럼 용도가 분명한 여러 라벨을 사용해, 다양한 기준으로 리소스를 나눌 수 있게 한다.</li>
+<li><strong>쿼리하지 않을 상세 정보는 어노테이션에 넣는다.</strong> 라벨 셋을 깔끔하고 의미 있게 유지하는 데 도움이 된다.</li>
+</ul>
+<h3>핵심 정리</h3>
+<ul>
+<li>라벨은 <code class='ic'>metadata.labels</code>에 위치하는 기능적 key/value 메타데이터로, Kubernetes가 오브젝트를 그룹화·탐색·연결하는 데 사용한다.</li>
+<li>Equality-based 셀렉터(<code class='ic'>=</code>, <code class='ic'>!=</code>)는 정확한 값 하나와 매칭하고, set-based 셀렉터(<code class='ic'>in</code>, <code class='ic'>notin</code>, <code class='ic'>exists</code>)는 OR 스타일 매칭과 키 존재 여부 확인을 지원하며, 여러 조건은 항상 AND로 결합된다.</li>
+<li>Deployment는 <code class='ic'>selector.matchLabels</code>(Pod 템플릿과 동일해야 함)로 Pod를 소유하고, Service는 <code class='ic'>spec.selector</code>로 트래픽 라우팅 대상 Pod를 결정한다 — 둘 다 순전히 Pod 라벨 매칭으로 동작한다.</li>
+<li>선택(select)에 쓸 것은 <strong>라벨</strong>로, 선택에 쓰지 않을 비식별 정보는 <strong>어노테이션</strong>으로 관리한다.</li>
+<li>권장 <code class='ic'>app.kubernetes.io/</code> 라벨을 따르고, 셀렉터 라벨은 팀 전체에서 일관되고 안정적으로 유지한다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 워밍업 — Pod 매니페스트에 라벨을 붙이고 확인하기</p>
+<p>1. 아래 스타터 YAML을 <code class='ic'>labeled-pod.yaml</code>로 저장한다.</p>
+<p>2. 클러스터에 적용한다: <code class='ic'>kubectl apply -f labeled-pod.yaml</code>.</p>
+<p>3. 라벨이 붙었는지 확인한다: <code class='ic'>kubectl get pod labeled-nginx --show-labels</code>.</p>
+<p>4. 파일을 수정하지 않고, 실행 중인 Pod에 <code class='ic'>kubectl label</code>로 <code class='ic'>environment=staging</code> 라벨을 추가한다.</p>
+<p>5. 같은 방법으로 <code class='ic'>demo</code> 라벨을 Pod에서 제거한다.</p>
+<p>6. <code class='ic'>--show-labels</code>로 최종 라벨 셋을 다시 확인한다.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: labeled-nginx
+  labels:
+    app: nginx
+    tier: frontend
+    demo: &quot;true&quot;
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.21
+</code></pre>
+              <details><summary>힌트</summary><ul><li>변경할 때마다 `kubectl get pod labeled-nginx --show-labels`를 실행해 현재 라벨을 바로 확인하자.</li><li>라벨 추가: `kubectl label pod &lt;이름&gt; &lt;키&gt;=&lt;값&gt;`. 라벨 삭제: `kubectl label pod &lt;이름&gt; &lt;키&gt;-` (뒤에 마이너스 부호, 공백 없음).</li><li>이미 값이 있는 라벨을 추가하려 할 때 &#x27;already has a value&#x27; 오류가 나오면 `--overwrite` 플래그를 추가한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1~2단계: 매니페스트 적용
+kubectl apply -f labeled-pod.yaml
+
+# 3단계: 라벨 확인
+kubectl get pod labeled-nginx --show-labels
+# 예상 출력에 포함:  app=nginx,demo=true,tier=frontend
+
+# 4단계: 라벨 추가(명령형)
+kubectl label pod labeled-nginx environment=staging
+
+# 5단계: demo 라벨 삭제(키 뒤에 &#x27;-&#x27; 붙이기)
+kubectl label pod labeled-nginx demo-
+
+# 6단계: 최종 상태 확인
+kubectl get pod labeled-nginx --show-labels
+# 예상 라벨: app=nginx,environment=staging,tier=frontend
+# (demo는 사라짐)</code></pre>
+                <div class='exp2'><p>라벨은 <code class='ic'>metadata.labels</code>에 위치하며, 선언형(YAML)과 명령형(<code class='ic'>kubectl label</code>) 두 가지 방식으로 관리할 수 있다. 키 뒤에 마이너스 부호(<code class='ic'>demo-</code>)를 붙이는 것이 라벨 키를 삭제하는 kubectl 문법이다. 명령형으로 변경하면 즉시 반영되지만 소스 YAML에는 반영되지 않는다 — 같은 매니페스트로 <code class='ic'>kubectl apply</code>를 다시 실행하면 덮어씌워진다. 따라서 명령형 라벨 변경은 임시 트러블슈팅 용도에만 쓰는 것이 좋다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 핵심 실습 1 — equality-based와 set-based 셀렉터로 Pod 필터링</p>
+<p>아래 세 Pod가 클러스터에 실행 중이라고 가정한다(스타터 YAML을 적용해 생성할 것). 각 질문에 맞는 <code class='ic'>kubectl get pods -l</code> 명령어를 실행해 답하라.</p>
+<p>a) <code class='ic'>app=nginx</code>인 Pod를 모두 조회한다.</p>
+<p>b) <code class='ic'>tier</code>가 <code class='ic'>frontend</code>가 아닌 Pod를 모두 조회한다.</p>
+<p>c) <code class='ic'>app=nginx</code>이고 동시에 <code class='ic'>tier=frontend</code>인 Pod를 조회한다.</p>
+<p>d) <code class='ic'>version</code>이 <code class='ic'>1.20</code> 또는 <code class='ic'>1.21</code>인 Pod를 조회한다(set-based 셀렉터 사용).</p>
+<p>e) <code class='ic'>canary</code> 라벨이 어떤 값이든 존재하는 Pod를 조회한다(키 존재 여부 확인).</p></div>
+              <pre class='starter'><code># 테스트용 Pod 세 개 생성:
+kubectl run pod-a --image=nginx:1.20 --labels=&#x27;app=nginx,tier=frontend,version=1.20&#x27;
+kubectl run pod-b --image=nginx:1.21 --labels=&#x27;app=nginx,tier=backend,version=1.21,canary=true&#x27;
+kubectl run pod-c --image=httpd:2.4  --labels=&#x27;app=httpd,tier=frontend,version=2.4&#x27;
+</code></pre>
+              <details><summary>힌트</summary><ul><li>Set-based 표현식은 셸이 괄호를 잘못 해석하지 않도록 작은따옴표로 감싼다: `kubectl get pods -l &#x27;version in (1.20, 1.21)&#x27;`.</li><li>조건 사이의 쉼표는 AND다, OR가 아니다. 하나의 라벨 키에 대한 OR 매칭은 `in`을 사용한다.</li><li>키 존재 여부 확인(&#x27;canary가 어떤 값으로든 설정되어 있음&#x27;)은 연산자 없이 키 이름만 넘긴다: `kubectl get pods -l &#x27;canary&#x27;`.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># a) equality: app=nginx
+kubectl get pods -l app=nginx
+# 반환: pod-a, pod-b
+
+# b) inequality: tier != frontend
+kubectl get pods -l &#x27;tier!=frontend&#x27;
+# 반환: pod-b
+
+# c) 다중 AND 조건
+kubectl get pods -l &#x27;app=nginx,tier=frontend&#x27;
+# 반환: pod-a
+
+# d) set-based &#x27;in&#x27; (version이 1.20 또는 1.21)
+kubectl get pods -l &#x27;version in (1.20, 1.21)&#x27;
+# 반환: pod-a, pod-b
+
+# e) 키 존재 여부 확인(canary 라벨이 있는 Pod)
+kubectl get pods -l &#x27;canary&#x27;
+# 반환: pod-b</code></pre>
+                <div class='exp2'><p>Equality-based 셀렉터(<code class='ic'>=</code>, <code class='ic'>!=</code>)는 값 하나와 정확히 매칭하며 가장 단순한 형태다. 쉼표로 연결한 여러 조건은 항상 AND로 결합된다 — Pod는 모든 조건을 만족해야 한다. Set-based 셀렉터(<code class='ic'>in</code>, <code class='ic'>notin</code>, <code class='ic'>exists</code>)는 표현력이 더 높다. <code class='ic'>in</code>은 값 목록에 대한 OR 매칭을 제공하고, 키 이름 단독(<code class='ic'>canary</code>)은 &#x27;값에 관계없이 이 키가 존재함&#x27;을 의미하는 단축 표현이다. 두 문법은 하나의 <code class='ic'>-l</code> 표현식 안에서 혼합해 쓸 수 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 핵심 실습 2 — 라벨로 Deployment와 Service 연결하기</p>
+<p>1. 아래 두 스타터 매니페스트(<code class='ic'>deployment.yaml</code>, <code class='ic'>service.yaml</code>)를 저장하고 적용한다.</p>
+<p>2. Deployment가 Pod 세 개를 생성했고 예상 라벨이 붙었는지 확인한다: <code class='ic'>kubectl get pods --show-labels</code>.</p>
+<p>3. Service가 해당 Pod를 엔드포인트로 선택했는지 확인한다: <code class='ic'>kubectl get endpoints web-service</code>.</p>
+<p>4. 의도적으로 불일치를 만들어본다: <code class='ic'>kubectl patch</code>로 Service 셀렉터를 <code class='ic'>app: webserver</code>(잘못된 값)로 변경한 뒤, 즉시 <code class='ic'>kubectl get endpoints web-service</code>를 다시 확인한다.</p>
+<p>5. 셀렉터를 <code class='ic'>app: web</code>으로 되돌려 패치하고, 엔드포인트가 복원되는지 확인한다.</p></div>
+              <pre class='starter'><code># deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+        tier: frontend
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+---
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+</code></pre>
+              <details><summary>힌트</summary><ul><li>`kubectl apply` 후 `kubectl get endpoints web-service`가 `&lt;none&gt;`을 보여준다면, Service `selector`의 키·값이 Pod의 `--show-labels` 출력과 정확히 일치하는지 다시 확인한다.</li><li>`kubectl patch` 명령어는 인라인 JSON을 받는다: `kubectl patch service web-service -p &#x27;{&quot;spec&quot;:{&quot;selector&quot;:{&quot;app&quot;:&quot;webserver&quot;}}}&#x27;`. Windows cmd 환경에서는 내부 따옴표를 이스케이프하거나 YAML 패치 파일을 대신 쓴다.</li><li>Service가 Pod를 찾았는지 확인하려면 `Endpoints` 컬럼(또는 `kubectl describe service web-service`)에 IP 주소가 하나 이상 표시되는지 본다. `Endpoints:` 행이 비어 있으면 셀렉터가 아무것도 매칭하지 못한 것이다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># 1단계: 두 매니페스트 적용
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# 2단계: Pod 라벨 확인
+kubectl get pods --show-labels
+# 세 Pod 모두 라벨: app=web,tier=frontend
+
+# 3단계: Service 엔드포인트 확인
+kubectl get endpoints web-service
+# Pod 레플리카 각각에 해당하는 IP:80 세 개가 목록에 표시되어야 함
+
+# 4단계: 의도적 불일치 만들기(잘못된 셀렉터 값)
+kubectl patch service web-service -p &#x27;{&quot;spec&quot;:{&quot;selector&quot;:{&quot;app&quot;:&quot;webserver&quot;}}}&#x27;
+kubectl get endpoints web-service
+# 엔드포인트 목록이 비워짐 — 트래픽이 조용히 실패
+
+# 5단계: 셀렉터 복원
+kubectl patch service web-service -p &#x27;{&quot;spec&quot;:{&quot;selector&quot;:{&quot;app&quot;:&quot;web&quot;}}}&#x27;
+kubectl get endpoints web-service
+# 엔드포인트 세 개 복원</code></pre>
+                <div class='exp2'><p>Deployment의 <code class='ic'>spec.selector.matchLabels</code>와 Pod 템플릿의 <code class='ic'>metadata.labels</code>는 동일한 키·값을 가져야 한다 — Kubernetes가 생성 시점에 이를 검증하고 불일치하면 거부한다. Service의 <code class='ic'>spec.selector</code>도 같은 역할을 라우팅에서 수행한다. Service는 라벨과 일치하는 Pod를 지속적으로 조회해 엔드포인트로 삼는다. 4단계는 운영 환경에서 셀렉터에 오타가 생겼을 때 어떤 일이 일어나는지를 보여준다. 엔드포인트 목록이 비워지고 Service로 들어오는 요청은 응답을 받지 못하는데, Service 자체에는 아무런 오류도 표시되지 않는다. Service에 접근이 안 될 때 첫 번째로 확인할 진단 단계가 <code class='ic'>kubectl get endpoints &lt;서비스명&gt;</code>인 이유가 바로 여기에 있다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. 심화 과제 — 잘못 설계된 매니페스트를 모범 사례에 맞게 재설계하기</p>
+<p>아래 매니페스트는 e-커머스 결제(checkout) 서비스를 배포하지만 라벨링에 여러 문제가 있다.</p>
+<ul>
+<li><code class='ic'>selector.matchLabels</code>의 키(<code class='ic'>svc</code>)가 Pod 템플릿 라벨의 키(<code class='ic'>service</code>)와 달라 Kubernetes가 거부한다.</li>
+<li><code class='ic'>version</code> 라벨이 <code class='ic'>selector.matchLabels</code>에 포함되어 있어, 버전 업데이트 시 Deployment를 재생성해야 한다.</li>
+<li>운영 메타데이터(빌드 ID, 담당자 연락처)가 어노테이션이 아닌 라벨로 저장되어 있다.</li>
+<li>권장 <code class='ic'>app.kubernetes.io/</code> 접두사 라벨이 없다.</li>
+</ul>
+<p>과제:</p>
+<p>1. 스타터 매니페스트에서 네 가지 문제를 모두 찾는다.</p>
+<p>2. 강의에서 다룬 모범 사례에 따라 매니페스트를 수정한다. 적절한 곳에 <code class='ic'>app.kubernetes.io/</code> 권장 라벨을 사용한다.</p>
+<p>3. 빌드 ID와 담당자 연락처를 담는 어노테이션 블록을 추가한다.</p>
+<p>4. 수정한 매니페스트를 적용하고 <code class='ic'>kubectl get deployment checkout-deployment -o yaml</code>로 결과를 확인한다.</p></div>
+              <pre class='starter'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      svc: checkout          # 문제: Pod 템플릿의 키와 불일치
+      version: &quot;2.5&quot;         # 문제: 셀렉터에 version이 있으면 업데이트 불가
+  template:
+    metadata:
+      labels:
+        service: checkout    # 문제: 셀렉터의 키와 맞춰야 함
+        version: &quot;2.5&quot;
+        build-id: &quot;b1042&quot;    # 문제: 어노테이션으로 옮겨야 함
+        oncall: &quot;payments-team@example.com&quot;  # 문제: 어노테이션으로 옮겨야 함
+    spec:
+      containers:
+        - name: checkout
+          image: checkout-app:2.5
+</code></pre>
+              <details><summary>힌트</summary><ul><li>셀렉터 키 목록과 템플릿 라벨 키 목록을 나란히 놓고 비교해보자. `selector.matchLabels`의 모든 키는 `template.metadata.labels`에 동일한 값으로 존재해야 한다.</li><li>어떤 라벨을 셀렉터에 넣을지 판단하는 좋은 기준: &#x27;Deployment 수명 동안 이 값이 바뀔 수 있는가?&#x27; 바뀔 수 있다면 Pod 템플릿 라벨에만 두고 셀렉터에는 넣지 않는다.</li><li>그룹화나 필터링에 쓰이지 않는 값(빌드 ID, 담당자 정보, 커밋 SHA)은 `metadata.annotations`으로 옮긴다. 어노테이션은 더 긴 문자열을 허용하며 셀렉터에서 보이지 않는다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-deployment
+  annotations:
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: checkout      # 안정적: 앱 식별, 절대 변경되지 않음
+      app.kubernetes.io/component: checkout # 안정적: 컴포넌트 역할 식별
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checkout
+        app.kubernetes.io/component: checkout
+        app.kubernetes.io/version: &quot;2.5&quot;    # 정보성 버전 라벨(셀렉터에 미포함)
+      annotations:
+        build-id: &quot;b1042&quot;                   # 라벨에서 어노테이션으로 이동
+        oncall: &quot;payments-team@example.com&quot; # 라벨에서 어노테이션으로 이동
+    spec:
+      containers:
+        - name: checkout
+          image: checkout-app:2.5
+</code></pre>
+                <div class='exp2'><p>문제 1(셀렉터/템플릿 키 불일치): Kubernetes는 <code class='ic'>selector.matchLabels</code>의 모든 키가 Pod 템플릿 라벨에 동일한 값으로 존재하는지 검증한다. 셀렉터에 <code class='ic'>svc</code>를 쓰고 템플릿에 <code class='ic'>service</code>를 쓰면 API가 즉시 거부한다. 문제 2(셀렉터에 version 포함): <code class='ic'>spec.selector</code>는 Deployment 생성 후 변경할 수 없다. <code class='ic'>version</code>을 셀렉터에 넣으면 버전을 올릴 때 Deployment를 삭제하고 다시 만들어야 해 롤링 업데이트 자체가 무의미해진다. 해결책은 <code class='ic'>version</code>을 Pod 템플릿 라벨에만 두는 것이다(정보성 라벨). 문제 3·4(운영 메타데이터를 라벨로 저장): 라벨은 인덱싱되어 셀렉터용으로 쓰는 것이다. 빌드 ID나 이메일처럼 어떤 셀렉터도 쿼리하지 않을 값을 라벨에 넣으면 라벨 네임스페이스를 낭비한다. 비식별 메타데이터의 올바른 위치는 어노테이션이다. 어노테이션은 라벨보다 길이와 문자 제한이 완화되어 있고 더 긴 값도 담을 수 있다. <code class='ic'>app.kubernetes.io/</code> 권장 접두사를 사용하면 Helm, 대시보드 등의 도구가 별도 설정 없이도 리소스를 올바르게 인식한다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=luUt9KxLWZ0' target='_blank'>Learn about Pod Labels and Selectors - Civo Academy</a></li><li><a href='https://www.youtube.com/watch?v=rX4v_L0k4Hc' target='_blank'>Kubernetes Node Selector vs Node Affinity vs Pod Affinity vs Tains &amp; Tolerations</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

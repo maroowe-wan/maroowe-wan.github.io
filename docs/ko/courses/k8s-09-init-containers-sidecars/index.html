@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-InitContainers&amp;Sidecars</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-09-init-containers-sidecars/index.html'>EN</a></div>
+  <h1>K8S-InitContainers&amp;Sidecars</h1>
+  <div class="sub">쿠버네티스 기본 Pod/컨테이너 개념을 아는 중급 학습자 · 총 1강</div>
+  <ul><li><a href='#lec1'>01. 쿠버네티스 Init 컨테이너와 사이드카 패턴</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. 쿠버네티스 Init 컨테이너와 사이드카 패턴 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>Init 컨테이너의 동작 원리를 설명할 수 있다. Init 컨테이너는 앱 컨테이너보다 먼저 실행되고, 정의된 순서대로 하나씩 동작하며, 각 컨테이너가 정상 종료해야 다음 컨테이너가 시작된다. 설정 준비나 의존성 대기 같은 대표적인 사용 사례도 파악한다.</li>
+<li>사이드카 패턴의 개념과 대표적인 역할(로그 전송, 프록시, 설정 동기화)을 설명하고, 일반 멀티 컨테이너 Pod와의 차이를 구분한다.</li>
+<li>쿠버네티스 1.28+ <strong>네이티브 사이드카</strong>(<code class='ic'>restartPolicy: Always</code>를 가진 init 컨테이너)를 YAML로 직접 작성·검증하고, 기존 방식 대비 수명주기 측면의 이점을 설명한다.</li>
+</ul>
+<h3>본문</h3>
+<h4>컨테이너 하나만으로는 부족한 이유</h4>
+<p>쿠버네티스 Pod는 배포 가능한 가장 작은 단위이며, 컨테이너를 여러 개 담을 수 있다. 이는 의도된 설계다. 실제 시스템에서 애플리케이션은 혼자 돌아가는 경우가 거의 없다. 설정을 미리 가져와야 할 수도 있고, 로그를 어딘가로 전송하거나, 외부 트래픽을 암호화하거나, 백그라운드에서 시크릿을 동기화해야 할 수도 있다. 이 모든 기능을 메인 이미지에 몰아넣을 수도 있지만, 그러면 관심사가 뒤엉켜 각 기능을 독립적으로 업데이트하기 어려워진다.</p>
+<p>쿠버네티스는 이를 깔끔하게 해결하는 두 가지 도구를 제공한다. <strong>Init 컨테이너</strong>는 앱이 시작되기 <em>전에</em> 반드시 완료되어야 하는 일회성 준비 작업을 담당하고, <strong>사이드카</strong>는 앱과 <em>나란히</em> 앱의 전체 생애 동안 실행되는 보조 프로세스다. YAML 구조는 비슷해 보이지만, 각각 문제의 다른 절반을 담당한다. 하나는 시작 단계, 다른 하나는 실행 단계다. 순서대로 살펴보자.</p>
+<h4>Init 컨테이너: Pod의 사전 점검 목록</h4>
+<p>Init 컨테이너는 Pod spec에 선언하는 시작 전용 컨테이너다. 핵심 규칙은 단순하지만 엄격하다. <strong>Init 컨테이너가 정상 완료되지 않으면, Pod의 다른 어떤 컨테이너도 실행되지 않는다.</strong> Init 컨테이너가 오류로 종료되면 Pod는 실패로 간주되고, 쿠버네티스는 재시작 정책에 따라 계속 재시도한다.</p>
+<p><em>비행 전 점검표</em>를 떠올리면 이해하기 쉽다. &quot;본 작업&quot;을 시작하기 전에 모든 사전 조건이 충족되었는지 확인한다. 데이터베이스에 연결 가능한가? 설정 볼륨이 채워져 있는가? 오늘 사용할 Kafka 브로커를 찾을 수 있는가? 유효한 인증 정보가 있는가? 점검 항목 중 하나라도 실패하면 진행할 이유가 없으므로, Pod는 아예 시작하지 않는다. 객체 지향 프로그래밍의 생성자와 같은 원칙이다. 절반만 초기화된 객체는 절대 허용하지 않듯, Init 컨테이너는 절반만 초기화된 Pod가 실행되는 상황을 막아준다.</p>
+<blockquote class='callout'>
+<p>Init 컨테이너는 <strong>선언한 순서대로 하나씩</strong> 실행되며, 각 컨테이너가 완료된 후에야 다음 컨테이너가 시작된다. 앱 컨테이너는 <em>모든</em> Init 컨테이너가 성공한 뒤에만 시작된다.</p>
+</blockquote>
+<p>주요 사용 사례:</p>
+<ul>
+<li><strong>의존성 대기</strong> — 데이터베이스나 메시지 브로커 같은 서비스가 실제로 준비될 때까지 시작을 막아, 앱이 처음 뜨자마자 crash-loop에 빠지는 상황을 방지한다.</li>
+<li><strong>데이터·설정 준비</strong> — 저장소를 <code class='ic'>git clone</code>하거나, 공유 볼륨에 템플릿을 렌더링하거나, 앱에 필요한 에셋을 다운로드한다.</li>
+<li><strong>볼륨 초기화</strong> — 디렉터리 구조를 생성하고 권한을 설정하거나, 앱 컨테이너가 사용할 공유 <code class='ic'>emptyDir</code> 볼륨에 초기 데이터를 넣는다.</li>
+</ul>
+<p>한 가지 유용한 특징이 있다. Init 컨테이너는 일반 컨테이너와 동일한 필드(<code class='ic'>name</code>, <code class='ic'>image</code>, <code class='ic'>command</code>, <code class='ic'>args</code> 등)를 사용하지만, liveness probe와 readiness probe는 지원하지 않는다. Probe는 장시간 실행되는 프로세스를 위한 것이고, Init 컨테이너는 시작해서 역할을 마치고 종료하는 것이 목적이므로 계속 상태를 확인할 필요가 없다.</p>
+<p>아래는 애플리케이션 실행 전에 두 가지 의존성을 기다리는 Pod 예시다. 두 개의 Init 컨테이너가 각각 Service의 DNS가 해석될 때까지 반복하고, 그 뒤에 실제 앱 컨테이너가 시작된다.</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  # Init 컨테이너는 이 순서대로 하나씩 실행된다.
+  initContainers:
+    - name: init-myservice
+      image: busybox:1.36
+      # &quot;myservice&quot;의 DNS가 해석될 때까지 반복하다가 성공하면 exit 0으로 종료.
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &quot;until nslookup myservice; do echo waiting for myservice; sleep 2; done&quot;]
+    - name: init-mydb
+      image: busybox:1.36
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &quot;until nslookup mydb; do echo waiting for mydb; sleep 2; done&quot;]
+  # 두 Init 컨테이너가 모두 성공한 후에만 앱 컨테이너가 시작된다.
+  containers:
+    - name: myapp
+      image: nginx:1.27
+      ports:
+        - containerPort: 80
+</code></pre>
+<p><code class='ic'>myservice</code>와 <code class='ic'>mydb</code>에 접근할 수 없으면 Pod는 crash-loop 없이 <code class='ic'>Init:</code> 상태에서 대기한다. 바로 우리가 원하는 동작이다. 이 Pod에서 Init 컨테이너가 순차적으로 실행되고, 실패하면 앱 컨테이너가 차단되는 흐름을 아래 다이어그램에서 확인할 수 있다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Start([Pod 스케줄됨]) --&gt; Init1[&quot;init-myservice 실행&quot;]
+    Init1 --&gt; Check1{exit 0?}
+    Check1 --&gt;|No| Retry1[&quot;restartPolicy에 따라 재시작&quot;]
+    Retry1 --&gt; Init1
+    Check1 --&gt;|Yes| Init2[&quot;init-mydb 실행&quot;]
+    Init2 --&gt; Check2{exit 0?}
+    Check2 --&gt;|No| Retry2[&quot;restartPolicy에 따라 재시작&quot;]
+    Retry2 --&gt; Init2
+    Check2 --&gt;|Yes| App[&quot;앱 컨테이너 myapp 시작&quot;]
+    App --&gt; Ready([Pod 실행 중])</div><figcaption>Init 컨테이너는 순차 실행되며 실패하면 앱이 차단된다</figcaption></figure>
+<h4>사이드카 패턴, 그리고 그 본질</h4>
+<p><strong>사이드카</strong>는 메인 애플리케이션 <em>옆에서</em> 실행되며, 메인 이미지를 변경하지 않고 기능을 확장하는 보조 컨테이너다. 이름의 유래는 오토바이 사이드카다. 오토바이에 고정된 별도의 좌석으로, 오토바이가 가는 곳이면 어디든 함께 간다.</p>
+<p>사이드카의 대표적인 역할:</p>
+<ul>
+<li><strong>로그 전송</strong> — 앱이 공유 볼륨에 로그를 기록하면, 사이드카가 해당 파일을 읽어 로깅 백엔드로 전달한다.</li>
+<li><strong>프록시 / 서비스 메시</strong> — 사이드카(예: Envoy)가 모든 네트워크 트래픽을 가로채 상호 TLS, 재시도, 가시성(observability)을 제공한다. 앱은 이 과정을 전혀 인식하지 못한다.</li>
+<li><strong>설정 동기화</strong> — 사이드카가 원격 설정 소스를 감시하면서 로컬 파일을 최신 상태로 유지해, 앱이 항상 최신 설정을 읽을 수 있게 한다.</li>
+</ul>
+<p>일반적인 멀티 컨테이너 Pod와의 핵심 차이는 목적과 수명주기 결합 방식에 있다. 일반 멀티 컨테이너 Pod에서는 각 컨테이너가 동등한 구성원으로서 핵심 기능을 함께 담당한다. 반면 사이드카는 명백히 <em>종속적</em>이다. 메인 앱을 지원하기 위해서만 존재하며, 앱과 생사를 함께해야 한다.</p>
+<h4>&quot;전통적인&quot; 사이드카의 불편한 진실</h4>
+<p>많은 사람이 처음 알게 되면 놀라는 사실이 있다. <strong>쿠버네티스는 오랫동안 사이드카라는 개념 자체를 지원하지 않았다.</strong> 사이드카라는 말은 항상 쓰였지만, 기술적으로는 그냥 <code class='ic'>containers:</code> 목록에 추가된 두 번째 항목일 뿐이었다. 쿠버네티스는 목록의 모든 컨테이너를 동등한 구성원으로 취급하고 거의 동시에 시작했으며, 순서는 보장되지 않았다.</p>
+<p>이 공백은 실제로 고통스러운 버그들을 낳았다.</p>
+<ul>
+<li><strong>시작 경쟁 조건.</strong> 오토바이가 10마일을 달려나갔는데 사이드카는 아직 부착도 안 된 상황이 벌어졌다. 앱이 프록시 사이드카보다 먼저 시작되면 초반 요청이 실패하고, PagerDuty에 알림이 날아가고, 카나리 배포가 깨졌다. 앱이 기다리지 않았기 때문이다.</li>
+<li><strong>종료 문제.</strong> Job에서는 메인 작업이 완료되면 Pod도 끝나야 한다. 그런데 프록시나 로깅 사이드카는 설계상 영원히 실행되기 때문에 Pod를 계속 살려두고, Job은 영원히 &quot;완료&quot;를 보고하지 못했다.</li>
+</ul>
+<p>수년간 팀들은 이 문제를 우회하는 방법으로 버텼다. 공유 &quot;ready&quot; 플래그 파일, 사이드카 준비를 폴링하는 셸 루프, <code class='ic'>preStop</code> 트릭 같은 것들이다. 나름 동작하긴 했지만 취약했고, 모든 팀이 같은 해결책을 제각각 다시 만들어야 했다.</p>
+<h4>쿠버네티스 1.28+의 네이티브 사이드카</h4>
+<p>쿠버네티스 1.28은 드디어 사이드카를 공식적으로 지원했다. 구현 방식은 놀랍도록 영리하다. <code class='ic'>sidecars:</code>라는 새 필드가 생긴 것이 아니다. 대신 <strong><code class='ic'>restartPolicy: Always</code>를 가진 init 컨테이너</strong>로 사이드카를 선언한다.</p>
+<p>처음에는 모순처럼 들릴 수 있으니 두 부분으로 나눠 살펴보자.</p>
+<p>1. <strong>Init 컨테이너이므로</strong>, 메인 앱 컨테이너보다 <em>먼저</em> 시작된다. 시작 경쟁 조건이 해결된다. 앱은 사이드카가 올라온 뒤에만 시작이 보장된다.</p>
+<p>2. <strong><code class='ic'>restartPolicy: Always</code></strong> 가 &quot;init 컨테이너는 완료될 때까지 기다린다&quot;는 규칙을 바꾼다. 이제 쿠버네티스는 이 컨테이너가 종료되기를 기다리지 않고, <em>시작</em>되었음을 확인한 뒤 앱 컨테이너로 넘어간다. 재시작 정책이 <code class='ic'>Always</code>이므로 사이드카는 Pod 전체 생애 동안 계속 실행되고, 크래시 시 자동으로 재시작된다.</p>
+<p>이를 통해 얻는 수명주기 이점:</p>
+<ul>
+<li><strong>시작 순서 보장</strong> — 사이드카가 앱보다 먼저 준비되므로, 첫 요청 실패가 사라진다.</li>
+<li><strong>깔끔한 종료</strong> — 메인 앱이 종료되면 쿠버네티스가 이를 기다렸다가 사이드카에 정상 종료 신호를 보내, 로그를 플러시하고 연결을 닫을 시간을 준다.</li>
+<li><strong>Job이 정상 작동</strong> — 사이드카가 더 이상 <code class='ic'>containers:</code>의 구성원이 아니므로, Job 완료를 더 이상 막지 않는다. Job은 앱의 작업이 끝나면 완료되고, 사이드카는 그 이후에 정리된다.</li>
+</ul>
+<p>네이티브 사이드카는 <em>절대 끝나지 않는 init 컨테이너</em>라고 생각할 수 있다. 나머지 Pod는 이 사이드카와 나란히 실행된다. 아래 YAML은 네이티브 방식으로 선언한 로그 전송 사이드카의 예다.</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-native-sidecar
+spec:
+  initContainers:
+    # 네이티브 사이드카: initContainers에 있지만 restartPolicy: Always 덕분에
+    # 앱보다 먼저 시작되고 Pod 전체 생애 동안 계속 실행된다.
+    - name: log-shipper
+      image: busybox:1.36
+      restartPolicy: Always   # &lt;-- 이 필드가 사이드카로 만드는 핵심
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;tail -F /var/log/app/app.log&#x27;]
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+  containers:
+    - name: myapp
+      image: busybox:1.36
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;while true; do echo &quot;$(date) request handled&quot; &gt;&gt; /var/log/app/app.log; sleep 5; done&#x27;]
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+  volumes:
+    - name: logs
+      emptyDir: {}
+</code></pre>
+<p>시작 흐름은 다음과 같다. 쿠버네티스는 먼저 <code class='ic'>log-shipper</code>를 시작하고, <code class='ic'>restartPolicy: Always</code> 덕분에 종료를 기다리지 않고 실행 중임을 확인한 뒤 <code class='ic'>myapp</code>을 시작한다. 앱은 공유 <code class='ic'>emptyDir</code> 볼륨에 로그를 기록하고, 사이드카는 그 내용을 읽어 전달한다. 앱이 종료되면 사이드카도 정상 종료된다. 아래 다이어그램은 &quot;앱보다 먼저 시작 → 나란히 실행 → 앱 종료 후 정리&quot;라는 수명주기 흐름을 시간 순으로 보여준다.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant K as Kubelet
+    participant S as log-shipper 사이드카
+    participant A as myapp 컨테이너
+    participant V as 공유 emptyDir 볼륨
+    K-&gt;&gt;S: 사이드카 시작 (restartPolicy Always)
+    S--&gt;&gt;K: 시작됨 (완료 대기 없음)
+    K-&gt;&gt;A: 앱 컨테이너 시작
+    A-&gt;&gt;V: 로그 라인 추가
+    S-&gt;&gt;V: 로그 라인 읽어 전달
+    Note over A: 앱 작업 완료
+    A--&gt;&gt;K: 앱 종료
+    K-&gt;&gt;S: 정상 종료 신호 전송
+    S--&gt;&gt;K: 로그 플러시 후 종료</div><figcaption>네이티브 사이드카 수명주기: 앱보다 먼저 시작, 나란히 실행, 앱 종료 후 정리</figcaption></figure>
+<h4>비용과 더 넓은 맥락</h4>
+<p>사이드카는 강력하지만 공짜가 아니다. 완전한 서비스 메시는 <em>Pod마다</em> 프록시 컨테이너를 하나씩 추가하는데, 규모가 커지면 이 프록시들이 CPU, 메모리, 비용의 상당 부분을 차지할 수 있다. 그래서 업계에서는 Pod별 컨테이너 대신 커널 레벨에서 이 작업을 처리하는 eBPF 기반 메시 같은 경량 대안을 탐색하고 있다. 그렇다고 사이드카 패턴이 사라지는 것은 아니다. 로깅, 프록시, 설정 보조 기능으로 앱을 확장하는 방식은 여전히 핵심적이다. 다만 무거운 메시를 기본으로 선택하기보다, 실제 필요에 맞게 사이드카를 적절히 활용하는 것이 중요하다.</p>
+<h3>핵심 정리</h3>
+<ul>
+<li><strong>Init 컨테이너</strong>는 앱보다 먼저, 선언 순서대로 하나씩 실행되며, 각각 성공해야 다음 단계로 넘어간다. 의존성 대기, 설정 준비, 볼륨 초기화에 적합하다. 일반 컨테이너와 동일한 필드를 쓰지만 probe는 지원하지 않는다.</li>
+<li><strong>사이드카</strong>는 메인 앱과 나란히 실행되며, 앱 이미지를 수정하지 않고 로깅·프록시·설정 동기화 기능을 추가하는 보조 컨테이너다. 수명주기를 앱에 종속시킨다는 점에서 일반 멀티 컨테이너 Pod와 다르다.</li>
+<li><strong>전통적인 사이드카</strong>는 순서 보장이 없는 일반 컨테이너였기 때문에 시작 경쟁 조건과 Job 미완료 문제를 일으켰다.</li>
+<li><strong>네이티브 사이드카(1.28+)</strong> 는 <code class='ic'>restartPolicy: Always</code>를 가진 init 컨테이너다. 앱보다 먼저 시작되고, Pod 전체 생애 동안 실행되며, 크래시 시 자동 재시작되고, 정상 종료되며, Job 완료를 더 이상 막지 않는다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 워밍업: <code class='ic'>preflight-pod</code>라는 이름의 Pod YAML을 작성하라. <code class='ic'>busybox:1.36</code> 이미지를 사용하는 <code class='ic'>check-config</code>라는 Init 컨테이너를 하나 추가하고, 이 컨테이너가 <code class='ic'>config ready</code> 메시지를 출력한 뒤 정상 종료되도록 한다. 메인 앱 컨테이너는 <code class='ic'>nginx:1.27</code>을 사용하는 <code class='ic'>app</code>으로 이름을 짓고 포트 80을 노출한다. <code class='ic'>initContainers</code> 필드가 <code class='ic'>spec</code> 안에서 <code class='ic'>containers</code>와 같은 레벨에 위치하는지 확인한다.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: preflight-pod
+spec:
+  # TODO: 여기에 initContainers 블록을 추가한다
+  containers:
+    - name: app
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+              <details><summary>힌트</summary><ul><li>`initContainers` 키는 `spec:` 아래에 위치하며, `containers:` 안이나 매니페스트 최상위 레벨이 아니다.</li><li>출력만 하고 끝나는 셸 명령은 exit 코드 0으로 종료된다. `command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;echo config ready&#x27;]`로 한 줄짜리 셸 명령을 실행한다.</li><li>`kubectl apply -f preflight-pod.yaml`로 매니페스트를 적용한 뒤 `kubectl get pod preflight-pod -w`로 상태 변화를 확인한다. `Init:0/1` → `PodInitializing` → `Running` 순서로 진행되어야 한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: preflight-pod
+spec:
+  initContainers:
+    - name: check-config
+      image: busybox:1.36
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;echo config ready&#x27;]
+  containers:
+    - name: app
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+                <div class='exp2'><p><code class='ic'>initContainers</code> 필드는 <code class='ic'>spec</code> 안에, <code class='ic'>containers</code>와 같은 들여쓰기 레벨에 위치한다. 쿠버네티스는 <code class='ic'>initContainers</code> 아래의 모든 항목을 선언 순서대로 하나씩 실행하며, 각 컨테이너가 exit 코드 0으로 종료되어야 다음 컨테이너로 넘어간다. 모든 Init 컨테이너가 성공한 후에만 <code class='ic'>containers</code> 아래의 컨테이너가 시작된다. 이 예시에서는 Init 컨테이너가 하나뿐이고, <code class='ic'>echo config ready</code>를 실행하면 자동으로 exit 코드 0으로 종료된다. 그 뒤에 <code class='ic'>nginx</code>가 시작된다. Init 컨테이너는 <code class='ic'>livenessProbe</code>나 <code class='ic'>readinessProbe</code>를 사용하지 않는다는 점도 기억하자. Init 컨테이너는 한 번 실행하고 끝내는 것이 목적이므로 probe가 필요 없다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 핵심 실습 1 — 두 개의 순차 Init 컨테이너로 의존성 대기 구현: <code class='ic'>app-with-deps</code>라는 이름의 Pod YAML을 작성해 실제 의존성 대기 패턴을 구현하라. 다음 순서로 Init 컨테이너 두 개를 추가한다.</p>
+<p>1. <code class='ic'>wait-for-db</code> (<code class='ic'>busybox:1.36</code> 이미지): <code class='ic'>nslookup mydb</code>가 성공할 때까지 2초마다 반복하고, 성공하면 종료한다.</p>
+<p>2. <code class='ic'>wait-for-cache</code> (<code class='ic'>busybox:1.36</code> 이미지): <code class='ic'>nslookup mycache</code>가 성공할 때까지 2초마다 반복하고, 성공하면 종료한다.</p>
+<p>두 컨테이너가 모두 성공하면 메인 컨테이너 <code class='ic'>backend</code> (<code class='ic'>nginx:1.27</code>, 포트 80)를 시작한다.</p>
+<p>순서 보장이 핵심이다. <code class='ic'>wait-for-db</code>가 정상 종료한 후에만 <code class='ic'>wait-for-cache</code>가 시작되어야 한다.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-deps
+spec:
+  initContainers:
+    # TODO: wait-for-db Init 컨테이너 추가
+    # TODO: wait-for-cache Init 컨테이너 추가
+  containers:
+    - name: backend
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+              <details><summary>힌트</summary><ul><li>`initContainers` 목록에서 `wait-for-db`를 먼저 두고 `wait-for-cache`를 그 다음에 둔다. 목록의 위치가 곧 실행 순서이며, 쿠버네티스는 정렬하거나 병렬 실행하지 않는다.</li><li>셸 루프 패턴은 `until &lt;명령&gt;; do echo &#x27;waiting&#x27;; sleep 2; done`이다. `&lt;명령&gt;`이 exit 0으로 종료되면 `until` 조건이 거짓이 되어 셸도 exit 0으로 종료되고, 쿠버네티스의 성공 조건을 만족한다.</li><li>실제 클러스터 없이 테스트하려면 `mydb` Service가 없는 로컬 kind 또는 minikube 클러스터에 매니페스트를 적용한다. `kubectl get pod app-with-deps`로 `Init:0/2` 상태에 머무는 것을 확인하고, `kubectl create service clusterip mydb --tcp=5432:5432`로 더미 Service를 생성한 뒤 `Init:1/2`로 진행되는지 확인해 순서를 검증한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-deps
+spec:
+  initContainers:
+    - name: wait-for-db
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;until nslookup mydb; do echo &#x27;waiting for mydb&#x27;; sleep 2; done&quot;
+    - name: wait-for-cache
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;until nslookup mycache; do echo &#x27;waiting for mycache&#x27;; sleep 2; done&quot;
+  containers:
+    - name: backend
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+                <div class='exp2'><p>쿠버네티스는 Init 컨테이너를 YAML 목록에 나타난 순서대로 엄격하게 실행한다. <code class='ic'>wait-for-db</code>가 먼저 시작되고, <code class='ic'>nslookup mydb</code>가 성공(exit 0)할 때까지 반복 대기한다. DB에 연결할 수 없으면 무기한 대기 상태가 된다. 정상 종료된 후에야 <code class='ic'>wait-for-cache</code>가 시작되어 <code class='ic'>mycache</code>에 대해 같은 대기 루프를 수행한다. 두 컨테이너 모두 exit 코드 0으로 종료되어야 <code class='ic'>backend</code>가 시작된다. 이것이 의존성 대기 패턴이다. Pod는 <code class='ic'>Init:0/2</code> → <code class='ic'>Init:1/2</code> → <code class='ic'>Running</code> 순으로 진행되며, 앱 컨테이너가 crash-loop에 빠지지 않는다. 실제 클러스터에서는 <code class='ic'>mydb</code>와 <code class='ic'>mycache</code>라는 Service를 생성하면 DNS가 해석되어 Init 컨테이너가 대기를 마친다. 단발성 확인 대신 <code class='ic'>until … done</code> 루프를 쓰는 이유는, Service가 생성된 후 DNS 전파에 몇 초가 걸릴 수 있기 때문이다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 핵심 실습 2 — 공유 볼륨을 사용하는 네이티브 사이드카: 쿠버네티스 1.28+ 네이티브 사이드카 패턴을 보여주는 <code class='ic'>native-sidecar-pod</code> Pod YAML을 작성하라. 요구사항:</p>
+<ul>
+<li><code class='ic'>shared-logs</code>라는 이름의 <code class='ic'>emptyDir</code> 볼륨을 선언한다.</li>
+<li><code class='ic'>initContainers</code>에 <code class='ic'>log-agent</code> 사이드카 컨테이너(<code class='ic'>busybox:1.36</code>)를 선언하고 <code class='ic'>restartPolicy: Always</code>를 추가한다. <code class='ic'>tail -F /var/log/app/app.log</code>를 실행하고 <code class='ic'>shared-logs</code>를 <code class='ic'>/var/log/app</code>에 마운트한다.</li>
+<li><code class='ic'>containers</code>에 메인 앱 <code class='ic'>myapp</code> (<code class='ic'>busybox:1.36</code>)을 선언한다. 3초마다 <code class='ic'>$(date) - request handled</code>를 <code class='ic'>/var/log/app/app.log</code>에 무한 반복으로 기록하고, 같은 <code class='ic'>shared-logs</code> 볼륨을 <code class='ic'>/var/log/app</code>에 마운트한다.</li>
+</ul>
+<p>YAML 안에 주석으로, init 컨테이너에 <code class='ic'>restartPolicy: Always</code>를 추가하면 왜 네이티브 사이드카가 되는지 설명한다.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: native-sidecar-pod
+spec:
+  initContainers:
+    # TODO: 여기에 log-agent 네이티브 사이드카를 선언한다
+  containers:
+    # TODO: 여기에 myapp 메인 컨테이너를 선언한다
+  volumes:
+    # TODO: 여기에 shared-logs emptyDir 볼륨을 선언한다</code></pre>
+              <details><summary>힌트</summary><ul><li>`log-agent`는 `containers:`가 아닌 `initContainers:` 아래에 위치해야 한다. `containers:` 항목에 `restartPolicy: Always`를 추가해도 특별한 효과가 없다. 네이티브 사이드카 메커니즘은 오직 `initContainers:` 아래에서만 동작한다.</li><li>`log-agent`와 `myapp` 모두 `volumeMounts`에서 같은 볼륨 이름(`shared-logs`)을 참조해야 한다. 각 컨테이너는 자체 파일시스템 네임스페이스를 가지므로 `mountPath`는 동일해도 되며, 볼륨이 두 컨테이너를 연결하는 다리 역할을 한다.</li><li>매니페스트를 적용한 뒤 `kubectl logs native-sidecar-pod -c log-agent`를 실행해 사이드카가 `myapp`이 기록한 로그 파일을 읽고 있는지 확인한다. 약 3초마다 타임스탬프가 찍힌 줄이 나타나면 공유 볼륨 통신이 정상적으로 작동하는 것이다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: native-sidecar-pod
+spec:
+  initContainers:
+    # restartPolicy: Always가 이 init 컨테이너를 네이티브 사이드카로 만든다.
+    # 쿠버네티스가 myapp보다 먼저 시작하지만 종료를 기다리지 않는다.
+    # Pod 전체 생애 동안 계속 실행되며 크래시 시 자동으로 재시작된다.
+    - name: log-agent
+      image: busybox:1.36
+      restartPolicy: Always
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;tail -F /var/log/app/app.log&#x27;]
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log/app
+  containers:
+    - name: myapp
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;while true; do echo \&quot;$(date) - request handled\&quot; &gt;&gt; /var/log/app/app.log; sleep 3; done&quot;
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log/app
+  volumes:
+    - name: shared-logs
+      emptyDir: {}</code></pre>
+                <div class='exp2'><p>init 컨테이너에 <code class='ic'>restartPolicy: Always</code> 하나만 추가하면 쿠버네티스 1.28+에서 네이티브 사이드카로 인식한다. 이 필드가 없으면 쿠버네티스는 해당 컨테이너가 종료될 때까지 기다린 후 다음 단계로 넘어간다. 이 필드가 있으면 컨테이너가 시작(종료가 아니라)된 시점에 init 단계가 완료된 것으로 보고 곧바로 <code class='ic'>myapp</code>을 시작한다. 사이드카는 Pod 전체 생애 동안 실행되고, 크래시 시 자동 재시작되며, <code class='ic'>myapp</code>이 종료된 후에야 정상 종료 신호를 받는다. 덕분에 로그를 깔끔하게 플러시할 수 있다. <code class='ic'>emptyDir</code> 볼륨은 컨테이너 간 통신 채널이다. 노드 메모리에 존재하고, 같은 볼륨을 마운트한 Pod 내 모든 컨테이너가 공유하며, Pod가 삭제되면 함께 사라진다. <code class='ic'>tail -F</code>(대문자 F)는 파일이 교체되거나 아직 존재하지 않아도 재열기하므로, 사이드카가 <code class='ic'>myapp</code>보다 먼저 시작되어 파일이 없는 경우에도 안정적으로 동작한다.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. 응용 도전 과제 — 설정 준비 + 네이티브 사이드카를 하나의 Pod에 결합: 지금까지 배운 두 패턴을 결합한다. <code class='ic'>full-pattern-pod</code>라는 이름의 Pod YAML을 작성해 다음을 올바른 수명주기 순서로 구현하라.</p>
+<p>1. <strong>Init 컨테이너</strong> <code class='ic'>prepare-config</code> (<code class='ic'>busybox:1.36</code>): <code class='ic'>config-vol</code>이라는 공유 볼륨(<code class='ic'>emptyDir</code> 타입)의 <code class='ic'>/etc/app/config.ini</code>에 <code class='ic'>server_mode=production</code> 문자열을 기록하고 종료한다.</p>
+<p>2. <strong>네이티브 사이드카</strong> <code class='ic'>config-watcher</code> (<code class='ic'>busybox:1.36</code>, <code class='ic'>restartPolicy: Always</code>): 설정 동기화 사이드카를 시뮬레이션하며 10초마다 <code class='ic'>cat /etc/app/config.ini</code>를 무한 반복 실행한다. <code class='ic'>config-vol</code>을 <code class='ic'>/etc/app</code>에 마운트한다.</p>
+<p>3. <strong>메인 컨테이너</strong> <code class='ic'>app</code> (<code class='ic'>nginx:1.27</code>, 포트 80): <code class='ic'>prepare-config</code>가 기록한 설정 파일을 읽을 수 있도록 <code class='ic'>config-vol</code>을 <code class='ic'>/etc/app</code>에 마운트한다.</p>
+<p>자체 검증: 답안에서 쿠버네티스가 이 세 컨테이너를 시작하는 정확한 순서와 그 이유를 설명한다.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: full-pattern-pod
+spec:
+  # 힌트: initContainers에 prepare-config와 config-watcher 모두 포함해야 한다.
+  # 목록의 순서가 실행 순서를 결정한다.
+  initContainers:
+    # TODO
+  containers:
+    # TODO
+  volumes:
+    # TODO</code></pre>
+              <details><summary>힌트</summary><ul><li>`prepare-config`와 `config-watcher` 모두 `initContainers:` 아래에 위치한다. 목록 순서가 중요하다. `prepare-config`가 먼저 나와야 실행 후 파일을 기록하고, 그 다음 `config-watcher`가 시도할 때 파일이 존재한다.</li><li>`prepare-config`가 `/etc/app/config.ini` 생성에 실패하면(예: 디렉터리가 없는 경우) `echo` 명령 앞에 `mkdir -p /etc/app`을 추가한다. `emptyDir` 볼륨은 빈 디렉터리로 마운트되므로 파일을 명시적으로 생성해야 한다.</li><li>실제 클러스터에서 전체 순서를 검증하려면: `kubectl apply -f full-pattern-pod.yaml` 적용 후 `kubectl logs full-pattern-pod -c prepare-config`(&quot;config written&quot; 출력 확인), `kubectl logs full-pattern-pod -c config-watcher`(10초마다 config.ini 내용 출력 확인), `kubectl exec full-pattern-pod -c app -- cat /etc/app/config.ini`(&quot;server_mode=production&quot; 출력 확인)를 순서대로 실행한다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: full-pattern-pod
+spec:
+  initContainers:
+    # 1단계: 일반 init 컨테이너 — 다른 것보다 먼저 완료까지 실행된다.
+    - name: prepare-config
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;mkdir -p /etc/app &amp;&amp; echo &#x27;server_mode=production&#x27; &gt; /etc/app/config.ini &amp;&amp; echo &#x27;config written&#x27;&quot;
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app
+    # 2단계: 네이티브 사이드카 — prepare-config 종료 후 시작되지만
+    # 쿠버네티스는 이 컨테이너가 완료되길 기다리지 않고 앱을 시작한다.
+    - name: config-watcher
+      image: busybox:1.36
+      restartPolicy: Always
+      command:
+        - sh
+        - -c
+        - &quot;while true; do echo &#x27;[config-watcher]&#x27;; cat /etc/app/config.ini; sleep 10; done&quot;
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app
+  containers:
+    # 3단계: 메인 앱 — 두 init 항목이 모두 충족된 후 시작된다.
+    - name: app
+      image: nginx:1.27
+      ports:
+        - containerPort: 80
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app
+  volumes:
+    - name: config-vol
+      emptyDir: {}
+
+# 시작 순서 설명 (문제에서 요구):
+# 1. prepare-config가 시작되어 완료(exit 0)까지 실행된다. 이 시점에는 다른 컨테이너가 시작되지 않는다.
+# 2. config-watcher가 시작된다. restartPolicy: Always로 네이티브 사이드카로 표시되어 있으므로
+#    쿠버네티스는 완료를 기다리지 않고 실행 중임만 확인한다.
+# 3. app이 시작된다. prepare-config가 기록한 /etc/app/config.ini가 이미 존재한다.</code></pre>
+                <div class='exp2'><p>이 실습은 <code class='ic'>initContainers</code> 아래에 위치하는 두 가지 항목의 차이를 명확히 보여준다. 일반 init 컨테이너(<code class='ic'>prepare-config</code>)는 다음 항목이 시작되기 전에 반드시 완료되어야 한다. 네이티브 사이드카(<code class='ic'>config-watcher</code>, <code class='ic'>restartPolicy: Always</code>로 표시)는 시작만 확인하면 되고 완료를 기다리지 않으므로, 쿠버네티스는 사이드카 프로세스가 살아있음을 확인하는 즉시 앱 컨테이너로 넘어간다. 결과적으로 세 단계의 수명주기가 만들어진다. (1) 일반 설정 작업, (2) 사이드카 시작 및 계속 실행, (3) 앱 시작 후 준비된 설정 파일 읽기. 세 컨테이너 모두 <code class='ic'>config-vol</code>(<code class='ic'>emptyDir</code>)을 공유한다. init 컨테이너가 파일을 기록하고, 사이드카와 앱 모두 이를 읽는다. <code class='ic'>prepare-config</code>가 실패하면(예: 볼륨이 올바르게 마운트되지 않은 경우) <code class='ic'>config-watcher</code>와 <code class='ic'>app</code>은 절대 시작되지 않는다. 설정이 준비되지 않은 상태에서 애플리케이션이 실행되지 않도록 보장하는 것이 바로 이 패턴의 안전 장치다.</p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=48lsKjtLUjQ' target='_blank'>KUBERNETES Multi-Container POD | Demo Init &amp; Sidecar</a></li><li><a href='https://www.youtube.com/watch?v=2PCz6Ds0vwo' target='_blank'>Native Sidecars In Kubernetes 1.28</a></li><li><a href='https://www.youtube.com/watch?v=O6fiE2eFX1o' target='_blank'>Cloud Native Short Take - Kubernetes Init Containers</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

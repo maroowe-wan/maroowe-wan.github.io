@@ -1,0 +1,61 @@
+{
+  "lecture_no": 1,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "Which of the following is NOT one of the four requirements of the Kubernetes flat networking model?",
+      "options": [
+        "Every Pod must have a unique, cluster-wide IP address.",
+        "Pods must be able to communicate with all other Pods without NAT.",
+        "Every Pod must be reachable from the internet without port forwarding.",
+        "A Pod's self-IP must equal the IP that other entities in the cluster use to reach it."
+      ],
+      "answer_index": 2,
+      "explanation": "The four Kubernetes networking requirements are: (1) every Pod gets a unique cluster-wide IP, (2) Pods reach Pods without NAT, (3) nodes reach Pods (and vice versa) without NAT, and (4) a Pod's self-IP equals the IP others use for it. Internet reachability is not part of the flat networking contract — that is handled separately by Services, Ingress, or load balancers. Options A, B, and D all describe genuine requirements; only C is outside the specification."
+    },
+    {
+      "question": "A developer discovers that a Pod on Node A reports its own IP as 10.244.1.5, but when another Pod on Node B runs 'curl 10.244.1.5', the request is transparently rewritten and actually reaches a different IP on the wire. Which Kubernetes networking requirement does this violate?",
+      "options": [
+        "Every Pod must have a unique, cluster-wide IP address.",
+        "Pods must communicate with all other Pods without NAT.",
+        "Nodes must reach Pods without NAT.",
+        "NetworkPolicy must be enforced by the CNI plugin."
+      ],
+      "answer_index": 1,
+      "explanation": "The scenario describes silent NAT: the source address is rewritten mid-path, so the packet that arrives at the destination was not addressed to the IP the target Pod sees as its own. This violates requirement 2 — Pod-to-Pod communication must happen without NAT. Requirement 1 is about uniqueness (not violated here), requirement 3 is about node-to-Pod access (not at issue), and NetworkPolicy enforcement is a feature, not a flat-model requirement."
+    },
+    {
+      "question": "When a new Pod is scheduled onto a node, what is the correct order of events in the CNI ADD flow?",
+      "options": [
+        "kubelet creates the network namespace → runtime invokes CNI plugin ADD → plugin assigns IP and sets routes → runtime reports result to kubelet.",
+        "Container runtime creates the network namespace → runtime invokes CNI plugin ADD → plugin assigns IP and sets routes → runtime reports result to kubelet.",
+        "CNI plugin creates the network namespace → plugin assigns IP and sets routes → runtime reports result to kubelet.",
+        "kubelet invokes CNI plugin ADD directly → plugin creates the network namespace and assigns IP → kubelet updates the Pod spec."
+      ],
+      "answer_index": 1,
+      "explanation": "The correct sequence is: (1) the kubelet asks the container runtime (e.g., containerd) to create the Pod; (2) the runtime creates the network namespace (which has only loopback at this point); (3) the runtime reads the CNI config from /etc/cni/net.d/ and invokes the CNI plugin with the ADD operation, passing the container ID, netns path, and config via stdin; (4) the plugin creates the interface, assigns an IP from the Pod CIDR, sets routes, and returns a JSON success result; (5) the runtime relays that result to the kubelet. The kubelet does not invoke the CNI plugin directly — it goes through the container runtime. Option A is wrong because the kubelet does not create the network namespace; options C and D misplace or skip key actors."
+    },
+    {
+      "question": "Your company runs Kubernetes on bare-metal servers in a private data center where you fully control the ToR (top-of-rack) switches and can configure BGP on them. You need the lowest possible network overhead and want to inspect Pod-to-Pod packets with standard tools without any decapsulation. Which cross-node connectivity strategy is the best fit, and why?",
+      "options": [
+        "Overlay (VXLAN), because it works anywhere without requiring network cooperation, giving maximum portability.",
+        "Native cloud CNI (e.g., Amazon VPC CNI), because it gives each Pod a real cloud-network IP with no overhead.",
+        "Routing (BGP), because packets travel unencapsulated and you control the network infrastructure needed to propagate Pod routes.",
+        "Overlay (VXLAN), because it provides better security by hiding Pod IPs from the physical network."
+      ],
+      "answer_index": 2,
+      "explanation": "BGP routing is the right answer. Because you control the switches and can participate in BGP, you can advertise Pod CIDR routes so that cross-node packets travel as plain, standard IP packets — no VXLAN header overhead, no MTU reduction, and no wrapping to remove when using tcpdump or other inspection tools. Overlay (VXLAN) would also work here, but it adds per-packet encapsulation cost that is unnecessary when the network can be configured to carry Pod routes natively. Native cloud CNI (option B) is only available on managed cloud networks, not on bare-metal. Option D is incorrect: VXLAN's purpose is portability, not security."
+    },
+    {
+      "question": "A team is designing a multi-tenant Kubernetes cluster where different business units share the same nodes. They need (a) NetworkPolicy enforcement, (b) the ability to write HTTP-level (Layer 7) access rules between services, and (c) visibility into which services are actually communicating at runtime. Which CNI plugin is the best match for all three requirements?",
+      "options": [
+        "Flannel, because it is the simplest to install and reason about.",
+        "Calico in BGP mode, because it offers high-performance routing and strong NetworkPolicy support.",
+        "Cilium, because its eBPF foundation enables identity-aware policy, Layer-7 rules, and deep flow observability.",
+        "Flannel with an additional NetworkPolicy controller, because it handles policy without replacing the underlying CNI."
+      ],
+      "answer_index": 2,
+      "explanation": "Cilium is the only one of the three major plugins that satisfies all three requirements simultaneously. Its eBPF-based data plane allows it to enforce identity-aware security policy (requirement a), write HTTP-level (L7) rules such as 'allow GET /api but deny POST /admin' (requirement b), and provide deep flow observability showing live service-to-service communication (requirement c). Flannel (options A and D) does not enforce NetworkPolicy at all in its standard form; adding a third-party controller addresses requirement (a) but not (b) or (c). Calico (option B) covers (a) very well and is a strong production choice, but its native policy is primarily at Layer 3/4 and it does not offer built-in Layer-7 rule writing or the same level of flow observability that Cilium provides out of the box."
+    }
+  ]
+}

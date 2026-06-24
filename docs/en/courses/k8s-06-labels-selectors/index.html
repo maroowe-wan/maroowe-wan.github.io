@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Labels&amp;Selectors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-06-labels-selectors/index.html'>한국어</a></div>
+  <h1>K8S-Labels&amp;Selectors</h1>
+  <div class="sub">Beginner-to-intermediate Kubernetes users who are already familiar with the basics: Pod, Deployment, and Service · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. &quot;Kubernetes Labels and Selectors: Organizing Your Cluster&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;Kubernetes Labels and Selectors: Organizing Your Cluster&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Use labels (key/value pairs) to organize Kubernetes resources, and filter them with both equality-based and set-based selectors.</li>
+<li>Understand how a Deployment&#x27;s <code class='ic'>selector.matchLabels</code> and a Service&#x27;s <code class='ic'>selector</code> match Pod template labels to actually pick the right Pods.</li>
+<li>Apply label design best practices (the recommended <code class='ic'>app</code>/<code class='ic'>version</code>/<code class='ic'>tier</code> labels) and know when to use a label versus an annotation.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why labels exist</h4>
+<p>A real Kubernetes cluster quickly fills up with hundreds of Pods, dozens of Deployments, Services, ConfigMaps, and more. Without a way to group and find these objects, operating the cluster becomes guesswork. Kubernetes solves this with <strong>labels</strong>: simple key/value pairs that you attach to objects to describe what they are.</p>
+<p>The crucial idea is that labels are not just documentation. They are <strong>functional metadata</strong> that Kubernetes itself reads to wire the system together. When a Service routes traffic to a set of Pods, or a Deployment decides which Pods it owns, it does so entirely by matching labels. Get your labels right and the cluster organizes itself; get them wrong and traffic silently goes nowhere.</p>
+<p>A label is structured like this:</p>
+<pre><code>
+metadata:
+  labels:
+    app: nginx
+    tier: frontend
+    version: &quot;1.21&quot;
+</code></pre>
+<p>Labels live in the <code class='ic'>metadata</code> section of every object. Keys can have an optional prefix (for example <code class='ic'>app.kubernetes.io/name</code>), and values are short strings. You attach labels at creation time inside the YAML manifest, or add them later to a running object.</p>
+<h4>Working with labels using kubectl</h4>
+<p>You can inspect, add, and change labels without ever editing a file. These are the commands you&#x27;ll use daily:</p>
+<pre><code>
+# Show every Pod together with its labels
+kubectl get pods --show-labels
+
+# Add (or overwrite) a label on a running Pod
+kubectl label pod nginx demo=true
+
+# Overwrite an existing label value (the --overwrite flag is required)
+kubectl label pod nginx tier=backend --overwrite
+
+# Remove a label by suffixing the key with a minus sign
+kubectl label pod nginx demo-
+</code></pre>
+<blockquote class='callout'>
+<p>Editing a manifest and applying it is the right approach for anything permanent. Use <code class='ic'>kubectl label</code> for quick, ad-hoc changes during troubleshooting — those changes won&#x27;t survive a redeploy from your YAML.</p>
+</blockquote>
+<h4>Selecting resources: equality-based vs set-based</h4>
+<p>A label by itself just sits there. Its power comes from <strong>selectors</strong> — the queries that find objects by their labels. Kubernetes supports two selector syntaxes.</p>
+<p><strong>Equality-based selectors</strong> match an exact value. They use <code class='ic'>=</code>, <code class='ic'>==</code>, or <code class='ic'>!=</code>:</p>
+<pre><code>
+# Pods where app equals nginx
+kubectl get pods -l app=nginx
+
+# Pods where tier is anything except frontend
+kubectl get pods -l &#x27;tier!=frontend&#x27;
+
+# Multiple conditions are ANDed together
+kubectl get pods -l &#x27;app=nginx,tier=frontend&#x27;
+</code></pre>
+<p><strong>Set-based selectors</strong> express more complex membership conditions using <code class='ic'>in</code>, <code class='ic'>notin</code>, and <code class='ic'>exists</code>:</p>
+<pre><code>
+# Pods whose version is one of these values
+kubectl get pods -l &#x27;version in (1.20, 1.21)&#x27;
+
+# Pods whose tier is neither cache nor backend
+kubectl get pods -l &#x27;tier notin (cache, backend)&#x27;
+
+# Pods that have the &quot;release&quot; label set to anything at all
+kubectl get pods -l &#x27;release&#x27;
+</code></pre>
+<p>Set-based selectors give you &quot;one of these values&quot; (<code class='ic'>in</code>), &quot;none of these values&quot; (<code class='ic'>notin</code>), and &quot;this key is present regardless of value&quot; (<code class='ic'>exists</code>). Equality-based selectors are simpler and cover most everyday needs; reach for set-based when you need OR-style matching or presence checks.</p>
+<h4>How Deployments and Services pick Pods</h4>
+<p>This is where labels stop being decoration and start running your application. Two of the most important Kubernetes objects — Deployments and Services — find their Pods purely through label matching.</p>
+<p>A <strong>Deployment</strong> declares which Pods it manages with <code class='ic'>spec.selector.matchLabels</code>, and it stamps those same labels onto every Pod it creates through <code class='ic'>spec.template.metadata.labels</code>. The two must agree, or Kubernetes rejects the Deployment.</p>
+<pre><code>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx          # the Deployment owns Pods with this label
+  template:
+    metadata:
+      labels:
+        app: nginx        # and it stamps the same label onto each Pod
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+</code></pre>
+<p>A <strong>Service</strong> does the same thing to decide where to send network traffic. Its <code class='ic'>spec.selector</code> is a set of labels; any Pod carrying all of those labels becomes an endpoint that the Service load-balances across.</p>
+<pre><code>
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx            # route traffic to every Pod labeled app=nginx
+  ports:
+    - port: 80
+      targetPort: 80
+</code></pre>
+<p>So the flow from a client request to a container is as follows: traffic hits the Service, the Service uses its <code class='ic'>selector</code> to find all Pods labeled <code class='ic'>app: nginx</code>, and those Pods are exactly the ones the Deployment created and labeled. The label <code class='ic'>app: nginx</code> is the single thread tying the Deployment, the Pods, and the Service together, as shown in the diagram below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    Client[&quot;Client request&quot;]
+    Svc[&quot;Service nginx-service&lt;br/&gt;selector: app=nginx&quot;]
+    Dep[&quot;Deployment nginx-deployment&lt;br/&gt;selector.matchLabels: app=nginx&quot;]
+    P1[&quot;Pod&lt;br/&gt;label app=nginx&quot;]
+    P2[&quot;Pod&lt;br/&gt;label app=nginx&quot;]
+    P3[&quot;Pod&lt;br/&gt;label app=nginx&quot;]
+
+    Client --&gt;|traffic| Svc
+    Dep --&gt;|creates and labels| P1
+    Dep --&gt;|creates and labels| P2
+    Dep --&gt;|creates and labels| P3
+    Svc -.-&gt;|selects by label| P1
+    Svc -.-&gt;|selects by label| P2
+    Svc -.-&gt;|selects by label| P3</div><figcaption>The label &quot;app: nginx&quot; ties Deployment, Pods, and Service together</figcaption></figure>
+<blockquote class='callout'>
+<p>If a Service returns no endpoints, the first thing to check is whether its <code class='ic'>selector</code> actually matches the Pod labels. A one-character mismatch (<code class='ic'>app: nginx</code> vs <code class='ic'>app: ngnix</code>) breaks routing with no error message.</p>
+</blockquote>
+<p>Deployment selectors also accept set-based logic through <code class='ic'>matchExpressions</code>, which you can combine with <code class='ic'>matchLabels</code>:</p>
+<pre><code>
+selector:
+  matchLabels:
+    app: nginx
+  matchExpressions:
+    - key: tier
+      operator: In
+      values: [frontend, web]
+</code></pre>
+<p>When both <code class='ic'>matchLabels</code> and <code class='ic'>matchExpressions</code> are present, <strong>all conditions must be true</strong> — they are combined with AND. The same matching machinery powers advanced scheduling features such as <code class='ic'>nodeAffinity</code> and <code class='ic'>podAffinity</code>, which use these very operators (<code class='ic'>In</code>, <code class='ic'>NotIn</code>, <code class='ic'>Exists</code>) to decide which node a Pod lands on.</p>
+<h4>Labels vs annotations</h4>
+<p>Kubernetes has a second kind of metadata that looks similar but serves the opposite purpose: <strong>annotations</strong>. Both are key/value pairs in <code class='ic'>metadata</code>, but they are used very differently.</p>
+<ul>
+<li><strong>Labels</strong> are for <strong>identifying and selecting</strong>. They are short, indexed, and queryable. You use them whenever something needs to <em>find</em> a group of objects — Services, Deployments, <code class='ic'>kubectl -l</code>.</li>
+<li><strong>Annotations</strong> are for <strong>attaching non-identifying information</strong>. They are <em>not</em> selectable, can hold large or structured values (build IDs, Git commit SHAs, contact emails, tool configuration), and exist to be read by humans or tools rather than matched by selectors.</li>
+</ul>
+<pre><code>
+metadata:
+  labels:
+    app: nginx            # used to SELECT this object
+  annotations:
+    kubernetes.io/change-cause: &quot;rollout to v1.21&quot;   # informational only
+    team-contact: &quot;platform@example.com&quot;
+</code></pre>
+<p>A simple rule of thumb: if you might ever write a selector against it, make it a label; otherwise make it an annotation.</p>
+<h4>Best practices for label design</h4>
+<p>The Kubernetes project publishes a set of <strong>recommended labels</strong> under the <code class='ic'>app.kubernetes.io/</code> prefix so that different tools can understand your applications in a consistent way:</p>
+<pre><code>
+metadata:
+  labels:
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/instance: nginx-prod
+    app.kubernetes.io/version: &quot;1.21&quot;
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: storefront
+    app.kubernetes.io/managed-by: helm
+</code></pre>
+<p>In practice, teams converge on a small, consistent vocabulary such as <code class='ic'>app</code>, <code class='ic'>version</code>, and <code class='ic'>tier</code>. A few guidelines worth following:</p>
+<ul>
+<li><strong>Be consistent across the team.</strong> Decide on your label keys once and use them everywhere; selectors only work if everyone spells <code class='ic'>tier</code> the same way.</li>
+<li><strong>Keep selector labels stable.</strong> A Deployment&#x27;s <code class='ic'>selector</code> is immutable after creation — choose those identifying labels carefully, and put fast-changing data (like <code class='ic'>version</code>) in additional labels rather than overloading the selector.</li>
+<li><strong>Don&#x27;t pack everything into one label.</strong> Use several focused labels (<code class='ic'>app</code>, <code class='ic'>tier</code>, <code class='ic'>environment</code>) instead of one giant combined value, so you can slice your resources along different dimensions.</li>
+<li><strong>Put non-queryable detail in annotations</strong>, not labels, to keep your label set clean and meaningful.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Labels are functional key/value metadata in <code class='ic'>metadata.labels</code>; Kubernetes uses them to group, find, and connect objects.</li>
+<li>Equality-based selectors (<code class='ic'>=</code>, <code class='ic'>!=</code>) match exact values; set-based selectors (<code class='ic'>in</code>, <code class='ic'>notin</code>, <code class='ic'>exists</code>) express OR-style and presence conditions, and multiple conditions are always ANDed.</li>
+<li>Deployments own Pods via <code class='ic'>selector.matchLabels</code> (mirrored in the Pod template), and Services route traffic via <code class='ic'>spec.selector</code> — both work purely by matching Pod labels.</li>
+<li>Use <strong>labels</strong> for anything you select on, and <strong>annotations</strong> for non-identifying information you never query.</li>
+<li>Follow the recommended <code class='ic'>app.kubernetes.io/</code> labels and keep your selector labels consistent and stable across the team.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up — Attach labels to a Pod manifest and inspect them.</p>
+<p>1. Save the starter YAML below as <code class='ic'>labeled-pod.yaml</code>.</p>
+<p>2. Apply it to your cluster: <code class='ic'>kubectl apply -f labeled-pod.yaml</code>.</p>
+<p>3. Verify the labels are present: <code class='ic'>kubectl get pod labeled-nginx --show-labels</code>.</p>
+<p>4. Without editing the file, add a new label <code class='ic'>environment=staging</code> to the running Pod using <code class='ic'>kubectl label</code>.</p>
+<p>5. Then remove the <code class='ic'>demo</code> label from the running Pod using <code class='ic'>kubectl label</code>.</p>
+<p>6. Confirm the final label set with <code class='ic'>--show-labels</code> again.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: labeled-nginx
+  labels:
+    app: nginx
+    tier: frontend
+    demo: &quot;true&quot;
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.21
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Run `kubectl get pod labeled-nginx --show-labels` after each change to see exactly which labels are present.</li><li>To add a label: `kubectl label pod &lt;name&gt; &lt;key&gt;=&lt;value&gt;`. To remove a label: `kubectl label pod &lt;name&gt; &lt;key&gt;-` (note the trailing minus sign, no space).</li><li>If you see &#x27;already has a value&#x27; when adding a label that already exists, add the `--overwrite` flag.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1-2: apply the manifest
+kubectl apply -f labeled-pod.yaml
+
+# Step 3: inspect labels
+kubectl get pod labeled-nginx --show-labels
+# Expected output includes:  app=nginx,demo=true,tier=frontend
+
+# Step 4: add environment label imperatively
+kubectl label pod labeled-nginx environment=staging
+
+# Step 5: remove the demo label (append &#x27;-&#x27; to the key)
+kubectl label pod labeled-nginx demo-
+
+# Step 6: confirm final state
+kubectl get pod labeled-nginx --show-labels
+# Expected labels: app=nginx,environment=staging,tier=frontend
+# (demo is gone)</code></pre>
+                <div class='exp2'><p>Labels live in <code class='ic'>metadata.labels</code> and can be managed both declaratively (YAML) and imperatively (<code class='ic'>kubectl label</code>). The minus-sign suffix (<code class='ic'>demo-</code>) is the kubectl syntax for removing a label key. Imperative changes take effect immediately but are not reflected in your source YAML — they will be overwritten the next time you <code class='ic'>kubectl apply</code> the same manifest, which is why they are best used for ad-hoc troubleshooting only.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice 1 — Filter Pods with equality-based and set-based selectors.</p>
+<p>Assume the following three Pods are running in your cluster (apply the starter YAML to create them). Then answer each query by running the correct <code class='ic'>kubectl get pods -l</code> command:</p>
+<p>a) Retrieve all Pods where <code class='ic'>app=nginx</code>.</p>
+<p>b) Retrieve all Pods where <code class='ic'>tier</code> is NOT <code class='ic'>frontend</code>.</p>
+<p>c) Retrieve all Pods where <code class='ic'>app=nginx</code> AND <code class='ic'>tier=frontend</code> simultaneously.</p>
+<p>d) Retrieve all Pods whose <code class='ic'>version</code> is either <code class='ic'>1.20</code> or <code class='ic'>1.21</code> (use a set-based selector).</p>
+<p>e) Retrieve all Pods that have the <code class='ic'>canary</code> label set to any value (key-exists check).</p></div>
+              <pre class='starter'><code># Run this to create three test Pods:
+kubectl run pod-a --image=nginx:1.20 --labels=&#x27;app=nginx,tier=frontend,version=1.20&#x27;
+kubectl run pod-b --image=nginx:1.21 --labels=&#x27;app=nginx,tier=backend,version=1.21,canary=true&#x27;
+kubectl run pod-c --image=httpd:2.4  --labels=&#x27;app=httpd,tier=frontend,version=2.4&#x27;
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Wrap set-based expressions in single quotes so the shell does not misinterpret the parentheses: `kubectl get pods -l &#x27;version in (1.20, 1.21)&#x27;`.</li><li>A comma between conditions acts as AND, not OR. For OR-style matching within one label key, use `in`.</li><li>For key-exists (&#x27;canary is set to anything&#x27;), just pass the bare key name with no operator: `kubectl get pods -l &#x27;canary&#x27;`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># a) equality: app=nginx
+kubectl get pods -l app=nginx
+# Returns: pod-a, pod-b
+
+# b) inequality: tier != frontend
+kubectl get pods -l &#x27;tier!=frontend&#x27;
+# Returns: pod-b
+
+# c) multiple AND conditions
+kubectl get pods -l &#x27;app=nginx,tier=frontend&#x27;
+# Returns: pod-a
+
+# d) set-based &#x27;in&#x27; (version is 1.20 OR 1.21)
+kubectl get pods -l &#x27;version in (1.20, 1.21)&#x27;
+# Returns: pod-a, pod-b
+
+# e) key-exists check (canary label present, regardless of value)
+kubectl get pods -l &#x27;canary&#x27;
+# Returns: pod-b</code></pre>
+                <div class='exp2'><p>Equality-based selectors (<code class='ic'>=</code>, <code class='ic'>!=</code>) match a single exact value and are the simplest form. Multiple conditions joined with commas are always ANDed — a Pod must satisfy all of them. Set-based selectors (<code class='ic'>in</code>, <code class='ic'>notin</code>, <code class='ic'>exists</code>) are more expressive: <code class='ic'>in</code> gives OR-style matching across a list of values, and a bare key name (<code class='ic'>canary</code>) is shorthand for &#x27;this key exists with any value&#x27;. Both syntaxes can be mixed inside a single <code class='ic'>-l</code> expression.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice 2 — Wire a Deployment and a Service together using labels.</p>
+<p>1. Save the two starter manifests below (<code class='ic'>deployment.yaml</code> and <code class='ic'>service.yaml</code>) and apply them.</p>
+<p>2. Confirm the Deployment created three Pods and that they carry the expected labels: <code class='ic'>kubectl get pods --show-labels</code>.</p>
+<p>3. Confirm the Service selected those Pods as endpoints: <code class='ic'>kubectl get endpoints web-service</code>.</p>
+<p>4. Now introduce a deliberate mismatch: patch the Service selector to <code class='ic'>app: webserver</code> (wrong value) with <code class='ic'>kubectl patch</code>, then immediately re-check <code class='ic'>kubectl get endpoints web-service</code>.</p>
+<p>5. Fix the mismatch by patching the selector back to <code class='ic'>app: web</code>, and confirm endpoints are restored.</p></div>
+              <pre class='starter'><code># deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+        tier: frontend
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+---
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+</code></pre>
+              <details><summary>Hint</summary><ul><li>If `kubectl get endpoints web-service` shows `&lt;none&gt;` after applying, double-check that the Service `selector` key and value match exactly what appears in `--show-labels` output for the Pods.</li><li>The `kubectl patch` command accepts inline JSON: `kubectl patch service web-service -p &#x27;{&quot;spec&quot;:{&quot;selector&quot;:{&quot;app&quot;:&quot;webserver&quot;}}}&#x27;`. On Windows cmd use double-quoted JSON with escaped inner quotes, or write a YAML patch file instead.</li><li>To confirm a Service has found its Pods, the `Endpoints` column (or `kubectl describe service web-service`) should list at least one IP address. An empty `Endpoints:` line means the selector matched nothing.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: apply both manifests
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# Step 2: verify Pod labels
+kubectl get pods --show-labels
+# All three Pods should show labels: app=web,tier=frontend
+
+# Step 3: verify Service endpoints
+kubectl get endpoints web-service
+# Should list three IP:80 entries, one per Pod replica
+
+# Step 4: introduce mismatch (wrong selector value)
+kubectl patch service web-service -p &#x27;{&quot;spec&quot;:{&quot;selector&quot;:{&quot;app&quot;:&quot;webserver&quot;}}}&#x27;
+kubectl get endpoints web-service
+# Endpoints list is now empty — traffic would silently fail
+
+# Step 5: fix the selector back
+kubectl patch service web-service -p &#x27;{&quot;spec&quot;:{&quot;selector&quot;:{&quot;app&quot;:&quot;web&quot;}}}&#x27;
+kubectl get endpoints web-service
+# Three endpoints restored</code></pre>
+                <div class='exp2'><p>A Deployment&#x27;s <code class='ic'>spec.selector.matchLabels</code> and the Pod template&#x27;s <code class='ic'>metadata.labels</code> must carry the same keys and values — Kubernetes enforces this at creation time and rejects mismatches. A Service&#x27;s <code class='ic'>spec.selector</code> does the same job for routing: it continuously queries the cluster for Pods matching the labels, and those Pods become the Service&#x27;s endpoints. Step 4 demonstrates what happens in production when there is a selector typo: the endpoint list goes empty and requests to the Service receive no response, with no error surfaced by the Service itself. Checking <code class='ic'>kubectl get endpoints &lt;service&gt;</code> is therefore the first diagnostic step when a Service appears unreachable.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Redesign a poorly labeled manifest using best practices.</p>
+<p>The manifest below deploys an e-commerce checkout service but has several labeling problems:</p>
+<ul>
+<li>The <code class='ic'>selector.matchLabels</code> key (<code class='ic'>svc</code>) is different from the Pod template labels key (<code class='ic'>service</code>) — this manifest will be rejected by Kubernetes.</li>
+<li>The <code class='ic'>version</code> label is baked into <code class='ic'>selector.matchLabels</code>, making it impossible to update the version without recreating the Deployment.</li>
+<li>Operational metadata (build ID, on-call contact) is stored as labels instead of annotations.</li>
+<li>The recommended <code class='ic'>app.kubernetes.io/</code> prefix labels are absent.</li>
+</ul>
+<p>Task:</p>
+<p>1. Identify all four problems in the starter manifest.</p>
+<p>2. Rewrite the manifest to fix all of them, following the best practices covered in the lecture. Use <code class='ic'>app.kubernetes.io/</code> recommended labels where appropriate.</p>
+<p>3. Add an annotation block that stores the build ID and on-call contact.</p>
+<p>4. Apply your corrected manifest and verify it with <code class='ic'>kubectl get deployment checkout-deployment -o yaml</code>.</p></div>
+              <pre class='starter'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      svc: checkout          # PROBLEM: key does not match Pod template
+      version: &quot;2.5&quot;         # PROBLEM: version in selector makes it immutable
+  template:
+    metadata:
+      labels:
+        service: checkout    # PROBLEM: key should match selector
+        version: &quot;2.5&quot;
+        build-id: &quot;b1042&quot;    # PROBLEM: should be annotation, not label
+        oncall: &quot;payments-team@example.com&quot;  # PROBLEM: should be annotation
+    spec:
+      containers:
+        - name: checkout
+          image: checkout-app:2.5
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Start by listing the selector keys and the template label keys side by side. Every key in `selector.matchLabels` must appear in `template.metadata.labels` with an identical value.</li><li>A good rule for deciding whether a label belongs in the selector: ask &#x27;will this value ever change during the lifetime of this Deployment?&#x27; If yes, keep it in the Pod template labels only — not in the selector.</li><li>Move any value that is not used for grouping or filtering (build IDs, contact info, commit SHAs) to `metadata.annotations`. Annotations accept longer strings and are invisible to selectors.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout-deployment
+  annotations:
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: checkout      # stable: identifies the app, never changes
+      app.kubernetes.io/component: checkout # stable: identifies the component role
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checkout
+        app.kubernetes.io/component: checkout
+        app.kubernetes.io/version: &quot;2.5&quot;    # informational version label (not in selector)
+      annotations:
+        build-id: &quot;b1042&quot;                   # moved from labels to annotations
+        oncall: &quot;payments-team@example.com&quot; # moved from labels to annotations
+    spec:
+      containers:
+        - name: checkout
+          image: checkout-app:2.5
+</code></pre>
+                <div class='exp2'><p>Problem 1 (selector/template key mismatch): Kubernetes validates that every key in <code class='ic'>selector.matchLabels</code> exists with the same value in the Pod template labels. Using <code class='ic'>svc</code> in the selector while the template uses <code class='ic'>service</code> would cause an immediate API rejection. Problem 2 (version in selector): <code class='ic'>spec.selector</code> is immutable after a Deployment is created. If <code class='ic'>version</code> is part of the selector, you cannot bump the version without deleting and recreating the Deployment — defeating the purpose of a rolling update. The fix is to put <code class='ic'>version</code> in the Pod template labels only (not in the selector), where it is informational. Problem 3 &amp; 4 (operational metadata as labels): Labels are indexed and intended for selectors. Storing a build ID or email in a label wastes the label namespace with data that no selector will ever query. Annotations are the correct home for non-identifying metadata; they have no length or character restrictions beyond those of labels, and they can hold longer values. Using the <code class='ic'>app.kubernetes.io/</code> recommended prefix makes your resources legible to Helm, dashboards, and other tooling out of the box.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=luUt9KxLWZ0' target='_blank'>Learn about Pod Labels and Selectors - Civo Academy</a></li><li><a href='https://www.youtube.com/watch?v=rX4v_L0k4Hc' target='_blank'>Kubernetes Node Selector vs Node Affinity vs Pod Affinity vs Tains &amp; Tolerations</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

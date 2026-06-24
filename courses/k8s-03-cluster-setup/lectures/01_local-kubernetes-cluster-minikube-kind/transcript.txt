@@ -1,0 +1,253 @@
+## Video 1: Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube & kubectl
+https://www.youtube.com/watch?v=hDBgeUuPgXo
+
+In this hands-on tutorial, you and I are diving into the exciting world of Kubernetes deployment. I'll show you how to deploy your first Dockerized application using Minikube. Whether you're just starting out or brushing up on Kubernetes, this tutorial will guide you through every step.
+
+Before we jump into the fun part, there are a few tools you'll need to have in place. Don't worry - I'll walk you through everything you need to get started!
+
+For this demo, I'll be deploying a simple Spring Boot application using Minikube.
+
+**Installation Requirements:**
+
+Install Docker Desktop: First you need to install Docker Desktop. It includes Docker CLI and Docker Daemon, and it also provides a Kubernetes option that we will use alongside Minikube.
+
+Install Minikube: You also need to install Minikube. If you have a MacBook Pro - just like me, you can do it by running the command: brew install minikube
+
+Install kubectl: You need to install the Kubernetes Command Line Interface (CLI) kubectl to interact with your Minikube cluster. On MacBook, you can install it using the following command: brew install kubectl
+
+**Starting Minikube:**
+
+Start Minikube with the Docker driver: minikube start --driver=docker
+
+This will start Minikube using Docker as the container runtime, which works well with Docker Desktop.
+
+Now minikube created a Kubernetes cluster for me. This cluster includes:
+
+- The control plane (master), which manages the cluster and its nodes.
+- A single node (managed by Minikube) where my workloads will run. This node is where the containers (pods) are hosted.
+
+This step initializes an empty Kubernetes cluster with a single node that is ready to receive workloads but does not create any pods or deployments on its own.
+
+**Using the Docker environment within Minikube:**
+
+Minikube provides a command to use the Docker daemon in Minikube so that you can directly build Docker images inside Minikube without pushing them to a remote registry like Docker Hub: eval $(minikube docker-env)
+
+**Create a Docker Image for the Spring Boot App:**
+
+I need to create a Dockerfile in the root of my Spring Boot project. Here's an example of a basic Dockerfile for a Spring Boot app.
+
+Before building the docker image, I need to package my Spring Boot application into a .jar file by running the appropriate command that generates the .jar. In my case, I'm using Gradle as a build tool, so I just have to run the bootJar Gradle task.
+
+Then, I can build the Docker image by running: docker build -t spring-boot-app:latest .
+
+Remember, this Docker image will be created inside Minikube - because I'm using the Docker environment within Minikube - since I run eval $(minikube docker-env). So don't be surprised when you don't see the image on the GUI of Docker Desktop.
+
+**Verify the Docker image:**
+
+Run the following command to see if the image has been built successfully: docker images
+
+If I'm not using the Docker environment within Minikube, I'll see something similar to the following. But since my Docker image is created inside Minikube, the output of the command docker images is different.
+
+**Deploy Spring Boot Application to Kubernetes:**
+
+The next step is to create the Kubernetes deployment.
+
+**Create Kubernetes Deployment and Service YAML Files:**
+
+I created a deployment.yaml file to define my Spring Boot app deployment.
+
+Notice that I used imagePullPolicy: Never in my deployment.yaml file. Without that option, Kubernetes failed to pull the specified Docker image and my pod got the status ImagePullBackOff. Here is why:
+
+By default, Kubernetes may try to pull the image from an external registry (Docker Hub), especially if the image tag is :latest. You can override this behavior by setting the imagePullPolicy to Never, which will force Kubernetes to use the local image instead of trying to pull it from a remote registry.
+
+Next, create a service.yaml file to expose the application.
+
+**Apply the deployment and service to the Kubernetes cluster:**
+
+Then run the following commands to apply the deployment.yaml and service.yaml files:
+- kubectl apply -f deployment.yaml
+- kubectl apply -f service.yaml
+
+**Verify the application is running:**
+
+You can check the status of your deployment and service with the following commands:
+- kubectl get pods
+- kubectl get services
+
+Ensure that your Spring Boot app's pod is running and the service is exposed as a NodePort.
+
+The command kubectl apply -f deployment.yaml creates a deployment in the existing Kubernetes cluster. The deployment instructs Kubernetes to create a specified number of pods - based on the replicas field in deployment.yaml. At this point, K8s schedules the pods to run on the available node that Minikube created when it started the cluster.
+
+After applying the service.yaml, Kubernetes creates a Service to expose my Spring Boot application (the pods) to the external world or to other services within the cluster. This Service maps network requests (e.g., NodePort or LoadBalancer) to the pods running my Spring Boot app.
+
+**Access the Spring Boot Application:**
+
+Now, you can access your Spring Boot application using Minikube's IP and the NodePort you exposed (in this case, 30007).
+
+First, get the Minikube IP: minikube ip
+
+Then, access your Spring Boot application in the browser using the following URL.
+
+If this approach didn't work for you and you got an error like "Failed to connect" or "Couldn't connect to server," you can try the next alternative.
+
+You can access your Spring Boot application by accessing your service and opening it in your browser. For that sake, you need to use the minikube service command, which forwards traffic directly to the service. This avoids possible networking issues: minikube service spring-boot-service --url
+
+This command returns a URL (something like http://127.0.0.1:<some-port>). Try accessing this URL in your browser and see if it works. If it was successful, you can see the message "Greeting from Spring Boot!", which is coming from the HelloController.
+
+And just like that, you've got your app running on Kubernetes!
+
+**Managing Resources - Scaling and Rolling Updates:**
+
+Now for the fun part - scaling! Want more power? Just increase the number of Pods in your deployment.
+
+Do you remember that I had replicas: 1 in my deployment.yaml file? Let's scale the app up to 5 replicas: kubectl scale deployment spring-boot-deployment --replicas=5
+
+Instantly, Kubernetes spins up more Pods, making sure your app can handle more traffic.
+
+Need to update your app? No problem. With rolling updates, you can deploy new versions without downtime. Kubernetes will gradually replace old Pods with new ones, so your users never notice a thing.
+
+**Experiment with Kubernetes - Your Playground:**
+
+So here's where the fun really begins.
+
+kubectl is the command-line tool you'll use to manage everything in Kubernetes. From listing Pods to checking logs to scaling deployments, kubectl is your best friend. Try some of these commands to get comfortable:
+- kubectl logs <pod-name>
+- kubectl delete pod <pod-name>
+
+Go wild with it. Try scaling up, rolling back, and breaking things! Kubernetes will fix itself - remember, it's self-healing.
+
+**Troubleshooting tips:**
+
+Don't get confused when you have 5 pods and you delete one, then you run kubectl get pods and you see 5 pods while you expect 4. Here is the thing:
+
+When you set the number of replicas to 5: Kubernetes ensures that 5 replicas (pods) of your application are running at all times. This is the desired state that you declared for your deployment. If a pod is deleted (intentionally or due to failure), Kubernetes' self-healing mechanism kicks in to restore the desired state by creating a new pod to maintain the specified number of replicas.
+
+When you manually delete a pod using: kubectl delete pod <pod_name>
+
+Kubernetes notices that the number of running replicas dropped below the desired count of 5. To maintain the desired state, it automatically creates a new pod to replace the one you deleted.
+
+This is how Kubernetes works in this case:
+
+1. Desired State: You set the deployment to have 5 replicas (i.e., 5 pods).
+2. Current State: When you delete a pod, Kubernetes sees that only 4 pods are running.
+3. Reconciliation: Kubernetes continuously monitors the cluster and detects that the current state (4 running pods) does not match the desired state (5 replicas). It immediately schedules a new pod to bring the total back to 5.
+
+This self-healing behavior is one of the key benefits of Kubernetes. It ensures that your applications maintain high availability and recover from failures automatically.
+
+Sometimes Pods can get stuck in weird states like Pending or CrashLoopBackOff. Use kubectl describe pod <pod-name> to dig deeper and understand what's going wrong. You can also check the logs with kubectl logs <pod-name> to get more detailed error messages.
+
+Congratulations! In this step-by-step tutorial, you went through deploying a Spring Boot application using Docker, Minikube, and kubectl. We covered everything from setting up Minikube to creating a Docker image and deploying your app on a Kubernetes cluster. You learned how to scale your application, troubleshoot common issues, and use Kubernetes' powerful self-healing feature. By the end, you had your app running smoothly and became confident navigating Kubernetes.
+
+The best part is that you've only scratched the surface. So, don't stop here! Keep experimenting, break things, and learn from them.
+
+---
+
+## Video 2: Docker Desktop vs Kind - Which Is The BEST For Local Kubernetes?
+https://www.youtube.com/watch?v=oyD048gDg_k
+
+If you want to run a Kubernetes cluster locally on your Mac, then Kind has always been the best option. But earlier this year, the Docker team announced that you can use Docker Desktop to run a Kubernetes cluster using Kind. So does that mean that standalone Kind is now obsolete? Well, not quite. In fact, let's go through them both.
+
+**Ease of Installation:**
+
+If you already have Docker Desktop installed, then setting up Kubernetes is as simple as going into the settings, clicking on the Kubernetes tab and turning it on. This also lets you change the Kubernetes version and increase the amount of nodes. And if you don't have kubectl installed, then this process will install it for you.
+
+With standalone Kind, you'll have to install kubectl separately. And to set up multiple nodes, you'll have to create a Kind configuration file where each node is a role. But you could give each node a different version of Kubernetes, or you can set a global Kubernetes version when you're creating your cluster.
+
+So Docker Desktop wins for ease of installation.
+
+**Resource Usage and VM Architecture:**
+
+Kind in Docker Desktop exists inside the Docker VM, whereas standalone Kind has a more direct relationship with your host system. This potentially means that it uses less resources.
+
+However, the way Kind is set up in Docker Desktop has advantages when it comes to pulling images. You can see we have a manifest file for a front-end pod that needs the MyApp front-end image. And similarly, we have one for the back-end pod which uses the MyApp back-end image.
+
+Both of these images have been built inside Docker, but they don't exist inside the Docker Desktop control plane, which means the Kubernetes cluster won't be able to see them.
+
+But if we apply those manifest files and then check the control plane, we can see that Docker has automatically added those images. So both the pods are running correctly.
+
+But with standalone Kind, this won't work because you have to manually add each image to the control plane, which could take a lot of time if you have loads of images.
+
+So Docker Desktop also wins when it comes to handling images.
+
+**Multi-node and Multi-cluster Support:**
+
+We've already seen that Kind for Docker Desktop and standalone Kind have multi-node supports. But only Kind has support for multiple clusters. You could argue that multiple nodes are used way more often than multiple clusters, so that's an unnecessary feature. But if you are after that feature, then it's nice to know that Kind supports it.
+
+**Customization and Flexibility:**
+
+In fact, standalone Kind wins in general for flexibility because you can customize your cluster using a config file, which allows you to add extra mounts for persistent storage and extra port mappings to match the container port to the host, which makes it easier to set up network components like Ingress Nginx.
+
+Currently, Docker Desktop manages cluster creation internally, so you can't really customize it, which is a shame.
+
+**Resource Management:**
+
+Because Kind in Docker Desktop is limited to the Docker VM, it shares resources with all the Docker components. So if you have a lot of images, a lot of containers, and a lot of volumes, adding a Kubernetes cluster to the mix could take up more space. Not to mention, if you're adding components like Istio, then this could take up way more resources.
+
+Standalone Kind uses the same resources as your host machine, so there's no need to go fiddling around with resource management if your machine can handle the load.
+
+**Conclusion:**
+
+So which one wins? Well, it depends. I think if you already have Docker Desktop installed, then using it for Kubernetes is a no-brainer. But if you want more control over your cluster and want multi-cluster support, or want to test your cluster in a CI/CD environment, then go with standalone Kind.
+
+---
+
+## Video 3: How to Install Kubernetes Cluster using Minikube | Ubuntu 22.04
+https://www.youtube.com/watch?v=T1k7Clx3tNo
+
+Hello everyone, welcome to Anonymous World. Hope you are doing well. In this video we will see how to install a single node Kubernetes cluster on your Ubuntu machine using Minikube.
+
+**Introduction:**
+
+Using Minikube we can create a single node cluster which can be used for small demo projects or your college projects and so on.
+
+**Install Docker Dependency:**
+
+First let's install our dependency for Minikube. So we will be using Docker as a dependency.
+
+This script contains all the commands which will be needed to install Docker automatically. I will give all the commands in the description as well. So let's wait until it gets finished.
+
+Our Docker is now installed and working.
+
+**Install Minikube:**
+
+Now let's go ahead and install Minikube. This command will install the latest Minikube from its release.
+
+You can see releases/latest/minikube-linux. It is installed now.
+
+Let's see the version: minikube version 1.31.2 is the latest version of Minikube right now. You can also match it with the hash.
+
+**Install kubectl and kubeadm:**
+
+Now we need to install kubectl and kubeadm.
+
+kubectl is getting installed. It is installed now. Let's also install kubeadm. It is also installed now.
+
+**Start Minikube:**
+
+Now we can start our Minikube. We don't need to use sudo here because we can run Minikube without root privileges. If you need to run it using root then we need to use a flag known as force.
+
+There are some errors with Docker permission denied. You need to add your user to the docker group.
+
+Let's add our user to the docker group. Let's see if it runs now.
+
+Minikube start - we will be using a Docker driver. There are more options such as VM which is also a driver which you can use.
+
+It is downloading Kubernetes, so it will pull some files. As a prerequisite it needs 2 CPU and a minimum memory of 2 GB. If you have only 1 CPU then it may not work.
+
+So done! Minikube is now configured to use Minikube cluster and default namespace by default. The name of cluster is "minikube" and the name of our namespace is "default" which is set by default.
+
+**Check Minikube Status:**
+
+We can check the status of Minikube using: minikube status
+
+You can see type is "control plane", host is running, kubelet is running, API server is running and Minikube config is configured.
+
+Now we need to check our pods so we can use: minikube kubectl -- get pods -A
+
+You can see these are the namespaces and all are ready, as well as their status is running. So all the pods are healthy here. So the cluster is configured well.
+
+We can see our cluster info as well. Kubernetes control plane is running at this particular IP, and CoreDNS is running here.
+
+**Conclusion:**
+
+That's how we install a single node cluster using Minikube on your machine. It's a very simple process and I will drop all the commands which are used in this tutorial in the description so you can easily copy and paste them.

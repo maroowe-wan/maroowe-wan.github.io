@@ -1,0 +1,50 @@
+{
+  "lecture_no": 1,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "워밍업 — Pod 매니페스트에 라벨을 붙이고 확인하기\n\n1. 아래 스타터 YAML을 `labeled-pod.yaml`로 저장한다.\n2. 클러스터에 적용한다: `kubectl apply -f labeled-pod.yaml`.\n3. 라벨이 붙었는지 확인한다: `kubectl get pod labeled-nginx --show-labels`.\n4. 파일을 수정하지 않고, 실행 중인 Pod에 `kubectl label`로 `environment=staging` 라벨을 추가한다.\n5. 같은 방법으로 `demo` 라벨을 Pod에서 제거한다.\n6. `--show-labels`로 최종 라벨 셋을 다시 확인한다.",
+      "starter": "apiVersion: v1\nkind: Pod\nmetadata:\n  name: labeled-nginx\n  labels:\n    app: nginx\n    tier: frontend\n    demo: \"true\"\nspec:\n  containers:\n    - name: nginx\n      image: nginx:1.21\n",
+      "solution": "# 1~2단계: 매니페스트 적용\nkubectl apply -f labeled-pod.yaml\n\n# 3단계: 라벨 확인\nkubectl get pod labeled-nginx --show-labels\n# 예상 출력에 포함:  app=nginx,demo=true,tier=frontend\n\n# 4단계: 라벨 추가(명령형)\nkubectl label pod labeled-nginx environment=staging\n\n# 5단계: demo 라벨 삭제(키 뒤에 '-' 붙이기)\nkubectl label pod labeled-nginx demo-\n\n# 6단계: 최종 상태 확인\nkubectl get pod labeled-nginx --show-labels\n# 예상 라벨: app=nginx,environment=staging,tier=frontend\n# (demo는 사라짐)",
+      "explanation": "라벨은 `metadata.labels`에 위치하며, 선언형(YAML)과 명령형(`kubectl label`) 두 가지 방식으로 관리할 수 있다. 키 뒤에 마이너스 부호(`demo-`)를 붙이는 것이 라벨 키를 삭제하는 kubectl 문법이다. 명령형으로 변경하면 즉시 반영되지만 소스 YAML에는 반영되지 않는다 — 같은 매니페스트로 `kubectl apply`를 다시 실행하면 덮어씌워진다. 따라서 명령형 라벨 변경은 임시 트러블슈팅 용도에만 쓰는 것이 좋다.",
+      "hints": [
+        "변경할 때마다 `kubectl get pod labeled-nginx --show-labels`를 실행해 현재 라벨을 바로 확인하자.",
+        "라벨 추가: `kubectl label pod <이름> <키>=<값>`. 라벨 삭제: `kubectl label pod <이름> <키>-` (뒤에 마이너스 부호, 공백 없음).",
+        "이미 값이 있는 라벨을 추가하려 할 때 'already has a value' 오류가 나오면 `--overwrite` 플래그를 추가한다."
+      ]
+    },
+    {
+      "prompt": "핵심 실습 1 — equality-based와 set-based 셀렉터로 Pod 필터링\n\n아래 세 Pod가 클러스터에 실행 중이라고 가정한다(스타터 YAML을 적용해 생성할 것). 각 질문에 맞는 `kubectl get pods -l` 명령어를 실행해 답하라.\n\na) `app=nginx`인 Pod를 모두 조회한다.\nb) `tier`가 `frontend`가 아닌 Pod를 모두 조회한다.\nc) `app=nginx`이고 동시에 `tier=frontend`인 Pod를 조회한다.\nd) `version`이 `1.20` 또는 `1.21`인 Pod를 조회한다(set-based 셀렉터 사용).\ne) `canary` 라벨이 어떤 값이든 존재하는 Pod를 조회한다(키 존재 여부 확인).",
+      "starter": "# 테스트용 Pod 세 개 생성:\nkubectl run pod-a --image=nginx:1.20 --labels='app=nginx,tier=frontend,version=1.20'\nkubectl run pod-b --image=nginx:1.21 --labels='app=nginx,tier=backend,version=1.21,canary=true'\nkubectl run pod-c --image=httpd:2.4  --labels='app=httpd,tier=frontend,version=2.4'\n",
+      "solution": "# a) equality: app=nginx\nkubectl get pods -l app=nginx\n# 반환: pod-a, pod-b\n\n# b) inequality: tier != frontend\nkubectl get pods -l 'tier!=frontend'\n# 반환: pod-b\n\n# c) 다중 AND 조건\nkubectl get pods -l 'app=nginx,tier=frontend'\n# 반환: pod-a\n\n# d) set-based 'in' (version이 1.20 또는 1.21)\nkubectl get pods -l 'version in (1.20, 1.21)'\n# 반환: pod-a, pod-b\n\n# e) 키 존재 여부 확인(canary 라벨이 있는 Pod)\nkubectl get pods -l 'canary'\n# 반환: pod-b",
+      "explanation": "Equality-based 셀렉터(`=`, `!=`)는 값 하나와 정확히 매칭하며 가장 단순한 형태다. 쉼표로 연결한 여러 조건은 항상 AND로 결합된다 — Pod는 모든 조건을 만족해야 한다. Set-based 셀렉터(`in`, `notin`, `exists`)는 표현력이 더 높다. `in`은 값 목록에 대한 OR 매칭을 제공하고, 키 이름 단독(`canary`)은 '값에 관계없이 이 키가 존재함'을 의미하는 단축 표현이다. 두 문법은 하나의 `-l` 표현식 안에서 혼합해 쓸 수 있다.",
+      "hints": [
+        "Set-based 표현식은 셸이 괄호를 잘못 해석하지 않도록 작은따옴표로 감싼다: `kubectl get pods -l 'version in (1.20, 1.21)'`.",
+        "조건 사이의 쉼표는 AND다, OR가 아니다. 하나의 라벨 키에 대한 OR 매칭은 `in`을 사용한다.",
+        "키 존재 여부 확인('canary가 어떤 값으로든 설정되어 있음')은 연산자 없이 키 이름만 넘긴다: `kubectl get pods -l 'canary'`."
+      ]
+    },
+    {
+      "prompt": "핵심 실습 2 — 라벨로 Deployment와 Service 연결하기\n\n1. 아래 두 스타터 매니페스트(`deployment.yaml`, `service.yaml`)를 저장하고 적용한다.\n2. Deployment가 Pod 세 개를 생성했고 예상 라벨이 붙었는지 확인한다: `kubectl get pods --show-labels`.\n3. Service가 해당 Pod를 엔드포인트로 선택했는지 확인한다: `kubectl get endpoints web-service`.\n4. 의도적으로 불일치를 만들어본다: `kubectl patch`로 Service 셀렉터를 `app: webserver`(잘못된 값)로 변경한 뒤, 즉시 `kubectl get endpoints web-service`를 다시 확인한다.\n5. 셀렉터를 `app: web`으로 되돌려 패치하고, 엔드포인트가 복원되는지 확인한다.",
+      "starter": "# deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web-deployment\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n        tier: frontend\n    spec:\n      containers:\n        - name: nginx\n          image: nginx:1.21\n---\n# service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: web-service\nspec:\n  selector:\n    app: web\n  ports:\n    - port: 80\n      targetPort: 80\n",
+      "solution": "# 1단계: 두 매니페스트 적용\nkubectl apply -f deployment.yaml\nkubectl apply -f service.yaml\n\n# 2단계: Pod 라벨 확인\nkubectl get pods --show-labels\n# 세 Pod 모두 라벨: app=web,tier=frontend\n\n# 3단계: Service 엔드포인트 확인\nkubectl get endpoints web-service\n# Pod 레플리카 각각에 해당하는 IP:80 세 개가 목록에 표시되어야 함\n\n# 4단계: 의도적 불일치 만들기(잘못된 셀렉터 값)\nkubectl patch service web-service -p '{\"spec\":{\"selector\":{\"app\":\"webserver\"}}}'\nkubectl get endpoints web-service\n# 엔드포인트 목록이 비워짐 — 트래픽이 조용히 실패\n\n# 5단계: 셀렉터 복원\nkubectl patch service web-service -p '{\"spec\":{\"selector\":{\"app\":\"web\"}}}'\nkubectl get endpoints web-service\n# 엔드포인트 세 개 복원",
+      "explanation": "Deployment의 `spec.selector.matchLabels`와 Pod 템플릿의 `metadata.labels`는 동일한 키·값을 가져야 한다 — Kubernetes가 생성 시점에 이를 검증하고 불일치하면 거부한다. Service의 `spec.selector`도 같은 역할을 라우팅에서 수행한다. Service는 라벨과 일치하는 Pod를 지속적으로 조회해 엔드포인트로 삼는다. 4단계는 운영 환경에서 셀렉터에 오타가 생겼을 때 어떤 일이 일어나는지를 보여준다. 엔드포인트 목록이 비워지고 Service로 들어오는 요청은 응답을 받지 못하는데, Service 자체에는 아무런 오류도 표시되지 않는다. Service에 접근이 안 될 때 첫 번째로 확인할 진단 단계가 `kubectl get endpoints <서비스명>`인 이유가 바로 여기에 있다.",
+      "hints": [
+        "`kubectl apply` 후 `kubectl get endpoints web-service`가 `<none>`을 보여준다면, Service `selector`의 키·값이 Pod의 `--show-labels` 출력과 정확히 일치하는지 다시 확인한다.",
+        "`kubectl patch` 명령어는 인라인 JSON을 받는다: `kubectl patch service web-service -p '{\"spec\":{\"selector\":{\"app\":\"webserver\"}}}'`. Windows cmd 환경에서는 내부 따옴표를 이스케이프하거나 YAML 패치 파일을 대신 쓴다.",
+        "Service가 Pod를 찾았는지 확인하려면 `Endpoints` 컬럼(또는 `kubectl describe service web-service`)에 IP 주소가 하나 이상 표시되는지 본다. `Endpoints:` 행이 비어 있으면 셀렉터가 아무것도 매칭하지 못한 것이다."
+      ]
+    },
+    {
+      "prompt": "심화 과제 — 잘못 설계된 매니페스트를 모범 사례에 맞게 재설계하기\n\n아래 매니페스트는 e-커머스 결제(checkout) 서비스를 배포하지만 라벨링에 여러 문제가 있다.\n- `selector.matchLabels`의 키(`svc`)가 Pod 템플릿 라벨의 키(`service`)와 달라 Kubernetes가 거부한다.\n- `version` 라벨이 `selector.matchLabels`에 포함되어 있어, 버전 업데이트 시 Deployment를 재생성해야 한다.\n- 운영 메타데이터(빌드 ID, 담당자 연락처)가 어노테이션이 아닌 라벨로 저장되어 있다.\n- 권장 `app.kubernetes.io/` 접두사 라벨이 없다.\n\n과제:\n1. 스타터 매니페스트에서 네 가지 문제를 모두 찾는다.\n2. 강의에서 다룬 모범 사례에 따라 매니페스트를 수정한다. 적절한 곳에 `app.kubernetes.io/` 권장 라벨을 사용한다.\n3. 빌드 ID와 담당자 연락처를 담는 어노테이션 블록을 추가한다.\n4. 수정한 매니페스트를 적용하고 `kubectl get deployment checkout-deployment -o yaml`로 결과를 확인한다.",
+      "starter": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout-deployment\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      svc: checkout          # 문제: Pod 템플릿의 키와 불일치\n      version: \"2.5\"         # 문제: 셀렉터에 version이 있으면 업데이트 불가\n  template:\n    metadata:\n      labels:\n        service: checkout    # 문제: 셀렉터의 키와 맞춰야 함\n        version: \"2.5\"\n        build-id: \"b1042\"    # 문제: 어노테이션으로 옮겨야 함\n        oncall: \"payments-team@example.com\"  # 문제: 어노테이션으로 옮겨야 함\n    spec:\n      containers:\n        - name: checkout\n          image: checkout-app:2.5\n",
+      "solution": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: checkout-deployment\n  annotations:\n    app.kubernetes.io/managed-by: kubectl\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: checkout      # 안정적: 앱 식별, 절대 변경되지 않음\n      app.kubernetes.io/component: checkout # 안정적: 컴포넌트 역할 식별\n  template:\n    metadata:\n      labels:\n        app.kubernetes.io/name: checkout\n        app.kubernetes.io/component: checkout\n        app.kubernetes.io/version: \"2.5\"    # 정보성 버전 라벨(셀렉터에 미포함)\n      annotations:\n        build-id: \"b1042\"                   # 라벨에서 어노테이션으로 이동\n        oncall: \"payments-team@example.com\" # 라벨에서 어노테이션으로 이동\n    spec:\n      containers:\n        - name: checkout\n          image: checkout-app:2.5\n",
+      "explanation": "문제 1(셀렉터/템플릿 키 불일치): Kubernetes는 `selector.matchLabels`의 모든 키가 Pod 템플릿 라벨에 동일한 값으로 존재하는지 검증한다. 셀렉터에 `svc`를 쓰고 템플릿에 `service`를 쓰면 API가 즉시 거부한다. 문제 2(셀렉터에 version 포함): `spec.selector`는 Deployment 생성 후 변경할 수 없다. `version`을 셀렉터에 넣으면 버전을 올릴 때 Deployment를 삭제하고 다시 만들어야 해 롤링 업데이트 자체가 무의미해진다. 해결책은 `version`을 Pod 템플릿 라벨에만 두는 것이다(정보성 라벨). 문제 3·4(운영 메타데이터를 라벨로 저장): 라벨은 인덱싱되어 셀렉터용으로 쓰는 것이다. 빌드 ID나 이메일처럼 어떤 셀렉터도 쿼리하지 않을 값을 라벨에 넣으면 라벨 네임스페이스를 낭비한다. 비식별 메타데이터의 올바른 위치는 어노테이션이다. 어노테이션은 라벨보다 길이와 문자 제한이 완화되어 있고 더 긴 값도 담을 수 있다. `app.kubernetes.io/` 권장 접두사를 사용하면 Helm, 대시보드 등의 도구가 별도 설정 없이도 리소스를 올바르게 인식한다.",
+      "hints": [
+        "셀렉터 키 목록과 템플릿 라벨 키 목록을 나란히 놓고 비교해보자. `selector.matchLabels`의 모든 키는 `template.metadata.labels`에 동일한 값으로 존재해야 한다.",
+        "어떤 라벨을 셀렉터에 넣을지 판단하는 좋은 기준: 'Deployment 수명 동안 이 값이 바뀔 수 있는가?' 바뀔 수 있다면 Pod 템플릿 라벨에만 두고 셀렉터에는 넣지 않는다.",
+        "그룹화나 필터링에 쓰이지 않는 값(빌드 ID, 담당자 정보, 커밋 SHA)은 `metadata.annotations`으로 옮긴다. 어노테이션은 더 긴 문자열을 허용하며 셀렉터에서 보이지 않는다."
+      ]
+    }
+  ]
+}

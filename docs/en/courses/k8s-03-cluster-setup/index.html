@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-ClusterSetup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-03-cluster-setup/index.html'>한국어</a></div>
+  <h1>K8S-ClusterSetup</h1>
+  <div class="sub">Beginner-to-intermediate developers and infrastructure newcomers who are familiar with core Kubernetes concepts (Pods, Deployments) and want to stand up their own clusters hands-on. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. &quot;Building a Local Kubernetes Cluster: From minikube and kind to Your First Deployment&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;Building a Local Kubernetes Cluster: From minikube and kind to Your First Deployment&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Spin up a local cluster with both <strong>minikube</strong> and <strong>kind</strong>, and explain the difference between them (single VM/Docker node vs. multi-node containers) and when to reach for each.</li>
+<li>Understand the <strong>kubeadm bootstrap flow</strong> at a conceptual level — control-plane init, kubeconfig issuance, and node join — and explain how a kubeconfig file connects <code class='ic'>kubectl</code> to a cluster.</li>
+<li>Verify a fresh cluster with <code class='ic'>kubectl get nodes</code>, then ship your <strong>first Deployment</strong> and confirm it is actually running.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why run Kubernetes on your laptop?</h4>
+<p>Before you operate Kubernetes in production, you want a safe place to break things. Renting cloud clusters for every experiment is slow and expensive, and you don&#x27;t want your first <code class='ic'>kubectl delete</code> to land on something real. A <strong>local cluster</strong> gives you the full Kubernetes API on your own machine: you can deploy apps, scale them, watch them self-heal, and tear it all down in seconds. The two tools most people start with are <strong>minikube</strong> and <strong>kind</strong>. They both give you a working cluster, but they take very different approaches — and knowing which to pick is the first real skill of this lecture.</p>
+<blockquote class='callout'>
+<p>A &quot;cluster&quot; is just a set of machines (nodes) running Kubernetes together. Locally, those &quot;machines&quot; are usually a VM or Docker containers pretending to be machines — but to Kubernetes they look identical to real servers.</p>
+</blockquote>
+<h4>minikube vs. kind: two paths to the same API</h4>
+<p><strong>minikube</strong> boots a single-node cluster inside a VM or a Docker container. It is beginner-friendly and batteries-included: it bundles handy extras like a dashboard, an Ingress add-on, and a <code class='ic'>minikube service</code> helper that opens your app in the browser without you fighting with networking. Its default shape is <strong>one node</strong> that runs both the control plane and your workloads. That single-node simplicity is exactly what you want for learning and small demos.</p>
+<p><strong>kind</strong> — short for <strong>Kubernetes IN Docker</strong> — runs each cluster <em>node</em> as a Docker container. Because nodes are just containers, kind can stand up a realistic <strong>multi-node</strong> cluster (one control-plane container plus several worker containers) in seconds, and it can run <strong>multiple independent clusters</strong> side by side. It is lightweight, scripts cleanly, and is the de-facto standard for <strong>CI/CD pipelines</strong>, where you spin a throwaway cluster up, run your tests, and throw it away.</p>
+<p>Here is the practical rule of thumb:</p>
+<blockquote class='callout'>
+<p>Reach for <strong>minikube</strong> when you want the friendliest single-node sandbox with add-ons included. Reach for <strong>kind</strong> when you want a fast, scriptable, multi-node cluster — especially inside automated test pipelines.</p>
+</blockquote>
+<p>One more option you&#x27;ll meet: <strong>Docker Desktop</strong> has a built-in Kubernetes toggle (Settings → Kubernetes → enable). It&#x27;s the lowest-effort path if you already run Docker Desktop, and it even installs <code class='ic'>kubectl</code> for you. The trade-off is less control — you can&#x27;t deeply customize how the cluster is built — so people who need extra port mappings, persistent-volume mounts, or multiple clusters still prefer standalone kind.</p>
+<h4>What kubeadm is actually doing under the hood</h4>
+<p>minikube and kind are convenient wrappers. Underneath, a real Kubernetes cluster is bootstrapped with a tool called <strong>kubeadm</strong>, and understanding its flow demystifies what your local tools quietly automate. The bootstrap proceeds in three conceptual stages:</p>
+<p>1. <strong>Initialize the control plane</strong> — On the first machine you run <code class='ic'>kubeadm init</code>. This starts the cluster&#x27;s &quot;brain&quot;: the <strong>API server</strong> (the front door every command talks to), <strong>etcd</strong> (the key-value store that holds all cluster state), the <strong>scheduler</strong> (decides which node a Pod lands on), and the <strong>controller manager</strong> (the loops that drive reality toward your desired state).</p>
+<p>2. <strong>Issue a kubeconfig</strong> — <code class='ic'>kubeadm init</code> writes out an <strong>admin kubeconfig</strong> file. This file contains three things: the API server&#x27;s address, the certificate authority that proves the server is trustworthy, and your client credentials. Without it, <code class='ic'>kubectl</code> has no idea which cluster to talk to or how to authenticate.</p>
+<p>3. <strong>Join worker nodes</strong> — <code class='ic'>kubeadm init</code> prints a <code class='ic'>kubeadm join</code> command containing the control-plane address and a short-lived join token. You run that command on each additional machine, and it registers as a <strong>worker node</strong> that the control plane can schedule workloads onto.</p>
+<p>The conceptual flow is as follows: a single control-plane init produces the credentials and a join token, and every worker uses that token to attach itself to the control plane.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Init[&quot;Stage 1: kubeadm init on first machine&quot;]
+    CP[&quot;Control plane started: API server, etcd, scheduler, controller manager&quot;]
+    Kubeconfig[&quot;Stage 2: admin kubeconfig issued (API address + CA + credentials)&quot;]
+    Token[&quot;Join token + control-plane address printed&quot;]
+    Kubectl[&quot;kubectl can now talk to the cluster&quot;]
+    Worker1[&quot;Stage 3: kubeadm join on worker&quot;]
+    Worker2[&quot;Stage 3: kubeadm join on worker&quot;]
+    Joined[&quot;Workers registered as schedulable nodes&quot;]
+
+    Init --&gt; CP
+    CP --&gt; Kubeconfig
+    Kubeconfig --&gt; Kubectl
+    CP --&gt; Token
+    Token --&gt; Worker1
+    Token --&gt; Worker2
+    Worker1 --&gt; Joined
+    Worker2 --&gt; Joined</div><figcaption>kubeadm three-stage bootstrap flow</figcaption></figure>
+<pre><code>
+# (Conceptual — this is what kubeadm runs on a real multi-node cluster)
+
+# On the first machine — initialize the control plane:
+kubeadm init --pod-network-cidr=10.244.0.0/16
+
+# kubeadm then tells you to copy the admin kubeconfig into place:
+mkdir -p $HOME/.kube
+cp /etc/kubernetes/admin.conf $HOME/.kube/config
+
+# On each worker machine — join using the token kubeadm printed:
+kubeadm join 192.168.0.10:6443 --token &lt;token&gt; \
+  --discovery-token-ca-cert-hash sha256:&lt;hash&gt;
+</code></pre>
+<p>When you run <code class='ic'>minikube start</code> or <code class='ic'>kind create cluster</code>, this entire dance happens automatically and the resulting kubeconfig is merged into your <code class='ic'>~/.kube/config</code> for you. That&#x27;s why &quot;it just works.&quot;</p>
+<h4>How kubeconfig connects kubectl to your cluster</h4>
+<p><code class='ic'>kubectl</code> is stateless — it has no built-in memory of any cluster. Every time you run a command, it reads a <strong>kubeconfig</strong> file (by default <code class='ic'>~/.kube/config</code>) to learn <em>where</em> to connect and <em>who</em> it is. A kubeconfig holds three kinds of entries that combine into a <strong>context</strong>:</p>
+<ul>
+<li><strong>clusters</strong> — the API server URL and its CA certificate.</li>
+<li><strong>users</strong> — your credentials (a client certificate or token).</li>
+<li><strong>contexts</strong> — a named pairing of &quot;this cluster + this user + a default namespace.&quot;</li>
+</ul>
+<p>The <strong>current context</strong> is the one <code class='ic'>kubectl</code> uses right now. Because you can hold many contexts in one file, switching between your minikube and kind clusters is a single command — no reconfiguration needed. The diagram below shows how these entries combine and how the current context steers <code class='ic'>kubectl</code>.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    Kubectl[&quot;kubectl (stateless)&quot;]
+    Current[&quot;Current context&quot;]
+    Ctx[&quot;contexts: cluster + user + namespace&quot;]
+    Cluster[&quot;clusters: API server URL + CA cert&quot;]
+    User[&quot;users: client cert or token&quot;]
+    API[&quot;Cluster API server&quot;]
+
+    Kubectl --&gt; Current
+    Current --&gt; Ctx
+    Ctx --&gt; Cluster
+    Ctx --&gt; User
+    Cluster --&gt; API
+    User --&gt; API</div><figcaption>How kubeconfig wires kubectl to a cluster</figcaption></figure>
+<pre><code>
+# See every context you have, and which one is active (marked with *):
+kubectl config get-contexts
+
+# Switch the active cluster:
+kubectl config use-context kind-kind
+
+# Inspect where kubectl is currently pointed:
+kubectl config current-context
+</code></pre>
+<blockquote class='callout'>
+<p>The mental model: kubeconfig is the address book. <code class='ic'>kubectl get nodes</code> doesn&#x27;t know about any server — it looks up the current context, reads the address and credentials, and calls that API server.</p>
+</blockquote>
+<h4>Hands-on: from zero to a running cluster</h4>
+<p>Let&#x27;s create both clusters and confirm they&#x27;re alive. The first step every time is to verify the nodes are <strong>Ready</strong> — that&#x27;s your signal the control plane is healthy.</p>
+<pre><code>
+# --- Option A: minikube (single-node, Docker driver) ---
+minikube start --driver=docker
+minikube status          # control plane, kubelet, apiserver should all be &quot;Running&quot;
+
+# --- Option B: kind (here, a 3-node cluster) ---
+# kind-config.yaml:
+#   kind: Cluster
+#   apiVersion: kind.x-k8s.io/v1alpha4
+#   nodes:
+#     - role: control-plane
+#     - role: worker
+#     - role: worker
+kind create cluster --name dev --config kind-config.yaml
+
+# --- Verify either cluster the same way: ---
+kubectl get nodes
+</code></pre>
+<p>A healthy single-node minikube shows one node with status <code class='ic'>Ready</code>; the 3-node kind cluster shows one control-plane node and two workers, all <code class='ic'>Ready</code>. If a node is stuck in <code class='ic'>NotReady</code>, the cluster networking usually hasn&#x27;t finished initializing — give it a moment, or run <code class='ic'>kubectl describe node &lt;name&gt;</code> to investigate.</p>
+<h4>Your first Deployment</h4>
+<p>With a Ready cluster, ship something. A <strong>Deployment</strong> is a declarative object: you tell Kubernetes the <em>desired state</em> (&quot;run N copies of this image&quot;), and its reconciliation loops continuously make reality match. We&#x27;ll use a small public image so there&#x27;s nothing to build.</p>
+<pre><code>
+# Create a Deployment running 2 replicas of a tiny web server:
+kubectl create deployment hello --image=nginx:alpine --replicas=2
+
+# Watch the Pods come up:
+kubectl get pods
+# hello-xxxx-aaaa   1/1   Running
+# hello-xxxx-bbbb   1/1   Running
+
+# Expose it inside the cluster, then reach it:
+kubectl expose deployment hello --type=NodePort --port=80
+
+# minikube gives you a ready-made URL:
+minikube service hello --url
+</code></pre>
+<p>Now prove the <strong>self-healing</strong> behavior that makes Kubernetes special. Delete a Pod and watch a replacement appear almost instantly — because you <em>declared</em> 2 replicas, the controller refuses to let the count drop:</p>
+<pre><code>
+kubectl delete pod &lt;one-pod-name&gt;
+kubectl get pods     # still 2 — Kubernetes recreated the missing one
+</code></pre>
+<p>This is the reconciliation loop in action: desired state (2) vs. current state (1) → Kubernetes schedules a new Pod to close the gap. The same idea scales the other way:</p>
+<pre><code>
+kubectl scale deployment hello --replicas=5
+kubectl get pods     # now 5
+</code></pre>
+<p>When something misbehaves (a Pod stuck in <code class='ic'>Pending</code>, <code class='ic'>ImagePullBackOff</code>, or <code class='ic'>CrashLoopBackOff</code>), your two best friends are <code class='ic'>kubectl describe pod &lt;name&gt;</code> for the event timeline and <code class='ic'>kubectl logs &lt;name&gt;</code> for the app&#x27;s own output. Get comfortable with these now — they are exactly the commands you&#x27;ll use in production.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>minikube</strong> = friendly single-node sandbox with add-ons; <strong>kind</strong> = fast, scriptable, multi-node clusters (and multiple clusters), ideal for CI/CD. Docker Desktop&#x27;s toggle is the easiest start but the least customizable.</li>
+<li>A real cluster is bootstrapped by <strong>kubeadm</strong>: <code class='ic'>init</code> starts the control plane and issues a kubeconfig, then each worker runs <code class='ic'>join</code> with a token. Local tools automate this whole flow for you.</li>
+<li><strong>kubeconfig</strong> is the address book that wires stateless <code class='ic'>kubectl</code> to a cluster — clusters + users + contexts — and switching clusters is just changing the current context.</li>
+<li>Always verify with <code class='ic'>kubectl get nodes</code> (look for <code class='ic'>Ready</code>), then deploy with <code class='ic'>kubectl create deployment</code> and watch reconciliation keep your declared replica count alive even when you delete Pods.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warmup — Start a minikube cluster and confirm it is healthy.</p>
+<p>1. Start minikube using the Docker driver.</p>
+<p>2. Check minikube&#x27;s own internal status report.</p>
+<p>3. Use kubectl to verify the node is listed and shows a Ready status.</p>
+<p>You should be able to see the control-plane node name, its role, and the word &#x27;Ready&#x27; in the final output.</p></div>
+              <pre class='starter'><code># Prerequisites: minikube and Docker must be installed.
+# Run these commands in your terminal one at a time.
+
+# Step 1 — start the cluster:
+minikube start --driver=docker
+
+# Step 2 — check minikube&#x27;s internal health:
+# (fill in the correct minikube sub-command)
+minikube ______
+
+# Step 3 — check the node from kubectl&#x27;s perspective:
+kubectl get ______</code></pre>
+              <details><summary>Hint</summary><ul><li>The minikube sub-command for showing all component statuses is &#x27;minikube status&#x27;.</li><li>kubectl&#x27;s resource type for listing machines in the cluster is &#x27;nodes&#x27; — so the full command is &#x27;kubectl get nodes&#x27;.</li><li>If the node shows &#x27;NotReady&#x27; after a minute, the cluster networking may still be initialising. Wait 30 seconds and re-run &#x27;kubectl get nodes&#x27;.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 — start the cluster:
+minikube start --driver=docker
+
+# Step 2 — minikube&#x27;s own status report:
+minikube status
+# Expected output shows:
+#   host: Running
+#   kubelet: Running
+#   apiserver: Running
+#   kubeconfig: Configured
+
+# Step 3 — node verification via kubectl:
+kubectl get nodes
+# Expected output (single node, both roles):
+#   NAME       STATUS   ROLES           AGE   VERSION
+#   minikube   Ready    control-plane   Xm    v1.x.x</code></pre>
+                <div class='exp2'><p>minikube start --driver=docker boots a single-node Kubernetes cluster inside a Docker container on your machine. Behind the scenes minikube runs the full kubeadm bootstrap flow (init, kubeconfig issuance) automatically and merges the result into ~/.kube/config so kubectl immediately knows which cluster to talk to. &#x27;minikube status&#x27; queries minikube&#x27;s internal health. &#x27;kubectl get nodes&#x27; is the universal cluster health check — a node in &#x27;Ready&#x27; state means the kubelet on that node is alive and the control plane can schedule workloads onto it.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core — Create a multi-node kind cluster from a configuration file.</p>
+<p>1. Write a kind cluster configuration file named &#x27;kind-config.yaml&#x27; that defines one control-plane node and two worker nodes.</p>
+<p>2. Create the cluster with the name &#x27;dev&#x27; using that configuration file.</p>
+<p>3. List all nodes with kubectl and confirm all three are Ready.</p>
+<p>4. Inspect which kubectl context is now active.</p>
+<p>The point of this task is that kind lets you simulate a realistic multi-node environment entirely inside Docker containers — something minikube&#x27;s single-node model cannot do without extra effort.</p></div>
+              <pre class='starter'><code># kind-config.yaml — fill in the missing fields:
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: ______       # first node — the control plane
+  - role: ______       # second node — a worker
+  - role: ______       # third node — another worker
+
+---
+# Terminal commands:
+# Create the cluster:
+kind create cluster --name ______ --config ______
+
+# Verify nodes:
+kubectl get nodes
+
+# See which context kubectl is using now:
+kubectl config ______-context</code></pre>
+              <details><summary>Hint</summary><ul><li>The two valid role values in kind&#x27;s config are &#x27;control-plane&#x27; and &#x27;worker&#x27;. A valid cluster must have exactly one control-plane entry.</li><li>The --config flag takes the path to your YAML file: &#x27;kind create cluster --name dev --config kind-config.yaml&#x27;.</li><li>If nodes remain NotReady for more than 2 minutes, run &#x27;kubectl describe node dev-worker&#x27; to read the event log and identify what&#x27;s missing (usually a CNI network plugin that kind installs automatically — give it a bit more time).</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># kind-config.yaml:
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+
+---
+# Terminal:
+kind create cluster --name dev --config kind-config.yaml
+# kind pulls the node images and wires them together — takes ~1 minute.
+
+kubectl get nodes
+# Expected output:
+#   NAME                STATUS   ROLES           AGE   VERSION
+#   dev-control-plane   Ready    control-plane   Xm    v1.x.x
+#   dev-worker          Ready    &lt;none&gt;          Xm    v1.x.x
+#   dev-worker2         Ready    &lt;none&gt;          Xm    v1.x.x
+
+kubectl config current-context
+# Expected output: kind-dev</code></pre>
+                <div class='exp2'><p>kind represents each Kubernetes node as a Docker container, so a 3-node cluster is just 3 containers on your laptop. The YAML config tells kind what roles to assign: exactly one control-plane node (runs API server, etcd, scheduler, controller manager) and as many worker nodes as you list. &#x27;kind create cluster --name dev&#x27; sets the cluster name which also becomes the kubectl context name (&#x27;kind-dev&#x27;). After creation, kind automatically updates ~/.kube/config and switches the current context to the new cluster, which is why &#x27;kubectl config current-context&#x27; returns &#x27;kind-dev&#x27; without any manual step.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core — Deploy an application, expose it, and observe Kubernetes self-healing in action.</p>
+<p>With the &#x27;dev&#x27; kind cluster still active:</p>
+<p>1. Create a Deployment named &#x27;hello&#x27; running 2 replicas of the &#x27;nginx:alpine&#x27; image.</p>
+<p>2. Wait for both Pods to reach Running status.</p>
+<p>3. Expose the Deployment as a NodePort Service on port 80.</p>
+<p>4. Delete one of the running Pods manually.</p>
+<p>5. Immediately re-list Pods and confirm the replica count returns to 2 automatically.</p>
+<p>The goal is to see the reconciliation loop in action: you declared 2 replicas, so Kubernetes refuses to let the count stay at 1.</p></div>
+              <pre class='starter'><code># 1. Create the Deployment with 2 replicas:
+kubectl create deployment hello \
+  --image=______ \
+  --replicas=______
+
+# 2. Watch Pod status (run repeatedly until both are Running):
+kubectl get ______
+
+# 3. Expose the Deployment:
+kubectl expose deployment hello \
+  --type=______ \
+  --port=______
+
+# 4. Find a Pod name, then delete it:
+kubectl get pods
+kubectl delete pod ______   # replace with an actual pod name from the list
+
+# 5. Immediately check the pod list again:
+kubectl get pods</code></pre>
+              <details><summary>Hint</summary><ul><li>Use &#x27;kubectl get pods&#x27; to copy an exact pod name before deleting. The name format is &#x27;hello-&lt;replicaset-hash&gt;-&lt;pod-suffix&gt;&#x27;.</li><li>If the new pod seems slow to appear, run &#x27;kubectl get pods -w&#x27; (watch mode) to stream updates in real time rather than re-running the command manually.</li><li>To debug a pod stuck in ContainerCreating or ImagePullBackOff, run &#x27;kubectl describe pod &lt;name&gt;&#x27; and read the Events section at the bottom — it will tell you exactly what failed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create the Deployment:
+kubectl create deployment hello --image=nginx:alpine --replicas=2
+
+# 2. Watch Pods (repeat until both show 1/1 Running):
+kubectl get pods
+# hello-&lt;hash&gt;-&lt;id1&gt;   1/1   Running   0   Xs
+# hello-&lt;hash&gt;-&lt;id2&gt;   1/1   Running   0   Xs
+
+# 3. Expose as NodePort on port 80:
+kubectl expose deployment hello --type=NodePort --port=80
+
+# 4. Copy one pod name from step 2, then delete it:
+kubectl delete pod hello-&lt;hash&gt;-&lt;id1&gt;
+
+# 5. Re-list immediately — you will see the deleted pod Terminating
+#    and a brand-new pod already starting:
+kubectl get pods
+# hello-&lt;hash&gt;-&lt;id2&gt;   1/1   Running     0   Xm
+# hello-&lt;hash&gt;-&lt;id3&gt;   0/1   ContainerCreating   0   2s
+# A few seconds later both will show Running again.</code></pre>
+                <div class='exp2'><p>A Deployment is a declarative object: it stores your <em>desired state</em> (2 replicas of nginx:alpine) in etcd. The ReplicaSet controller continuously compares desired state with current state. When you manually delete a Pod, the current count drops to 1. The controller sees the gap (desired 2, actual 1) and immediately schedules a new Pod on an available node to close it. This reconciliation loop is the foundation of Kubernetes reliability — you do not need to babysit individual Pods because Kubernetes continuously repairs drift from your declared intent.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied — Switch kubectl context between clusters and scale a Deployment.</p>
+<p>You now have two clusters: minikube (context name &#x27;minikube&#x27;) and kind-dev (context name &#x27;kind-dev&#x27;). Practice context switching and scaling:</p>
+<p>1. List all available kubectl contexts and identify the currently active one.</p>
+<p>2. Switch the active context to your minikube cluster.</p>
+<p>3. Verify the switch by confirming the current context and listing the minikube node.</p>
+<p>4. Now create a Deployment named &#x27;webserver&#x27; with 1 replica of &#x27;nginx:alpine&#x27; on minikube.</p>
+<p>5. Scale it up to 5 replicas with a single command.</p>
+<p>6. Confirm all 5 Pods reach Running status.</p>
+<p>7. Finally, switch back to the kind-dev context.</p>
+<p>This exercise builds the muscle memory for navigating multiple clusters without reconfiguring anything — the kubeconfig address book handles it all.</p></div>
+              <pre class='starter'><code># 1. List all contexts (the active one is marked with *):
+kubectl config ______-contexts
+
+# 2. Switch to the minikube context:
+kubectl config ______-context ______
+
+# 3. Verify: show current context, then check node:
+kubectl config ______-context
+kubectl get nodes
+
+# 4. Create Deployment with 1 replica:
+kubectl create deployment webserver --image=nginx:alpine --replicas=______
+
+# 5. Scale to 5 replicas:
+kubectl scale deployment webserver --replicas=______
+
+# 6. Confirm 5 pods are running:
+kubectl get pods
+
+# 7. Switch back to kind-dev:
+kubectl config use-context ______</code></pre>
+              <details><summary>Hint</summary><ul><li>The command to list contexts is &#x27;kubectl config get-contexts&#x27; (plural). The command to switch is &#x27;kubectl config use-context &lt;name&gt;&#x27; (singular context, then the name).</li><li>If you are unsure of the exact context name, &#x27;kubectl config get-contexts&#x27; prints the Name column — copy it exactly, including the &#x27;kind-&#x27; prefix for kind clusters.</li><li>After scaling, if some Pods stay in &#x27;Pending&#x27; instead of &#x27;Running&#x27;, it usually means the node has insufficient CPU/memory. On minikube you can check with &#x27;kubectl describe node minikube&#x27; and look at the Allocated resources section.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. List all contexts:
+kubectl config get-contexts
+# Output shows both &#x27;minikube&#x27; and &#x27;kind-dev&#x27;; the active one has * in the first column.
+
+# 2. Switch to minikube:
+kubectl config use-context minikube
+# Switched to context &quot;minikube&quot;.
+
+# 3. Verify:
+kubectl config current-context
+# minikube
+kubectl get nodes
+# NAME       STATUS   ROLES           AGE
+# minikube   Ready    control-plane   Xm
+
+# 4. Create Deployment (1 replica):
+kubectl create deployment webserver --image=nginx:alpine --replicas=1
+
+# 5. Scale to 5:
+kubectl scale deployment webserver --replicas=5
+
+# 6. Confirm 5 Pods (give it ~30 seconds):
+kubectl get pods
+# webserver-&lt;hash&gt;-&lt;1&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;2&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;3&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;4&gt;   1/1   Running   0   Xs
+# webserver-&lt;hash&gt;-&lt;5&gt;   1/1   Running   0   Xs
+
+# 7. Switch back:
+kubectl config use-context kind-dev
+# Switched to context &quot;kind-dev&quot;.</code></pre>
+                <div class='exp2'><p>kubectl is stateless — it reads ~/.kube/config on every command. That file holds entries for both clusters under different context names (&#x27;minikube&#x27; and &#x27;kind-dev&#x27;). &#x27;kubectl config get-contexts&#x27; shows the full address book. &#x27;kubectl config use-context &lt;name&gt;&#x27; just writes a single field in the config file (current-context) so that subsequent kubectl calls resolve to a different API server and credentials. No network reconnection, no re-authentication — it is just a pointer change. Scaling works through the same reconciliation principle seen in Task 3: you update the desired replica count, and the ReplicaSet controller schedules four more Pods to match. Because minikube is single-node, all five Pods land on the same node — on the kind-dev cluster&#x27;s worker nodes they would spread across multiple machines.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=hDBgeUuPgXo' target='_blank'>Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube &amp; kubectl</a></li><li><a href='https://www.youtube.com/watch?v=oyD048gDg_k' target='_blank'>Docker Desktop vs Kind - Which Is The BEST For Local Kubernetes?</a></li><li><a href='https://www.youtube.com/watch?v=T1k7Clx3tNo' target='_blank'>How to Install Kubernetes Cluster using Minikube | Ubuntu 22.04</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

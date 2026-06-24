@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-ConfigMap&amp;Secret</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-10-configmap-secret/index.html'>한국어</a></div>
+  <h1>K8S-ConfigMap&amp;Secret</h1>
+  <div class="sub">Learners who are already familiar with Kubernetes fundamentals — Pods, Deployments, Services, and YAML manifests — and want to take the next step toward production-grade operations and deployment reliability. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Separating Configuration with ConfigMap and Secret - Decoupling Code from Config</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Separating Configuration with ConfigMap and Secret - Decoupling Code from Config </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand why environment variables and configuration files must be separated from the container image (12-factor app)</li>
+<li>Distinguish the difference between ConfigMap and Secret and know when to use each</li>
+<li>Inject ConfigMap and Secret into Pods via environment variables and volume mounts</li>
+</ul>
+<h3>Content</h3>
+<h4>Why Configuration Must Be Separated from the Image</h4>
+<p>In the introductory course, we learned how to build container images and deploy them with Deployments. Moving into real-world operations, however, you quickly run into a fundamental question: <strong>database addresses and API keys differ across development, staging, and production environments — do you have to rebuild the image every single time?</strong></p>
+<p>The answer is no. The same image should be able to run in every environment, with only the configuration changing. This principle is captured in the <strong>12-factor app</strong> methodology&#x27;s third factor: &quot;store config in the environment.&quot; The 12-factor app is a set of twelve design guidelines for building software that runs well in cloud environments.</p>
+<p>Let&#x27;s examine what goes wrong when configuration is baked into the image.</p>
+<ul>
+<li><strong>The image diverges per environment.</strong> You end up with images like <code class='ic'>myapp:1.0-dev</code> and <code class='ic'>myapp:1.0-prod</code> — effectively different artifacts even though the application code is identical. You can no longer guarantee that &quot;the image running in production is exactly what was tested.&quot;</li>
+<li><strong>Secrets leak into the image.</strong> Image layers can be unpacked by anyone. Putting a database password in a <code class='ic'>Dockerfile</code> or in source code exposes it directly.</li>
+<li><strong>Rebuilding and redeploying just to change a config value.</strong> Running the entire build pipeline to flip a single log level is wasteful.</li>
+</ul>
+<p>Kubernetes provides two objects to enable this separation. <strong>Non-sensitive general configuration</strong> goes into a <code class='ic'>ConfigMap</code>; <strong>sensitive secrets</strong> go into a <code class='ic'>Secret</code>. Both are fundamentally <strong>collections of key-value pairs</strong>. The difference lies in their intended use and how they are handled.</p>
+<h4>ConfigMap vs Secret — What to Use and When</h4>
+<p>| | ConfigMap | Secret |</p>
+<p>|---|---|---|</p>
+<p>| Stores | Non-sensitive general configuration | Sensitive secret values |</p>
+<p>| Examples | Log level, feature flags, server addresses, config files | DB passwords, API tokens, TLS certificates |</p>
+<p>| Storage format | Plain text | Stored <strong>base64-encoded</strong> |</p>
+<p>| Size limit | ~1 MB | ~1 MB |</p>
+<p>One point that is frequently misunderstood deserves special emphasis.</p>
+<blockquote class='callout'>
+<p>The base64 encoding in a Secret is <strong>encoding, not encryption</strong>. Anyone can decode base64 in under a second. The reason Secrets are genuinely more secure than ConfigMaps is not base64 — it is the separate protective mechanisms applied to Secrets: encryption at rest in etcd, RBAC access controls, and log masking.</p>
+</blockquote>
+<p>The decision rule is simple: <strong>&quot;Would this value leaking cause a security incident?&quot;</strong> If yes, use a Secret; otherwise, use a ConfigMap. Also keep in mind that neither object can hold large data exceeding 1 MB — that belongs in the volumes and storage domain covered in the next lecture. The decision flowchart below shows that a single question is all it takes to choose between the two.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A[Configuration value to store] --&gt; B{Would a leak be a security incident?}
+    B --&gt;|Yes| C[Use Secret]
+    B --&gt;|No| D[Use ConfigMap]
+    C --&gt; E{Exceeds 1 MB?}
+    D --&gt; E
+    E --&gt;|Yes| F[Volume / Storage domain]
+    E --&gt;|No| G[Handle with ConfigMap / Secret]</div><figcaption>Choosing Between ConfigMap and Secret</figcaption></figure>
+<h4>Creating a ConfigMap — Three Methods</h4>
+<p>There are three ways to create a ConfigMap. The examples below assume a local cluster (e.g., minikube) is running.</p>
+<p><strong>1) Specify values directly on the command line (<code class='ic'>--from-literal</code>)</strong></p>
+<pre><code>
+kubectl create configmap app-config \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=APP_REGION=ap-northeast-2
+</code></pre>
+<p><strong>2) Create from a file (<code class='ic'>--from-file</code>)</strong></p>
+<pre><code>
+# Load the entire contents of app.properties as a single entry
+kubectl create configmap app-config-file --from-file=app.properties
+
+# --from-env-file splits each line in the file into individual key-value pairs
+kubectl create configmap app-config-env --from-env-file=app.properties
+</code></pre>
+<p>With <code class='ic'>--from-file=app.properties</code>, the <strong>filename becomes the key</strong> and the <strong>entire file content becomes the value</strong> — there is exactly one key (<code class='ic'>app.properties</code>) whose value is the whole file. This is useful when you want to mount the file as a single unit. To specify a custom key name, use the <code class='ic'>key=path</code> form: <code class='ic'>--from-file=myconfig=app.properties</code>.</p>
+<p>With <code class='ic'>--from-env-file=app.properties</code>, each <code class='ic'>KEY=VALUE</code> line in the file is parsed into a <strong>separate key-value pair</strong>. If the file contains <code class='ic'>LOG_LEVEL=info</code> and <code class='ic'>APP_REGION=ap-northeast-2</code> on two lines, the resulting ConfigMap will have two distinct keys: <code class='ic'>LOG_LEVEL</code> and <code class='ic'>APP_REGION</code>. The core distinction is &quot;load the whole file as one blob (<code class='ic'>--from-file</code>)&quot; versus &quot;split the file into individual entries (<code class='ic'>--from-env-file</code>).&quot; This is a common source of confusion, so keep it in mind.</p>
+<p><strong>3) Declare via a YAML manifest (recommended for production)</strong></p>
+<p>In production, it is best practice to manage manifests declaratively in version control (Git) rather than using imperative commands.</p>
+<pre><code>
+# app-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: &quot;info&quot;
+  APP_REGION: &quot;ap-northeast-2&quot;
+</code></pre>
+<pre><code>
+kubectl apply -f app-config.yaml
+kubectl describe configmap app-config   # verify the stored values
+</code></pre>
+<h4>Creating a Secret</h4>
+<p>Secrets follow the same pattern, but creating them imperatively (without a file) is often the safer choice to avoid committing plaintext secret files to source control.</p>
+<pre><code>
+kubectl create secret generic db-secret \
+  --from-literal=DB_USER=admin \
+  --from-literal=DB_PASSWORD=&#x27;s3cr3t!&#x27;
+</code></pre>
+<p><code class='ic'>generic</code> creates the most common <code class='ic'>Opaque</code> type (arbitrary user-defined data). There are also specialized types for specific use cases: <code class='ic'>docker-registry</code> for container registry credentials and <code class='ic'>tls</code> for TLS certificates, each with built-in validation.</p>
+<p>If you prefer writing a YAML manifest directly, values must be base64-encoded and placed under the <code class='ic'>data</code> field.</p>
+<pre><code>
+# The -n flag removes the trailing newline — omitting it is a common cause of authentication failures
+echo -n &#x27;s3cr3t!&#x27; | base64
+# czNjcjN0IQ==
+</code></pre>
+<pre><code>
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+type: Opaque
+data:
+  DB_PASSWORD: czNjcjN0IQ==   # base64-encoded value
+</code></pre>
+<blockquote class='callout'>
+<p>If encoding is inconvenient, use <code class='ic'>stringData</code> instead of <code class='ic'>data</code> — you can write the plain-text value directly and Kubernetes will encode it automatically. However, the manifest file itself then contains a plaintext secret, so it must never be committed to Git.</p>
+</blockquote>
+<h4>Injecting into a Pod — Environment Variable Method</h4>
+<p>There are two main ways to deliver ConfigMap and Secret values into a container: <strong>environment variables</strong> and <strong>volume mounts</strong>. Let&#x27;s start with environment variables.</p>
+<p><strong>Inject individual keys (<code class='ic'>valueFrom</code>)</strong> — you can choose a separate environment variable name inside the container for each key.</p>
+<pre><code>
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo LEVEL=$LOG_LEVEL PW=$DB_PASSWORD; sleep 3600&quot;]
+      env:
+        - name: LOG_LEVEL                 # variable name inside the container
+          valueFrom:
+            configMapKeyRef:
+              name: app-config            # which ConfigMap to read from
+              key: LOG_LEVEL              # which key to pull
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:                 # use secretKeyRef for Secrets
+              name: db-secret
+              key: DB_PASSWORD
+</code></pre>
+<p><strong>Inject all keys at once (<code class='ic'>envFrom</code>)</strong> — dumps every key from the ConfigMap or Secret directly as environment variables; the key name becomes the variable name.</p>
+<pre><code>
+      envFrom:
+        - configMapRef:
+            name: app-config
+        - secretRef:
+            name: db-secret
+</code></pre>
+<p>Application code accesses these values just like any other environment variable. In Python: <code class='ic'>os.environ.get(&quot;DB_PASSWORD&quot;)</code>; in Node.js: <code class='ic'>process.env.DB_PASSWORD</code>.</p>
+<h4>Injecting into a Pod — Volume Mount Method</h4>
+<p>When an application is designed to read <strong>files</strong> rather than environment variables — such as nginx configuration files or TLS certificates — the ConfigMap or Secret should be mounted as a volume. In this case, <strong>each key becomes a file, and its value becomes the file&#x27;s contents</strong>.</p>
+<p>The configuration is split into two parts: (1) declare a volume at the Pod level under <code class='ic'>volumes</code>, referencing the ConfigMap or Secret; and (2) attach that volume to a specific path inside the container using <code class='ic'>volumeMounts</code>. The <code class='ic'>name</code> field in both sections must match exactly for the binding to work.</p>
+<pre><code>
+spec:
+  containers:
+    - name: app
+      image: nginx
+      volumeMounts:
+        - name: config-volume          # must match the name in volumes below
+          mountPath: /etc/app/config   # files will appear at this path
+          readOnly: true
+  volumes:
+    - name: config-volume
+      configMap:
+        name: app-config               # for a Secret: secret: { secretName: db-secret }
+</code></pre>
+<p>In the example above, if <code class='ic'>app-config</code> has keys <code class='ic'>LOG_LEVEL</code> and <code class='ic'>APP_REGION</code>, two files will appear inside the container — <code class='ic'>/etc/app/config/LOG_LEVEL</code> and <code class='ic'>/etc/app/config/APP_REGION</code> — each containing the corresponding value.</p>
+<p>There is one hidden advantage to volume mounts: <strong>when a ConfigMap is updated, the mounted files are automatically refreshed (after a short delay).</strong> In contrast, values injected via environment variables are fixed at Pod creation time — updating the ConfigMap does not take effect until the Pod is restarted. If your application needs dynamic reloading, the volume mount approach is the better choice.</p>
+<p>The diagram below summarizes both injection paths at a glance, showing how the same ConfigMap and Secret reach the container through two separate channels.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    CM[ConfigMap&lt;br/&gt;app-config]
+    SE[Secret&lt;br/&gt;db-secret]
+
+    subgraph POD[&quot;Pod Container&quot;]
+        ENV[&quot;Environment Variables&lt;br/&gt;LOG_LEVEL, DB_PASSWORD&quot;]
+        FILE[&quot;File&lt;br/&gt;/etc/app/config/LOG_LEVEL&quot;]
+    end
+
+    CM --&gt;|&quot;env: configMapKeyRef / envFrom&quot;| ENV
+    SE --&gt;|&quot;env: secretKeyRef / envFrom&quot;| ENV
+    CM --&gt;|&quot;volumes + volumeMounts&quot;| FILE
+    SE --&gt;|&quot;volumes + volumeMounts&quot;| FILE
+
+    ENV -.-&gt;|Fixed until Pod restart| NOTE1[Restart required on value change]
+    FILE -.-&gt;|Auto-refreshed on update| NOTE2[Reflected after a short delay]</div><figcaption>Two Paths for Injecting ConfigMap/Secret into a Pod Container</figcaption></figure>
+<h4>Verifying Behavior</h4>
+<pre><code>
+kubectl apply -f pod.yaml
+kubectl get pods
+kubectl exec -it &lt;pod-name&gt; -- printenv | grep LOG_LEVEL      # verify environment variable
+kubectl exec -it &lt;pod-name&gt; -- cat /etc/app/config/LOG_LEVEL  # verify volume file
+</code></pre>
+<h4>Production Gotchas</h4>
+<ul>
+<li><strong>base64 is not security.</strong> As emphasized earlier, the base64 encoding in a Secret is just encoding. Real protection comes from encryption at rest in etcd and RBAC. If you manage your own cluster, these must be configured.</li>
+<li><strong>Never commit Secret manifests to Git.</strong> Whether the values are plaintext or base64-encoded, files containing secrets must be excluded from version control. Use tools like Sealed Secrets, External Secrets, or HashiCorp Vault to manage them safely.</li>
+<li><strong>Protect secrets within the application too.</strong> Do not log Secret values or transmit them to untrusted external systems.</li>
+<li><strong>ConfigMaps and Secrets are namespace-scoped.</strong> A Pod can only reference objects in the same namespace. Make sure your ConfigMap or Secret lives in the same namespace as the Pod that uses it.</li>
+</ul>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Separating configuration and secrets from the image allows the same image to be reused across all environments (12-factor). This prevents image divergence, secret leakage, and unnecessary rebuilds.</li>
+<li><strong>ConfigMap = non-sensitive configuration</strong>, <strong>Secret = sensitive secrets</strong>. Both are key-value collections with a 1 MB size limit. The base64 in a Secret is encoding, not encryption.</li>
+<li>Creation options: <code class='ic'>--from-literal</code>, <code class='ic'>--from-file</code> (filename as key, entire file content as value), <code class='ic'>--from-env-file</code> (each line as a separate key-value pair), or a YAML manifest (recommended).</li>
+<li>Injection methods: environment variables (<code class='ic'>valueFrom</code> with <code class='ic'>configMapKeyRef</code>/<code class='ic'>secretKeyRef</code>, or <code class='ic'>envFrom</code>) and volume mounts. Volume mounts create one file per key and update automatically when the ConfigMap changes.</li>
+<li>Security is enforced through etcd encryption, RBAC, Git exclusion, and in-app protection — not base64.</li>
+</ul>
+<h3>Sources</h3>
+<ul>
+<li>DevOps Directive, &quot;Kubernetes Secrets in 5 Minutes!&quot; — https://www.youtube.com/watch?v=cQAEK9PBY8U</li>
+<li>Thetips4you, &quot;Kubernetes Tutorial For Beginners | Kubernetes ConfigMap&quot; — https://www.youtube.com/watch?v=3RvudbKR1gc</li>
+<li>Civo, &quot;How to Create ConfigMaps in Kubernetes - Civo Academy&quot; — https://www.youtube.com/watch?v=6kBNZ9c88FY</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Create a ConfigMap using each of the following two methods.</p>
+<p>Method A — Imperative: Use --from-literal to create app-config-cmd with two values: LOG_LEVEL=info and APP_REGION=ap-northeast-2.</p>
+<p>Method B — Declarative: Write a YAML manifest (app-config.yaml) containing the same two values and use kubectl apply to create app-config.</p>
+<p>After creating both, use kubectl describe to verify the Data section of each ConfigMap.</p></div>
+              <pre class='starter'><code># Method A: Imperative (fill in the blanks and run)
+kubectl create configmap app-config-cmd \
+  --from-literal=__KEY1__=__VALUE1__ \
+  --from-literal=__KEY2__=__VALUE2__
+
+# Method B: Declarative (complete app-config.yaml)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  __KEY1__: &quot;__VALUE1__&quot;
+  __KEY2__: &quot;__VALUE2__&quot;</code></pre>
+              <details><summary>Hint</summary><ul><li>The --from-literal flag takes the form KEY=VALUE. If the value contains spaces, wrap it in quotes.</li><li>Each line under the data field in YAML follows the format &#x27;key: &quot;value&quot;&#x27;. Incorrect indentation (2-space indent required) will cause a parse error.</li><li>In the output of kubectl describe configmap &lt;name&gt;, the Data section must show both keys and their values. If a value is missing, re-check the --from-literal argument or the YAML value.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Method A
+kubectl create configmap app-config-cmd \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=APP_REGION=ap-northeast-2
+
+# Method B: app-config.yaml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  LOG_LEVEL: &quot;info&quot;
+  APP_REGION: &quot;ap-northeast-2&quot;
+
+# Apply
+kubectl apply -f app-config.yaml
+
+# Verify
+kubectl describe configmap app-config-cmd
+kubectl describe configmap app-config</code></pre>
+                <div class='exp2'><p>kubectl create configmap --from-literal is quick and convenient, but leaves no audit trail. Declaring a YAML manifest enables version control in Git, and kubectl apply is the standard declarative approach — it patches existing resources or creates them if they do not yet exist. The key goal of this step is to confirm that the Data sections of both ConfigMaps are identical.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Write a Pod manifest (envfrom-pod.yaml) that uses envFrom to load the app-config ConfigMap created in Step 1.</p>
+<ul>
+<li>Image: busybox:1.36</li>
+<li>Container command: sh -c &#x27;printenv | grep -E &quot;LOG_LEVEL|APP_REGION&quot;; sleep 3600&#x27;</li>
+<li>Inject app-config via envFrom.</li>
+</ul>
+<p>After creating the Pod, use kubectl logs to verify the output.</p></div>
+              <pre class='starter'><code># envfrom-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: envfrom-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;printenv | grep -E &#x27;LOG_LEVEL|APP_REGION&#x27;; sleep 3600&quot;]
+      envFrom:
+        - ____Ref:
+            name: ____</code></pre>
+              <details><summary>Hint</summary><ul><li>Under envFrom, the entry is either configMapRef: (for a ConfigMap) or secretRef: (for a Secret). A typo here will leave the Pod in Pending or Error state.</li><li>If kubectl logs envfrom-pod produces no output, check the Events section of kubectl describe pod envfrom-pod for error messages like configmap &#x27;app-config&#x27; not found.</li><li>If the Pod is stuck in ContainerCreating, verify that the ConfigMap exists in the same namespace by running kubectl get configmap.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># envfrom-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: envfrom-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;printenv | grep -E &#x27;LOG_LEVEL|APP_REGION&#x27;; sleep 3600&quot;]
+      envFrom:
+        - configMapRef:
+            name: app-config
+
+# Apply and verify
+kubectl apply -f envfrom-pod.yaml
+kubectl get pod envfrom-pod   # wait for Running status
+kubectl logs envfrom-pod</code></pre>
+                <div class='exp2'><p>envFrom.configMapRef uses every key in the ConfigMap as an environment variable name directly. If the logs show LOG_LEVEL=info and APP_REGION=ap-northeast-2, the injection was successful. The envFrom approach is convenient because you don&#x27;t need to list each key individually, but be aware that all keys are dumped into the container&#x27;s namespace, which can cause unintended variable name collisions.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. 1. Create a Secret named db-secret using --from-literal. Include the keys: DB_USER=admin and DB_PASSWORD=s3cr3t!</p>
+<p>2. Write a Pod manifest (valuefrom-pod.yaml) using the valueFrom method.</p>
+<ul>
+<li>Image: busybox:1.36</li>
+<li>Container command: sh -c &#x27;echo LEVEL=$LOG_LEVEL USER=$DB_USER PW=$DB_PASSWORD; sleep 3600&#x27;</li>
+<li>LOG_LEVEL comes from the app-config ConfigMap; DB_USER and DB_PASSWORD come from the db-secret Secret.</li>
+</ul>
+<p>3. After creating the Pod, use kubectl logs to confirm all three values appear in the output.</p></div>
+              <pre class='starter'><code># 1. Create the Secret (fill in the blanks)
+kubectl create secret generic db-secret \
+  --from-literal=____=____ \
+  --from-literal=____=____
+
+# 2. valuefrom-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: valuefrom-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo LEVEL=$LOG_LEVEL USER=$DB_USER PW=$DB_PASSWORD; sleep 3600&quot;]
+      env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: ____
+              key: ____
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: ____
+              key: ____
+        - name: DB_PASSWORD
+          valueFrom:
+            ____:
+              name: ____
+              key: ____</code></pre>
+              <details><summary>Hint</summary><ul><li>configMapKeyRef and secretKeyRef are different spellings — double-check that the prefix is &#x27;configMapKey&#x27; or &#x27;secretKey&#x27; before &#x27;Ref&#x27;.</li><li>Special characters such as !, #, $, and &amp; in Secret values can be interpreted by the shell. When using --from-literal, wrap the entire value in single quotes: --from-literal=DB_PASSWORD=&#x27;s3cr3t!&#x27;</li><li>If PW= is empty in the kubectl logs output, verify that the key name in the Pod manifest exactly matches the key stored in the Secret by running kubectl describe secret db-secret.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Create the Secret
+kubectl create secret generic db-secret \
+  --from-literal=DB_USER=admin \
+  --from-literal=DB_PASSWORD=&#x27;s3cr3t!&#x27;
+
+# 2. valuefrom-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: valuefrom-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;echo LEVEL=$LOG_LEVEL USER=$DB_USER PW=$DB_PASSWORD; sleep 3600&quot;]
+      env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_LEVEL
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: DB_PASSWORD
+
+# Apply and verify
+kubectl apply -f valuefrom-pod.yaml
+kubectl logs valuefrom-pod
+# Expected output: LEVEL=info USER=admin PW=s3cr3t!</code></pre>
+                <div class='exp2'><p>The valueFrom approach lets you pull specific keys from a ConfigMap or Secret and assign them any environment variable name you choose inside the container. Use configMapKeyRef for ConfigMaps and secretKeyRef for Secrets. If you inspect the Secret with kubectl get secret db-secret -o yaml, you will see the values are base64-encoded. However, Kubernetes automatically decodes them before injecting them into the container, so application code can use the values as-is without any decoding logic.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. 1. Write a Pod manifest (volume-pod.yaml) that mounts app-config as a volume.</p>
+<ul>
+<li>Image: busybox:1.36</li>
+<li>Command: sh -c &#x27;sleep 3600&#x27;</li>
+<li>Mount app-config at /etc/app/config as readOnly.</li>
+</ul>
+<p>2. After creating the Pod, use kubectl exec to list the files under /etc/app/config/ and read the contents of the LOG_LEVEL file.</p>
+<p>3. Use kubectl patch or kubectl edit to change LOG_LEVEL in app-config to debug.</p>
+<p>4. Wait approximately 30–60 seconds, then use kubectl exec to confirm that /etc/app/config/LOG_LEVEL now contains debug.</p>
+<p>5. Based on your observations, write one sentence describing the difference in update behavior between environment variable injection and volume mount injection.</p></div>
+              <pre class='starter'><code># volume-pod.yaml (fill in the blanks)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;sleep 3600&quot;]
+      volumeMounts:
+        - name: ____          # must match the name in volumes
+          mountPath: ____
+          readOnly: true
+  volumes:
+    - name: ____
+      configMap:
+        name: ____</code></pre>
+              <details><summary>Hint</summary><ul><li>volumeMounts.name and volumes.name must be exactly the same string. Changing only one side will put the Pod into an Error state.</li><li>Verify that the output of kubectl exec &lt;pod&gt; -- ls /etc/app/config shows key names as filenames. If no files appear, check that volumes.configMap.name matches the actual ConfigMap name.</li><li>It is normal for the update not to happen immediately. Wait for the kubelet sync cycle (default 60 seconds), or in a minikube environment, run kubectl exec repeatedly to watch for the change. If the value has not changed after more than 30 seconds, confirm the patch was actually applied by running kubectl describe configmap app-config.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># volume-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-pod
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: [&quot;sh&quot;, &quot;-c&quot;, &quot;sleep 3600&quot;]
+      volumeMounts:
+        - name: config-volume
+          mountPath: /etc/app/config
+          readOnly: true
+  volumes:
+    - name: config-volume
+      configMap:
+        name: app-config
+
+# Create the Pod
+kubectl apply -f volume-pod.yaml
+kubectl get pod volume-pod
+
+# List files and check the initial value
+kubectl exec volume-pod -- ls /etc/app/config
+# Expected output: APP_REGION  LOG_LEVEL
+kubectl exec volume-pod -- cat /etc/app/config/LOG_LEVEL
+# Output: info
+
+# Update the ConfigMap value (patch method)
+kubectl patch configmap app-config \
+  --type merge \
+  -p &#x27;{&quot;data&quot;:{&quot;LOG_LEVEL&quot;:&quot;debug&quot;}}&#x27;
+
+# Wait ~30-60 seconds for the automatic refresh
+# (kubelet sync interval defaults to 60 seconds)
+kubectl exec volume-pod -- cat /etc/app/config/LOG_LEVEL
+# Output: debug  (update confirmed)
+
+# [Note] With environment variable injection, you must restart the Pod to see the change:
+# kubectl delete pod envfrom-pod &amp;&amp; kubectl apply -f envfrom-pod.yaml</code></pre>
+                <div class='exp2'><p>When a ConfigMap is mounted as a volume, each key is created as a separate file under mountPath. In this exercise, two files are created: /etc/app/config/LOG_LEVEL and /etc/app/config/APP_REGION, each containing the corresponding value. When you update the ConfigMap with kubectl patch, the kubelet refreshes the volume files automatically on its next sync cycle (default: 60 seconds). By contrast, values injected via environment variables (envFrom or valueFrom) are fixed at Pod creation time — updating the ConfigMap has no effect until the Pod is restarted. This is why applications that require hot-reloading of config (e.g., nginx config files, feature flags) are better served by the volume mount approach.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=cQAEK9PBY8U' target='_blank'>Kubernetes Secrets in 5 Minutes!</a></li><li><a href='https://www.youtube.com/watch?v=3RvudbKR1gc' target='_blank'>Kubernetes Tutorial For Beginners | Kubernetes ConfigMap</a></li><li><a href='https://www.youtube.com/watch?v=6kBNZ9c88FY' target='_blank'>How to Create ConfigMaps in Kubernetes - Civo Academy</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Kubectl</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-04-kubectl/index.html'>한국어</a></div>
+  <h1>K8S-Kubectl</h1>
+  <div class="sub">Beginner developers and operators who are just starting to work with Kubernetes clusters (assumed to have a basic understanding of containers and Docker) · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. &quot;kubectl CLI Basics: Core Commands and Cluster Operations&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. &quot;kubectl CLI Basics: Core Commands and Cluster Operations&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Understand the structure of your kubeconfig and switch safely between contexts and namespaces so you never run a command against the wrong cluster.</li>
+<li>Inspect and debug live resources with <code class='ic'>get</code>, <code class='ic'>describe</code>, <code class='ic'>logs</code>, and <code class='ic'>exec</code>, and shape the output using <code class='ic'>-o wide/yaml/json</code> and label selectors.</li>
+<li>Tell the difference between the imperative style (<code class='ic'>run</code>, <code class='ic'>create</code>, <code class='ic'>set</code>) and the declarative style (<code class='ic'>apply -f</code>), and choose the right one for the task in front of you.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why kubectl is the tool you live in</h4>
+<p><code class='ic'>kubectl</code> (pronounced &quot;kube-control&quot; or &quot;kube-cuttle&quot;; both are accepted) is the command-line client that talks to the Kubernetes API server. Almost everything you do with a cluster — listing Pods, reading logs, scaling a Deployment, opening a shell inside a running container — flows through this one binary. If Kubernetes is the engine, kubectl is the cockpit. The goal of this lecture is to make that cockpit feel familiar so that when something breaks at 2 a.m., your hands already know where the controls are.</p>
+<p>A small but important detail before we start: every example below uses <code class='ic'>kubectl</code>, but most operators add a shell alias <code class='ic'>alias k=kubectl</code>. You&#x27;ll see <code class='ic'>k</code> used interchangeably in the wild, and enabling shell auto-completion (<code class='ic'>source &lt;(kubectl completion bash)</code> or the zsh equivalent) means you can Tab-complete resource names instead of memorizing them. These two habits alone will roughly halve your typing.</p>
+<blockquote class='callout'>
+<p>The official kubectl Cheat Sheet in the Kubernetes docs is the single best reference to keep open while you learn. It lists every short name and output flag in one page.</p>
+</blockquote>
+<h4>Knowing which cluster you&#x27;re talking to: kubeconfig, context, namespace</h4>
+<p>Before you run a single command, you need to answer one question: <em>which cluster, and as whom, am I about to act?</em> Running a <code class='ic'>delete</code> against production when you thought you were on a local test cluster is one of the most common and most painful beginner mistakes. Kubernetes solves this with a configuration file called the <strong>kubeconfig</strong>, by default at <code class='ic'>~/.kube/config</code>.</p>
+<p>A kubeconfig bundles three kinds of entries:</p>
+<ul>
+<li><strong>clusters</strong> — the API server addresses and their certificate authorities (the &quot;where&quot;).</li>
+<li><strong>users</strong> — the credentials you authenticate with, such as a client certificate or a token (the &quot;who&quot;).</li>
+<li><strong>contexts</strong> — named combinations that glue one cluster + one user + a default namespace together (the &quot;which combination&quot;).</li>
+</ul>
+<p>The structure is as follows: a context is simply a pointer that says &quot;use <em>this</em> cluster, <em>this</em> user, and <em>this</em> namespace by default.&quot; One of the contexts is marked as <strong>current</strong>, and that is the one every command uses unless you override it.</p>
+<p>You inspect and switch all of this with <code class='ic'>kubectl config</code>:</p>
+<pre><code>
+# See everything kubectl knows about (credentials are redacted)
+kubectl config view
+
+# List all contexts; the current one is marked with a *
+kubectl config get-contexts
+
+# See just the name of the context you&#x27;re on right now
+kubectl config current-context
+
+# Switch to a different cluster/user combination
+kubectl config use-context minikube
+</code></pre>
+<p>A <strong>namespace</strong> is a virtual partition <em>inside</em> a single cluster — think of it as a folder that scopes resource names so that the <code class='ic'>web</code> Deployment in <code class='ic'>team-a</code> doesn&#x27;t collide with the <code class='ic'>web</code> Deployment in <code class='ic'>team-b</code>. Most commands default to the <code class='ic'>default</code> namespace. You can target another namespace per command with <code class='ic'>-n</code>, or change the default baked into your current context:</p>
+<pre><code>
+# One-off: list Pods in the kube-system namespace
+kubectl get pods -n kube-system
+
+# Persist a new default namespace for the current context
+kubectl config set-context --current --namespace=jupiter
+</code></pre>
+<blockquote class='callout'>
+<p>Best practice: glance at <code class='ic'>kubectl config current-context</code> before any destructive command. Many teams install tools like <code class='ic'>kubectx</code> and <code class='ic'>kubens</code>, or add the context name to their shell prompt, precisely so a wrong-cluster mistake becomes hard to make.</p>
+</blockquote>
+<h4>Reading the cluster: get, describe, and output formatting</h4>
+<p><code class='ic'>kubectl get</code> is your bird&#x27;s-eye view — a quick table of what exists and its high-level status.</p>
+<pre><code>
+kubectl get pods
+kubectl get deployments
+kubectl get nodes
+</code></pre>
+<p>Many resource types have short names that save keystrokes: <code class='ic'>po</code> for pods, <code class='ic'>deploy</code> for deployments, <code class='ic'>svc</code> for services, <code class='ic'>ns</code> for namespaces, <code class='ic'>no</code> for nodes, <code class='ic'>rs</code> for replicasets. So <code class='ic'>kubectl get po</code> is the same as <code class='ic'>kubectl get pods</code>. Run <code class='ic'>kubectl api-resources</code> to see the full list of types and their short names.</p>
+<p>The default table is often not enough. The <code class='ic'>-o</code> (output) flag reshapes the result:</p>
+<pre><code>
+# Add extra columns like node placement and Pod IP
+kubectl get pods -o wide
+
+# Dump the full live object as YAML (great for learning the schema)
+kubectl get pod nginx -o yaml
+
+# Same thing as JSON, ideal for piping into jq or scripts
+kubectl get pod nginx -o json
+</code></pre>
+<p>When you have dozens of Pods, <strong>label selectors</strong> let you filter to just the ones you care about. Labels are key/value tags attached to resources, and <code class='ic'>--selector</code> (or its short form <code class='ic'>-l</code>) matches against them:</p>
+<pre><code>
+# Only Pods labelled app=web
+kubectl get pods -l app=web
+
+# Combine two labels
+kubectl get pods -l &#x27;app=web,env=prod&#x27;
+</code></pre>
+<p>While <code class='ic'>get</code> gives you the summary, <code class='ic'>kubectl describe</code> gives you the deep, human-readable detail of one object — its configuration, current conditions, and, crucially, the <strong>Events</strong> at the bottom. When a Pod is stuck, the Events section usually tells you exactly why.</p>
+<pre><code>
+kubectl describe pod nginx
+</code></pre>
+<p>If you see a Pod stuck in <code class='ic'>Pending</code>, <code class='ic'>ImagePullBackOff</code>, or <code class='ic'>CrashLoopBackOff</code>, <code class='ic'>describe</code> is almost always your first stop — for example, <code class='ic'>ImagePullBackOff</code> typically means the image name is wrong or the cluster can&#x27;t reach the registry, and the Events will say so.</p>
+<h4>Debugging from the inside: logs and exec</h4>
+<p>Two commands let you reach into a running container.</p>
+<p><code class='ic'>kubectl logs</code> streams whatever the container wrote to standard output — your application logs:</p>
+<pre><code>
+kubectl logs nginx
+
+# Follow new lines as they arrive (like tail -f)
+kubectl logs -f nginx
+
+# Read logs from a Pod that already crashed and restarted
+kubectl logs nginx --previous
+</code></pre>
+<p><code class='ic'>kubectl exec</code> runs a command inside a container. With <code class='ic'>-it</code> (interactive + TTY) it opens a live shell, which is the closest thing to SSH-ing into your workload:</p>
+<pre><code>
+# Run a single command and print its result
+kubectl exec nginx -- printenv
+
+# Open an interactive shell inside the container
+kubectl exec -it nginx -- sh
+</code></pre>
+<p>Note the <code class='ic'>--</code> separator: everything after it is the command for the <em>container</em>, not for kubectl. So <code class='ic'>kubectl exec -it nginx -- sh -c &#x27;echo $var1&#x27;</code> prints the value of an environment variable from inside the Pod — exactly how you&#x27;d confirm a configuration value really took effect.</p>
+<h4>Two ways to create things: imperative vs declarative</h4>
+<p>There are two philosophies for managing Kubernetes resources, and a good operator uses both deliberately.</p>
+<p>The <strong>imperative</strong> style means you tell kubectl <em>what to do, step by step</em>, on the command line. It&#x27;s fast and great for experimenting, throwaway resources, and exam-style time pressure:</p>
+<pre><code>
+# Create a Pod directly from the CLI
+kubectl run nginx --image=nginx --env=var1=val1
+
+# Create a Deployment with two replicas
+kubectl create deployment web --image=nginx:1.18.0 --replicas=2
+
+# Change a running Deployment&#x27;s image in place
+kubectl set image deployment/web nginx=nginx:1.19.8
+
+# Scale a Deployment up or down
+kubectl scale deployment web --replicas=5
+</code></pre>
+<p>The <strong>declarative</strong> style means you write the <em>desired end state</em> into a YAML manifest and hand it to <code class='ic'>kubectl apply -f</code>. Kubernetes figures out the steps to reach that state:</p>
+<pre><code>
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+</code></pre>
+<p>The key difference: with imperative commands you describe <em>actions</em>; with declarative apply you describe the <em>goal</em>, and you can re-run <code class='ic'>apply</code> against the same file as many times as you like — Kubernetes only changes what differs from the live state. That makes declarative manifests version-controllable and the standard choice for anything you&#x27;ll run more than once. Imperative commands are for speed and exploration; declarative manifests are for production and GitOps.</p>
+<p>A wonderful bridge between the two is <code class='ic'>--dry-run=client -o yaml</code>. It tells kubectl to <em>not</em> actually create anything, but instead print the YAML it <em>would</em> have generated. This lets you scaffold a correct manifest in seconds instead of hand-writing indentation:</p>
+<pre><code>
+kubectl create deployment web --image=nginx:1.18.0 --replicas=2 \
+  --dry-run=client -o yaml &gt; deployment.yaml
+</code></pre>
+<h4>Desired state and self-healing: why apply is so powerful</h4>
+<p>Once you understand declarative management, one of Kubernetes&#x27; best features makes sense. When you declare <code class='ic'>replicas: 5</code>, you&#x27;ve told the cluster the <strong>desired state</strong>: five Pods should always be running. Suppose you delete one by hand:</p>
+<pre><code>
+kubectl delete pod web-7d9f-abcde
+kubectl get pods   # you still see 5, not 4
+</code></pre>
+<p>This is not a bug. A controller continuously compares the <strong>current state</strong> to the <strong>desired state</strong>, notices only four Pods are running, and immediately schedules a replacement. This loop is called <strong>reconciliation</strong>, and it&#x27;s the engine behind Kubernetes&#x27; self-healing, shown in the loop below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    Desired[&quot;Desired state: 5 Pods&quot;] --&gt; Compare{&quot;Current == Desired?&quot;}
+    Current[&quot;Current state: live Pods&quot;] --&gt; Compare
+    Compare --&gt;|Yes| Wait[&quot;Do nothing, keep watching&quot;]
+    Compare --&gt;|&quot;No, only 4 running&quot;| Act[&quot;Schedule a replacement Pod&quot;]
+    Wait --&gt; Compare
+    Act --&gt; Current</div><figcaption>Kubernetes reconciliation loop driving self-healing</figcaption></figure>
+<p>It also explains why <code class='ic'>kubectl create deployment</code> returns instantly while your container isn&#x27;t running <em>yet</em>. The flow is as follows, as shown in the sequence diagram below: kubectl sends your request to the <strong>API server</strong>, which records the Deployment in <strong>etcd</strong> (the cluster&#x27;s database) and replies &quot;created&quot; — like a restaurant confirming your order before the food is cooked. Then the <strong>Deployment controller</strong> creates a ReplicaSet, the <strong>ReplicaSet controller</strong> creates a Pod (initially <code class='ic'>Pending</code>), the <strong>scheduler</strong> picks a node for it, and finally the <strong>kubelet</strong> on that node pulls the image and starts the container, flipping the Pod to <code class='ic'>Running</code>. You can watch this whole sequence unfold live:</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as kubectl
+    participant API as API Server
+    participant ETCD as etcd
+    participant DC as Deployment Controller
+    participant RC as ReplicaSet Controller
+    participant SCH as Scheduler
+    participant KL as kubelet
+    U-&gt;&gt;API: create deployment web
+    API-&gt;&gt;ETCD: store Deployment
+    API--&gt;&gt;U: created
+    DC-&gt;&gt;API: create ReplicaSet
+    RC-&gt;&gt;API: create Pod (Pending)
+    SCH-&gt;&gt;API: assign Pod to a node
+    KL-&gt;&gt;KL: pull image and start container
+    KL-&gt;&gt;API: Pod status Running</div><figcaption>From kubectl create to a running Pod across cluster components</figcaption></figure>
+<pre><code>
+kubectl get pods -o wide --watch
+kubectl create deployment web --image=nginx
+</code></pre>
+<p>You&#x27;ll see the Pod move from <code class='ic'>Pending</code>, to <code class='ic'>ContainerCreating</code>, to <code class='ic'>Running</code> with an assigned IP — a front-row seat to reconciliation in action.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A kubeconfig binds <strong>clusters</strong>, <strong>users</strong>, and <strong>contexts</strong> together; always confirm <code class='ic'>kubectl config current-context</code> and your namespace before acting, especially on anything destructive.</li>
+<li><code class='ic'>get</code> gives the summary table (reshape it with <code class='ic'>-o wide/yaml/json</code> and filter with <code class='ic'>-l</code>/<code class='ic'>--selector</code>), while <code class='ic'>describe</code>, <code class='ic'>logs</code>, and <code class='ic'>exec</code> take you progressively deeper for debugging.</li>
+<li>Imperative commands (<code class='ic'>run</code>, <code class='ic'>create</code>, <code class='ic'>set</code>, <code class='ic'>scale</code>) are fast for experiments; declarative <code class='ic'>apply -f</code> describes the desired end state and is the standard for repeatable, version-controlled, production workloads.</li>
+<li>Use <code class='ic'>--dry-run=client -o yaml</code> to generate correct manifests instantly, bridging the imperative and declarative worlds.</li>
+<li>Kubernetes constantly reconciles current state toward your declared desired state, which is why a deleted Pod comes back and why a <code class='ic'>create</code> returns before the container is truly running.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. [Warm-up] Inspect your current kubeconfig and switch namespace.</p>
+<p>1. Print the name of the context you are currently using.</p>
+<p>2. List every available context and identify which one is marked as active.</p>
+<p>3. Set the default namespace for your current context to <code class='ic'>kube-system</code> (without switching context).</p>
+<p>4. Confirm the change by listing Pods — you should see system Pods without specifying <code class='ic'>-n</code>.</p>
+<p>5. Restore the default namespace back to <code class='ic'>default</code>.</p></div>
+              <pre class='starter'><code># A local cluster must be reachable (minikube, kind, or any kubeconfig-enabled cluster).
+# No starter code — these are pure CLI commands.</code></pre>
+              <details><summary>Hint</summary><ul><li>The kubeconfig file lives at `~/.kube/config` by default. If `kubectl config view` shows nothing useful, check that the file exists and that `KUBECONFIG` env var is not overriding the path.</li><li>`kubectl config set-context --current` modifies only the active context record. Omitting `--current` and supplying a name instead would create or overwrite a named context.</li><li>After step 3, run `kubectl config view --minify` to see only the active-context block and verify the namespace field changed.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 – show the active context name
+kubectl config current-context
+
+# Step 2 – list all contexts (active one is marked with *)
+kubectl config get-contexts
+
+# Step 3 – pin kube-system as the default namespace for the current context
+kubectl config set-context --current --namespace=kube-system
+
+# Step 4 – confirm: Pods are now from kube-system without -n
+kubectl get pods
+
+# Step 5 – restore default namespace
+kubectl config set-context --current --namespace=default</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl config current-context</code> reads the <code class='ic'>current-context</code> field in <code class='ic'>~/.kube/config</code>. <code class='ic'>get-contexts</code> shows the full table with a <code class='ic'>*</code> on the active row. <code class='ic'>set-context --current --namespace=&lt;ns&gt;</code> only edits the namespace field of the already-active context — it does NOT switch to a different cluster or user. Restoring <code class='ic'>default</code> at the end is important hygiene; leaving an unusual default namespace can confuse later commands.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. [Core 1] Read the cluster and debug a broken Pod.</p>
+<p>1. Create a Pod with a deliberately wrong image:</p>
+<p>   <code class='ic'>kubectl run bad-pod --image=nginx:doesnotexist999</code></p>
+<p>2. Watch its status until it reaches <code class='ic'>ImagePullBackOff</code>.</p>
+<p>3. Use <code class='ic'>kubectl describe</code> to find the exact error message in the <strong>Events</strong> section.</p>
+<p>4. List only Pods whose label <code class='ic'>run=bad-pod</code> is set (kubectl adds this label automatically with <code class='ic'>run</code>).</p>
+<p>5. Check the output formats: dump the Pod spec as YAML, then as JSON.</p>
+<p>6. Delete the Pod when you are done.</p></div>
+              <pre class='starter'><code># Prerequisites: kubectl configured and a reachable cluster.
+# No YAML file needed — all steps are CLI only.</code></pre>
+              <details><summary>Hint</summary><ul><li>If the Pod moves to `ErrImagePull` first and then flips to `ImagePullBackOff`, that is normal — the kubelet retries with exponential back-off, and `ImagePullBackOff` is just the back-off phase.</li><li>Inside `kubectl describe pod bad-pod`, scroll to the very bottom of the output; the **Events** table is the last section and contains the timestamped pull-failure messages.</li><li>You can combine flags: `kubectl get pod bad-pod -o wide --watch` shows IP and node assignment while streaming live updates.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 – create the broken Pod
+kubectl run bad-pod --image=nginx:doesnotexist999
+
+# Step 2 – watch status (Ctrl-C to stop once ImagePullBackOff appears)
+kubectl get pod bad-pod --watch
+
+# Step 3 – read the Events block
+kubectl describe pod bad-pod
+# Look for: Failed to pull image ... : not found  (or similar registry error)
+
+# Step 4 – filter by label
+kubectl get pods -l run=bad-pod
+
+# Step 5a – YAML output
+kubectl get pod bad-pod -o yaml
+
+# Step 5b – JSON output
+kubectl get pod bad-pod -o json
+
+# Step 6 – clean up
+kubectl delete pod bad-pod</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl run</code> automatically attaches the label <code class='ic'>run=&lt;name&gt;</code>, which is why <code class='ic'>-l run=bad-pod</code> works as a selector. The <code class='ic'>describe</code> Events section is the primary first-stop when a Pod is stuck: for <code class='ic'>ImagePullBackOff</code>, the event message will state the exact registry error (image not found, auth failure, etc.). <code class='ic'>-o yaml</code> and <code class='ic'>-o json</code> emit the <em>live</em> object from the API server — not a local file — which means you see server-populated fields like <code class='ic'>status</code>, <code class='ic'>resourceVersion</code>, and container state that never appear in a hand-written manifest.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. [Core 2] Reach inside a running container with <code class='ic'>logs</code> and <code class='ic'>exec</code>.</p>
+<p>1. Create a healthy Pod: <code class='ic'>kubectl run web --image=nginx:1.25</code></p>
+<p>2. Wait until it is <code class='ic'>Running</code>, then stream its access logs in follow mode (<code class='ic'>-f</code>). Open a second terminal and curl the Pod IP (get it from <code class='ic'>kubectl get pod web -o wide</code>) to generate a log line, then stop following.</p>
+<p>3. Use <code class='ic'>kubectl exec</code> to run <code class='ic'>nginx -v</code> inside the container (non-interactive, single command).</p>
+<p>4. Open an interactive shell inside the container and verify the environment variable <code class='ic'>NGINX_VERSION</code> is set (<code class='ic'>printenv NGINX_VERSION</code>), then <code class='ic'>exit</code>.</p>
+<p>5. Delete the Pod.</p></div>
+              <pre class='starter'><code># Two terminals are helpful for step 2 (one for log follow, one for curl).
+# If curl is not available on your machine, just observe the default NGINX access log after a few seconds.</code></pre>
+              <details><summary>Hint</summary><ul><li>If `sh` is not in the image (some minimal images use `ash` or `bash`), try `kubectl exec -it web -- bash` or `kubectl exec -it web -- /bin/sh`.</li><li>To get the Pod IP without a second terminal, run `kubectl get pod web -o jsonpath=&#x27;{.status.podIP}&#x27;` — `jsonpath` is a concise alternative to full `-o json` piped through `jq`.</li><li>If you do not have `curl` locally, you can test connectivity from inside the container itself: `kubectl exec -it web -- sh -c &#x27;wget -qO- http://localhost&#x27;`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 – start a healthy Pod
+kubectl run web --image=nginx:1.25
+
+# Step 2a – wait for Running
+kubectl get pod web --watch
+# (stop watching once status shows Running)
+
+# Step 2b – follow logs (keep this terminal open, switch to another for curl)
+kubectl logs -f web
+# In second terminal: POD_IP=$(kubectl get pod web -o jsonpath=&#x27;{.status.podIP}&#x27;)
+#                     curl http://$POD_IP
+# Switch back and observe the GET / line appear, then Ctrl-C
+
+# Step 3 – single non-interactive command
+kubectl exec web -- nginx -v
+
+# Step 4 – interactive shell
+kubectl exec -it web -- sh
+# Inside the shell:
+printenv NGINX_VERSION
+exit
+
+# Step 5 – clean up
+kubectl delete pod web</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl logs -f</code> behaves like <code class='ic'>tail -f</code> on the container&#x27;s stdout/stderr — it stays open and prints new lines as they arrive, which is ideal for watching live traffic. The <code class='ic'>--</code> separator between <code class='ic'>kubectl exec</code> arguments and the container command is mandatory when the container command has its own flags (like <code class='ic'>nginx -v</code>); without <code class='ic'>--</code>, kubectl may misinterpret <code class='ic'>-v</code> as its own verbosity flag. <code class='ic'>-it</code> allocates a pseudo-TTY (<code class='ic'>-t</code>) and keeps stdin open (<code class='ic'>-i</code>), which is what makes an interactive shell work. <code class='ic'>NGINX_VERSION</code> is an environment variable baked into the official NGINX image — confirming it from inside proves you are truly inside the container, not on the host.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. [Applied] Scaffold a Deployment manifest with dry-run, apply it declaratively, then update and self-heal it.</p>
+<p>1. Use <code class='ic'>--dry-run=client -o yaml</code> to generate a manifest for a Deployment named <code class='ic'>myapp</code> with image <code class='ic'>nginx:1.25</code> and 2 replicas. Save it to a file (e.g., <code class='ic'>myapp-deploy.yaml</code>).</p>
+<p>2. Open the file and add the label <code class='ic'>team: ops</code> under <code class='ic'>spec.template.metadata.labels</code> (alongside the existing <code class='ic'>app: myapp</code> label that kubectl generated). Save the file.</p>
+<p>3. Apply the manifest with <code class='ic'>kubectl apply -f myapp-deploy.yaml</code> and verify 2 Pods are Running.</p>
+<p>4. <strong>Simulate self-healing:</strong> delete one of the running Pods by name, then immediately re-run <code class='ic'>kubectl get pods</code> in a loop (or with <code class='ic'>--watch</code>) and observe Kubernetes recreate it automatically.</p>
+<p>5. Update the image to <code class='ic'>nginx:1.26</code> by editing <code class='ic'>myapp-deploy.yaml</code> and re-running <code class='ic'>kubectl apply -f</code>. Confirm the rollout with <code class='ic'>kubectl rollout status deployment/myapp</code>.</p>
+<p>6. Clean up: <code class='ic'>kubectl delete -f myapp-deploy.yaml</code>.</p></div>
+              <pre class='starter'><code># No starter file — you generate it in step 1.
+# Target directory for myapp-deploy.yaml can be anywhere convenient on your local machine.</code></pre>
+              <details><summary>Hint</summary><ul><li>If the generated YAML contains `creationTimestamp: null` or `status: {}`, leave those lines as-is — kubectl and the API server handle them gracefully; they are placeholder fields in the dry-run output.</li><li>After `kubectl apply`, running `kubectl get deployment myapp -o yaml` lets you verify the `team: ops` label propagated to the live object under `spec.template.metadata.labels`.</li><li>If `kubectl rollout status` hangs, the new image may be failing to pull. Open a second terminal and run `kubectl describe deployment myapp` or `kubectl get pods` to check for `ImagePullBackOff` on the new Pods.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1 – scaffold the manifest
+kubectl create deployment myapp --image=nginx:1.25 --replicas=2 \
+  --dry-run=client -o yaml &gt; myapp-deploy.yaml
+
+# Step 2 – add team: ops label (edit the file)
+# Find the section that looks like:
+#   spec:
+#     template:
+#       metadata:
+#         labels:
+#           app: myapp
+# Add one line so it becomes:
+#           app: myapp
+#           team: ops
+
+# Step 3 – apply and verify
+kubectl apply -f myapp-deploy.yaml
+kubectl get pods -l app=myapp
+# Wait until both show Running
+
+# Step 4 – self-healing demo
+# Get one Pod name:
+kubectl get pods -l app=myapp
+# Delete it (replace &lt;pod-name&gt; with the actual name from above)
+kubectl delete pod &lt;pod-name&gt;
+# Watch the replacement:
+kubectl get pods -l app=myapp --watch
+# You will see a new Pod appear within seconds
+
+# Step 5 – update image in myapp-deploy.yaml:
+# Change   image: nginx:1.25   →   image: nginx:1.26
+# Then re-apply:
+kubectl apply -f myapp-deploy.yaml
+kubectl rollout status deployment/myapp
+
+# Step 6 – clean up
+kubectl delete -f myapp-deploy.yaml</code></pre>
+                <div class='exp2'><p><code class='ic'>--dry-run=client -o yaml</code> tells kubectl to compute the full API object locally and print it without contacting the server — an instant, error-free manifest scaffold. Re-running <code class='ic'>apply</code> after editing the YAML is the heart of declarative management: kubectl computes a three-way diff (original manifest, current live state, new manifest) and only patches what changed, leaving everything else untouched. When you delete a Pod owned by a Deployment, the Deployment&#x27;s ReplicaSet controller detects that the current replica count (1) is below the desired count (2) and schedules a replacement — this is the reconciliation loop in action. <code class='ic'>kubectl rollout status</code> blocks until the new Pods are healthy and the old ones are terminated, giving you a reliable &quot;done&quot; signal after an image update.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=QOv26a-yaq8' target='_blank'>Improve kubectl productivity with imperative commands</a></li><li><a href='https://www.youtube.com/watch?v=hDBgeUuPgXo' target='_blank'>Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube &amp; kubectl</a></li><li><a href='https://www.youtube.com/watch?v=Dn3RkWlPDAk' target='_blank'>What really happens when we run &quot;kubectl create deployment&quot;?</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -1,0 +1,182 @@
+## Video 1: Day 41: Pod Security in Kubernetes – Mastering Security Context & Linux Capabilities | CKA 2025
+https://www.youtube.com/watch?v=ZoTKkmY6VSw
+
+Hi, I am Varun Jooshi and welcome to day 41 of our certified Kubernetes administrator 2025 course. In today's lesson, we focus on a critical yet often overlooked aspect of Kubernetes that is pod security. Through hands-on demos, we will reinforce key concepts and show how to apply security best practices using security contexts and Linux capabilities to protect your workloads.
+
+Why is pod security a thing?
+
+Before we deep dive into pod security, we must first understand why we need pod security to begin with. Kubernetes lets you run containers easily. But it does not secure them by default. If you spin up a basic pod, it often runs as a root user inside the container which can be dangerous. But we have been creating pods since the beginning and we have not defined any security-related parameters anywhere. So what we get is the default design.
+
+When we create a basic pod, if I run id it will show me that I have logged in as a user whose UID is zero. UID 0 is associated with the root user. The GID (group ID) is also zero. The groups that this user is part of are the root group and the wheel group. The wheel group is also associated with administrative privileges like sudo and su.
+
+Some of you might be wondering that if my containers are running as root then what is the problem with that? Understand that when we talk about security and any production grade implementations, the first thing from a security perspective that should come to your mind is the principle of least privilege. Whatever permissions you are giving to any user or to your operating system should be adhering to the principle of least privilege, which says only grant the permissions to perform the things that are needed to be performed by that user. Do not give any extra permissions.
+
+Why running your containers with the root user can be counterproductive:
+
+First is privilege escalation. If the container is compromised, an attacker could attempt to escalate privileges and break out of the container. If my application is running using the root user and some malicious actor compromises my container, since it is the root user, it can perform any system level configurations. Any root privileges will be available at the disposal of that malicious actor. Not just that, if special permissions are granted, then that container user can also access the underlying host's kernel. That is dangerous.
+
+Second point is access to host resources in less strictly isolated environments. Without user namespaces or pod security standards, a root container may gain elevated access to the host system.
+
+Third one is accidental misuse. If my application doesn't want the root user, if my application is not performing any system level configuration changes, my application just wants to simply run. It is not performing any other action. Then why do I need to run my application as a root user? If the application running as root can unintentionally modify critical files or perform actions that would otherwise be restricted, then it is not recommended to run your applications as root user.
+
+Non-compliance. Any client or any project that you deal with would want to adhere to certain security standards and also compliance standards. Security can be subjective. Security for me can mean something else. Security for you can mean something else. But when I talk about compliance standards, these are set by third-party companies. If a third-party company has set a compliance standard, then your application or your containers should meet those specific things. If the compliance standard adhered by your application warrants you to use a non-root user to run your application processes, then you must be running your processes with a non-root user.
+
+Not all containers run as root. Some container images are designed to run as non-root. For example, if I am creating a Dockerfile and I specifically add a couple of instructions in that Dockerfile that would result in the application running as a non-root user, that is possible. Some container images specify a user ID directly instead of a username. Remember that in Linux, the operating system cares about the numerical values (user ID and group ID), not the usernames. Usernames are there so that we humans can read them and understand them.
+
+How to achieve pod security:
+
+Pod security can be achieved via two things: security context and Linux capabilities. When I talk about security contexts, these are applicable at both container and pod level. But Linux capabilities are only available at container level.
+
+Security context can be segregated into three categories. Pod level: you can only have this security context at a pod level. Pod plus container level: you can define these at both pod level and container level. But if you have defined it at both pod and container level, then container level will take precedence. Container level: these settings can only be defined at container level.
+
+Pod plus container level settings:
+
+First is run as user. This will instruct the container that whatever process you are running, you must run it with this user ID.
+
+Second is run as group. We are specifying whenever this process is started, I want you to run as this group ID.
+
+Third is run as nonroot. Once you add this, then no matter what, your containers will not start with the root user. They must start with a non-root user. For example, if you do not have the run as user and run as group settings and you only have this setting, then you will not be able to run your nginx container because we know that by default nginx container runs as root and you have added this flag. Hence, this flag will only allow the container to run if your container is running as a non-root user.
+
+Container level parameters:
+
+First is allow privilege escalation. This prevents the container from gaining additional privileges. Suppose there is a binary owned by the root user with the setuid bit set. Now even if a non-root user runs it, it will execute with root privileges. Imagine your container is running as a non-root user with user ID 1000 without protection. If you are not having false for this, then that container could run such a binary and gain root level capabilities inside the container even though it didn't start that way.
+
+Second one is privileged. This gives the container full access to the host including kernel level operation. In production implementations, you would typically set this to false.
+
+Third is read only root file system. This mounts the container's root file system as read-only. If my application is not performing any sort of modifications in the system level configuration files or system files, then why do I have to give permissions to my application to modify something? If my application modifies something, then I should. But if it is not, then I should not. If an application is just supposed to read some data and it is not modifying something, then it is important you set this to true.
+
+Once you do this, anything underneath slash (the root directory) will not be modifiable. Your container will not be able to create or modify any files. But what if my application wants to modify some data that is coming from an external disk? For example, what if I am using hostPath, mtdir, or the recommended way, a PVC? How can my application modify that if you set this to true? You can always use FS group. FS group specifies the group that owns the mounted volume. If you have specified an FS group, for example, then anything that is mounted will have special permissions to modify and write files to that directory or to those mounted volumes.
+
+Demonstration with security context:
+
+We created a secure pod with run as user whose UID is 1000. Run as group whose UID is 3000. The FS group is 2000. So if I have mounted anything (mounted a volume), then that volume should have ownership of this FS group so that my application can modify that directory, can create files in that directory, and can delete files in that directory in that mounted volume. Run as nonroot is also set to true.
+
+In the containers section, we say allow privilege escalation is false. Read only root file system is true. So my application will not be able to write any file.
+
+When we exec into this pod and run mkdir test_dir, it says "can't create directory read only file system" and why is this? This is because of the read only root file system setting. When we run sudo su, the busybox image does not have pseudo or su installed by default. But what we want to understand is even if you would have this installed, then also these commands won't run because we have supplied allow privilege escalation as false.
+
+When we run id, the UID is 1000, and it says unknown here because we did not specify a username. Do not think this as an error. Linux security is based on UIDs and GIDs, not usernames. Username is optional and only needed for human readability. We can understand that it is UID 1000 which is running my process.
+
+Demonstration with writable volume:
+
+In demo 2, we are creating a pod named secure_writable. We define parameters at the pod level itself: security context with run as user, run as group, FS group, and run as nonroot.
+
+We also define allow privilege escalation as false at container level. Read only root file system is true. So we cannot perform any write operations in the root file system. But we are also saying this pod has a volume associated with it. That volume's name is writable_volume and this is of type emptydir. We are mounting that volume onto the pod with the volume mounts section. The name is writable_volume and mount path is /writable. Anything that we create in the root file system or anything that we modify in the root file system will be denied. But this will be allowed because FS group specifies the group that owns mounted volume. So this mounted volume will be owned by group 2000.
+
+When we exec into this pod and run ls, you see that ownership is of root, root. We also see writable_volume here. But this one is owned by root, but the group ID is 2000. Why is this 2000? Because we defined 2000 here. FS group specifies the group that owns the mounted volume. The mounted volume is named writable because that is what we called it. It has ownership of group ID 2000. My user (user ID 1000) is part of this group.
+
+When we try to create a directory in the root filesystem, it fails due to read-only file system. But if we cd into writable_volume and run the same command, it succeeds. When we touch my_file, this command will also succeed because my application running as UID 1000 has access to this writable directory, this volume. We have specified 2000 as FS group, hence the group 2000 has writes on the writable directory and volume.
+
+When we run ls again, the owner is 1000 and the group owner is 2000, which is the expected behavior.
+
+Linux capabilities:
+
+Now what we want to cover is Linux capabilities. One thing to understand is that root privileges contain plenty of things that are distinct low-level permissions called capabilities. Linux capabilities can be thought of as small bifurcations within the root privileges.
+
+For example, if I have a container, I might allow that container to modify the system time, but I might not allow my container to modify network settings or my Ethernet adapters. Hence, Linux capabilities allow you to do certain root level things and can also deny you to do certain root level things.
+
+The first Linux capability is chown. If you have this at container level and you have set this to add, then your containers will be able to change ownership and change ownership using chown for files and directories.
+
+Next is sys_time. This is there to manage the time sync services like NTP. So you can use this to change the date and time of your container.
+
+There is net_admin. Net as in network. This allows you to modify network interfaces, routing tables, and firewall rules.
+
+Capabilities demonstration:
+
+We are creating a pod that is called cap_pod. Under spec section, we are only creating a container. That container's name is app. Image is busybox. Command is asking it to sleep for 3600 seconds. Then there is security context again. Underneath security context, you define capabilities.
+
+What we are doing is the recommended way. What we are saying is drop all the capabilities for now and only allow containers to do these things. But if your application, for example, does not want these privileges, then you can entirely remove this section as all the capabilities will be dropped by default.
+
+If you drop all capabilities and then ask your application teams to check whether the application is working fine or not. If there is an error, then ask them what that error is and work with them to add appropriate capabilities in the add section. But always have this capability section because you do not want your containers to perform actions that are highly privileged.
+
+In this example, what we are allowing the container to do is allow it to add/remove network interfaces and then change the system time.
+
+When we run ip link show, this will show all the adapters. There is a loopback adapter which is in up state. When we run ip link set lo down, it has shut down that loopback port adapter. If we run this again, we see that loopback is down. Previously it had an up. So we can conclude that we are able to run this command.
+
+We can also change the date. Before we do that, we want to show you what is the date in this OS. The date is set to June 28th. We change the date to what we desire, and if we run date, we see the date has changed.
+
+But we also want to show you what is something that will not work. If we go to our diagrams, we see we have chown as well. When we touch a file named my_file, if we run ls, we see my_file exists here. If we run ls -lr, root will have the ownership for my_file and that is what we expect because we are logged in as the root user. When we want to change the ownership to user ID 1000 and group ID 1000 and run chown 1000:1000 my_file, it says "operation is not permitted". Why is this operation not permitted? This is not permitted because of what we have defined in our YAML. We have said drop all other capabilities and only allow these.
+
+In the second demo with cap_pod_2, we comment out the add section and keep drop to all. Once we do this, we cannot do any of the things we did before either. When we try to run the date command again, it will error out because we have set that date cannot be changed because we have dropped that capability.
+
+So start with drop all and then see how your application behaves. If your application is not functioning properly, you check the error logs of the application and then add the needed capabilities. But do not start with add all, never.
+
+What we covered is foundational for running secure production grade clusters, especially in multi-tenant environments or where compliance is critical.
+
+
+## Video 2: Kubernetes Pod Security Deep-Dive: Deny Privilege Escalation, Drop Capabilities & Run as Non-Root
+https://www.youtube.com/watch?v=fyMiIM_UReU
+
+Pretty complex properties and our server operation will explain what they actually mean and what they actually do.
+
+When trying to apply the deployment, it says that we have several violations to the policy on the cluster.
+
+First, we should set privilege escalation to false in our customer deployment. So we need to modify the security context. Nodeworke will explain what this means. Maybe to take a few steps back, basically we set for all of your namespaces that you're working in a sort of baseline security context. When you start to do a deployment of a pod or container or anything else, there are certain settings that we want to enforce there to be in your YAML before we allow it to actually start running on the cluster.
+
+As an example, when you got the employee pod, it deployed fine. There was no problem with that. But if you look inside that YAML, you will see it already has the YAML spec defined in it for the security context. For the customer pod, you see it's an empty dictionary for security context. When you start deploying, there's none for it configured. When it hits the cluster, it checks it and goes, "No, we deny that. We don't want that." Because our security baseline enforces a few basics.
+
+When there are multiple settings asked for, you should separate them from each other because there are multiple settings it's asking from you, not a singular setting. They will all output them on the same line. So you have to go one by one through each of them.
+
+First one is allow privilege escalation false. When your container deploys with a certain set of permissions, you already tell Kubernetes you're not allowed to, in the life cycle of that pod, add more if they were to be given. If a privilege escalation takes place, it won't allow that and we already enforce that from the start.
+
+Second one is security context capabilities drop all. Because your container is basically a process inside the Linux kernel. When you deploy it, you get all kinds of capabilities with that container when that process runs. One for example might be you get the change owner (chown) and whatever you want to call it inside Linux, which are some capabilities that your pod can execute inside the cluster as well.
+
+What we want to enforce is that basically you want to run in a least privilege way of giving these capabilities to a pod. If your pod doesn't need them, drop all of them. And then next step, you can provide a specific list of capabilities that you do allow to be used. That way you kind of run a least privileged way of giving those kernel capabilities to a pod. Because you might imagine, if you give change ownership capabilities to a pod and an attacker might get access to it, it can do a lot of damage to your cluster and other parts of your infrastructure.
+
+These settings are part of the principle that you want to only give the pod the security capabilities it is actually using. It's about giving the least possible amount of security privileges.
+
+Next one, run as nonroot, should be set to true, not false. Even though it seems pretty self-explanatory, a lot of base images that people will use for their application by default will run with root. So if your cluster admin has not set up any security baseline for this, people and developers can just deploy these images with root privileges because they by default will use them and not be aware of that. You basically have a ticking time bomb running in multiple pods, how much it scales over your cluster. So even though it seems like a very trivial thing, it is of large impact.
+
+By default in Docker, if you build an image and don't configure anything, it runs as root user. Some people saw that if you try to run the customer image as it was by default, it will not start because of this constraint. Because the default image would run as a root user. That's why we added the Dockerfile layer to set the user to user 1000, which is the default, which is not an admin user. So that's actually required on this cluster.
+
+Next one, the seccomp profile must be set to runtime default or localhost runtime default. This also has to do with capabilities inside the kernel that you can load as modules to a pod. Think of things like commands like the mount command. Is there a reason why your pod needs to have access to the mount command? And once it gets access, should it be able to re-mount modules or get more access over the life cycle of the pod? So basically you shorten how much access it has to kernel capabilities.
+
+The TLDR is you can do a lot if you are not careful. Limit your pods as much as possible. It's important to Google documentation because you don't need to know all this stuff from the top of your mind. The best thing you can do is look it up in the documentation, read the keys of the dictionary, and see the explanation of what they mean inside that YAML schema.
+
+
+## Video 3: Pod Security Context: Running as Non-Root | Kubernetes Security Tutorial
+https://www.youtube.com/watch?v=Nppym_oFdYQ
+
+Pod security context with a focus on running as non-root. This is about mastering security settings at the pod level in Kubernetes. Running containers as non-root users is one of the most fundamental security practices in container orchestration. Throughout this tutorial, we'll explore why this matters and how to implement it correctly.
+
+Why should we run containers as non-root users?
+
+There are two critical reasons. First, it limits the blast radius. If an attacker manages to escape from a container that's running with root privileges, they can potentially compromise the entire host system. By running as non-root, we significantly reduce the damage an attacker can cause.
+
+Second, it provides defense in depth. This adds an essential security layer that protects your system even if other security mechanisms fail. It's a simple yet powerful way to harden your Kubernetes deployments.
+
+The pod security context is a powerful feature that applies security settings to all containers within a pod. It gives you control over three main areas. First, it sets user and group IDs for the processes running inside your containers. Second, it controls file system permissions, determining who can read, write, or execute files. Third, it manages Linux capabilities and privileges, allowing you to grant or restrict specific system level operations.
+
+By configuring these settings at the pod level, you ensure consistent security policies across all containers in that pod.
+
+Basic non-root configuration:
+
+This is a simple pod manifest where we define the security context. Under the spec section, we add a security context block. Inside it, we set run as nonroot to true, which enforces that the container must run as a non-root user. We also set run as user to 1000, explicitly specifying the user ID that the container processes should use. Then we define our container with a name and image as usual. This simple configuration ensures your pod runs with non-root privileges.
+
+Key fields in the security context:
+
+First is run as nonroot, which enforces that the container must run as a non-root user. If the container image tries to run as root, Kubernetes will prevent it from starting.
+
+Second is run as user, which specifies the user ID for running container processes.
+
+Third is run as group, which sets the primary group ID for container processes.
+
+Finally, there's FS group, which controls the ownership of mounted volumes. This is particularly important when your containers need to read or write to persistent storage.
+
+Complete example:
+
+In the security context section, we set run as nonroot to true, run as user to 1000, run as group to 3000, and FS group to 2000. This means the container runs as user 1000 with group 3000, and any volumes mounted will be owned by group 2000. We then define our container and mount a volume at the data path. This configuration ensures comprehensive security for both the running processes and the file system.
+
+Behavior of run as nonroot:
+
+What actually happens when run as nonroot is set to true? The behavior depends on your container image. If your image is built with a non-root user defined, the pod starts successfully without any issues. However, if your image runs as root by default, Kubernetes will refuse to start the pod and return an error. This failsafe mechanism ensures that no container accidentally runs with root privileges when you've explicitly configured it to run as non-root. It's a safety net that protects your cluster.
+
+Best practices:
+
+First, always set run as nonroot to true in production environments. This should be a standard security baseline.
+
+Second, use high user ID values, typically 1000 or above, to avoid conflicts with system users.
+
+Third, build your container images with the user instruction in your Dockerfile, so the non-root user is baked into the image itself.
+
+Finally, combine pod security context with pod security standards for complete layered protection. These practices will significantly strengthen your Kubernetes security posture.

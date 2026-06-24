@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-InitContainers&amp;Sidecars</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-09-init-containers-sidecars/index.html'>한국어</a></div>
+  <h1>K8S-InitContainers&amp;Sidecars</h1>
+  <div class="sub">Intermediate learners who already understand basic Kubernetes Pod and container concepts. · 1 lecture</div>
+  <ul><li><a href='#lec1'>01. Kubernetes Init Containers and the Sidecar Pattern</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Kubernetes Init Containers and the Sidecar Pattern </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Explain how init containers work — they run before your application containers, one at a time, in the order you define them, and each must finish successfully before the next starts — and recognize common use cases such as preparing configuration or waiting on dependencies.</li>
+<li>Describe the sidecar pattern and its typical jobs (log shipping, proxies, config sync), and distinguish it from an ordinary multi-container Pod.</li>
+<li>Write and validate a Kubernetes 1.28+ <strong>native sidecar</strong> (an init container with <code class='ic'>restartPolicy: Always</code>) in YAML, and explain its lifecycle advantages over the old hand-rolled sidecar approach.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why a single container is rarely enough</h4>
+<p>A Kubernetes Pod is the smallest deployable unit, and it can hold more than one container. That&#x27;s deliberate. In real systems, your application almost never runs alone: something has to fetch its configuration first, ship its logs somewhere, encrypt its outbound traffic, or sync secrets in the background. You <em>could</em> cram all of that into your main image, but then every concern is tangled together and impossible to update independently.</p>
+<p>Kubernetes gives you two clean tools for this: <strong>init containers</strong> for one-time setup that must happen <em>before</em> your app starts, and <strong>sidecars</strong> for helper processes that run <em>alongside</em> your app for its entire life. They look similar in YAML, but they solve opposite halves of the problem — startup versus runtime. Let&#x27;s take them one at a time.</p>
+<h4>Init containers: the Pod&#x27;s startup checklist</h4>
+<p>An init container is a startup container that you declare as part of the Pod spec. The defining rule is simple but strict: <strong>it must complete successfully, or no other container in the Pod will ever launch.</strong> If an init container exits with an error, the Pod is considered failed, and Kubernetes will (depending on your restart policy) keep retrying it.</p>
+<p>A useful mental model is a <em>pre-flight checklist</em>. Before the &quot;real&quot; work begins, you verify that every prerequisite is met. Is the database reachable? Is the config volume populated? Can we find today&#x27;s Kafka broker? Do we have valid credentials? If any item on the checklist fails, there&#x27;s no point continuing — so the Pod simply doesn&#x27;t start. If you&#x27;ve done object-oriented programming, this is the same discipline as a constructor: you never let a half-initialized object exist, and init containers make sure you never run a half-initialized Pod.</p>
+<blockquote class='callout'>
+<p>Init containers run <strong>sequentially, in the exact order you list them</strong>, and each one runs to completion before the next begins. App containers start only after <em>all</em> init containers have succeeded.</p>
+</blockquote>
+<p>Common use cases:</p>
+<ul>
+<li><strong>Waiting on dependencies</strong> — block startup until a service like a database or message broker is actually ready, so your app doesn&#x27;t crash-loop on first launch.</li>
+<li><strong>Preparing data and config</strong> — <code class='ic'>git clone</code> a repository, render templates into a shared volume, or download assets the app needs.</li>
+<li><strong>Volume initialization</strong> — create directory structures, set permissions, or seed a shared <code class='ic'>emptyDir</code> volume that the app container then reads.</li>
+</ul>
+<p>One nice detail: init containers share the same fields as regular containers (<code class='ic'>name</code>, <code class='ic'>image</code>, <code class='ic'>command</code>, <code class='ic'>args</code>, and so on) with one exception — they don&#x27;t take liveness or readiness probes. Probes are for long-running processes; an init container is expected to start, do its job, and stop, so there&#x27;s nothing to keep probing.</p>
+<p>Here is a Pod that waits for two dependencies before the application is allowed to run. The structure is two init containers that each loop until a Service resolves, followed by the real app container:</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  # Init containers run first, one at a time, in this order.
+  initContainers:
+    - name: init-myservice
+      image: busybox:1.36
+      # Block until DNS for &quot;myservice&quot; resolves, then exit 0.
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &quot;until nslookup myservice; do echo waiting for myservice; sleep 2; done&quot;]
+    - name: init-mydb
+      image: busybox:1.36
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &quot;until nslookup mydb; do echo waiting for mydb; sleep 2; done&quot;]
+  # The app container starts ONLY after both init containers succeed.
+  containers:
+    - name: myapp
+      image: nginx:1.27
+      ports:
+        - containerPort: 80
+</code></pre>
+<p>If <code class='ic'>myservice</code> and <code class='ic'>mydb</code> aren&#x27;t reachable, the Pod sits patiently in the <code class='ic'>Init:</code> state instead of crash-looping — exactly the behavior you want. The strict one-at-a-time ordering for this Pod is shown in the diagram below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    Start([Pod scheduled]) --&gt; Init1[&quot;init-myservice runs&quot;]
+    Init1 --&gt; Check1{Exited 0?}
+    Check1 --&gt;|No| Retry1[&quot;Restart per restartPolicy&quot;]
+    Retry1 --&gt; Init1
+    Check1 --&gt;|Yes| Init2[&quot;init-mydb runs&quot;]
+    Init2 --&gt; Check2{Exited 0?}
+    Check2 --&gt;|No| Retry2[&quot;Restart per restartPolicy&quot;]
+    Retry2 --&gt; Init2
+    Check2 --&gt;|Yes| App[&quot;App container myapp starts&quot;]
+    App --&gt; Ready([Pod Running])</div><figcaption>Init containers run sequentially, and any failure blocks the app</figcaption></figure>
+<h4>The sidecar pattern, and what it really means</h4>
+<p>A <strong>sidecar</strong> is a helper container that runs <em>next to</em> your main application and extends its functionality without changing the main image. The name comes from a motorcycle sidecar: a separate seat bolted to the bike, going wherever the bike goes.</p>
+<p>Typical sidecar jobs:</p>
+<ul>
+<li><strong>Log shipping</strong> — the app writes logs to a shared volume; the sidecar tails that file and forwards it to your logging backend.</li>
+<li><strong>Proxies / service mesh</strong> — a sidecar (for example, Envoy) intercepts all network traffic to add mutual TLS, retries, and observability without the app knowing.</li>
+<li><strong>Config sync</strong> — the sidecar watches a remote config source and keeps a local file fresh, so the app always reads up-to-date settings.</li>
+</ul>
+<p>The key difference from an <em>ordinary</em> multi-container Pod is intent and lifecycle coupling. In a plain multi-container Pod, the containers are peers — each is part of the core function. A sidecar is explicitly <em>subordinate</em>: it exists only to support the main app, and it should live and die in step with it.</p>
+<h4>The dirty secret of &quot;classic&quot; sidecars</h4>
+<p>Here&#x27;s the awkward part that surprises many newcomers: <strong>for most of its history, Kubernetes had no actual concept of a sidecar.</strong> We talked about sidecars constantly, but technically they were just a second entry in the <code class='ic'>containers:</code> list with no special status. Kubernetes treated all containers in that list as equal peers and started them roughly in parallel — with no guarantee about ordering.</p>
+<p>That gap caused real, painful bugs:</p>
+<ul>
+<li><strong>The startup race.</strong> The motorcycle could roar 10 miles down the road before the sidecar was even attached. If your app started before its proxy sidecar was ready, early requests failed, alerts fired into PagerDuty, and canary deployments broke — all because the app didn&#x27;t wait.</li>
+<li><strong>The shutdown problem.</strong> With Jobs, the Pod is supposed to finish when the main task completes. But a proxy or logging sidecar runs forever by design, so it would keep the Pod alive indefinitely and the Job would never report &quot;done.&quot;</li>
+</ul>
+<p>For years, teams worked around this with hacks: shared &quot;ready&quot; flag files, shell loops that polled for the sidecar, or <code class='ic'>preStop</code> tricks. They worked, but they were fragile and every team reinvented them.</p>
+<h4>Native sidecars in Kubernetes 1.28+</h4>
+<p>Kubernetes 1.28 finally gave sidecars first-class support — and the implementation is delightfully clever. There&#x27;s no new <code class='ic'>sidecars:</code> field. Instead, you declare your sidecar as an <strong>init container with <code class='ic'>restartPolicy: Always</code></strong>.</p>
+<p>That sounds contradictory at first, so unpack the two halves:</p>
+<p>1. <strong>It&#x27;s an init container</strong>, so it starts <em>before</em> the main app container — solving the startup race. The app is guaranteed not to begin until the sidecar is up.</p>
+<p>2. <strong><code class='ic'>restartPolicy: Always</code></strong> changes the rule &quot;an init container must run to completion.&quot; Now Kubernetes doesn&#x27;t wait for it to finish; it considers the init phase complete once this container is <em>started</em>, then moves on to the app container. Because the restart policy is <code class='ic'>Always</code>, the sidecar keeps running for the whole life of the Pod, and if it crashes it&#x27;s automatically restarted.</p>
+<p>The lifecycle benefits this unlocks:</p>
+<ul>
+<li><strong>Guaranteed startup ordering</strong> — the sidecar is ready before the app, so no more first-request failures.</li>
+<li><strong>Clean shutdown</strong> — when the main app finishes, Kubernetes waits for it, then sends a graceful termination signal to the sidecar so it can flush logs and close connections before exiting.</li>
+<li><strong>Jobs finally work</strong> — because the sidecar is no longer a peer in <code class='ic'>containers:</code>, it no longer blocks a Job from completing. The Job ends when the app&#x27;s work is done, and the sidecar is cleaned up afterward.</li>
+</ul>
+<p>You can think of a native sidecar as a <em>never-ending init container</em> that the rest of the Pod gets to run alongside. Here is the same idea in YAML — a log-shipping sidecar declared the native way:</p>
+<pre><code>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-native-sidecar
+spec:
+  initContainers:
+    # A NATIVE SIDECAR: it&#x27;s in initContainers, but restartPolicy: Always
+    # makes it start before the app and keep running for the Pod&#x27;s lifetime.
+    - name: log-shipper
+      image: busybox:1.36
+      restartPolicy: Always   # &lt;-- this is what makes it a sidecar
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;tail -F /var/log/app/app.log&#x27;]
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+  containers:
+    - name: myapp
+      image: busybox:1.36
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;while true; do echo &quot;$(date) request handled&quot; &gt;&gt; /var/log/app/app.log; sleep 5; done&#x27;]
+      volumeMounts:
+        - name: logs
+          mountPath: /var/log/app
+  volumes:
+    - name: logs
+      emptyDir: {}
+</code></pre>
+<p>The flow at startup is as follows: Kubernetes starts <code class='ic'>log-shipper</code> first; because of <code class='ic'>restartPolicy: Always</code> it doesn&#x27;t wait for it to finish, it just confirms it&#x27;s running, then starts <code class='ic'>myapp</code>. The app writes to the shared <code class='ic'>emptyDir</code> volume, and the sidecar tails and forwards those lines. When the app ends, the sidecar is shut down gracefully. The diagram below traces this start-before, run-alongside, shut-down-after lifecycle in time order.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant K as Kubelet
+    participant S as log-shipper sidecar
+    participant A as myapp container
+    participant V as Shared emptyDir volume
+    K-&gt;&gt;S: Start sidecar (restartPolicy Always)
+    S--&gt;&gt;K: Started (not waited to completion)
+    K-&gt;&gt;A: Start app container
+    A-&gt;&gt;V: Append log lines
+    S-&gt;&gt;V: Tail and forward log lines
+    Note over A: App finishes its work
+    A--&gt;&gt;K: App exited
+    K-&gt;&gt;S: Graceful termination signal
+    S--&gt;&gt;K: Flushed logs and exited</div><figcaption>Native sidecar lifecycle: starts before the app, runs alongside, shuts down after</figcaption></figure>
+<h4>A note on cost and the bigger picture</h4>
+<p>Sidecars are powerful, but they aren&#x27;t free. A full service mesh adds one proxy container <em>per Pod</em>, and at scale those proxies can consume a startling share of your CPU, memory, and budget. That&#x27;s why the industry is exploring lighter alternatives like eBPF-based meshes that move this work into the kernel instead of a per-Pod container. None of that retires the sidecar pattern — extending an app with logging, proxies, and config helpers remains fundamental — but it&#x27;s worth right-sizing your use of it rather than reaching for a heavy mesh by default.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>Init containers</strong> run before your app, sequentially in declared order, and each must succeed or the Pod won&#x27;t start — ideal for dependency waits, config preparation, and volume setup. They use the same fields as normal containers but no probes.</li>
+<li><strong>Sidecars</strong> are helper containers that run alongside the main app to add capabilities (logging, proxies, config sync) without modifying the app image; they differ from ordinary multi-container Pods by being lifecycle-coupled and subordinate to the main app.</li>
+<li><strong>Classic sidecars</strong> were just regular containers with no ordering guarantees, causing startup races and Jobs that never finished.</li>
+<li><strong>Native sidecars (1.28+)</strong> are init containers with <code class='ic'>restartPolicy: Always</code>: they start before the app, keep running for the Pod&#x27;s whole life, restart on failure, shut down gracefully, and no longer block Jobs from completing.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Write a Pod YAML named <code class='ic'>preflight-pod</code> that has a single init container named <code class='ic'>check-config</code> using the <code class='ic'>busybox:1.36</code> image. The init container should print the message <code class='ic'>config ready</code> and exit successfully. The main application container should be named <code class='ic'>app</code> using <code class='ic'>nginx:1.27</code> and expose port 80. Confirm that the <code class='ic'>initContainers</code> field is at the same level as <code class='ic'>containers</code> inside <code class='ic'>spec</code>.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: preflight-pod
+spec:
+  # TODO: add initContainers block here
+  containers:
+    - name: app
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>The `initContainers` key belongs under `spec:`, not under `containers:` or at the top level of the manifest.</li><li>A shell command that only prints and does nothing else exits with code 0. Use `command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;echo config ready&#x27;]` to run a shell one-liner.</li><li>Apply the manifest with `kubectl apply -f preflight-pod.yaml` and then watch with `kubectl get pod preflight-pod -w`. You should see the status move through `Init:0/1` → `PodInitializing` → `Running`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: preflight-pod
+spec:
+  initContainers:
+    - name: check-config
+      image: busybox:1.36
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;echo config ready&#x27;]
+  containers:
+    - name: app
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+                <div class='exp2'><p>The <code class='ic'>initContainers</code> field lives inside <code class='ic'>spec</code>, at the same indentation level as <code class='ic'>containers</code>. Kubernetes runs every entry under <code class='ic'>initContainers</code> in declaration order, one at a time, waiting for each to exit with code 0 before moving to the next. Only after all init containers succeed does Kubernetes start the containers listed under <code class='ic'>containers</code>. Here there is only one init container; it executes <code class='ic'>echo config ready</code> (exit code 0 automatically) and terminates, after which <code class='ic'>nginx</code> is allowed to start. Note that init containers do not take <code class='ic'>livenessProbe</code> or <code class='ic'>readinessProbe</code> — they are expected to run once and finish, so probes are not applicable.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core practice 1 — Dependency wait with two sequential init containers: Write a Pod YAML named <code class='ic'>app-with-deps</code> that models a real dependency-wait pattern. Add two init containers in this exact order:</p>
+<p>1. <code class='ic'>wait-for-db</code> (image <code class='ic'>busybox:1.36</code>): loops every 2 seconds running <code class='ic'>nslookup mydb</code> until it succeeds, then exits.</p>
+<p>2. <code class='ic'>wait-for-cache</code> (image <code class='ic'>busybox:1.36</code>): loops every 2 seconds running <code class='ic'>nslookup mycache</code> until it succeeds, then exits.</p>
+<p>After both succeed, start the main container <code class='ic'>backend</code> (image <code class='ic'>nginx:1.27</code>, port 80).</p>
+<p>The ordering guarantee is critical: <code class='ic'>wait-for-cache</code> must not start until <code class='ic'>wait-for-db</code> has exited successfully.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-deps
+spec:
+  initContainers:
+    # TODO: add wait-for-db init container
+    # TODO: add wait-for-cache init container
+  containers:
+    - name: backend
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+              <details><summary>Hint</summary><ul><li>List `wait-for-db` first and `wait-for-cache` second in `initContainers`. The list position is the execution order — Kubernetes does not sort or parallelize them.</li><li>The shell loop pattern is: `until &lt;command&gt;; do echo &#x27;waiting&#x27;; sleep 2; done`. When `&lt;command&gt;` exits 0 the `until` condition becomes false and the shell exits 0, satisfying Kubernetes&#x27;s success requirement.</li><li>To test without a real cluster, apply the manifest to a local kind or minikube cluster that has no `mydb` Service. Run `kubectl get pod app-with-deps` and observe it stuck at `Init:0/2`. Then create a dummy Service (`kubectl create service clusterip mydb --tcp=5432:5432`) and watch it advance to `Init:1/2`, confirming the ordering.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: app-with-deps
+spec:
+  initContainers:
+    - name: wait-for-db
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;until nslookup mydb; do echo &#x27;waiting for mydb&#x27;; sleep 2; done&quot;
+    - name: wait-for-cache
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;until nslookup mycache; do echo &#x27;waiting for mycache&#x27;; sleep 2; done&quot;
+  containers:
+    - name: backend
+      image: nginx:1.27
+      ports:
+        - containerPort: 80</code></pre>
+                <div class='exp2'><p>Kubernetes runs init containers strictly in the order they appear in the YAML list. <code class='ic'>wait-for-db</code> starts first; because it loops until <code class='ic'>nslookup mydb</code> succeeds (exit 0), it blocks indefinitely if the DB is not reachable. Only when it exits cleanly does <code class='ic'>wait-for-cache</code> start, applying the same blocking loop for <code class='ic'>mycache</code>. Only when both have exited with code 0 does Kubernetes start <code class='ic'>backend</code>. This is the dependency-wait pattern: the Pod stays in <code class='ic'>Init:0/2</code> → <code class='ic'>Init:1/2</code> → <code class='ic'>Running</code> and never crash-loops the app container. In a real cluster you would create Services named <code class='ic'>mydb</code> and <code class='ic'>mycache</code>; once those Services exist, <code class='ic'>nslookup</code> resolves them and the init containers unblock. Using <code class='ic'>until … done</code> rather than a one-shot check is the safe form because DNS propagation may take a few seconds after the Service is created.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core practice 2 — Native sidecar with a shared volume: Write a Pod YAML named <code class='ic'>native-sidecar-pod</code> that demonstrates the Kubernetes 1.28+ native sidecar pattern. Requirements:</p>
+<ul>
+<li>Declare an <code class='ic'>emptyDir</code> volume named <code class='ic'>shared-logs</code>.</li>
+<li>In <code class='ic'>initContainers</code>, declare a sidecar container named <code class='ic'>log-agent</code> (image <code class='ic'>busybox:1.36</code>) with <code class='ic'>restartPolicy: Always</code>. It should run <code class='ic'>tail -F /var/log/app/app.log</code> and mount <code class='ic'>shared-logs</code> at <code class='ic'>/var/log/app</code>.</li>
+<li>In <code class='ic'>containers</code>, declare the main app named <code class='ic'>myapp</code> (image <code class='ic'>busybox:1.36</code>). It should write <code class='ic'>$(date) - request handled</code> to <code class='ic'>/var/log/app/app.log</code> every 3 seconds in an infinite loop, and mount the same <code class='ic'>shared-logs</code> volume at <code class='ic'>/var/log/app</code>.</li>
+</ul>
+<p>Explain in a comment inside the YAML why <code class='ic'>restartPolicy: Always</code> on an init container is what makes it a native sidecar.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: native-sidecar-pod
+spec:
+  initContainers:
+    # TODO: declare the log-agent native sidecar here
+  containers:
+    # TODO: declare the myapp main container here
+  volumes:
+    # TODO: declare the shared-logs emptyDir volume here</code></pre>
+              <details><summary>Hint</summary><ul><li>Place `log-agent` under `initContainers:`, not under `containers:`. Adding `restartPolicy: Always` to an entry in `containers:` has no special effect — the native sidecar mechanism only works under `initContainers:`.</li><li>Both `log-agent` and `myapp` must reference the same volume name (`shared-logs`) in their `volumeMounts`. The `mountPath` can be the same path on both containers because each container has its own filesystem namespace; the volume is the bridge between them.</li><li>After applying the manifest, run `kubectl logs native-sidecar-pod -c log-agent` to confirm the sidecar is tailing the log file that `myapp` writes. If you see timestamped lines appearing every ~3 seconds, the shared-volume communication is working.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: native-sidecar-pod
+spec:
+  initContainers:
+    # restartPolicy: Always transforms this init container into a native sidecar:
+    # Kubernetes starts it before myapp but does NOT wait for it to exit.
+    # It keeps running alongside myapp for the entire Pod lifetime,
+    # and is restarted automatically if it crashes.
+    - name: log-agent
+      image: busybox:1.36
+      restartPolicy: Always
+      command: [&#x27;sh&#x27;, &#x27;-c&#x27;, &#x27;tail -F /var/log/app/app.log&#x27;]
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log/app
+  containers:
+    - name: myapp
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;while true; do echo \&quot;$(date) - request handled\&quot; &gt;&gt; /var/log/app/app.log; sleep 3; done&quot;
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log/app
+  volumes:
+    - name: shared-logs
+      emptyDir: {}</code></pre>
+                <div class='exp2'><p>The single field <code class='ic'>restartPolicy: Always</code> on an init container is what Kubernetes 1.28+ uses to distinguish a native sidecar from a normal init container. Without it, Kubernetes would wait for the container to exit before starting the next init container or the app. With it, Kubernetes considers the init phase complete as soon as the container has started (not finished), then immediately proceeds to start <code class='ic'>myapp</code>. The sidecar then runs for the entire life of the Pod, is automatically restarted on crash, and receives a graceful termination signal only after <code class='ic'>myapp</code> exits — enabling clean log flushing. The <code class='ic'>emptyDir</code> volume is the communication channel: it exists in memory on the node, is shared by any container in the Pod that mounts it, and is destroyed when the Pod is deleted. <code class='ic'>tail -F</code> (uppercase F) re-opens the file if it is rotated or does not yet exist, making it robust to the race where the sidecar starts before <code class='ic'>myapp</code> has written the first line.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied challenge — Config preparation + native sidecar in one Pod: Combine both patterns you have learned. Write a Pod YAML named <code class='ic'>full-pattern-pod</code> that does the following in the correct lifecycle order:</p>
+<p>1. <strong>Init container</strong> <code class='ic'>prepare-config</code> (image <code class='ic'>busybox:1.36</code>): writes the string <code class='ic'>server_mode=production</code> to <code class='ic'>/etc/app/config.ini</code> on a shared volume named <code class='ic'>config-vol</code> (type <code class='ic'>emptyDir</code>), then exits.</p>
+<p>2. <strong>Native sidecar</strong> <code class='ic'>config-watcher</code> (image <code class='ic'>busybox:1.36</code>, <code class='ic'>restartPolicy: Always</code>): runs <code class='ic'>cat /etc/app/config.ini</code> every 10 seconds in an infinite loop, simulating a config-sync sidecar. Mount <code class='ic'>config-vol</code> at <code class='ic'>/etc/app</code>.</p>
+<p>3. <strong>Main container</strong> <code class='ic'>app</code> (image <code class='ic'>nginx:1.27</code>, port 80): mounts <code class='ic'>config-vol</code> at <code class='ic'>/etc/app</code> so it can read the config file written by the init container.</p>
+<p>Self-check: in your answer, state the exact startup order Kubernetes will use for these three containers and why.</p></div>
+              <pre class='starter'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: full-pattern-pod
+spec:
+  # HINT: initContainers must contain BOTH prepare-config AND config-watcher.
+  # Their order in the list determines execution order.
+  initContainers:
+    # TODO
+  containers:
+    # TODO
+  volumes:
+    # TODO</code></pre>
+              <details><summary>Hint</summary><ul><li>Both `prepare-config` and `config-watcher` go under `initContainers:`. The list order is crucial: `prepare-config` must be listed first so it runs and writes the file before `config-watcher` tries to read it.</li><li>If `prepare-config` fails to create `/etc/app/config.ini` (for example, because the directory does not exist), add `mkdir -p /etc/app` before the `echo` command. The `emptyDir` volume is mounted as an empty directory, so the file must be created explicitly.</li><li>To verify the full sequence on a real cluster: `kubectl apply -f full-pattern-pod.yaml`, then run `kubectl logs full-pattern-pod -c prepare-config` (should show &#x27;config written&#x27;), `kubectl logs full-pattern-pod -c config-watcher` (should show the config.ini contents every 10 seconds), and `kubectl exec full-pattern-pod -c app -- cat /etc/app/config.ini` (should print &#x27;server_mode=production&#x27;).</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>apiVersion: v1
+kind: Pod
+metadata:
+  name: full-pattern-pod
+spec:
+  initContainers:
+    # Step 1: classic init container — runs to completion before anything else.
+    - name: prepare-config
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - &quot;mkdir -p /etc/app &amp;&amp; echo &#x27;server_mode=production&#x27; &gt; /etc/app/config.ini &amp;&amp; echo &#x27;config written&#x27;&quot;
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app
+    # Step 2: native sidecar — starts after prepare-config exits,
+    # but Kubernetes does NOT wait for it to finish before starting the app.
+    - name: config-watcher
+      image: busybox:1.36
+      restartPolicy: Always
+      command:
+        - sh
+        - -c
+        - &quot;while true; do echo &#x27;[config-watcher]&#x27;; cat /etc/app/config.ini; sleep 10; done&quot;
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app
+  containers:
+    # Step 3: main app — starts after both init entries are satisfied.
+    - name: app
+      image: nginx:1.27
+      ports:
+        - containerPort: 80
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/app
+  volumes:
+    - name: config-vol
+      emptyDir: {}
+
+# STARTUP ORDER EXPLANATION (required by the prompt):
+# 1. prepare-config starts and runs to completion (exit 0). No other container starts yet.
+# 2. config-watcher starts. Because restartPolicy: Always marks it as a native sidecar,
+#    Kubernetes does NOT wait for it to finish; it only waits until it is running.
+# 3. app starts. It finds /etc/app/config.ini already populated by prepare-config.</code></pre>
+                <div class='exp2'><p>This exercise cements the distinction between the two kinds of entries under <code class='ic'>initContainers</code>. A plain init container (<code class='ic'>prepare-config</code>) must run to completion before the next entry begins. A native sidecar (<code class='ic'>config-watcher</code>, marked by <code class='ic'>restartPolicy: Always</code>) is waited on only for startup — not for completion — so Kubernetes advances to the app container once the sidecar process is alive. The result is a three-phase lifecycle: (1) classic setup, (2) sidecar starts and stays running, (3) app starts and can read the prepared config. All three containers share <code class='ic'>config-vol</code> via <code class='ic'>emptyDir</code>. The init container writes the file, the sidecar and the app both read it. If <code class='ic'>prepare-config</code> fails (for example, the volume is not mounted correctly), <code class='ic'>config-watcher</code> and <code class='ic'>app</code> will never start, which is exactly the safety guarantee you want: do not run the application if the configuration was not successfully prepared.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=48lsKjtLUjQ' target='_blank'>KUBERNETES Multi-Container POD | Demo Init &amp; Sidecar</a></li><li><a href='https://www.youtube.com/watch?v=2PCz6Ds0vwo' target='_blank'>Native Sidecars In Kubernetes 1.28</a></li><li><a href='https://www.youtube.com/watch?v=O6fiE2eFX1o' target='_blank'>Cloud Native Short Take - Kubernetes Init Containers</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

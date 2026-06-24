@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-YAML</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← 강좌 목록</a><a class='lang-toggle' data-lang='en' href='../../../en/courses/k8s-08-yaml/index.html'>EN</a></div>
+  <h1>K8S-YAML</h1>
+  <div class="sub">쿠버네티스를 처음 접하는 입문자/초급자 (컨테이너·도커 기초 정도만 아는 수준) · 총 1강</div>
+  <ul><li><a href='#lec1'>01. YAML 매니페스트로 직접 배포하기 - 선언형 구성 실습</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. YAML 매니페스트로 직접 배포하기 - 선언형 구성 실습 </h2>
+          <h3>학습 목표</h3>
+<ul>
+<li>명령형(imperative)과 선언형(declarative) 배포 방식의 차이를 이해한다</li>
+<li>Deployment와 Service의 YAML 매니페스트를 직접 작성한다</li>
+<li><code class='ic'>kubectl apply</code>로 매니페스트를 적용하고 결과를 검증한다</li>
+</ul>
+<h3>본문</h3>
+<h4>왜 YAML로 배포하는가</h4>
+<p>3강과 4강에서 우리는 <code class='ic'>kubectl run</code>이나 <code class='ic'>kubectl create deployment</code> 같은 명령어로 Pod와 Deployment를 만들었습니다. 명령어 한 줄로 끝나니 빠르고 편리하죠. 그런데 실무 현장에서는 이렇게 명령어로 자원을 만드는 경우가 거의 없습니다. 대신 <strong>YAML 파일에 원하는 상태를 적어 두고</strong> 그 파일을 클러스터에 적용합니다. 이번 강의에서는 그 이유와 방법을 직접 손으로 따라 하며 익힙니다.</p>
+<blockquote class='callout'>
+<p>YAML(YAML Ain&#x27;t Markup Language)은 사람이 읽기 쉬운 설정 파일 형식입니다. 쿠버네티스에서는 &quot;어떤 자원을, 어떤 모습으로 띄울지&quot;를 적는 설계도 역할을 합니다.</p>
+</blockquote>
+<h4>명령형 vs 선언형 — 핵심 차이</h4>
+<p>두 방식의 차이는 한 문장으로 요약됩니다.</p>
+<ul>
+<li><strong>명령형(Imperative)</strong>: &quot;이렇게 <strong>해라</strong>&quot;라고 <em>행동</em>을 지시합니다. 예) <code class='ic'>kubectl run</code>, <code class='ic'>kubectl create</code>, <code class='ic'>kubectl delete</code>. 내가 어떤 절차를 밟아야 할지 직접 명령합니다.</li>
+<li><strong>선언형(Declarative)</strong>: &quot;최종 모습은 <strong>이래야 한다</strong>&quot;라고 <em>상태</em>를 선언합니다. 예) YAML 파일 + <code class='ic'>kubectl apply</code>. 어떻게 거기에 도달할지는 쿠버네티스가 알아서 계산합니다.</li>
+</ul>
+<p>식당에 비유하면, 명령형은 주방에 들어가 &quot;불을 켜고, 패티를 굽고, 빵을 데워라&quot;라고 단계마다 지시하는 것이고, 선언형은 &quot;치즈버거 하나 주세요&quot;라고 <strong>원하는 결과만 말하는 것</strong>입니다. 주방(쿠버네티스)이 현재 상태와 목표 상태를 비교해 부족한 만큼만 알아서 채웁니다.</p>
+<p>이 &quot;현재 상태를 목표 상태에 맞춰 끊임없이 조정하는 것&quot;을 <strong>조정 루프(reconciliation loop)</strong> 라고 부릅니다. 선언형 방식이 강력한 이유가 바로 여기 있습니다. 같은 YAML을 두 번, 세 번 적용해도 결과는 항상 동일하고(멱등성), 누군가 Pod를 지워도 쿠버네티스가 선언된 상태로 되돌립니다.</p>
+<p>아래 그림처럼 조정 루프는 &quot;목표 상태와 현재 상태를 비교 → 차이가 있으면 조정 → 다시 비교&quot;를 끝없이 반복합니다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    A[&quot;목표 상태&lt;br/&gt;(YAML 선언)&quot;] --&gt; B{&quot;현재 상태와&lt;br/&gt;일치하는가&quot;}
+    C[&quot;현재 상태&lt;br/&gt;(실제 클러스터)&quot;] --&gt; B
+    B -- &quot;일치&quot; --&gt; D[&quot;그대로 유지&quot;]
+    B -- &quot;불일치&quot; --&gt; E[&quot;부족한 만큼&lt;br/&gt;생성·삭제로 조정&quot;]
+    E --&gt; C
+    D --&gt; B</div><figcaption>선언된 상태를 끊임없이 지키는 조정 루프</figcaption></figure>
+<p>선언형 방식의 실무 장점을 정리하면 다음과 같습니다.</p>
+<ul>
+<li><strong>버전 관리</strong>: YAML을 Git에 올려 변경 이력을 추적하고 되돌릴 수 있습니다.</li>
+<li><strong>재현성</strong>: 같은 파일로 개발/스테이징/운영 환경에 똑같은 구성을 재현합니다.</li>
+<li><strong>협업</strong>: 팀원에게 파일만 공유하면 동일한 자원을 만들 수 있습니다.</li>
+<li><strong>검토 가능</strong>: 코드처럼 리뷰(PR)를 거쳐 배포할 수 있습니다.</li>
+</ul>
+<blockquote class='callout'>
+<p>실험·학습 단계에서는 <code class='ic'>kubectl run</code>도 충분합니다. 하지만 실제 운영 환경이라면 YAML + <code class='ic'>kubectl apply</code>가 정답입니다.</p>
+</blockquote>
+<h4>모든 매니페스트의 공통 뼈대</h4>
+<p>자원 종류가 Pod든 Deployment든 Service든, 매니페스트는 항상 4개의 최상위 필드로 시작합니다.</p>
+<p>| 필드 | 의미 |</p>
+<p>|------|------|</p>
+<p>| <code class='ic'>apiVersion</code> | 사용할 쿠버네티스 API 버전 (자원 종류마다 다름) |</p>
+<p>| <code class='ic'>kind</code> | 만들 자원의 종류 (Pod, Deployment, Service 등) |</p>
+<p>| <code class='ic'>metadata</code> | 이름·라벨 등 자원을 식별하는 정보 |</p>
+<p>| <code class='ic'>spec</code> | 자원이 갖춰야 할 실제 명세(원하는 상태) |</p>
+<p>여기서 초보자가 가장 많이 틀리는 지점이 <code class='ic'>apiVersion</code>입니다. 자원마다 값이 다릅니다. Pod와 Service는 <code class='ic'>v1</code>, Deployment는 <code class='ic'>apps/v1</code>을 씁니다. 또 YAML은 <strong>들여쓰기(공백 2칸)로 계층을 표현</strong>하므로, 탭 대신 스페이스를 쓰고 콜론(<code class='ic'>:</code>) 뒤에는 반드시 한 칸을 띄워야 합니다.</p>
+<h4>실습 1 — Deployment 매니페스트 작성</h4>
+<p>이제 nginx 웹 서버를 2개 복제본으로 띄우는 Deployment를 작성해 봅니다. <code class='ic'>nginx-deployment.yaml</code> 파일을 만듭니다.</p>
+<pre><code>
+apiVersion: apps/v1          # Deployment는 apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment      # 이 Deployment의 이름
+  labels:
+    app: nginx
+spec:
+  replicas: 2                 # Pod를 몇 개 띄울지 (원하는 상태)
+  selector:
+    matchLabels:
+      app: nginx              # 아래 라벨과 일치하는 Pod를 내 관리 대상으로 삼음
+  template:                   # 찍어낼 Pod의 설계도
+    metadata:
+      labels:
+        app: nginx            # selector와 반드시 일치해야 함
+    spec:
+      containers:
+        - name: nginx         # 컨테이너 목록(리스트)이라 &#x27;-&#x27;로 시작
+          image: nginx:1      # nginx 프로젝트가 &#x27;메이저 1의 최신&#x27;으로 운용하는 태그
+          ports:
+            - containerPort: 80
+</code></pre>
+<p>핵심은 <code class='ic'>selector</code>의 라벨과 <code class='ic'>template</code>의 라벨이 <strong>반드시 일치</strong>해야 한다는 점입니다. Deployment는 이 라벨을 기준으로 &quot;내가 책임질 Pod&quot;를 찾기 때문입니다. 불일치하면 적용 단계에서 에러가 납니다.</p>
+<blockquote class='callout'>
+<p>이미지 태그 팁: 태그는 그 자체로 버전을 자동 추적하는 <em>기능</em>이 아니라, 특정 이미지를 가리키는 <strong>이동 가능한 별명(포인터)</strong> 일 뿐입니다. 위에서 쓴 <code class='ic'>nginx:1</code>이 &quot;메이저 버전 1 계열의 최신 이미지&quot;를 가리키는 이유는, <strong>nginx 프로젝트가 <code class='ic'>1</code> 태그를 1.x 최신 릴리스로 계속 옮겨 달아 주는 운용 정책을 따르기 때문</strong>이지, <code class='ic'>&lt;숫자&gt;</code> 태그면 무조건 그 계열의 최신을 가리킨다는 보편 규칙이 있어서가 아닙니다. 태그 운용 방식은 <strong>이미지마다 다릅니다</strong> — 다른 이미지에서 <code class='ic'>image:2</code>라고 쓴다고 해서 항상 2.x 최신이 보장되지는 않습니다. 또한 <code class='ic'>nginx:1</code>이 가리키는 실제 버전은 시점마다 바뀔 수 있어 재현성이 떨어집니다. 그래서 운영 환경에서는 <code class='ic'>nginx:1.27.4</code>처럼 <strong>패치 버전까지 명시적으로 고정</strong>해, 언제 배포해도 똑같은 이미지가 뜨도록 만드는 것을 권장합니다.</p>
+</blockquote>
+<h4>실습 2 — Service 매니페스트 작성</h4>
+<p>Deployment가 만든 Pod들은 클러스터 내부에서만 보이고, IP도 재시작 때마다 바뀝니다. 외부에서 접속하려면 안정적인 진입점인 <strong>Service</strong>가 필요합니다. <code class='ic'>nginx-service.yaml</code>을 만듭니다.</p>
+<pre><code>
+apiVersion: v1               # Service는 v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: NodePort             # 노드의 포트로 외부 노출 (ClusterIP도 함께 자동 부여됨)
+  selector:
+    app: nginx               # 이 라벨을 가진 Pod로 트래픽 전달
+  ports:
+    - port: 80               # Service가 받는 포트
+      targetPort: 80         # Pod(컨테이너)로 전달할 포트
+      nodePort: 30080        # 외부에서 접속할 노드 포트(30000~32767)
+</code></pre>
+<p>Service 역시 <code class='ic'>selector</code> 라벨(<code class='ic'>app: nginx</code>)로 대상 Pod를 찾습니다. Deployment에서 붙인 라벨과 같기 때문에, Service는 그 2개의 Pod에 트래픽을 자동으로 나눠 보냅니다. Pod IP를 일일이 몰라도 되고, Pod가 죽고 새로 떠도 라벨만 맞으면 알아서 연결됩니다.</p>
+<blockquote class='callout'>
+<p><code class='ic'>nodePort: 30080</code>처럼 포트를 직접 고정하면, 그 포트가 이미 다른 서비스에 쓰이고 있을 때 <code class='ic'>kubectl apply</code>가 충돌로 실패할 수 있습니다. 운영 환경에서는 <strong><code class='ic'>nodePort</code> 필드를 아예 생략</strong>하는 편이 안전한데, 그러면 쿠버네티스가 30000~32767 범위에서 빈 포트를 <strong>자동 할당</strong>하고, 할당된 값은 <code class='ic'>kubectl get service nginx-service</code>의 <code class='ic'>PORT(S)</code> 열에서 확인해 접속하면 됩니다. 다만 이 강의처럼 학습·실습에서는 매번 같은 포트(<code class='ic'>30080</code>)로 접속할 수 있도록 <strong>고정값을 쓰는 편이 편리</strong>하므로, &quot;운영에서는 생략(자동 할당), 학습에서는 고정&quot;으로 기억해 두면 좋습니다.</p>
+</blockquote>
+<p>아래 구성도처럼 Deployment와 Service는 둘 다 <code class='ic'>app: nginx</code> 라벨을 매개로 같은 Pod 묶음과 연결됩니다. 이 라벨이 일치해야 모든 연결이 성립합니다.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    Dep[&quot;Deployment&lt;br/&gt;nginx-deployment&lt;br/&gt;replicas: 2&quot;]
+    Svc[&quot;Service&lt;br/&gt;nginx-service&lt;br/&gt;type: NodePort&quot;]
+    P1[&quot;Pod&lt;br/&gt;app=nginx&quot;]
+    P2[&quot;Pod&lt;br/&gt;app=nginx&quot;]
+
+    Dep -- &quot;template으로 생성·관리&quot; --&gt; P1
+    Dep -- &quot;template으로 생성·관리&quot; --&gt; P2
+    Svc -- &quot;selector app=nginx&lt;br/&gt;로 트래픽 전달&quot; --&gt; P1
+    Svc -- &quot;selector app=nginx&lt;br/&gt;로 트래픽 전달&quot; --&gt; P2</div><figcaption>&quot;app: nginx 라벨로 묶이는 Deployment·Service·Pod 관계&quot;</figcaption></figure>
+<h4>실습 3 — kubectl apply로 적용하고 검증하기</h4>
+<p>작성한 매니페스트를 클러스터에 적용합니다. 명령형의 <code class='ic'>create</code>와 달리 <code class='ic'>apply</code>를 씁니다.</p>
+<pre><code>
+kubectl apply -f nginx-deployment.yaml
+kubectl apply -f nginx-service.yaml
+</code></pre>
+<pre><code>
+deployment.apps/nginx-deployment created
+service/nginx-service created
+</code></pre>
+<blockquote class='callout'>
+<p><code class='ic'>create</code>는 &quot;새로 만들기&quot;만 하지만, <code class='ic'>apply</code>는 &quot;이 상태가 되도록 맞춰라&quot;입니다. 파일을 수정한 뒤 다시 <code class='ic'>apply</code>하면 바뀐 부분만 반영됩니다. 이것이 선언형 운영의 핵심입니다.</p>
+</blockquote>
+<p>이제 결과를 검증합니다.</p>
+<pre><code>
+kubectl get deployment
+kubectl get pods
+kubectl get service
+</code></pre>
+<pre><code>
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE
+nginx-deployment   2/2     2            2           20s
+
+NAME                                READY   STATUS    RESTARTS   AGE
+nginx-deployment-7d9c5b8f6c-abcde   1/1     Running   0          20s
+nginx-deployment-7d9c5b8f6c-fghij   1/1     Running   0          20s
+
+NAME            TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+nginx-service   NodePort   10.96.120.45    &lt;none&gt;        80:30080/TCP   18s
+</code></pre>
+<p><code class='ic'>READY 2/2</code>는 원하던 복제본 2개가 모두 떠 있다는 뜻이고, Pod가 2개 <code class='ic'>Running</code> 상태인 것이 보입니다. 한 가지 눈여겨볼 점: Pod 이름 <code class='ic'>nginx-deployment-7d9c5b8f6c-abcde</code>는 세 부분으로 이루어진 <strong><code class='ic'>&lt;Deployment 이름&gt;-&lt;ReplicaSet 해시&gt;-&lt;Pod 고유 ID&gt;</code></strong> 구조입니다.</p>
+<ul>
+<li><code class='ic'>nginx-deployment</code> — 우리가 만든 <strong>Deployment의 이름</strong></li>
+<li><code class='ic'>7d9c5b8f6c</code> — Deployment가 자동으로 만든 <strong>ReplicaSet을 식별하는 해시값</strong>입니다. 같은 ReplicaSet이 찍어낸 Pod들은 이 가운데 부분이 모두 같습니다(<code class='ic'>kubectl get replicaset</code>으로 <code class='ic'>nginx-deployment-7d9c5b8f6c</code>라는 이름의 ReplicaSet을 직접 확인할 수 있습니다).</li>
+<li><code class='ic'>abcde</code> — 각 <strong>Pod에 무작위로 붙는 고유 suffix(ID)</strong> 입니다. 같은 ReplicaSet이 만든 Pod라도 이 마지막 부분은 Pod마다 다릅니다.</li>
+</ul>
+<p>즉 우리가 Deployment 하나만 적용했는데, 그 아래에 ReplicaSet이 생기고 다시 그 아래에 Pod가 생긴 것이고, Pod 이름이 이 3단 구조(Deployment → ReplicaSet → Pod)를 그대로 드러내 줍니다. 잠시 뒤 이 구조를 자세히 설명합니다.</p>
+<p>선언형의 위력을 확인하려면 Pod 하나를 강제로 지워 보세요.</p>
+<pre><code>
+kubectl delete pod nginx-deployment-7d9c5b8f6c-abcde
+kubectl get pods
+</code></pre>
+<pre><code>
+NAME                                READY   STATUS    RESTARTS   AGE
+nginx-deployment-7d9c5b8f6c-fghij   1/1     Running   0          90s
+nginx-deployment-7d9c5b8f6c-klmno   1/1     Running   0          5s
+</code></pre>
+<p>지운 즉시 쿠버네티스가 새 Pod를 띄워 다시 2개를 맞춥니다. 새로 뜬 Pod는 가운데 ReplicaSet 해시(<code class='ic'>7d9c5b8f6c</code>)는 그대로지만 마지막 고유 ID만 <code class='ic'>klmno</code>로 바뀐 것을 확인할 수 있습니다 — 같은 ReplicaSet이 새 Pod를 찍어냈다는 뜻입니다. &quot;복제본 2개&quot;라는 선언된 상태를 조정 루프가 끊임없이 지켜 주는 것입니다. 마지막으로 동작을 확인합니다.</p>
+<pre><code>
+curl http://localhost:30080
+</code></pre>
+<p>응답에 <code class='ic'>Welcome to nginx!</code>가 보이면 배포 성공입니다. 실습이 끝나면 다음으로 정리합니다.</p>
+<pre><code>
+kubectl delete -f nginx-service.yaml -f nginx-deployment.yaml
+</code></pre>
+<h4>적용 흐름 한눈에 보기 — Deployment → ReplicaSet → Pod</h4>
+<p>매니페스트를 적용했을 때 클러스터 내부에서 벌어지는 흐름을 정확히 짚어 봅시다. 여기서 초보자가 흔히 오해하는 부분이 있습니다. <strong>Deployment는 Pod를 직접 만들지 않습니다.</strong> 실제 흐름은 책임이 한 단계씩 위임되는 3단 구조입니다.</p>
+<p>1. 사용자가 <code class='ic'>kubectl apply</code>로 YAML(목표 상태)을 <strong>API Server</strong>에 보낸다.</p>
+<p>2. API Server가 그 목표 상태를 <strong>etcd</strong>에 저장한다.</p>
+<p>3. <strong>Deployment 컨트롤러</strong>가 이 Deployment를 감지하고, 자기가 직접 Pod를 만드는 대신 <strong>ReplicaSet 객체를 하나 생성</strong>한다. (ReplicaSet은 &quot;동일한 Pod를 N개 유지&quot;만 책임지는 더 단순한 컨트롤러입니다. Deployment가 롤링 업데이트 같은 버전 관리를 위해 그 아래에 ReplicaSet을 두는 것입니다.)</p>
+<p>4. 이번엔 <strong>ReplicaSet 컨트롤러</strong>가 자신의 ReplicaSet을 감지하고, 명세에 적힌 <code class='ic'>replicas</code> 수만큼 <strong>Pod 객체를 생성</strong>한다.</p>
+<p>5. 아직 노드가 정해지지 않은 Pod들을 <strong>스케줄러</strong>가 발견해 적절한 노드에 배치한다.</p>
+<p>6. 각 노드의 <strong>kubelet</strong>이 자기에게 배정된 Pod를 받아 실제 컨테이너를 띄우고, 상태를 다시 API Server에 보고한다.</p>
+<p>즉 책임의 사슬은 <strong>Deployment(버전·롤아웃 관리) → ReplicaSet(개수 유지) → Pod(실제 실행)</strong> 입니다. 앞서 본 Pod 이름의 세 부분(<code class='ic'>Deployment-ReplicaSet해시-Pod고유ID</code>)이 바로 이 사슬을 그대로 반영한 것입니다. 4강에서 본 &quot;자가 치유&quot;가 실제로는 이 ReplicaSet 계층에서 일어나는 일이고, Deployment는 그 위에서 새 버전 배포 시 새 ReplicaSet을 만들어 천천히 교체하는 식으로 동작합니다. 아래 시퀀스 다이어그램이 그 순서를 시간 흐름으로 보여 줍니다. Deployment 컨트롤러와 ReplicaSet 컨트롤러를 별개 참여자로 나눠, 책임이 한 단계씩 위임되는 모습에 주목하세요.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant U as 사용자(kubectl)
+    participant API as API Server
+    participant ETCD as etcd
+    participant DC as Deployment 컨트롤러
+    participant RC as ReplicaSet 컨트롤러
+    participant SCH as 스케줄러
+    participant KUBELET as kubelet(노드)
+
+    U-&gt;&gt;API: kubectl apply, YAML 목표 상태 전송
+    API-&gt;&gt;ETCD: 목표 상태 저장
+    API--&gt;&gt;U: 접수 응답(created)
+    DC-&gt;&gt;API: Deployment 감지
+    DC-&gt;&gt;API: ReplicaSet 생성 요청
+    RC-&gt;&gt;API: ReplicaSet 감지
+    RC-&gt;&gt;API: replicas 수만큼 Pod 생성 요청
+    SCH-&gt;&gt;API: 미배치 Pod 발견, 배치할 노드 결정
+    KUBELET-&gt;&gt;API: 내게 할당된 Pod 확인
+    KUBELET-&gt;&gt;KUBELET: 컨테이너 실행
+    KUBELET-&gt;&gt;API: 실행 상태 보고(Running)</div><figcaption>kubectl apply 한 번이 Deployment→ReplicaSet→Pod 3단 위임을 거쳐 컨테이너 실행까지 이어지는 순서</figcaption></figure>
+<h3>핵심 요약</h3>
+<ul>
+<li>명령형은 &quot;행동&quot;을 지시하고(<code class='ic'>kubectl run/create</code>), 선언형은 &quot;원하는 상태&quot;를 선언한다(YAML + <code class='ic'>kubectl apply</code>).</li>
+<li>선언형은 버전 관리·재현성·협업에 유리하며, 조정 루프 덕분에 멱등성과 자가 치유가 보장된다.</li>
+<li>모든 매니페스트는 <code class='ic'>apiVersion</code>, <code class='ic'>kind</code>, <code class='ic'>metadata</code>, <code class='ic'>spec</code> 4개 필드로 구성된다. Pod/Service는 <code class='ic'>v1</code>, Deployment는 <code class='ic'>apps/v1</code>.</li>
+<li>Deployment·Service는 <code class='ic'>selector</code> 라벨로 대상 Pod를 찾으므로 라벨 일치가 매우 중요하다.</li>
+<li>NodePort는 <code class='ic'>nodePort</code> 값을 생략하면 쿠버네티스가 30000~32767에서 자동 할당한다(포트 충돌을 피하는 운영 권장 방식). 학습·실습에서는 매번 같은 포트로 접속하기 위해 <code class='ic'>30080</code>처럼 고정값을 써도 무방하다.</li>
+<li>이미지 태그는 자동 버전 추적 기능이 아니라 특정 이미지를 가리키는 <strong>이동 가능한 별명</strong>이다. <code class='ic'>nginx:1</code>이 메이저 1의 최신을 가리키는 것은 nginx 프로젝트의 운용 정책일 뿐 보편 규칙이 아니며, 태그 정책은 이미지마다 다르다. 운영에서는 재현성을 위해 <code class='ic'>nginx:1.27.4</code>처럼 패치 버전까지 고정한다.</li>
+<li>Pod 이름은 <strong><code class='ic'>&lt;Deployment 이름&gt;-&lt;ReplicaSet 해시&gt;-&lt;Pod 고유 ID&gt;</code></strong> 구조다. 가운데는 ReplicaSet을 식별하는 해시, 마지막은 Pod마다 다른 고유 suffix다.</li>
+<li>Deployment는 Pod를 직접 만들지 않는다. <strong>Deployment → ReplicaSet → Pod</strong> 순으로 책임이 위임되며, 개수 유지(자가 치유)는 ReplicaSet이, 버전·롤아웃 관리는 Deployment가 맡는다.</li>
+<li><code class='ic'>kubectl apply -f</code>로 적용하고 <code class='ic'>kubectl get</code>으로 검증하며, 파일을 고쳐 다시 apply하면 변경분만 반영된다.</li>
+</ul>
+          <section class='ex'><h3>🛠 실습</h3><div class='task'>
+              <div class='q'><p>실습 1. 아래는 &#x27;hello-pod&#x27;라는 이름의 Pod 매니페스트인데, 필수 필드 4개 중 일부가 빠져 있습니다. 빈칸(_____)을 올바르게 채우고, <code class='ic'>kubectl apply -f hello-pod.yaml</code> 로 적용한 뒤 <code class='ic'>kubectl get pod hello-pod</code> 로 STATUS가 Running인지 확인하세요.</p>
+<pre><code>
+_____: v1          # Pod는 core API 그룹
+kind: _____
+metadata:
+  name: hello-pod
+spec:
+  containers:
+    - name: hello
+      image: _____
+</code></pre></div>
+              <pre class='starter'><code># hello-pod.yaml (빈칸 채우기용)
+_____: v1
+kind: _____
+metadata:
+  name: hello-pod
+spec:
+  containers:
+    - name: hello
+      image: _____</code></pre>
+              <details><summary>힌트</summary><ul><li>모든 매니페스트는 `apiVersion`, `kind`, `metadata`, `spec` 네 가지 최상위 필드가 필요합니다. 첫 번째 빈칸은 그중 하나입니다.</li><li>`kind: Pod`에 대응하는 `apiVersion`은 `v1`입니다. Deployment는 `apps/v1`, Pod·Service는 `v1`이라고 기억하세요.</li><li>이미지는 `nginx:1.27` 처럼 &#x27;이미지명:태그&#x27; 형식으로 씁니다. 태그 없이 `nginx`만 써도 되지만 버전을 명시하는 것이 실무 관행입니다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># hello-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hello-pod
+spec:
+  containers:
+    - name: hello
+      image: nginx:1.27</code></pre>
+                <div class='exp2'><p><code class='ic'>apiVersion</code>은 자원 종류에 따라 다릅니다. Pod와 Service는 쿠버네티스 core API 그룹에 속하므로 <code class='ic'>v1</code>을 씁니다. <code class='ic'>kind</code>는 만들 자원의 종류로 <code class='ic'>Pod</code>라고 정확히 씁니다(대소문자 구분). <code class='ic'>image</code>는 실제로 존재하는 공개 이미지를 지정해야 합니다. 여기서는 Docker Hub의 공식 <code class='ic'>nginx:1.27</code>을 사용합니다.</p>
+<p>적용 후 <code class='ic'>kubectl get pod hello-pod -w</code> 로 STATUS 변화를 실시간으로 관찰할 수 있습니다. ContainerCreating → Running 순으로 바뀌면 정상입니다. 정리: <code class='ic'>kubectl delete pod hello-pod</code>.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 2. 아래 요구사항에 맞는 Deployment 매니페스트(<code class='ic'>my-deployment.yaml</code>)를 처음부터 작성하고 클러스터에 적용하세요.</p>
+<p>요구사항:</p>
+<ul>
+<li>이름: <code class='ic'>my-nginx</code></li>
+<li>복제본 수: 3</li>
+<li>컨테이너 이름: <code class='ic'>nginx-container</code>, 이미지: <code class='ic'>nginx:1.27</code>, 컨테이너 포트: 80</li>
+<li>Pod 라벨: <code class='ic'>app: my-nginx</code></li>
+</ul>
+<p>적용 후 다음 명령으로 상태를 검증하세요.</p>
+<pre><code>
+kubectl get deployment my-nginx
+kubectl get pods -l app=my-nginx
+</code></pre>
+<p>예상 결과: READY 칼럼이 <code class='ic'>3/3</code>, Pod 3개가 모두 Running이어야 합니다.</p></div>
+              <pre class='starter'><code># my-deployment.yaml — 아래부터 직접 작성하세요
+# 힌트: 최상위 필드 4개(apiVersion, kind, metadata, spec)로 시작</code></pre>
+              <details><summary>힌트</summary><ul><li>Deployment의 `apiVersion`은 `apps/v1`입니다. `v1`만 쓰면 `no kind &#x27;Deployment&#x27; is registered...` 오류가 납니다.</li><li>`spec.selector.matchLabels` 아래 라벨값과 `spec.template.metadata.labels` 아래 라벨값을 동일하게 맞추세요. 둘이 다르면 쿠버네티스가 적용 단계에서 즉시 오류를 돌려줍니다.</li><li>컨테이너 목록(`containers`)은 YAML 리스트이므로 `-`(하이픈)으로 시작합니다. 들여쓰기는 스페이스 2칸씩, 탭 문자는 금지입니다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># my-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+  labels:
+    app: my-nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-nginx
+  template:
+    metadata:
+      labels:
+        app: my-nginx
+    spec:
+      containers:
+        - name: nginx-container
+          image: nginx:1.27
+          ports:
+            - containerPort: 80</code></pre>
+                <div class='exp2'><p>Deployment 매니페스트에서 가장 중요한 규칙은 <code class='ic'>spec.selector.matchLabels</code>와 <code class='ic'>spec.template.metadata.labels</code>가 반드시 일치해야 한다는 점입니다. Deployment 컨트롤러는 이 라벨 셀렉터로 &#x27;내가 관리해야 할 Pod&#x27;를 찾기 때문에, 불일치하면 <code class='ic'>kubectl apply</code> 시점에 오류가 발생합니다.</p>
+<p><code class='ic'>kubectl get pods -l app=my-nginx</code> 는 <code class='ic'>-l</code>(label selector) 옵션으로 해당 라벨을 가진 Pod만 필터해서 보여 줍니다. 세 Pod 이름이 모두 <code class='ic'>my-nginx-&lt;해시&gt;-&lt;해시&gt;</code> 형태인 것도 확인하세요. 이것이 Deployment가 ReplicaSet을 통해 자동 생성한 이름입니다.</p>
+<p>정리: <code class='ic'>kubectl delete deployment my-nginx</code></p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 3. 핵심 실습 1에서 만든 <code class='ic'>my-nginx</code> Deployment가 실행 중인 상태에서 NodePort 타입의 Service 매니페스트(<code class='ic'>my-service.yaml</code>)를 작성하고 적용하세요.</p>
+<p>요구사항:</p>
+<ul>
+<li>이름: <code class='ic'>my-nginx-svc</code></li>
+<li>타입: NodePort</li>
+<li>셀렉터 라벨: <code class='ic'>app: my-nginx</code></li>
+<li>port: 80, targetPort: 80, nodePort: 30090</li>
+</ul>
+<p>적용 후 다음 명령으로 검증하고, minikube 환경이라면 curl로 응답을 확인하세요.</p>
+<pre><code>
+kubectl get service my-nginx-svc
+# minikube 환경에서 실제 접속 확인
+curl http://$(minikube ip):30090
+</code></pre>
+<p><code class='ic'>Welcome to nginx!</code> 문자열이 응답에 포함돼 있으면 성공입니다.</p></div>
+              <pre class='starter'><code># my-service.yaml — 아래부터 직접 작성하세요
+# apiVersion, kind, metadata, spec 순으로 작성
+# spec.type, spec.selector, spec.ports 필드가 필요합니다</code></pre>
+              <details><summary>힌트</summary><ul><li>Service의 `apiVersion`은 `v1`입니다. `spec.type: NodePort`를 빠뜨리면 기본값인 ClusterIP 타입이 되어 외부에서 접속할 수 없습니다.</li><li>`spec.selector`의 라벨값이 핵심 실습 1에서 정한 `app: my-nginx`와 정확히 일치해야 합니다. 오타 한 글자만 달라도 Pod로 트래픽이 전달되지 않습니다.</li><li>curl 응답이 없거나 `Connection refused`가 뜨면 `kubectl get endpoints my-nginx-svc` 를 실행하세요. ENDPOINTS 열에 Pod IP가 표시되면 Service가 Pod와 연결된 것이고, `&lt;none&gt;`이면 라벨 셀렉터 불일치입니다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># my-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-nginx-svc
+spec:
+  type: NodePort
+  selector:
+    app: my-nginx
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30090</code></pre>
+                <div class='exp2'><p>Service의 <code class='ic'>apiVersion</code>은 <code class='ic'>v1</code>입니다(Deployment와 달리 <code class='ic'>apps/v1</code>이 아님). <code class='ic'>spec.selector</code>의 라벨(<code class='ic'>app: my-nginx</code>)은 Deployment가 Pod에 붙인 라벨과 일치해야 합니다. 이 라벨 매칭이 곧 &#x27;Service가 어떤 Pod에 트래픽을 전달할지&#x27;를 결정합니다.</p>
+<p>NodePort 타입에서 세 포트 필드의 역할을 구분하면:</p>
+<ul>
+<li><code class='ic'>port: 80</code> — 클러스터 내부에서 Service의 ClusterIP로 접속할 때 쓰는 포트</li>
+<li><code class='ic'>targetPort: 80</code> — 실제 컨테이너(Pod)가 수신하는 포트</li>
+<li><code class='ic'>nodePort: 30090</code> — 클러스터 외부에서 노드 IP로 접속할 때 쓰는 포트 (30000~32767 범위)</li>
+</ul>
+<p><code class='ic'>kubectl get service my-nginx-svc</code>의 PORT(S) 컬럼에 <code class='ic'>80:30090/TCP</code>가 보이면 정상입니다.</p>
+<p>minikube 환경에서는 <code class='ic'>minikube ip</code>가 노드 IP(보통 192.168.x.x 대역)를 반환하고, 그 IP의 30090 포트로 nginx에 접속됩니다.</p>
+<p>정리: <code class='ic'>kubectl delete -f my-service.yaml -f my-deployment.yaml</code></p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>실습 4. 핵심 실습 1에서 작성한 <code class='ic'>my-deployment.yaml</code>의 <code class='ic'>replicas</code>를 3에서 5로 수정한 뒤 <code class='ic'>kubectl apply</code>를 다시 실행하세요. 기존 클러스터 자원을 지우지 말고 그대로 두고 파일만 수정해서 apply하는 것이 핵심입니다.</p>
+<p>단계:</p>
+<p>1. <code class='ic'>my-deployment.yaml</code>의 <code class='ic'>replicas: 3</code>을 <code class='ic'>replicas: 5</code>로 수정</p>
+<p>2. <code class='ic'>kubectl apply -f my-deployment.yaml</code></p>
+<p>3. 아래 명령으로 Pod 수가 5개로 늘었는지 확인</p>
+<pre><code>
+kubectl get deployment my-nginx
+kubectl get pods -l app=my-nginx
+</code></pre>
+<p>예상 결과: READY <code class='ic'>5/5</code>, Running Pod 5개.</p>
+<p>추가 도전: Pod 하나를 강제로 삭제(<code class='ic'>kubectl delete pod &lt;pod-name&gt;</code>)한 뒤, 잠시 기다렸다가 <code class='ic'>kubectl get pods -l app=my-nginx</code>를 다시 실행해 Pod가 5개로 자동 복구되는지 확인하세요.</p></div>
+              <pre class='starter'><code># 수정 대상: my-deployment.yaml (핵심 실습 1에서 작성한 파일)
+# replicas 필드값만 3 → 5로 변경 후 저장
+# 변경 전:
+#   replicas: 3
+# 변경 후:
+#   replicas: 5</code></pre>
+              <details><summary>힌트</summary><ul><li>파일에서 `replicas: 3` 줄만 `replicas: 5`로 바꾸면 됩니다. 다른 필드는 수정하지 않아도 됩니다. 저장 후 `kubectl apply -f my-deployment.yaml`을 실행하세요.</li><li>`kubectl apply` 실행 직후 `kubectl get pods -l app=my-nginx -w` 를 실행하면 새 Pod가 ContainerCreating → Running 상태로 올라오는 과정을 실시간으로 볼 수 있습니다 (종료: Ctrl+C).</li><li>Pod 이름을 모른다면 `kubectl get pods -l app=my-nginx` 로 확인한 뒤 아무 Pod 이름 하나를 복사해 `kubectl delete pod &lt;이름&gt;` 으로 삭제하세요. 약 5~10초 뒤 다시 조회하면 새 Pod가 Running 상태로 올라와 있을 것입니다.</li></ul></details>
+              <details><summary>정답 보기</summary>
+                <pre class='sol'><code># my-deployment.yaml (replicas만 변경한 최종본)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-nginx
+  labels:
+    app: my-nginx
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: my-nginx
+  template:
+    metadata:
+      labels:
+        app: my-nginx
+    spec:
+      containers:
+        - name: nginx-container
+          image: nginx:1.27
+          ports:
+            - containerPort: 80
+
+# 적용 명령
+# kubectl apply -f my-deployment.yaml
+
+# 검증 명령
+# kubectl get deployment my-nginx
+# kubectl get pods -l app=my-nginx
+
+# 자가 치유 확인 (pod 이름은 실제 환경에 맞게 변경)
+# kubectl delete pod &lt;my-nginx-xxx-yyy&gt;
+# kubectl get pods -l app=my-nginx   # 잠시 후 재실행 → 5개 유지 확인</code></pre>
+                <div class='exp2'><p>이 응용 과제는 선언형 방식의 핵심 장점 두 가지를 직접 체험합니다.</p>
+<p>첫째, <strong>멱등성(idempotency)</strong>: <code class='ic'>kubectl apply</code>는 파일의 현재 상태와 클러스터의 현재 상태를 비교해 차이나는 부분만 반영합니다. <code class='ic'>replicas: 3 → 5</code> 로 변경하면 쿠버네티스는 기존 3개 Pod는 그대로 두고 새로운 2개만 추가합니다. 서비스 중단 없이 스케일 아웃이 이루어집니다.</p>
+<p>둘째, <strong>자가 치유(self-healing)</strong>: Deployment 컨트롤러는 조정 루프를 통해 항상 &#x27;복제본 5개&#x27;라는 목표 상태를 유지하려 합니다. Pod 하나를 강제 삭제하면 컨트롤러가 즉시 감지하고 새 Pod를 생성해 5개를 맞춥니다. 이것이 운영 환경에서 Deployment를 쓰는 핵심 이유입니다.</p>
+<p><code class='ic'>kubectl get deployment my-nginx</code> 출력에서 <code class='ic'>UP-TO-DATE</code> 값이 5로 바뀌고 <code class='ic'>AVAILABLE</code>이 5에 도달하는 시점을 지켜보세요.</p>
+<p>전체 정리: <code class='ic'>kubectl delete deployment my-nginx &amp;&amp; kubectl delete service my-nginx-svc</code></p></div>
+              </details></div></section>
+          <div class='src'><strong>출처 영상</strong><ul><li><a href='https://www.youtube.com/watch?v=YZ3cdDBYY9I' target='_blank'>Kubernetes Pods: From kubectl Commands to YAML Manifests</a></li><li><a href='https://www.youtube.com/watch?v=Dn3RkWlPDAk' target='_blank'>What really happens when we run &quot;kubectl create deployment&quot;?</a></li><li><a href='https://www.youtube.com/watch?v=HkVYcfva9vw' target='_blank'>Kubernetes Pods Creating and Managing with YAML | How to Define Pod Specifications with YAML</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>
