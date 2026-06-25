@@ -12,26 +12,22 @@ sources:
 
 ## Learning Objectives
 - Separate configuration and secret values from images using ConfigMaps and Secrets, and inject them into Pods.
-- Survey approaches to managing manifests at scale with Helm and Kustomize.
+- Manage manifests at scale with Kustomize (and know when to reach for Helm).
 - Review the finished pipeline and how to apply it to your own code.
 
 ## Body
 
-### The last missing piece: configuration
+Real apps need configuration — database URLs, feature flags, API keys, passwords — that you should **never** bake into an image or hardcode in a manifest. Kubernetes keeps configuration separate from code with two objects: **ConfigMap** (non-sensitive) and **Secret** (sensitive). This is what makes one image portable across dev, staging, and production. Below, each task is a short *what/why*, the command or YAML, then a verification step.
 
-Your pipeline deploys safely, but real apps need *configuration* — database URLs, feature flags, API keys, passwords. You should **never** bake these into the image (every environment would need a different image) or hardcode them in the Deployment manifest (especially secrets, which would then sit in your Git repo in plain text). Kubernetes gives you two objects to keep configuration separate from code: **ConfigMap** for non-sensitive settings and **Secret** for sensitive ones. This decoupling is what makes one image portable across dev, staging, and production.
+### Create a ConfigMap
 
-### ConfigMap: non-sensitive configuration
-
-A **ConfigMap** stores configuration as key-value pairs. It is *not* encrypted and is meant for non-confidential data like ports, log levels, or feature flags. Create one from literals on the command line:
+A **ConfigMap** stores non-sensitive settings as key-value pairs. Create it imperatively for quick tests, or declaratively (YAML) for anything you commit to Git.
 
 ```bash
 kubectl create configmap app-config \
   --from-literal=LOG_LEVEL=info \
   --from-literal=NGINX_PORT=8080
 ```
-
-…or declaratively in YAML, which is what you commit to your repo:
 
 ```yaml
 apiVersion: v1
@@ -43,9 +39,15 @@ data:
   NGINX_PORT: "8080"
 ```
 
-There are two ways a Pod consumes a ConfigMap, and the same two work for Secrets:
+Verify:
 
-**As environment variables.** Inject specific keys with `env`/`valueFrom`, or pull in every key at once with `envFrom`:
+```bash
+kubectl get configmap app-config -o yaml
+```
+
+### Inject a ConfigMap into a Pod
+
+Pods consume a ConfigMap two ways (the same two work for Secrets): as **environment variables** or as **mounted files**. Use `envFrom` to pull in every key at once, or `env`/`valueFrom` for one specific key.
 
 ```yaml
         envFrom:
@@ -60,11 +62,17 @@ There are two ways a Pod consumes a ConfigMap, and the same two work for Secrets
                 key: LOG_LEVEL
 ```
 
-**As mounted files.** Mount the ConfigMap as a volume and each key becomes a file (e.g., under `/etc/config/`). This suits apps that read a config file rather than environment variables.
+To mount as files instead, attach the ConfigMap as a volume; each key becomes a file under your mount path (e.g. `/etc/config/`). Verify inside the Pod:
 
-### Secret: sensitive values — and what "base64" really means
+```bash
+kubectl exec -it <pod> -- env | grep LOG_LEVEL
+# or, for file mounts:
+kubectl exec -it <pod> -- ls /etc/config
+```
 
-A **Secret** looks almost identical to a ConfigMap but is intended for sensitive data — passwords, tokens, TLS certificates, DB credentials:
+### Create and inject a Secret
+
+A **Secret** is for sensitive values — passwords, tokens, TLS certs, DB credentials. It looks almost identical to a ConfigMap, but signals intent and supports extra protections (see below).
 
 ```bash
 kubectl create secret generic db-secret \
@@ -72,7 +80,7 @@ kubectl create secret generic db-secret \
   --from-literal=password=S3cr3t123
 ```
 
-Inject it the same way (note `secretKeyRef` / `secretRef` instead of the ConfigMap variants):
+Inject it just like a ConfigMap, but with `secretKeyRef` / `secretRef`:
 
 ```yaml
         env:
@@ -83,43 +91,97 @@ Inject it the same way (note `secretKeyRef` / `secretRef` instead of the ConfigM
                 key: password
 ```
 
-Now for the single most misunderstood point in all of Kubernetes:
+Verify:
 
-> **Base64 is encoding, not encryption.** When you inspect a Secret with `kubectl get secret db-secret -o yaml`, the values look scrambled — but they are merely base64-encoded, which anyone can reverse instantly with `echo <value> | base64 --decode`. A Secret is **not** secured by default. Treat its YAML exactly as carefully as a plaintext password.
+```bash
+kubectl exec -it <pod> -- env | grep DB_PASSWORD
+```
 
-So what makes Secrets genuinely safer than ConfigMaps, and how do you protect them properly?
+### Understand "base64" — and protect Secrets properly
 
-- **Enable encryption at rest** on the cluster so the values are encrypted inside etcd (Kubernetes' datastore). Without this, anyone with etcd access reads them in the clear. On EKS you can enable envelope encryption with a KMS key.
-- **Never commit real Secret YAML to Git.** Use placeholders, or tooling like Sealed Secrets that stores an *encrypted* version safely in the repo.
-- **For production, offload secrets to an external manager** — AWS Secrets Manager, HashiCorp Vault, or the External Secrets Operator — and let Kubernetes pull them in at runtime rather than storing the real values in the cluster at all. On EKS, the AWS Secrets and Configuration Provider (ASCP) can mount Secrets Manager values directly.
-- **Rotate secrets regularly.** Credentials age; rotation limits the damage of a leak.
+When you inspect a Secret, the values look scrambled. They are not. This is the single most misunderstood point in Kubernetes.
 
-### Managing manifests at scale: Helm and Kustomize
+```bash
+kubectl get secret db-secret -o yaml
+echo 'UzNjcjN0MTIz' | base64 --decode   # → S3cr3t123
+```
 
-So far you have a handful of hand-written YAML files for one environment. Real systems run the same app across dev, staging, and production with small differences (more replicas in prod, a different image tag, an environment-specific DNS name). Copy-pasting YAML per environment quickly becomes unmaintainable. Two tools solve this:
+> **Base64 is encoding, not encryption.** Anyone can reverse it instantly. A Secret is **not** secured by default — treat its YAML as carefully as a plaintext password.
 
-**Kustomize** is a *template-free* tool, built right into `kubectl` (`kubectl apply -k`). You keep a **base** directory of plain Kubernetes YAML and per-environment **overlays** that patch only what differs — namespace, replica count, image tag. Because there are no templating placeholders, your base files are still valid, readable Kubernetes manifests. A handy bonus is its `configMapGenerator`/`secretGenerator`: when the data changes, Kustomize appends a hash to the object's name, which *automatically triggers a rolling update* (plain ConfigMap edits do not). For many teams Kustomize hits the sweet spot of simple and powerful.
+To make Secrets genuinely safe:
+- **Enable encryption at rest** so values are encrypted inside etcd (Kubernetes' datastore). On EKS, use envelope encryption with a KMS key.
+- **Never commit real Secret YAML to Git.** Use placeholders, or Sealed Secrets (stores an *encrypted* version safely in the repo).
+- **For production, offload to an external manager** — AWS Secrets Manager, HashiCorp Vault, or the External Secrets Operator — so the real values never live in the cluster. On EKS, the AWS Secrets and Configuration Provider (ASCP) can mount Secrets Manager values directly.
+- **Rotate secrets regularly** to limit the damage of a leak.
 
-**Helm** is a *templating* package manager. It bundles your manifests into a reusable, versioned **chart** with a `values.yaml` file of parameters, so you (or others) can install the same app with different values. Helm shines for packaging off-the-shelf software (databases, monitoring stacks) and sharing reusable charts; the trade-off is that to be flexible you end up parameterizing many fields, which adds its own complexity.
+### Manage manifests at scale with Kustomize
 
-You do not need to adopt either today — your hand-written manifests work fine for one app and one environment. But know the menu: reach for **Kustomize** when you need per-environment variants of your own app with minimal ceremony, and **Helm** when you are packaging something for reuse or installing third-party software.
+Running the same app across dev/staging/prod with small differences (replica count, image tag, namespace) makes copy-pasting YAML unmaintainable. **Kustomize** solves this and is built into `kubectl` (`apply -k`). It is **template-free**: a **base** of plain Kubernetes YAML plus per-environment **overlays** that patch only what differs — so your base files stay valid, readable manifests.
+
+Lay it out like this:
+
+```
+base/
+  deployment.yaml
+  kustomization.yaml      # resources: [deployment.yaml]
+overlays/
+  staging/kustomization.yaml
+  production/kustomization.yaml
+```
+
+A production overlay patches just the differences and points back to the base:
+
+```yaml
+# overlays/production/kustomization.yaml
+namespace: production
+resources:
+  - ../../base
+replicas:
+  - name: nginx
+    count: 20
+images:
+  - name: nginx
+    newTag: 1.21.6
+```
+
+Apply and verify:
+
+```bash
+kubectl apply -k overlays/production
+kubectl get pods -n production
+```
+
+A key bonus is `configMapGenerator`/`secretGenerator`: when the data changes, Kustomize appends a content hash to the object's name, which **automatically triggers a rolling update** — plain ConfigMap edits do not.
+
+```yaml
+configMapGenerator:
+  - name: app-config
+    literals:
+      - LOG_LEVEL=info
+secretGenerator:
+  - name: db-secret
+    literals:
+      - password=S3cr3t123
+```
+
+> **When to use Helm instead.** **Helm** is a *templating* package manager that bundles manifests into versioned, reusable **charts** with a `values.yaml`. Reach for Helm when packaging software for reuse or installing third-party apps (databases, monitoring); reach for **Kustomize** for per-environment variants of your own app with minimal ceremony. Hand-written YAML is perfectly fine to start.
 
 ### The finished pipeline — and applying it to your code
 
-Step back and look at what you built across this course. The end-to-end flow is:
+Step back at what you built across this course. End to end:
 
-1. **Containerize** your app with a `Dockerfile` and stand up an **ECR** repository (Lecture 2).
-2. **Push to GitLab** → a **webhook** triggers **Jenkins**, which checks out, tests, builds, and pushes a **commit-SHA-tagged image** to ECR (Lecture 3).
-3. Describe the workload with **Deployment and Service manifests**, where the image tag is injected (Lecture 4).
-4. Give Jenkins access to **EKS** via an **IAM role mapped to an RBAC group** (Lecture 5).
-5. Jenkins' **deploy stage** updates the image (`kubectl apply` or `set image`) and waits with `kubectl rollout status` (Lecture 6).
-6. EKS performs a **rolling update**, gated by **readiness/liveness probes**, with **`kubectl rollout undo`** ready as a one-command rollback (Lecture 7).
-7. **ConfigMaps and Secrets** keep configuration out of the image, managed at scale with **Kustomize or Helm** (this lecture).
+1. **Containerize** your app with a `Dockerfile`; stand up an **ECR** repository (L2).
+2. **Push to GitLab** → a **webhook** triggers **Jenkins**, which tests, builds, and pushes a **commit-SHA-tagged image** to ECR (L3).
+3. Describe the workload with **Deployment + Service manifests** taking the injected image tag (L4).
+4. Give Jenkins **EKS** access via an **IAM role mapped to an RBAC group** (L5).
+5. Jenkins' **deploy stage** updates the image and waits with `kubectl rollout status` (L6).
+6. EKS runs a **rolling update**, gated by **readiness/liveness probes**, with **`kubectl rollout undo`** as one-command rollback (L7).
+7. **ConfigMaps and Secrets** keep config out of the image, managed at scale with **Kustomize or Helm** (this lecture).
 
-To run *your own* application through this pipeline, the pieces you customize are small and well-contained: your `Dockerfile`; your `deployment.yaml`/`service.yaml` (your image reference, container port, replica count, and probes); your ConfigMap/Secret for environment-specific values; and the environment variables in the `Jenkinsfile` (AWS account ID, region, ECR repo name, cluster name). The *shape* of the pipeline — webhook → build → push → deploy → verify — never changes. That reusability is the whole point: you set it up once and every project afterward inherits safe, automated, traceable deployments.
+To run *your own* app through this pipeline, the parts you customize are small: your `Dockerfile`; your `deployment.yaml`/`service.yaml` (image reference, port, replicas, probes); your ConfigMap/Secret; and a few `Jenkinsfile` variables (AWS account ID, region, ECR repo, cluster name). The *shape* — webhook → build → push → deploy → verify — never changes. You set it up once, and every project afterward inherits safe, automated, traceable deployments.
 
 ## Key Takeaways
-- Keep configuration out of your image and manifest: ConfigMap for non-sensitive settings, Secret for sensitive ones; inject either as environment variables or mounted files.
-- A Secret is base64-*encoded*, not encrypted — anyone can decode it. Protect real secrets with encryption at rest, by keeping them out of Git, and ideally with an external manager (AWS Secrets Manager, Vault) plus regular rotation.
-- Manage manifests across environments with **Kustomize** (template-free base + overlays, built into `kubectl`) or **Helm** (templated, versioned charts); hand-written YAML is fine to start.
+- Keep configuration out of the image: **ConfigMap** for non-sensitive settings, **Secret** for sensitive ones; inject either as environment variables (`envFrom`/`valueFrom`) or as mounted files.
+- A Secret is base64-*encoded*, not encrypted — anyone can decode it. Protect real secrets with encryption at rest, by keeping them out of Git, and ideally with an external manager (AWS Secrets Manager, Vault) plus rotation.
+- **Kustomize** (template-free base + overlays, built into `kubectl`) manages per-environment variants; its generators hash data to auto-trigger rollouts. Use **Helm** for reusable/third-party charts.
 - The finished pipeline turns a single push into a safe, traceable, zero-downtime EKS deployment; adapting it to a new app means changing only the Dockerfile, manifests, config/secrets, and a few `Jenkinsfile` variables.

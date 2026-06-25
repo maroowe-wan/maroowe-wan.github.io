@@ -1,0 +1,661 @@
+## Video 1: Using local docker images in Minikube (https://www.youtube.com/watch?v=7tWJbsGglYA)
+
+When you're developing Kubernetes
+applications using minikube, you
+need to ensure that your Docker image
+that you want to run in your Pod.
+It is available to minikube.
+The simplest thing you can do is
+to just build your Docker image and
+then publish it to a remote registry
+like Docker hub, and then have
+minikube, pull this image and run it.
+Sadly, the simplest thing is
+also rather time-consuming.
+And not always convenient.
+especially for developing
+a proprietary application.
+In which case you probably
+need a private Docker registry,
+which will cost you money.
+And minikube will require
+proper authentication.
+And authorization for
+it to pull the images.
+But you can also use
+your local docker images directly
+into minikube without having to
+upload them to a registry first
+I'm in the zone, Let's get started..
+So when you're developing a
+Kubernetes application, this is what
+your typical workflow looks like.
+First, you will make some
+code changes to application.
+And now you want to
+test those changes out.
+So you will use Docker Build to
+create a new Docker image locally.
+This new image will contain your new
+code changes that you want to test out.
+And of course you will assign
+this image, a new tag, or maybe
+you will assign it, the "latest"
+tag, depending on your workflow.
+Now once your new image is ready, you
+will publish it to a remote Docker
+registry, something like Docker
+hub on Amazon ECR Or Artifactory.
+This is so that you can make this
+image available for minikube.
+Once your image is
+published to the registry.
+You will go ahead and make
+some changes in your pod.
+Specification.
+Specifically, what are you going
+to do is you're going to update the
+tag of the image that you want to
+pull, or if it's latest, you're just
+going to make sure that minikube is
+pulling the latest image all the time.
+And once you're done with this,
+you're going to submit this new
+pod specification to minikube.
+At which point minikube cluster
+we'll go ahead and pull your new
+image from the Docker registry.
+And then it did start running it.
+And once it starts running it, then
+you can test your code changes out.
+And if I, this point you realize that
+now you got to make some more code.
+Changes, you will go ahead
+and repeat the entire cycle.
+This can easily get frustrating
+when you're frequently making
+code changes in your app.
+You end up with the "change,
+build, publish to registry,
+pull in minikube" cycle.
+over and over.
+So how to configure minkube to
+use docker image from your local
+system  rather than pulling from
+a remote registry all the time
+The trick here is to ask your Docker
+client to talk to minikubes, Docker,
+Daemon the other than your local Docker
+Daemon, and then build all the Docker
+images inside the minikube containers.
+Remember that minikube runs inside
+its own container VM on your computer.
+Inside minikube.
+It runs its own Docker Daemon, which runs
+all the containers, including Kubernetes.
+It says.
+So the first and most important step
+is to point your docker client to
+minikube's docker daemon  rather than
+your local computer's docker daemon.
+and you do this, by running this command.
+let's unpack it.
+At the moment, if I run a bunch of.
+Did and against my local
+machines, demon returning the
+docker objects, residing on it.
+This is the default configuration.
+We always interact with Docker
+objects on our local system.
+Now I have a minikube
+cluster running on my local.
+And Minikube itself is running
+inside a Docker container actually.
+This one.
+On my MacOS Minikube is running inside.
+This Docker container container
+is also the default setting.
+you could instead be running
+minikube inside a virtual machine to.
+Now, inside this container, there is
+another Docker Daemon running that
+manages all the containers running
+as part of the cluster inside it.
+No.
+Running the "docker-env" command
+produces some environment variables.
+Among other things, this output
+tells you how to connect to
+the minikubes, Docker, demon.
+So When I run "eval" on this output.
+I set a bunch of environment
+variables in my current shell session.
+That point, my Docker client,
+too minikubes, Docker, demon.
+No, all docker commands that I
+will run will actually execute
+against the minikubes, Docker demon.
+And not against my own local
+machines, Docker, demon.
+Let's verify this.
+Yep.
+These images are not on my local system.
+They are inside the minikube container.
+Similarly.
+All of these processes.
+All of these containers.
+are running inside the
+minikube containers.
+On my local, there is only
+the Minikube container itself.
+That's running.
+Also note that this change is
+only for this terminal session.
+If I open up a new terminal.
+And try to reach out
+to Docker Daemon again.
+It will actually reach out
+to only my local daemon.
+This is because those
+environment variables were
+exported only for this session.
+Not if you're using a custom profile.
+for your minikube cluster, make sure
+to specify that custom profiles name.
+Okay.
+Let's say make some code
+changes to my application.
+Let's see the Dockerfile as well.
+Very simple Dockerfile,
+runs my python application..
+I don't need to make any changes here.
+Just need to build a new image.
+That's app:0.0.11.
+Cool.
+As you can see this time, the
+image got built inside the minikube
+container because we were using
+the minikubes, Docker demon.
+And if I tried to find it on my local.
+It's not there.
+I also never pushed this new
+image to any remote registry.
+So minikube can't really
+pull it from anywhere.
+So now let's set the image name
+and tag in my pod specification.
+0 0 1.
+Another important thing also make sure
+that the imagePullPolicy is set to Never.
+This means Kubelet will never pull
+the image from the remote registry.
+It will always try to find
+it on the local machine.
+And if it finds it.
+It will start the container.
+Otherwise the startup fields.
+And finally let's apply these changes.
+There The pod is running.
+So the container was started
+successfully, which means Kubernetes
+was able to find the container image.
+Despite it not being present in a
+remote registry like Docker hub.
+Notice the log here, container.
+Image is already present on the local.
+This is the confirmation that Minikube
+actually picked the image up from Local.
+So I simply pointed my Docker client.
+Too minikubes.
+Docker Daemon.
+I built my image.
+Then minikube was able to simply use
+that image from the local itself.
+This improves my development workflow
+so much because now I don't have to
+keep pushing my image to a remote
+registry, just so minikube could
+pull it back inside my system.
+So, this is all you can force
+minikube to use your Docker images
+from the local system itself.
+That is one caveat you should be
+aware of the "docker-env" command
+only works with single-node clusters
+you get this error  So when
+using multinode clusters in
+minikube, use the registry addon
+I hope this video makes
+you more productive.
+I create a lot of content to
+help you solve the most practical
+problems in the world of DevOps.
+If there's.
+Anything specific you want to learn?
+Drop a comment below and let me know.
+See you next time.
+
+
+## Video 6: Minikube Tutorial: Setting Up Your Environment - Part 3 (https://www.youtube.com/watch?v=qBudNa-j7as)
+
+In this section, we’ll talk about&nbsp;
+Minikube, kubectl, and how you can&nbsp;&nbsp;
+set them up so that you can start working&nbsp;
+with a real Kubernetes cluster locally.
+But first of all, what is Minikube? Well,&nbsp;
+as we discussed in the previous section,&nbsp;&nbsp;
+a typical production Kubernetes setup consists&nbsp;
+of three Kubernetes control plane nodes for high&nbsp;&nbsp;
+availability and many Kubernetes workers where&nbsp;
+you run your applications. As you already know,&nbsp;&nbsp;
+control plane nodes and workers have&nbsp;
+their own responsibilities. Typically,&nbsp;&nbsp;
+you would have separate physical or&nbsp;
+virtual machines for each type of node.
+Now, if you want to test something quickly on your&nbsp;
+laptop, such as deploying your application or new&nbsp;&nbsp;
+components, setting up a full-fledged&nbsp;
+Kubernetes cluster can be difficult.&nbsp;
+Or maybe even impossible if you don’t&nbsp;
+have a lot of resources like memory or&nbsp;&nbsp;
+CPU. Minikube was created exactly for&nbsp;
+this use case, for testing purposes.
+Minikube is usually a single-node cluster&nbsp;
+that combines control plane and worker node&nbsp;&nbsp;
+functionality. If you need to test something&nbsp;
+that requires a multi-node cluster, such as&nbsp;&nbsp;
+how your application handles disruptions,&nbsp;
+you can use Minikube for that as well. It’s&nbsp;&nbsp;
+quite flexible. Typically, we don’t run&nbsp;
+applications on master nodes. Internally,&nbsp;&nbsp;
+Kubernetes uses taints and tolerations to&nbsp;
+repel pods from control plane nodes. However,&nbsp;&nbsp;
+with a single-node cluster,&nbsp;
+these constraints are removed.
+To run Minikube for a long time, we used to&nbsp;
+rely on external hypervisors that needed to&nbsp;&nbsp;
+be installed on your workstation. For&nbsp;
+example, we would install VirtualBox,&nbsp;&nbsp;
+and Minikube would spin up a virtual machine&nbsp;
+for the one-node cluster. Recently, Minikube&nbsp;&nbsp;
+added native support for Docker. Now, you can&nbsp;
+use Docker to create a container instead of a&nbsp;&nbsp;
+virtual machine for the Kubernetes cluster,&nbsp;
+and run other Docker containers inside that&nbsp;&nbsp;
+cluster. You can use the Docker driver&nbsp;
+for Minikube on Windows, Linux, and Mac.
+Now to summarize, Minikube is a&nbsp;
+one-node Kubernetes cluster that&nbsp;&nbsp;
+will run inside a Docker container in our case or&nbsp;&nbsp;
+a virtual machine. And you can use it&nbsp;
+for testing purposes on your laptop.
+Now, you need a way to interact with&nbsp;
+your local Kubernetes cluster on&nbsp;&nbsp;
+your laptop or PC. That’s where&nbsp;
+kubectl comes into the picture.
+When you have a local Kubernetes cluster, you&nbsp;
+need a tool to interact with it. For example,&nbsp;&nbsp;
+you might need to create pods, services,&nbsp;
+configmaps, or secrets. The easiest way to do this&nbsp;&nbsp;
+locally is by using kubectl. In production, we use&nbsp;
+GitOps principles and tools like ArgoCD or FluxCD.
+If you remember from the previous section,&nbsp;
+all interactions with Kubernetes are done&nbsp;&nbsp;
+via the API server. To do anything with your&nbsp;
+local cluster, the API server will be your&nbsp;&nbsp;
+entry point. Whether you want to configure&nbsp;
+something or perform an action in Kubernetes,&nbsp;&nbsp;
+you need to talk to the API server first. To&nbsp;
+configure or manage anything in Kubernetes,&nbsp;&nbsp;
+you need to talk to the API server&nbsp;
+first. You can interact with the API&nbsp;&nbsp;
+server through different clients. These include&nbsp;
+a UI like the open-source Kubernetes dashboard,&nbsp;&nbsp;
+sending raw REST requests, or using the&nbsp;
+command-line interface (CLI) known as kubectl.
+Kubectl is one of the most powerful&nbsp;
+of these clients. With kubectl,&nbsp;&nbsp;
+you can do almost anything in&nbsp;
+Kubernetes. During this tutorial,&nbsp;&nbsp;
+we’ll primarily use the kubectl&nbsp;
+client to interact with Kubernetes.
+Whenever you send a request using kubectl&nbsp;
+to the control plane via the API server,&nbsp;&nbsp;
+such as creating a pod or exposing it using a&nbsp;
+service, Kubernetes workers will make it happen.&nbsp;&nbsp;
+Worker nodes are responsible for executing&nbsp;
+most of the commands you send to Kubernetes,&nbsp;&nbsp;
+such as creating pods, destroying&nbsp;
+pods, or creating services, etc.&nbsp;
+So, this is the Minikube setup, and this is how&nbsp;
+kubectl is used to interact with the cluster.
+And it is also important to note is that&nbsp;
+kubectl is not only for the local Minikube&nbsp;&nbsp;
+cluster. If you have a cloud cluster,&nbsp;
+for example, an EKS cluster in AWS,&nbsp;&nbsp;
+you can still interact with it&nbsp;
+using kubectl, and we frequently&nbsp;&nbsp;
+do. Kubectl is a tool to interact with any type of&nbsp;
+cluster—on-premises, in the cloud, or even hybrid.
+So now we know what a Minikube cluster is and&nbsp;
+what kubectl is. It's time to install both and&nbsp;&nbsp;
+see them in practice. I use Mac so I’ll quciklly&nbsp;
+show you install all these components on Mac and&nbsp;&nbsp;
+I’ll attach instructions how to install&nbsp;
+those tools on Windows and Linux as well.
+Alright, since we’ll use Docker as a Minikube&nbsp;
+driver, we need to install it first. It is also&nbsp;&nbsp;
+super easy; just download the distribution&nbsp;
+for your operating system. In my case,&nbsp;&nbsp;
+I use a Mac with Apple Silicon, and double-click&nbsp;
+to start the installation. I’ll also attach all&nbsp;&nbsp;
+the links in the description for&nbsp;
+Windows, Linux, as well as Mac.
+Next, we need to start Docker. Before moving&nbsp;
+to the next step, make sure it’s running.&nbsp;
+Now I’ll use Brew, which is a package manager&nbsp;
+for Mac. First of all, we need to refresh all&nbsp;&nbsp;
+repositories to get the latest versions.&nbsp;
+Then I’ll install Minikube with Brew.&nbsp;&nbsp;
+Minikube has kubectl as a dependency,&nbsp;
+so we just need to install Minikube,&nbsp;&nbsp;
+and we are ready. The same applies to Windows:&nbsp;
+when you download and install Minikube, you get&nbsp;&nbsp;
+kubectl as well. In my case, kubernetes-cli&nbsp;
+is a bundle that includes kubectl CLI.&nbsp;
+To verify the installation, let’s run kubectl&nbsp;
+--help. If you get an error, it means it’s not&nbsp;&nbsp;
+installed; otherwise, you will get a bunch of&nbsp;
+subcommands that we can run, and I’ll cover&nbsp;&nbsp;
+most of them in the following part. For now,&nbsp;
+we just need to make sure that it is installed.&nbsp;
+Next, let’s verify that Minikube CLI is&nbsp;
+installed as well. So let’s run minikube&nbsp;&nbsp;
+--help. You will see commands like start,&nbsp;
+status, delete, and others that you can use&nbsp;&nbsp;
+to manage your local Kubernetes cluster. We’ll&nbsp;
+also cover many of them in the following section.&nbsp;
+It’s also helpful to run kubectl version. This&nbsp;
+will give you the client version and also try&nbsp;&nbsp;
+to get the Kubernetes version. Since we haven’t&nbsp;
+started Minikube yet, it will give you an error.&nbsp;
+Alright, time to start Minikube. Again, usually,&nbsp;
+we run a single node cluster, so the --node=1 is&nbsp;&nbsp;
+totally optional since it’s the default. Just keep&nbsp;
+in mind that if you need a multi-node cluster,&nbsp;&nbsp;
+start Minikube with 2 or more nodes. Also,&nbsp;
+we’ll use Docker as a driver. You can use&nbsp;&nbsp;
+VirtualBox or any other supported hypervisor&nbsp;
+if you want; there is little difference.&nbsp;
+Minikube will download the Docker image&nbsp;
+and start Minikube inside the container.&nbsp;
+You can run minikube status to make sure&nbsp;
+all components are running. And if you&nbsp;&nbsp;
+check running containers, you’ll see that the&nbsp;
+k8s-minikube Docker container is running as well.&nbsp;
+Finally, if you run kubectl version again,&nbsp;
+you’ll see both client and server versions.&nbsp;&nbsp;
+Don’t worry if they do not match; they&nbsp;
+have backward compatibility. So far,&nbsp;&nbsp;
+we have set up the local environment, and&nbsp;
+in the following part, we’ll start deploying&nbsp;&nbsp;
+applications to Kubernetes and exposing&nbsp;
+them to outside clients. We’ll also learn&nbsp;&nbsp;
+the most common kubectl commands that you can use,&nbsp;
+including for debugging, which is very important.
+
+
+## Video 11: Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube & kubectl (https://www.youtube.com/watch?v=hDBgeUuPgXo)
+
+In this hands-on tutorial, you and I are diving&nbsp;
+into the exciting world of Kubernetes deployment!&nbsp;
+I'll show you how to deploy your first&nbsp;
+Dockerized application using Minikube.&nbsp;&nbsp;
+Whether you're just starting out or brushing up on&nbsp;
+Kubernetes, this tutorial will guide you through&nbsp;&nbsp;
+every step. Let's get deploying!
+Before we jump into the fun part,&nbsp;&nbsp;
+there are a few tools you'll need to have&nbsp;
+in place. Don't worry - I'll walk you&nbsp;&nbsp;
+through everything you need to get started!
+For this demo, I'll be deploying a simple&nbsp;&nbsp;
+Spring Boot application using Minikube.
+Install Docker Desktop: First you need to&nbsp;&nbsp;
+install Docker Desktop. It includes Docker CLI and&nbsp;
+Docker Daemon, and it also provides a Kubernetes&nbsp;&nbsp;
+option that we will use alongside Minikube.
+Install Minikube: You also need to install&nbsp;&nbsp;
+Minikube. If you have a MacBook Pro - just&nbsp;
+like me, you can do it by running the command:
+brew install minikube&nbsp;
+Install kubectl: You need to install the&nbsp;
+Kubernetes Command Line Interface (CLI) kubectl to&nbsp;&nbsp;
+interact with your Minikube cluster. On MacBook,&nbsp;
+you can install it using the following command:
+brew install kubectl
+Start Minikube with the Docker&nbsp;driver:
+minikube start --driver=docker&nbsp;
+This will start Minikube using&nbsp;
+Docker as the container runtime,&nbsp;&nbsp;
+which works well with Docker Desktop.
+Now minikube created a Kubernetes cluster&nbsp;&nbsp;
+for me. This cluster includes:
+The control plane (master),&nbsp;&nbsp;
+which manages the cluster and its nodes.
+A single node (managed by Minikube) where&nbsp;&nbsp;
+my workloads will run. This node is&nbsp;
+where the containers (pods) are hosted.
+This step initializes an empty Kubernetes&nbsp;
+cluster with a single node that is ready to&nbsp;&nbsp;
+receive workloads but does not create&nbsp;
+any pods or deployments on its own.&nbsp;
+Use the Docker environment within&nbsp;Minikube
+Minikube provides a command to use the Docker&nbsp;&nbsp;
+daemon in Minikube so that you can directly build&nbsp;
+Docker images inside Minikube without pushing them&nbsp;&nbsp;
+to a remote registry like Docker Hub:
+eval $(minikube docker-env)&nbsp;
+Create a Docker Image for the Spring Boot&nbsp;App
+I need to create a Dockerfile in the root of my&nbsp;&nbsp;
+Spring Boot project. Here's an example of&nbsp;
+a basic Dockerfile for a Spring Boot app.&nbsp;
+Before building the docker image, I need&nbsp;
+to package my Spring Boot application&nbsp;&nbsp;
+into a&nbsp;.jar file by running the appropriate&nbsp;
+command that generates the&nbsp;.jar. In my case,&nbsp;&nbsp;
+I'm using Gradle as a build tool, so I&nbsp;
+just have to run the bootJar Gradle task.
+Then, I can build the Docker image by running:&nbsp;
+docker build -t spring-boot-app:latest .
+Remember, this Docker image will be created&nbsp;&nbsp;
+inside Minikube - because I'm using the&nbsp;
+Docker environment within Minikube - since&nbsp;&nbsp;
+I run eval $(minikube docker-env). So don't&nbsp;
+be surprised when you don't see the image on&nbsp;&nbsp;
+the GUI of Docker Desktop.
+Verify the Docker&nbsp;image
+Run the following command to see if the image&nbsp;
+has been built successfully: docker images&nbsp;
+If I'm not using the Docker&nbsp;
+environment within Minikube,&nbsp;&nbsp;
+I'll see something similar to the following.
+But since my Docker image is created inside&nbsp;&nbsp;
+Minikube, the output of the command&nbsp;
+docker images is the following.
+Deploy Spring Boot Application to Kubernetes
+The next step is to create the Kubernetes&nbsp;&nbsp;
+deployment.
+Create Kubernetes&nbsp;&nbsp;
+Deployment and Service YAML&nbsp;Files
+I created a deployment.yaml file to&nbsp;&nbsp;
+define my Spring Boot app deployment.
+Notice that I used imagePullPolicy: Never in&nbsp;
+my deployment.yaml file. Without that option,&nbsp;&nbsp;
+Kubernetes failed to pull the specified Docker&nbsp;
+image and my pod got the status ImagePullBackOff.
+Here is why:&nbsp;
+By default, Kubernetes may try to pull the&nbsp;
+image from an external registry (Docker Hub),&nbsp;&nbsp;
+especially if the image tag is&nbsp;:latest. You&nbsp;
+can override this behavior by setting the&nbsp;&nbsp;
+imagePullPolicy to Never, which will force&nbsp;
+Kubernetes to use the local image instead of&nbsp;&nbsp;
+trying to pull it from a remote registry.
+Next, create a service.yaml file to&nbsp;&nbsp;
+expose the application.
+Apply the deployment&nbsp;&nbsp;
+and service to the Kubernetes cluster
+Then run the following commands to apply&nbsp;&nbsp;
+the deployment.yaml and service.yaml files:
+kubectl apply -f deployment.yaml&nbsp;
+kubectl apply -f service.yaml
+Verify the application is&nbsp;running&nbsp;
+You can check the status of your deployment&nbsp;
+and service with the following commands:&nbsp;
+kubectl get pods
+kubectl get services&nbsp;
+Ensure that your Spring Boot app's pod is&nbsp;
+running and the service is exposed as a NodePort.
+The command kubectl apply -f deployment.yaml&nbsp;
+creates a deployment in the existing Kubernetes&nbsp;&nbsp;
+cluster. The deployment instructs Kubernetes to&nbsp;&nbsp;
+create a specified number of pods - based&nbsp;
+on the replicas field in deployment.yaml.&nbsp;
+At this point, K8s schedules the pods to&nbsp;
+run on the available node that Minikube&nbsp;&nbsp;
+created when it started the cluster.
+After applying the service.yaml,&nbsp;&nbsp;
+Kubernetes creates a Service to expose my&nbsp;
+Spring Boot application (the pods) to the&nbsp;&nbsp;
+external world or to other services within&nbsp;
+the cluster. This Service maps network&nbsp;&nbsp;
+requests (e.g., NodePort or LoadBalancer)&nbsp;
+to the pods running my Spring Boot app.&nbsp;
+Access the Spring Boot Application
+Now, you can access your Spring Boot&nbsp;&nbsp;
+application using Minikube's IP and the&nbsp;
+NodePort you exposed (in this case, 30007).&nbsp;
+First, get the Minikube IP.
+minikube ip&nbsp;
+Then, access your Spring Boot application&nbsp;
+in the browser using the following URL.&nbsp;
+If this approach didn't work for you and&nbsp;
+you got an error like "Failed to connect"&nbsp;&nbsp;
+or "Couldn't connect to server,"&nbsp;
+you can try the next alternative.&nbsp;
+You can access your Spring Boot application&nbsp;
+by accessing your service and opening it in&nbsp;&nbsp;
+your browser. For that sake, you need&nbsp;
+to use the minikube service command,&nbsp;&nbsp;
+which forwards traffic directly to the service.&nbsp;
+This avoids possible networking issues:
+minikube service spring-boot-service --url
+This command returns a URL (something like&nbsp;&nbsp;
+http://127.0.0.1:&lt;some-port&gt;). Try accessing&nbsp;
+this URL in your browser and see if it works.&nbsp;&nbsp;
+If it was successful, you can see the message&nbsp;
+"Greeting from Spring Boot!", which is coming&nbsp;&nbsp;
+from the HelloController.
+And just like that,&nbsp;&nbsp;
+you've got your app running on Kubernetes!
+Managing Resources - Scaling and Rolling&nbsp;Updates&nbsp;
+Now for the fun part - scaling!&nbsp;
+Want more power? Just increase&nbsp;&nbsp;
+the number of Pods in your deployment.
+Do you remember that I had replicas:&nbsp;&nbsp;
+1 in my deployment.yaml file?
+Let's scale the app up to 5 replicas:&nbsp;
+kubectl scale deployment&nbsp;
+spring-boot-deployment --replicas=5&nbsp;
+Instantly, Kubernetes spins up more Pods,&nbsp;
+making sure your app can handle more traffic 🔥.
+Need to update your app?
+No problem. With rolling updates,&nbsp;&nbsp;
+you can deploy new versions without downtime.&nbsp;
+Kubernetes will gradually replace old Pods with&nbsp;&nbsp;
+new ones, so your users never notice a thing.
+Experiment with Kubernetes - Your Playground&nbsp;
+So here's where the fun really begins.
+kubectl is the command-line tool you'll use&nbsp;&nbsp;
+to manage everything in Kubernetes. From listing&nbsp;
+Pods to checking logs to scaling deployments,&nbsp;&nbsp;
+kubectl is your best friend. Try some&nbsp;
+of these commands to get comfortable:&nbsp;
+kubectl logs &lt;pod-name&gt;&nbsp;
+kubectl delete pod &lt;pod-name&gt;
+Go wild with it. Try scaling up,&nbsp;&nbsp;
+rolling back, and breaking things! Kubernetes&nbsp;
+will fix itself - remember, it's self-healing.
+Troubleshooting tips
+Don't get confused when&nbsp;&nbsp;
+you have 5 pods and you delete one, then&nbsp;
+you run kubectl get pods and you see 5&nbsp;&nbsp;
+pods while you expect 4. Here is the thing:&nbsp;
+When you set the number of replicas to 5:&nbsp;
+Kubernetes ensures that 5 replicas&nbsp;
+(pods) of your application are running&nbsp;&nbsp;
+at all times. This is the desired state that&nbsp;
+you declared for your deployment. If a pod&nbsp;&nbsp;
+is deleted (intentionally or due to failure),&nbsp;
+Kubernetes' self-healing mechanism kicks in to&nbsp;&nbsp;
+restore the desired state by creating a new pod&nbsp;
+to maintain the specified number of replicas.&nbsp;
+When you manually delete a pod using:
+kubectl delete pod &lt;pod_name&gt;&nbsp;
+Kubernetes notices that the number of running&nbsp;
+replicas dropped below the desired count of 5.&nbsp;&nbsp;
+To maintain the desired state, it automatically&nbsp;
+creates a new pod to replace the one you deleted.
+This is how Kubernetes works in this&nbsp;case:
+Desired State: You set the deployment&nbsp;&nbsp;
+to have 5 replicas (i.e., 5 pods).
+Current State: When you delete a pod,&nbsp;&nbsp;
+Kubernetes sees that only 4 pods are running.
+Reconciliation: Kubernetes continuously monitors&nbsp;&nbsp;
+the cluster and detects that the current state (4&nbsp;
+running pods) does not match the desired state (5&nbsp;&nbsp;
+replicas). It immediately schedules a&nbsp;
+new pod to bring the total back to 5.
+This self-healing behavior is one of the key&nbsp;
+benefits of Kubernetes. It ensures that your&nbsp;&nbsp;
+applications maintain high availability&nbsp;
+and recover from failures automatically.&nbsp;
+kubectl describe &amp; kubectl&nbsp;logs&nbsp;
+Sometimes Pods can get stuck in weird&nbsp;
+states like Pending or CrashLoopBackOff.&nbsp;&nbsp;
+Use kubectl describe pod &lt;pod-name&gt; to dig&nbsp;
+deeper and understand what's going wrong.&nbsp;
+You can also check the logs with kubectl logs&nbsp;
+&lt;pod-name&gt; to get more detailed error messages.
+---
+Congratulations!
+In this step-by-step tutorial,&nbsp;&nbsp;
+you went through deploying a Spring Boot&nbsp;
+application using Docker, Minikube, and kubectl.&nbsp;
+We covered everything from setting up&nbsp;
+Minikube to creating a Docker image and&nbsp;&nbsp;
+deploying your app on a Kubernetes cluster.&nbsp;
+You learned how to scale your application,&nbsp;&nbsp;
+troubleshoot common issues, and use&nbsp;
+Kubernetes' powerful self-healing feature.&nbsp;
+By the end, you had your app running smoothly&nbsp;
+and became confident navigating Kubernetes.&nbsp;
+The best part is that you've only scratched the&nbsp;
+surface. So, don't stop here! Keep experimenting,&nbsp;&nbsp;
+break things, and learn from them.
+Thanks for hanging out with&nbsp;&nbsp;
+me - until next time, happy coding!
+Found this helpful? Smash that like button&nbsp;&nbsp;
+like it’s a bug in your code! Got questions or a&nbsp;
+topic you’d love to unravel? Drop a comment below!&nbsp;
+Until next time, keep those servers&nbsp;
+running and that coffee brewing.
+Excited about diving deeper into the&nbsp;
+world of software architecture? This&nbsp;&nbsp;
+video is just the beginning!
+Check out my Udemy video&nbsp;&nbsp;
+course on software architecture.
+The link to the course is in the&nbsp;&nbsp;
+video description below!
+See you next time!
+

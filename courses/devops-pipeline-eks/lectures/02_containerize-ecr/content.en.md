@@ -11,21 +11,17 @@ sources:
 # Containerizing Your App and Preparing Amazon ECR
 
 ## Learning Objectives
-- Package a web application of any language into a container image using a `Dockerfile`.
-- Create an Amazon ECR repository to store those images.
-- Understand that the image is the *input* to every Kubernetes deployment.
+- Package a web application into a container image with a `Dockerfile`.
+- Create an Amazon ECR repository and push an image to it.
+- See why the pushed image is the *input* to every Kubernetes deployment.
 
 ## Body
 
-### Why we start here
+Kubernetes runs **container images**, not source code. So step zero is turning your app into an image and storing it somewhere EKS can pull from. That "somewhere" is **Amazon ECR (Elastic Container Registry)** — AWS's private Docker registry, gated by IAM. Containers are language-agnostic, so the recipe below is the same whether your app is Node, Go, Python, or Java.
 
-Kubernetes does not run your source code. It runs **container images**. So before any pipeline, manifest, or cluster matters, you need a repeatable way to turn your app into an image and a reliable place to keep it. That is this lecture: a `Dockerfile` to build the image, and an **Amazon ECR** repository to store it. Once an image with a known tag sits in ECR, the rest of the course is about getting EKS to run it.
+### 1. Write a Dockerfile
 
-A nice property of containers is that they are **language-agnostic**. Whether your app is Node.js, Go, Python, or Java, the recipe is the same: describe the build in a `Dockerfile`, run `docker build`, then `docker push`. The pipeline does not care what language you wrote — it only cares that a `Dockerfile` exists.
-
-### Anatomy of a Dockerfile
-
-A `Dockerfile` is a plain-text recipe. Each line is an instruction that produces a layer of the image. Here is a minimal example for a Node.js web app:
+A `Dockerfile` is a plain-text recipe; each instruction adds a layer. Copy the dependency manifests *before* the source so Docker can cache the install layer and skip it when only your code changes.
 
 ```dockerfile
 FROM node:18-alpine
@@ -37,85 +33,73 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 ```
 
-Reading it line by line:
+> For production, prefer a **multi-stage build**: one stage compiles the app, a second slim stage (e.g. Google's "distroless") copies only the finished binary — smaller image, smaller attack surface.
 
-- `FROM node:18-alpine` — start from an official base image that already has Node installed. `alpine` is a tiny Linux distribution that keeps the image small.
-- `WORKDIR /app` — set the working directory inside the image.
-- `COPY package*.json ./` then `RUN npm install` — copy *just* the dependency manifests first and install. Doing this before copying the rest of the code means Docker can cache the dependency layer and skip re-installing when only your source changes. This ordering is a small habit that saves a lot of build time.
-- `COPY . .` — copy the application source.
-- `EXPOSE 3000` — document that the app listens on port 3000.
-- `CMD [...]` — the command that runs when the container starts.
+### 2. Build and test locally
 
-> A practical upgrade you will see in real projects is a **multi-stage build**: one stage compiles the app (with all the build tools), and a second, slim stage copies only the finished binary into a minimal image such as Google's "distroless" base. The result contains your app and nothing else — no shell, no package manager — which is smaller and has a smaller attack surface.
-
-Build and test it locally:
+Confirm the image runs before involving AWS.
 
 ```bash
 docker build -t my-app:dev .
 docker run -p 3000:3000 my-app:dev
+# Verify: open http://localhost:3000 (or curl it) and check the response.
 ```
 
-### Creating an ECR repository
+### 3. Create an ECR repository
 
-**Amazon ECR (Elastic Container Registry)** is AWS's private Docker registry. Think of it as your team's secure shelf for images — like Docker Hub, but inside your AWS account with IAM-controlled access.
-
-Create a repository from the AWS Console (search for "ECR" → *Create repository*), or from the CLI:
+One repository holds many tagged versions of the *same* service — typically one repo per service. Create it from the Console (search "ECR" -> *Create repository*) or the CLI.
 
 ```bash
 aws ecr create-repository \
   --repository-name my-app \
   --region us-east-1
+# Verify: returns the repositoryUri, shaped
+# <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app
 ```
 
-A repository is essentially one named bucket that holds many versions (tags) of the *same* application. You typically have one ECR repository per service.
+### 4. Authenticate, tag, and push
 
-### Pushing an image to ECR
-
-ECR repositories are private, so Docker has to authenticate before it can push. The ECR console even shows you the exact commands under *View push commands*. The flow has four steps: log in, build, tag, push.
+ECR is private, so Docker must log in first (the token is short-lived). The ECR console also lists these exact commands under *View push commands*. Tag with the **Git commit SHA**, not `latest`.
 
 ```bash
-# 1. Authenticate Docker to your ECR registry (the login token is short-lived)
+# Log in
 aws ecr get-login-password --region us-east-1 \
   | docker login --username AWS --password-stdin \
     <account-id>.dkr.ecr.us-east-1.amazonaws.com
 
-# 2. Build the image
+# Build, then tag with the full ECR address + commit SHA
 docker build -t my-app .
-
-# 3. Tag it with the full ECR address and a meaningful tag
 docker tag my-app:latest \
   <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)
 
-# 4. Push
+# Push
 docker push \
   <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:$(git rev-parse --short HEAD)
 ```
 
-The full image name has a strict shape: `<account-id>.dkr.ecr.<region>.amazonaws.com/<repo-name>:<tag>`. The part before the last `/` is the **registry** (your account, in your region); after it is the **repository name**; after the `:` is the **tag**.
+The image name is strict: `<account-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>` — registry, then repo, then tag. Verify the push in the Console under your repository, or with the CLI:
 
-### Tag by commit, not `latest`
+```bash
+aws ecr list-images --repository-name my-app --region us-east-1
+```
 
-Notice we used `$(git rev-parse --short HEAD)` — the Git commit SHA — as the tag instead of `latest`. This is one of the most important habits in the whole course.
+### Why commit tags, not `latest`
 
-`latest` is a label that moves. If two builds both push `latest`, the second silently overwrites the first, and now "latest" means something different than it did a minute ago. When you look at a running cluster and it says it is running `latest`, you have no idea *which* code that actually is — and rolling back becomes guesswork.
+`latest` is a label that moves: the next push silently overwrites it, so a running cluster reporting `latest` tells you nothing about *which* code is live, and rollbacks become guesswork. A commit SHA (or a semver tag like `v1.4.2`) is **immutable and traceable** — `a1b9f3c` always means exactly that code. This is what makes Lecture 7's rollbacks reliable.
 
-A commit-based tag (or a semantic version like `v1.4.2`) is **immutable and traceable**: the tag `a1b9f3c` always points to exactly that code, forever. You can look at any Pod, read its image tag, and know precisely what is deployed. This is what makes Lecture 7's rollbacks reliable.
+### How this feeds Kubernetes
 
-### How this connects to Kubernetes
-
-When you later write a Deployment manifest (Lecture 4), the most important field is the image reference:
+The Deployment manifest you write in Lecture 4 references this exact image:
 
 ```yaml
         image: <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
 ```
 
-That is the whole point of this lecture. The image you build and push here becomes the **input** to your deployment. The pipeline's job, in essence, is to keep producing new images and updating that one line so EKS pulls and runs the new version.
-
-One more thing worth knowing: in production, you usually give your *cluster* (its nodes or a service identity) permission to pull from ECR, so EKS can fetch images on its own — and AWS also offers features like cross-region replication and pull-through caching to keep image pulls fast and reliable as you scale. We will wire up the *push* side in the pipeline (Lecture 3) and the *pull/deploy* side starting in Lecture 5.
+That is the whole point: the image you push here is the **input** to your deployment. The pipeline's job is to keep producing new images and updating that one line. We wire up the *push* side in Lecture 3 and the *pull/deploy* side from Lecture 5 — at which point you grant the cluster's nodes IAM permission to pull from ECR.
 
 ## Key Takeaways
-- Kubernetes runs images, not source — so containerizing your app is step zero.
-- A `Dockerfile` is a layered recipe; order your steps so dependency installation is cached, and prefer multi-stage builds for small, secure images.
-- ECR is your private AWS registry. The push flow is: `get-login-password` → `docker login` → `build` → `tag` (with full ECR address) → `push`.
-- Tag images by commit SHA or version, never just `latest`, so every running Pod is traceable and rollbacks are reliable.
-- The pushed image — referenced by its full ECR address and tag — is the input that your Kubernetes Deployment will consume.
+- Kubernetes runs images, not source — containerizing is step zero.
+- Order Dockerfile steps so dependency installs are cached; prefer multi-stage builds.
+- Push flow: `get-login-password` -> `docker login` -> `build` -> `tag` (full ECR address) -> `push`.
+- Tag by commit SHA or version, never `latest`, so every Pod is traceable.
+- The pushed image (full ECR address + tag) is what your Deployment consumes.

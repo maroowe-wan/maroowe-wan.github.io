@@ -13,33 +13,17 @@ sources:
 ## Learning Objectives
 - Add `build` and `test` stages to your Jenkinsfile so the pipeline stops the moment something fails.
 - Build a Docker image only after the tests have passed.
-- Understand how CI acts as an automatic quality gate that keeps bad code from moving forward.
+- Understand how CI acts as an automatic quality gate.
 
 ## Body
 
-### Why this stage is the heart of CI
+Your pipeline already triggers on a push and checks out the code. Now we add the stages that make CI valuable: **build**, **test**, and **build image**. The guiding rule is **fail fast** — each stage is a gate, and in a declarative Jenkinsfile any step that returns a non-zero exit code fails the stage and cancels everything downstream. Because stages run top to bottom, simply ordering them correctly guarantees no untested code ever becomes an image.
 
-So far your pipeline triggers on a push and checks out the code. Useful, but it doesn't yet *protect* you from anything. The Continuous Integration stages are where the real value appears: they automatically verify every change so that broken code is caught in seconds, by a machine, instead of in production, by your customers.
+> A failing test that turns your pipeline red is not a problem — it's the pipeline doing its most important job.
 
-The principle to keep in front of you is **fail fast**. If the build won't compile, don't bother testing. If a test fails, don't bother building an image. Each stage is a gate, and a closed gate stops the entire pipeline cold and notifies the team. In a declarative Jenkinsfile this behavior is the default: if any step in a stage returns a non-zero exit code, the build is marked failed and the remaining stages never run.
+### 1. Add the build stage
 
-The flowchart below shows the fail-fast gating: each stage only proceeds on success, and any failure halts the pipeline before an image is ever built.
-
-```mermaid Fail-fast gating across the CI stages
-flowchart TD
-    Checkout["Checkout"] --> Build["Build"]
-    Build -->|success| Test["Test"]
-    Build -->|non-zero exit| Fail["Stop and notify team"]
-    Test -->|pass| Image["Build Image"]
-    Test -->|fail| Fail
-    Image --> Done["Image ready for registry"]
-```
-
-> A failing test that turns your pipeline red is not a problem — it's the pipeline doing its single most important job. The goal of CI is to make failures cheap, fast, and impossible to ignore.
-
-### Adding the build stage
-
-The build stage assembles your code together with its dependencies. What "build" means depends on your language — for a compiled language it might be `mvn clean package`; for an interpreted one it might be installing dependencies. The shape is the same: run a command, and let a non-zero exit code fail the stage.
+**What & why:** The build stage assembles your code and its dependencies. What "build" means depends on your language; the shape is always the same — run a command and let a non-zero exit fail the stage.
 
 ```groovy
 stage('Build') {
@@ -50,11 +34,13 @@ stage('Build') {
 }
 ```
 
-The `sh` step runs a shell command on the agent (use `bat` instead on Windows agents). If `npm ci` or `npm run build` fails, the pipeline stops here — there's no point testing code that didn't even assemble.
+The `sh` step runs a shell command on the agent (use `bat` on Windows agents). If either command fails, the pipeline stops here — there's no point testing code that didn't assemble.
 
-### Adding the test stage
+**Verify:** Run the pipeline; the Build stage should turn green in the Jenkins stage view.
 
-Next comes the gate that actually catches bugs. Run your automated tests as a stage; if any test fails, the stage fails, and everything downstream is cancelled:
+### 2. Add the test stage
+
+**What & why:** This is the gate that catches bugs. Run your automated tests as a stage — if any test fails, the stage fails and everything after it is cancelled.
 
 ```groovy
 stage('Test') {
@@ -64,9 +50,7 @@ stage('Test') {
 }
 ```
 
-This is the moment the source material illustrated so well: a developer changed a greeting from "hello world" to "hello CI/CD world," but a test still asserted the old value. The test failed, the pipeline went red, and the bad change was caught automatically — exactly as intended. That fast feedback loop is the entire point. Tests can be unit tests (individual functions), integration tests (components working together), or format/lint checks, and you can publish their results so the Jenkins UI shows which passed and which failed for every build.
-
-A useful refinement: collect test reports even when the run fails, so you can always see what broke. The `post` block runs after a stage regardless of outcome:
+These can be unit tests, integration tests, or lint/format checks. Collect reports even when the run fails by using a `post { always { ... } }` block, so you can always see what broke:
 
 ```groovy
 stage('Test') {
@@ -81,9 +65,11 @@ stage('Test') {
 }
 ```
 
-### Building the image — but only after tests pass
+**Verify:** Introduce a deliberate failure (e.g. change a value a test asserts) and confirm the pipeline goes red and stops before the image is built. Then revert it.
 
-Because the stages run in order and a failure halts the pipeline, simply placing the image build *after* the test stage guarantees it only runs on green tests. This is the bridge to the rest of the course: the artifact this stage produces is the Docker image we'll push and deploy in the next lectures.
+### 3. Build the image — only after tests pass
+
+**What & why:** Because a failed stage halts the pipeline, placing the image build *after* the test stage guarantees it only runs on green tests. The artifact this produces is the Docker image we'll push and deploy in the next lectures.
 
 ```groovy
 stage('Build Image') {
@@ -93,11 +79,11 @@ stage('Build Image') {
 }
 ```
 
-Two practitioner habits are worth adopting here. First, **never tag your image `latest` in a pipeline.** A floating `latest` tag makes it impossible to know which exact build is running where, and rollbacks become guesswork. Tag with something unique and traceable — above we use `${BUILD_NUMBER}`, a built-in Jenkins variable; in the next lecture we'll switch to the Git commit SHA for an even tighter link between code and image. Second, the Jenkins agent needs access to a Docker daemon to run `docker build`; the common setup is to give the Jenkins container access to the host's Docker socket so it can build images on the host.
+Two habits to adopt: **never tag a pipeline image `latest`** — a floating tag makes it impossible to know which build is running where and breaks clean rollbacks. Use something unique and traceable like `${BUILD_NUMBER}` (a built-in Jenkins variable; we switch to the commit SHA next lecture). Also, the agent needs access to a Docker daemon — the common setup is to mount the host's Docker socket into the Jenkins container.
 
-### The full picture so far
+**Verify:** After a green run, `docker images` on the host shows `myapp` tagged with the build number.
 
-Putting the new stages together, your Jenkinsfile now reads as a clear, ordered quality gate:
+### The full pipeline so far
 
 ```groovy
 pipeline {
@@ -111,10 +97,15 @@ pipeline {
 }
 ```
 
-Read top to bottom, this is Continuous Integration in its essence: every push is automatically checked out, built, tested, and — only if all of that succeeds — turned into a deployable image. No human had to remember to run the tests, and no untested code can produce an image. That image is now ready to be stored in a registry, which is exactly where the next lecture takes us.
+Read top to bottom, this is CI in its essence: every push is checked out, built, tested, and — only if all of that passes — turned into a deployable image. That image is now ready for a registry, which is exactly where the next lecture goes.
 
 ## Key Takeaways
-- CI stages turn your pipeline into an automatic quality gate; the core principle is **fail fast** — a failed stage halts the pipeline and notifies the team.
-- In a declarative pipeline, a non-zero exit code fails the stage by default, so ordering Build → Test → Build Image guarantees the image is only created from green, tested code.
-- Run your real automated tests in the test stage and consider publishing reports (e.g. with `junit`) so results are visible for every build.
-- Tag images with a unique, traceable value like the build number or commit SHA — never a floating `latest` — so you always know exactly what's running and can roll back cleanly.
+- Order stages Build → Test → Build Image; in a declarative pipeline a non-zero exit fails the stage by default, so this ordering guarantees images come only from green, tested code.
+- **Fail fast** — a failed stage halts the pipeline and notifies the team.
+- Run real automated tests and publish reports (e.g. with `junit`) so results are visible for every build.
+- Tag images with a unique, traceable value like the build number or commit SHA — never a floating `latest`.
+
+## Sources
+- https://www.youtube.com/watch?v=ESQC5tH5Aow
+- https://www.youtube.com/watch?v=WyH_ihsIaik
+- https://www.youtube.com/watch?v=wBvoerbHWEU

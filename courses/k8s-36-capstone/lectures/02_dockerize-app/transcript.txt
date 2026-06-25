@@ -1,0 +1,1971 @@
+## 영상 1: Stable Diffusion GUI App with Docker and Flask - Step by Step Tutorial for Python Beginners
+https://www.youtube.com/watch?v=gDF_qGzYEYQ
+
+Folks,
+today we will make the most advanced
+deep learning application
+in the history of this channel.
+We will use stable diffusion
+to generate images from a piece of text.
+We will then enlarge them
+using super sampling techniques.
+And we will wrap it
+in a beautiful GUI application
+that runs from a Docker container.
+And the best part is we will delegate
+all the generative tasks to our GPU,
+making our app incomparably faster.
+It's the most professional
+and coolest workflow
+that I've ever simplified, and the results
+will absolutely blow your mind.
+So without any further ado, let's roll
+So let's begin by installing Docker
+Desktop.
+For this we will navigate to docker.com.
+And from the products menu
+we will select Docker Desktop.
+Now if you are not familiar with Docker
+I have an amazing tutorial
+that covers it in detail.
+But the general idea is
+we want to isolate our application
+from the rest of the computer.
+We want to make sure it runs consistently
+in different
+conditions, environments,
+and even operating systems.
+And that way, users
+don't need to install a bunch of libraries
+trying to recreate the exact
+same environment that us developers have.
+They can just run a Docker container
+with our software
+and all its dependencies
+already installed.
+Now, once Docker desktop is our system,
+we will go ahead
+and make sure that the engine is running
+given this green bar at the bottom.
+Additionally,
+if you are planning to use a terminal
+like myself,
+we will navigate to the settings
+and we will make sure we enable it by
+checking this lovely box right over here.
+we do so, we can then safely navigate
+to our Windows Subsystem for Linux.
+will use it to clone
+some starter files from GitHub,
+where I created a very nice interface
+that doesn't have any functionality.
+There are buttons,
+but nothing happens when you click them.
+So we are basically building this project
+almost from scratch.
+For this we will copy
+the https address of my repository
+and we will paste it inside our terminal
+following a git clone command.
+Then we
+will navigate to the brand new directory
+we now have on our Linux drive with CD
+followed by Stable Diffusion GUI app.
+In addition, we will navigate
+to the Starter Files folder.
+from now on I'll refer to
+as the root directory of our project.
+Now, to make it work,
+we will need to set up a Docker container.
+And the fastest way to do
+so is by using Docker init.
+Now, unlike previous tutorials
+where we manually typed
+a bunch of code into our Docker file,
+we are now automating this process.
+So docker init will ask some questions
+and based on our answers,
+it will generate all the files
+that our container needs.
+In our case it already detected
+that the platform we use is Python.
+So let's just press enter.
+while Python three 11.5
+is the officially recommended version
+that you should specify on your end,
+I will go for Python 3.10 instead.
+I do it on purpose.
+You will see towards
+the end of the video why?
+Then the port of our choice would be 8000.
+three app dot pi.
+And beautiful.
+Docker successfully initialized
+all the important files.
+There you go.
+we can now run our application
+by copying this lovely
+command of Docker compose up dash dash.
+Build.
+Once our container is ready,
+we will open our browser and navigate
+to localhost at the port of 8000.
+boom, here's
+our beautiful starter application.
+That doesn't really do much.
+So let's investigate it a bit.
+And the first thing we'll do
+here is enter some kind of prompt.
+Let's say Canadian
+beer eating fish the river.
+Now once we hit the generate button,
+our app should produce different images
+based on our prompt.
+But at this point, the only thing it does.
+Is collect user input
+and print it to the console.
+can of course view it inside the terminal.
+Or alternatively,
+if we navigate to Docker desktop,
+then we navigate to the containers bar,
+choosing our Starter Files server.
+find our user input in the logs as well.
+So if the input
+is already being collected.
+we just need to convert it
+from a piece of text into an actual image.
+For this
+we will need a generative AI model,
+which in our case is stable diffusion
+in the version of one four.
+But how exactly can we use it?
+Well number one is what
+we've done in previous tutorials
+where simply copied this type of code
+and we were pretty much good to go.
+But the only problem with this approach
+is that it takes
+way too long to load and operate.
+So approach number two is downloading
+this entire model into our local computer.
+And it does require some disk space.
+Specifically,
+I am talking about 40GB of it,
+which I know sounds like a lot,
+but very often when you're dealing
+with these type of models, you'll be
+looking at hundreds of gigabytes instead.
+So as far as I'm concerned,
+it's just a baby.
+Now let's go ahead and copy
+the URL of this model card,
+and you can check out the description
+for all the links.
+navigate to our terminal.
+We will shut down our container Ctrl C.
+And we will download stable Diffusion
+with git clone.
+Followed by the URL of our model card.
+as you may guess,
+it will take quite some time to download.
+And if your download
+only took a few seconds, it obviously
+means that something is wrong.
+I mean, these numbers,
+they're not really adding up to 40GB.
+So let's fix it.
+a package called git LFS,
+which we will download
+with sudo apt dash. Get
+install git dash lfs as in git.
+Large file storage. You will hit enter.
+Then we will call git lfs install.
+Then we'll of course get rid
+of this incomplete directory
+we just download.
+Let's delete it.
+we can go ahead and clone our model
+once again.
+This time properly.
+So git clone followed by.
+hugging face repository.
+Great.
+Now, once our model is done downloading
+and we can find it inside
+our root directory, we can then go ahead
+and update our requirements file.
+Adding a library named diffusers
+which uses the transformers architecture,
+as well as the Torch Deep Learning
+framework, also known as PyTorch.
+Lastly, we will add the accelerate.
+Module, which will help us
+with loading our model on CPU in a memory
+efficient way.
+Now let's save it
+and we can finally start coding.
+So inside our app.py file.
+From diffusers will import the stable
+diffusion pipeline in upper camel case.
+Then right below our secret key,
+we will create a new variable
+named pipeline, assign to the stable
+diffusion pipeline class.
+Calling the from underscore
+pre-trained method on it.
+And into this method we will pass the path
+to our model, which in our case
+is dot slash, which represents the root
+directory followed by the name.
+Of the model repository which is cloned.
+So let's just
+copy it from our file system.
+And there you go.
+This is where our model now lives.
+this pipeline produces very basic images.
+They are nice, but they're
+not as realistic as we'd like them to be.
+So let's fix it by typing pipeline
+and calling
+the enable underscore free u method on it.
+Now, this method allows us to customize
+four different quality control parameters.
+And in my case, I'll just use
+what's recommended for the stable
+diffusion 1.4 model.
+I'll copy them
+directly from the free U repository.
+And if you're curious
+to see some examples.
+This is the type of quality improvement
+that you'll get.
+Awesome. So let's
+go ahead and paste these parameters
+inside our enable Free U method.
+Replacing every colon
+with an equals symbol.
+Now to produce our image
+we will find the app root.
+Where we collect our user input
+and print it to the page.
+Sorry. To the console.
+So right underneath our print statement
+we will type pipeline
+to which we will pass our user input.
+So let's just copy it
+from the print statement right above.
+let's pass it right over here.
+Then we can assign this expression
+to image.
+And at this stage let's just
+see how this data structure looks like.
+We'll have a better idea
+of what we're dealing with here.
+Let's save our file.
+Let's go back to our terminal.
+And let's call Docker
+compose up dash dash build.
+Once again.
+We will then navigate to our browser,
+then to our app.
+And we will remove the prompt route
+from the URL.
+Then we will enter the same
+input from before after quite some time
+our image was generated.
+So we can navigate to our terminal
+where we can find our output.
+Now this output has two different
+arguments.
+The first one is images and it stores
+a list with a single image item.
+And that's exactly what we're looking for.
+The other argument stores
+whether our image is safe for view or not,
+and in our case, it is perfectly safe
+because you want it to be false.
+So now we can just go back to our code.
+We can focus on the images.
+Attribute of our pipeline.
+And since it stores a list, we will focus
+on the first and only item in this list.
+Then instead of printing this image,
+we will go ahead and save it
+image dot save and we will call it
+at least at first output dot p and g.
+Now currently
+if we make changes to our Python file,
+our container doesn't
+automatically detect them.
+We will need to shut it down
+and rebuild it time and time again,
+which is probably not ideal.
+The first thing we need to make sure
+is that our debug mode is set to true.
+Which is of course true in our case.
+If so, we will navigate to our Docker
+compose file,
+where we will add
+a new attribute of volumes.
+And we will use this attribute mount
+the local root directory dot slash
+to the container directory of slash app.
+But wait how come it is slash app?
+exactly. Can we find this detail.
+Well let's save this file
+and let's navigate to our Docker file.
+Where we can see that the working
+directory of our container is indeed app.
+And that's the only reason why
+we chose it.
+it says something else on your end,
+that's what you should write instead.
+Now, if we're already here,
+let's have a look at another detail.
+So by default docker init creates
+a special kind of user called app user.
+And this user has very limited access.
+can use the app
+but they cannot make any changes
+such as saving images,
+which is a problem in our case.
+So let's go ahead and remove this
+unprivileged app user.
+Replacing it with the system
+administrator, also known as root.
+Otherwise you will get a permissions error
+that looks like that.
+And great.
+Now we can save our file.
+We can navigate back to our terminal.
+can shut down our container
+for the very last time with Ctrl C.
+We will then rebuild it
+with all the changes we just made.
+We will enter our original prompt
+We will then navigate to our root
+directory
+where we will find our lovely Canadian
+beer. Yay!
+Now let's apply the same logic
+on three different images,
+storing them in the appropriate location
+of static images.
+there you go.
+We can find our logo and our placeholder
+questionmark image here.
+So back in our code.
+inside app.py right
+above our image variable.
+We will go ahead and create a for loop.
+Wait for I in range three.
+Then we will indent our image pipeline
+as well as the image saving command.
+And instead of output dot png,
+we will navigate
+to static slash images
+and it will give unique names
+to each of our images.
+will do so with demo underscore image,
+to which we will concatenate the string
+instance of I, which is our iteration
+variable from above.
+It is either zero 1 or 2.
+Which will be the unique portion
+of the image names.
+Then we will wrap it up
+with the extension of dot png.
+And if we're already here we may
+as well display those images on the page.
+So let's just copy
+the names of these images.
+And let's paste it right underneath.
+Inside prompt images list comprehension.
+That we are passing
+to our render template return statement.
+So instead of displaying our placeholder
+images three times in a row.
+We'll just go ahead and display
+the actual demo images.
+since this list comprehension
+also uses the iteration
+variable of I in the range of three,
+everything should work like a charm.
+So let's save it.
+Let's go back to our browser.
+let's give our Canadian bear another try.
+And wow look at these beautiful
+beautiful beers.
+It's pretty impressive right.
+But the only problem is it took way too
+much time to produce these three images.
+And our CPU sounded a bit
+like a jet fighter in the process.
+So how exactly do we solve it?
+Well, why don't we use our GPU instead?
+Now? The next trick will only work
+if you have a Cuda compatible
+Nvidia based graphics card.
+So if you can find it
+somewhere here on the list, then great.
+You can follow along
+and you can continue with the next steps.
+Otherwise,
+please skip to the super sampling part
+and I will see you in about a minute.
+Now to access our GPU from Docker
+you will need an Nvidia driver,
+which I assume you already have
+because it's very rare.
+If you don't.
+we will need a container toolkit
+which we can install
+using the following guide.
+And we will first
+copy the configuration command.
+And once
+it is shut down, we can now paste it.
+Then we will
+go ahead and update our package
+repository as in apt. Get.
+now we can finally install
+the container toolkit.
+We will then go ahead and scroll down.
+we will configure the container runtime.
+Lastly,
+it is recommended to restart Docker.
+So let's just do it.
+We will copy this sudo system control.
+Restart command.
+paste it back.
+And if you cannot do it
+from your terminal,
+just like in my case,
+we can just do it from Docker Desktop.
+just hit.
+The quit Docker desktop button.
+It will confirm we would like to quit.
+And we will open it once again. Yay!
+So now we've set up our GPU,
+we also need to notify Docker.
+To do so, we will navigate
+to another installation guide.
+This time the Docker GPU support
+guide will scroll down.
+And we will copy the docker compose code
+right from deploy down to the very end.
+Then we will of course
+paste it inside our compose file.
+Right underneath volumes.
+And please
+make sure that the deploy attribute
+is at the same indentation level
+as the volumes attribute.
+Otherwise you will get an error.
+Great, so we're officially good to go.
+How do we know?
+Well let's save this file.
+Let's go back to App.py.
+at the very very
+top we will import PyTorch.
+Let's save this file.
+Let's navigate back to our terminal.
+boom Cuda is available
+indeed, given this lovely true statement
+at the very top right above
+loading our pipeline components.
+Now, if it is false on your end,
+please leave me a detailed
+comment below
+so I can help you with troubleshooting.
+And the emphasis is on the detailed.
+to delegate our tasks to the GPU,
+we will first.
+Turn our stable diffusion
+pipeline into a multi-line command
+just so it is easier to look at.
+call the two method on it, and
+we will send it to a device named Cuda.
+And now if we save our file,
+if we navigate back to our app,
+images are now ready within seconds
+and not minutes.
+Yay! And perfect. We are almost done.
+We just need to find a way
+of enlarging these images.
+Because right now, they're pretty small.
+For this, we'll need another deep
+learning model called e DSR,
+as in enhanced deep super resolution
+neural network.
+So from their GitHub repository
+we will navigate to models.
+We will then choose
+how much we'd like to zoom in.
+In my case
+I'll go four times four, turning
+512 pixels into 2048 of them.
+Then with a right click on the raw button,
+we will copy the link address.
+Now, since we don't need
+the entire repository,
+we won't be using git clone this time.
+But a command called W get followed
+by the URL we just copied.
+Now, once the download is complete,
+we will then take care of the requirements
+which in the case of our super sampling
+model would be open CV, dash, Python
+as well as open
+CV, dash contrib, dash, Python.
+But that's not all.
+If we try to install OpenCV
+with these requirements
+only,
+then we will get the following error.
+fix it,
+we will need to install some system
+requirements cannot be
+just installed with Pip.
+So specifying them
+here is not going to work.
+Instead,
+we will navigate to our docker file.
+We will copy the following command
+from the description,
+and we will paste it right after
+we pip install our requirements file.
+Now if we save everything,
+it will make sure
+I save the requirements as well
+because I can't remember.
+We will then navigate to our terminal.
+will rebuild our container with docker
+compose up again.
+And now we can finally navigate to app.py
+and import cv2, also known as OpenCV.
+Now OpenCV is a computer vision library
+that we've used many times
+on the channel before, but never
+in the context of loading neural networks.
+So let's see how it works.
+Now first we will create a super sampling
+object
+with cv2 dot dnn underscore super res
+as in deep neural network super resolution
+followed by dot
+and an abbreviation of DNN.
+Super resolution implementation.
+Underscore. Create.
+will then assign this expression
+to a variable named super Res.
+Next we will load our model
+into this object
+with super read dot read model.
+In camel case.
+we will pass the name of our model
+as it appears in our file system.
+Oh, sorry.
+Into this lovely method of ours.
+it and let's specify it in a string.
+Lastly, we will need to set this model
+with super red dot set model
+the first argument is a DSR,
+and the second argument
+would be the scaling factor of four.
+Because we are using the times for model.
+Our model is ready to go,
+and we can take care of the image
+that it's supposed to enlarge.
+For this,
+will search for the super sampling route,
+is the third and last route
+of our application right above.
+If name equals main.
+And in this route we will type cv2
+dot m read as in image read.
+To which we will pass
+one of our demo images.
+wait a second, how do we know
+which of our demo images was selected?
+I mean, we have three of them, right?
+judging by this print statement above,
+we see that we need bit of investigating.
+So let's comment out this incomplete
+line of code.
+And let's navigate back to our app.
+what happens if we click on the leftmost
+save button?
+Well,
+first of all, our demo images disappear
+and they're being replaced
+by the placeholder,
+which is something we'll need to fix.
+But second of all,
+if we navigate to our terminal.
+see a message
+that save button zero was clicked.
+If we click on the center button,
+then we see.
+That button
+number one was clicked instead.
+And same goes For the rightmost
+button returns
+button number two, is a perfect match
+to the way we named our images.
+We have image zero,
+image one, and image two.
+Which allows us to load each of our images
+one at a time.
+So back in our code, will go ahead
+and uncomment our hashtag from earlier.
+And we will pass the following
+string into our image read command.
+start with dot slash followed by static,
+followed by images
+followed by demo underscore image
+to which we will concatenate
+identification number of our images,
+which we'll just copy
+from the print statement.
+And just to be on the safe side,
+we will convert it into a string.
+Then we will wrap it up with a dot
+png extension.
+this very long
+line of code as demo underscore
+now that we have a loaded image
+we can then pass it into our super
+sampling model.
+We will do this
+with super res dot upsample
+to which we will pass our demo image.
+Then we will assign this expression to XL
+underscore image as in extra large image.
+Now the only problem is the Upsample
+method returns a numpy array,
+which is a mathematical structure
+rather than an actual image.
+let's quickly convert it into one
+by using image class with a capital
+II from the pillow module
+and calling the from array method on it.
+Passing our numpy array of Excel
+underscore image into it.
+Now we can then assign this expression
+back to Excel image,
+overwriting the original value
+with the new one.
+And now that we're dealing
+with an actual image, we can save it
+with XL underscore image dot save.
+at first we will call it XL
+underscore output dot bnc.
+want to make sure it works.
+So let's save our file.
+before we forget let's go ahead
+and take care of our placeholder images.
+To do so, we'll just copy our list
+comprehension from prompt root
+and we will paste it inside
+super sample route.
+Easy peasy.
+Let's save everything.
+let's generate
+some bare images once again.
+We will then pick our favorite image.
+In my case, this guy over here.
+Let's save it.
+And back in our file system,
+specifically our starter
+files folder,
+we can find our extra large image.
+And it has the right size.
+I mean it's
+clearly bigger than 512 pixels.
+But the only problem is
+our colors are way off.
+Now, the thing to remember with OpenCV
+is that instead of using the common RGB
+format,
+it uses the much less common BGR format.
+So our color channels
+are completely flipped.
+To fix it, we will close this image.
+It will navigate back to our code.
+convert our image to the right format
+right before we pass it into our model.
+To do so, we will type cv2 dot cv2 color,
+where the first argument
+is our demo image, and the second argument
+is the type of conversion
+we'd like to perform in our case, cv2
+dot color in all caps underscore
+bgr to rg b.
+let's assign this expression
+back to demo image, overwriting our blue.
+Bear with the right colors.
+And if we go back to our app
+and we try to save this image once again.
+We will go back to our file system,
+where our bare
+image now has the right
+size and the right colors.
+the only
+problem
+is we need to save a collection of images
+rather than overwriting the same file time
+and time again.
+So instead of extra large output,
+we need to give our images unique names.
+One way to do
+so is by using date and time.
+So let's navigate to the top of our code
+and from DateTime we will import DateTime.
+Then right below
+we will assign DateTime dot.
+Today to a variable named image id.
+And just to stay on the safe side.
+Let's also converted into a string.
+And at first let's go ahead and print it
+image ID
+to which we will concatenate our variable
+image ID.
+save it.
+Let's navigate to our terminal
+where we can find our unique combination
+of digits, counting the seconds
+as well as the milliseconds.
+So it's very unlikely
+that one image will overwrite the other.
+Now, the only thing I don't like
+here is all those punctuation symbols
+as well as spaces.
+So let's get rid of them.
+And one way to do
+so is by using a chain of replace methods,
+where its first will replace a colon
+with an empty string.
+And we will do the same.
+To the dash symbol well as a space symbol.
+And lastly a dot.
+If we save our file once again,
+navigate to the terminal.
+Our ID only stores
+a combination of digits.
+Still unique, but no punctuation detected.
+let's use it as part of our image name.
+we will copy these two lines of code.
+Actually, let's cut them.
+Let's paste them
+inside our super sampling route.
+At the very top.
+And we don't really need the
+print statement, so let's just delete it.
+Now one more thing we can do is
+we can store our extra large images
+in a special directory.
+So it's created first.
+navigate to static images.
+And we will create a new folder.
+And let's call it saved.
+Then instead of extra large output.
+We will first navigate
+to our new saved directory.
+we will call our images image underscore
+to which we will concatenate our image ID.
+And we will finish this string
+with a dot png extension.
+Now if we save our file.
+then see our complete app in action.
+So it's navigate there.
+Let's create some more Canadian bears.
+Let's save one of our images
+in super resolution.
+save another one.
+And if we check our filesystem,
+we can see that our images are saved
+in a special directory under unique names.
+Yay! Now, to be fair,
+we can make the super sampling process
+a bit faster by connecting OpenCV to Cuda,
+but it's quite the process.
+So if you'd like to see how,
+please leave me a comment below.
+Now before we can share our app,
+we need to take care of licensing.
+And the idea is because we are
+using models that somebody else made.
+We also need to follow their rules.
+And in the case of our app
+we have three different licenses
+where the first one is the IDs are license
+which you can find on GitHub.
+So let's click on the license.
+And let's copy
+the raw link just like earlier.
+We will then paste it in our terminal
+following a w get command.
+Then we will go ahead
+rename our new license file.
+And we will call it E DSR license.
+Just for extra clarity.
+And we will do the same for our stable
+diffusion license.
+Clicking on this license
+tab on Hugging Face,
+expanding it by clicking on Read More.
+then clicking on this files button.
+And from this repository we can go ahead
+and expand the license dot.
+TXT file.
+Copying
+this beautiful URL from up there w.
+Getting it.
+Lastly, we will navigate to the free U
+repository, also requires a license.
+And let's w get it as well.
+just like before we will rename it to.
+Free U license.
+Beautiful. Additionally,
+we will get rid of both our output images
+that we were testing with.
+And same goes for our three demo images
+because they will be automatically
+generated by the app.
+So let's delete them.
+And lastly
+we will delete our saved image collection.
+sure you keep the saved directory itself
+because our app will not run without it.
+So it's very, very important now.
+Once we made a few changes to our files,
+let's go ahead and rebuild our container
+with Docker compose up dash dash
+build for the very last time.
+once our image was built and updated,
+we can then publish our app on Docker Hub.
+For this, we will go ahead
+and create a new repository,
+which in my case I will call the fuze me.
+And we will also fill
+in some basic information.
+just do it off camera.
+and once we have a remote repository name,
+we will navigate to our terminal
+and find out the local name of our image.
+We will do so with Docker images,
+and in my case the name is starter files.
+Dash server.
+Now we need this name to be a perfect
+match to our remote repository name.
+So let's
+go ahead and rename it using Docker image
+tag followed by the local repository name.
+We'll just copy it.
+And with a colon
+we will indicate the local
+repository tag,
+which in my case is latest.
+And then we will specify the remote name.
+In my case Maria sha slash diffuse me.
+Lastly we will give it a tag of 1.0.
+Because it is the first version
+of my image.
+Now let's go ahead and hit enter.
+Let's type Docker.
+Images once again with no typos.
+And now we see a new instance of our image
+matches the name of our remote repository.
+And in this case, we can just type
+Docker push
+followed by the remote repository name
+the tag of 1.0.
+Boom.
+If your access to Docker Hub is denied,
+you'll just need to log in with Docker
+log in.
+Specifying your username
+Maria Shah well as your password.
+once your login was successful,
+you can then go ahead
+and call your push command once again.
+And this might take you a bit of time.
+now once our image was pushed,
+we will navigate to Docker Hub.
+We will refresh the page
+and our app is officially public.
+But what happens
+if somebody else wants to use it?
+test it further
+as we will get rid of our local
+image instances
+by navigating to Docker Desktop.
+And then to this troubleshoot
+lovely section
+where we will purge our W.S.
+shell to data.
+And once our purge was completed,
+we'll then go ahead and get back
+to our terminal.
+And let's test
+our Docker images once again.
+Where we get nothing in return.
+Which means that we get the same
+starting point as our users.
+Next we will go ahead and Docker
+pull our remote repository
+Maria Shah diffuse me in the tag of 1.0.
+to make sure this image is safe to use.
+And it doesn't have any vulnerabilities,
+we will use
+a static analysis
+tool called Docker Scout.
+We get it
+automatically through Docker Desktop,
+and we can access it with Docker Scout,
+quick View,
+followed by the name of the image
+and the tag of 1.0.
+And once our image was done scanning,
+we can see the total number
+of high, medium and low vulnerabilities.
+Where in my case,
+the vast majority of them have to do
+with the version of Python I chose.
+Now, if you'd like to see
+some detailed information,
+I recommend copying this Docker scout.
+See this command.
+But on my end
+I only care about the recommendations.
+So let's copy this one instead.
+Let's paste it in our terminal
+and let's hit enter.
+and as you may guess, my recommendation
+is to change the base image either
+to Python 3.12 slim, either to Python
+3.11 slim, or to an alpine version.
+Now on my end, I'm not too worried
+about it, but if you are more picky
+and if you'd like to fix it, please
+navigate to your Docker file.
+Scroll up until you find your base
+image commands
+change 3.10 to 12,
+as well as Slim to Alpine and boom.
+Now Docker scout will be extra happy
+and your app.
+Will be more secure than before.
+Now, once we've scanned our image
+and found that it's safe,
+we can finally run our application.
+To do so, we will create a new directory
+that has nothing inside it with McDeere
+followed by the name of test.
+We will
+of course navigate there with CD test,
+and we can finally run our app with Docker
+Run setting the GPUs flag to all.
+Then we will set the port's flag
+to expose the local port of 80,000
+to the containers port of 80,000 as well.
+We will also use the volumes tag.
+sets the current local directory
+of dot slash to receive information
+from the container.
+Directory of app
+slash static slash images slash saved.
+And that way we are only storing our high
+definition
+images on our local file system.
+Everything else will
+remain inside the container.
+We don't need our Docker
+files, our Python files,
+or our 40GB of stable diffusion tools.
+No thank you.
+only care about the high definition
+images.
+Okay, now lastly
+we'll specify the name of our image,
+which in my case is Maria Sha slash
+diffuse me the tag of 1.0.
+Let's run it.
+Let's fix my typo.
+Because GPUs requires two dashes not one.
+And this time, let's go for something
+a bit less realistic.
+Let's go for a unicorn.
+Cat on the beach.
+A high definition photo at dusk.
+Wow, look at these beautiful kitties.
+So let's go ahead and save one of them
+on our system.
+Let's navigate to our new test directory
+where we can find our lovely unicorn
+kitty image in high definition.
+And yay! Everything worked.
+It looks amazing. Good job.
+And thank you so much for watching!
+If you found this video helpful,
+please share it with the world and don't
+forget to leave it
+a huge thumbs up in all kinds of comments.
+If you'd like to see more videos of this
+kind, you can always subscribe
+to my channel and turn on the notification
+bell.
+I'll see you very soon
+in some more amazing videos.
+And in the meanwhile, bye bye.
+
+## 영상 2: Docker Simply Explained with a Machine Learning Project for Beginners
+https://www.youtube.com/watch?v=-l7YocEQtA0
+
+Hi, everyone.
+Today we will finally learn about Docker
+and we will do it
+by making a useful machine
+learning project.
+Specifically a translation program
+that we can easily share with the world.
+Now we will build it step by step.
+Solving actual real world problems
+using Docker only.
+We are not cloning anything from GitHub.
+And we will of course talk about images,
+containers, Docker files, compose files
+and we will even see how to publish
+our own software on Docker Hub.
+So what exactly are we waiting for?
+Let's roll.
+So first of all, what exactly is Docker?
+Docker is a platform that helps us build,
+run and share software.
+It uses something called containers
+to create isolated environments
+where programs live.
+And even though they use the same hardware
+as our system,
+the same processor memory
+and all other components, containers
+are separated entities
+that operate in a sandbox.
+Nothing goes in and nothing goes out,
+which means that all the modules
+and libraries that our software needs
+are already pre-installed
+inside the container.
+So we can think of containers
+as the perfect set of conditions
+for our software.
+But why is it so important?
+Well, let's say we are working on a team
+project.
+Batman has a mac machine, I have a Linux
+one and Gandalf is using Windows.
+Our project may have the exact same code,
+but it will probably manifest
+differently on every system.
+Or alternatively, even if we all have
+the same operating system,
+it doesn't mean that our environment is
+the same.
+I have the newest version of NumPy,
+but it fails on Batman's computer
+because it has conflicts
+with some other software.
+It happens all the time.
+But why do we need this headache
+if we can just create a controlled,
+consistent environment
+that all of us can use?
+And that's exactly where Docker comes
+handy.
+We can all work on three
+different computers, but if we use
+the same container, we are actually using
+the same environment.
+You will see what I mean shortly.
+So let's quickly install Docker
+and I'll continue explaining it as we go.
+First, we will navigate to Docker.com
+we will select "products"
+and we will go for the personal version.
+To download it, we will need to sign up.
+But since I already have an account,
+I'm just going to sign in.
+Now, once the Docker desktop is installed,
+we will accept the terms and conditions.
+In my case,
+I'm going to skip this lovely form
+and we will verify that the Docker
+engine is running.
+Given this green bar at the bottom
+left corner, if that's the case,
+we can close the GUI
+and we can use our terminal instead.
+In my case, I'll be using the command
+prompt and I will run it as administrator.
+And for the record,
+this tutorial is using Docker
+version 24.0.6.
+Great. So how exactly does it work?
+Well, before we go
+any further, we will need to understand
+the concept of Docker images.
+Docker images are very similar
+to GitHub repositories, but instead of
+just storing code, they also store
+the ideal set of conditions for our code.
+So we are not just
+getting a piece of software,
+but we are getting the environment
+where our software is already installed.
+Now images have a read only format,
+which means that we cannot modify them.
+We can build new images,
+but we cannot change existing ones.
+So we can think of them
+as this static set of instructions.
+But what are these instructions for?
+Well, images are instructions
+for containers.
+So, for example,
+if images are blueprints for a house,
+then the container is the house itself.
+And in technical terms, a Docker container
+is a running instance of an image.
+We are not just reading containers,
+but we are also interacting with them.
+And yes, you can modify containers
+as much as you'd like.
+So in summary, we use images
+to create containers, and inside them
+we are not just running programs,
+but we are running entire environments.
+So let's see it in action.
+So let's search for an image
+of a nice machine learning library
+with Docker Search TensorFlow.
+And even though there's
+quite a few options here,
+we will go for the Jupyter
+TensorFlow notebook.
+So let's quickly
+copy this name with a right mouse click
+and we will
+then download this image with Docker pull,
+followed by the name of the image
+where Jupyter is,
+the name of the community
+that maintains the image.
+TensorFlow
+notebook is the name of the image itself.
+And a combination of the two
+is the name of the repository.
+But what kind of repository
+are we talking about?
+Where exactly
+are we pulling this image from?
+So it's quickly run this command.
+Let's navigate to Hub.Docker.com
+as in Docker Hub, and we will
+then click on Explore, which will open
+a giant collection of images.
+So if we search for Jupyter TensorFlow,
+we will find the exact same repository
+we just pulled, including the pull command
+right over here.
+So you can either search here
+or in the terminal.
+It's entirely up to you.
+Now, once we finish pulling our image,
+we will turn it into a container
+with Docker run,
+followed by the name of the repository.
+And Great.
+We will copy one of those URLs
+that Jupyter provides us.
+We will paste it.
+In our browser
+and we get a nasty, nasty error.
+But why?
+Well, if we go back to our terminal,
+we see that
+we are not communicating
+with our own operating system.
+My name is not Jovyan
+and I am not using Linux.
+These are the properties of our container,
+which is essentially
+an isolated process on our computer,
+and because it is isolated,
+we get an error
+when we try to access it from the outside.
+So how are we supposed to solve it?
+Well, first of all, let's collapse
+our notebook with control C
+then we will press the up key
+to fetch the most recent terminal command.
+And then right in front of our repository
+name,
+we will add the flag of -p as in ports.
+Then we will choose a port
+from our host system.
+I'll go for port 8000, followed by a colon
+and then the port from our container,
+which is 8888.
+And here we don't really get to choose.
+We need to specify the exact same port
+that we got from Jupyter.
+Great.
+Now, let's give this command a quick run.
+Let's navigate to our browser.
+Will type local host
+at Port 8000 and Beautiful.
+Here's our notebook.
+Now, the last thing left to do
+is to copy our token from Jupyter.
+We will paste it as our password
+and boom, we are in.
+So we basically created this corridor
+where Docker takes all the actions
+that we perform
+in this lovely browser window
+and it automatically applies them
+on our container.
+In technical terms,
+we call this process exposing a port.
+Now let's quickly create a new notebook
+and let's make sure that TensorFlow works.
+To test it,
+we will load a very nice dataset
+with from TensorFlow.keras.datasets.
+We will import MNIST, which is an image
+dataset of black and white digits.
+To get those images
+we will call the MNIST.load_data
+method and we will assign it to data.
+But the thing is, our data is broken
+into train and test data,
+and each of these is broken into samples
+and labels data.
+So essentially our data is a nested tuple
+with this type of structure and it's
+okay if you're not sure what it means.
+It is not important for this tutorial.
+Now let's quickly run this cell.
+And once our data is loaded,
+despite all those warnings,
+we will go ahead and plot
+one of our images with PLT.imshow
+as an image show to which we will pass
+our very first training image
+with x_train in the index of zero.
+And yeah, we might as well import
+the library first before we use it
+with import matplotlib.pyplot as plt.
+Now let's give it a quick run.
+Let's have a look at our sample, and okay,
+it looks a lot like five.
+Now let's quickly
+verify it by printing the matching label
+to our sample with y_train
+in the index of zero and beautiful.
+It is five indeed.
+And TensorFlow officially works.
+But what if we don't have the time
+to learn TensorFlow
+and all the machine learning
+concept behind it?
+Can't we just skip the understanding part
+and go straight for the results?
+Of course we can.
+We'll just use a library
+called Transformers
+that offers a very large collection
+of tools for beginners, so let's quickly
+import it with from Transformers
+import pipeline.
+And look at that,
+Transformers
+is not installed inside this container.
+Now, usually we'll just install it with
+exclamation mark pip install transformers.
+But the whole idea of containers
+is that we never need to install anything
+and if something is missing
+from our image, we cannot just add it.
+We will need to build a brand new image
+instead.
+Now luckily
+we don't need to do it from scratch.
+We can use the TensorFlow
+notebook as a base and we can combine it
+with some new modules.
+For this, allow me to introduce you
+to Docker Compose,
+an alternative way of defining containers.
+So for example, if we'd like to reproduce
+the same container we ran earlier,
+we will need a compose file
+that defines it.
+Now this file is using the YAML language,
+which is all about indented
+pairs of keys
+and values separated by colons.
+Where the important points are.
+We are using the TensorFlow notebook image
+and we are exposing the internal port
+of our container
+to the external port of our host system.
+save this file as compose.yml.
+We will then navigate to the folder
+where we saved it
+and with a right mouse click
+we will open a terminal instance
+in the current directory.
+And this time
+we are dealing with a PowerShell terminal.
+Now let's quickly make the font larger,
+and at the moment of filming
+I am using Docker Compose version
+of 2.23.0.
+Now to run a container
+with Docker Compose, we will simply type
+Docker compose up.
+Then we will navigate to local host
+at port 8000.
+We will once again copy our token.
+We will paste it back in the notebook.
+And we are back in.
+But isn't it a bit silly that we always
+need to copy and paste our tokens?
+Can't we just set a really nice
+password instead?
+So for this
+we will go back to our terminal.
+We will first shut down
+Jupyter with control C
+Then we will stop and remove our container
+with Docker compose down.
+Then back in our compose file
+we will add another key of environment
+and we will assign it to a value
+of JUPYTER Underscore TOKEN in all caps.
+Now in my case,
+I will set it to I am Batman.
+Now let's save it.
+Let's go back to our terminal
+and let's call Docker compose up again.
+We will then refresh our browser
+and now instead of a token we will specify
+I am Batman.
+And beautiful, we are in.
+Now, the only problem is the notebook
+that we created earlier is now gone.
+So before we build a new image,
+let's make sure we have a way
+of preserving our files.
+No, the way to do so
+is with something called drive mounting,
+where we expose a folder
+from our container
+to a folder on our host machine,
+just like we've done with the ports.
+So back in our compose file,
+we will create a new key of volumes
+and we will assign it to a value of ./,
+which represents
+the current directory of our terminal.
+In my case, that will be this lovely
+folder where our compose file lives.
+Then once again we will separate it
+with a colon from the directory
+of our container,
+which in my case is /home/jovyan.
+Let's go back to our terminal.
+Let's shut down our notebook
+It will then return to our browser
+where we see
+our beautiful compose file in the file
+tree. Yay!
+No. The original plan was installing
+new modules inside a container,
+so instead of using an existing image,
+we will build a new one instead.
+Now the way to build images
+is with something called Docker file,
+which we will create right away.
+So the build key is where we specify
+the location of this file,
+in our case, ./
+or the same directory as our compose file.
+Now let's quickly save it.
+Let's create a new file and let's
+save it inside our project folder,
+our lovely mounted drive,
+and we will save it as Dockerfile
+with a capital D, no format,
+no extension, just Docker file.
+Now, to make it work, we will need
+to begin with the FROM instruction
+where FROM specifies the parent image
+on which our container is based.
+In our case jupyter/tensorflow-notebook.
+Then right below we specify our user,
+which in the case of our TensorFlow
+notebook is a variable
+named $NB_UID in all caps
+and what we really mean here is Jovyan,
+a user with the right permissions.
+Now, if you are building from a different
+base image, you will probably have
+a different username as well.
+So if you're not sure what it is,
+please try setting it to root,
+which is the administrator.
+So you will
+basically have unlimited permissions.
+But since we know our username,
+we will go ahead and use it instead.
+Next, we will use the run instruction
+to PIP install --upgrade PIP
+and with the help of a double &amp; symbol
+as well as a backslash,
+we will move it to the next line
+where we will PIP install transformers.
+Next, we will
+PIP install a library called PYSRT.
+You will see shortly why.
+And then just as a precaution step,
+we will go ahead and fix dash permissions
+of a string of /home/&amp;
+And in a set of curly brackets
+we will specify NB_USER.
+And as you may guess once again
+what we really mean here is Jovyan.
+and great.
+Our Docker file is ready.
+We can save it,
+we can navigate to our terminal
+and we can call Docker compose up again.
+Then we will create a new notebook
+where from Transformers,
+we will import Pipeline
+and let's give it a quick run.
+And despite all those warnings,
+Transformers was successfully installed.
+How do we know?
+Well, let's create a new model.
+We'll call it Translator.
+We will assign it to pipeline.
+And inside pipeline
+we will specify a task.
+In our case,
+a string of translation_en_to_fr
+as in English to French.
+And once the model associated
+with our translation
+task was done downloading,
+we can then call
+translator, to which we will pass
+a very nice sentence.
+In my case, my name is Maria
+and I am a programmer.
+Let's quickly assign it to FR.
+We will then print it right below
+and it all comes down to up
+** Speaking French **.
+But the only problem is we're not really
+getting a string in return.
+We are getting a dictionary
+that is embedded in a list,
+which is not exactly
+what we're looking for.
+So let's quickly focus on the item
+at index zero to cancel the list
+and then we will focus on the key of
+translation text to cancel the dictionary.
+And now when we rerun this cell,
+everything looks much, much better.
+Awesome.
+Now let's do something extra useful
+with our new set of skills.
+So let's take the subtitles
+from one of my videos, specifically in
+an SRT format, which is a sequential file
+with a bunch of timestamps
+alongside their text,
+and you can find it in the description.
+We will then
+paste it inside our mounted directory,
+which will load it into our container,
+and then back in our notebook
+we will first verify
+that our file was loaded.
+There you go. Captions English.
+and then we can read it with pysrt.open to
+which we will pass the name of the file.
+Captions underscore English dot SRT.
+We will then assign this expression
+to subs as in subtitles,
+and we will of course
+import PYSRT before we are using it.
+Then we will print the content of our file
+just to make sure
+that we loaded it properly with for
+I in subs we will print I.
+Let's give it a run. And great.
+There you go.
+Everything was properly loaded,
+but because we don't really need
+to translate the timestamps,
+let's focus on the text
+only by printing i.text.
+Now let's translat it to French.
+To do so we will create an inner loop
+variable called fr_text
+and we will assign it to translator
+to which we will pass i.text.
+Now, since we are looking
+for a string output, we will once again
+focus on the item at index zero, as
+well as the key of translation text.
+Then we will simply assign i.text
+to our French translation as in fr_text,
+then once we are done with our for loop,
+we will go ahead and save
+our new translation with subs dot save
+and we will specify the name of our file,
+which in my case
+would be captions_french.srt
+Now let's run it
+and this might take you a minute or two.
+And once Jupyter is done,
+we will then navigate to our file tree
+where we can find our brand new French
+captions file.
+So let's click it, and holy smokes
+you guys, here's
+our beautiful, beautiful translation.
+We did it.
+Now the last task is to convert
+our entire software into an image,
+not just the environment like
+we've done earlier, but also our code.
+That way we can upload it to Docker Hub
+and share it with the world.
+Now, before we do so, let's quickly rename
+our notebook, let's call it Translator.
+And there's just one tiny detail
+we will add to our Docker file.
+We will need a COPY instruction
+that takes files
+from our project folder
+and stores them directly on our image.
+So for example,
+we will copy captions_english.srt
+and we will save it at the root directory
+of our container, which is ./.
+Now we will do the same for our notebook.
+We'll just specify it right
+after our captions with translator.ipynb.
+Great. Now let's save it.
+Let's navigate back to our terminal
+where we will
+first need to stop
+and remove our current container.
+Now we can
+of course do it with Docker compose down
+just like we've done it earlier.
+But on my end I'll go ahead and remove
+all the stops containers,
+not just this one with Docker
+container prune.
+Yes. And once our container was removed,
+we can finally go ahead and call Docker,
+compose up again,
+which will build our new image.
+We can finally navigate to Docker Hub.
+We will click on repositories
+and we will create a new one.
+Now, in my end,
+I'll call it SRT Dash Translator
+and I'll describe it as English to French
+SRT video subtitles translator.
+Let's go ahead and click Create.
+And perfect.
+Now we have a remote repository name
+and because it is a remote,
+it means that our terminal
+is not aware of it yet.
+So first let's find
+the local repository name,
+and we will do this with Docker images,
+which will show us
+all the images that we've pulled and
+we are currently storing on our system.
+And then right below repository
+we will find the name of our Machine
+Learning project.
+So let's quickly copy it
+and now we will need to change it
+so it perfectly matches
+the name of our remote repository.
+To do so, we will type Docker image tag
+followed by the name of the local
+repository, and since it has the tag
+of latest, we will add colon latest
+to the very end of it.
+Now, right after we specify the new name
+of the repository,
+which I'll just copy from my browser
+and I will give it the tag of 1.0
+because it is the very first version
+of our image.
+Now let's run it.
+And if we check Docker images again,
+we see a new instance of our image.
+But this time with the remote repository
+name, great.
+But this repository
+still lives on our computer.
+To upload it to Docker Hub,
+we will type Docker push
+followed by the new name
+and the tag of 1.0.
+Once we hit enter, we finally load
+our repository to Docker Hub
+and once we are done
+we will navigate to our browser.
+We will refresh the page
+and boom, here is our beautiful,
+beautiful repository,
+which is now 100% publicly available.
+Yay! And let's quickly verify
+it works as expected.
+So let's prune our containers once again.
+Then we will remove the local instance
+of our image with docker
+RMI as in remove image
+followed by the name of the image as well
+Now we will verify that this image is gone
+with the Docker images.
+And beautiful is gone indeed.
+Now, in addition, I would like to change
+the current directory
+of my terminal just to make sure
+that it has no files in it.
+I want a complete new folder
+with nothing inside to do,
+so I will type mkdir test as in
+make a directory named test.
+We will then navigate there with CD TEST
+and now we will
+go ahead and pull our remote image
+from Docker Hub with Docker
+Pull followed by the name
+as well as the tag of 1.0.
+Now we will run this image and we are not
+going to use Docker compose this time.
+We'll just type Docker run -p
+followed by the host system
+port of let's say 5000 will be creative
+this time, followed by the container
+port of 8888,
+No, let's run it.
+Let's copy the URL from Jupyter,
+but we will need to slightly modify it.
+We will change port 8888 to 5000.
+And beautiful.
+Here are both of our files
+and when we click them
+we get the exact same content
+we had earlier, including the warnings.
+Now the best part is
+if we navigate to our new test directory,
+it is absolutely empty.
+So those files,
+they never came from our system.
+They came directly from Docker Hub.
+Now, I don't know if you've noticed,
+but we have officially learned
+how to work with Docker.
+You can continue
+exploring it on your own. So
+congratulations
+and thank you so much for watching.
+If you found this video helpful, please
+share it with the world and don't
+forget to leave it a huge thumbs up.
+If you'd like to see more videos of this
+kind, you can always subscribe
+to my channel and turn on the notification
+bell.
+I'll see you very soon in another awesome
+simplified tutorial, in the meanwhile.
+Bye bye.
+
+## 영상 3: How to Run a Python Docker Image on AWS Lambda
+https://www.youtube.com/watch?v=wbsbXfkv47A
+
+Hey everyone. In this video, I'm going to show
+you how to run a Docker image on AWS Lambda.
+Docker is a way to put all of your code into
+a container. That way you won't encounter
+unexpected problems when you run it on a different
+machine or a different environment.
+AWS Lambda is a cloud compute service. We can
+use this to run our Docker image on demand,
+just like a function. And we can make it
+run whenever a user calls our API endpoint.
+It's completely serverless, so we get billed by millisecond
+of usage. But it is extremely cheap.
+Docker and Lambda are amazing together because
+it means that you can build any type of application
+you want in any language you want, and then
+run it on the cloud for a really low cost.
+Today, we're going to learn how to use this by creating
+a Python "Hello World" application that we're
+going to run as a Docker image on AWS Lambda.
+To follow along effectively with this project,
+you'll need to have Docker, AWS CLI and
+AWS CDK installed. And it will be good if you
+have some experience with them as well.
+I'm going to start by creating a CDK project for this
+app. AWS CDK—or "Cloud Development Kit"—is a tool
+we can use to create our cloud infrastructure.
+That way, we can define our cloud infrastructure using
+code instead of having to click things in the console
+or having to do everything in the command line.
+Let's make a folder for our CDK project.
+When you're in the folder, you can run the "cdk
+init" command to create the CDK application.
+I'm going to use the language TypeScript for the CDK application.
+This should finish after about a minute and
+we can open this directory up in our code editor.
+Next, we have to create our Docker image folder.
+That means we'll have our Python app in a
+folder and a Dockerfile to turn that app into
+an image with all of its runtime dependencies.
+Back in our project, I'm going to create a folder
+called "image". Inside that image folder, I'm
+going to create another folder called "src".
+In the "image/src" folder, I'm going to create my Python
+application file, which I'm going to call "main.py".
+This Python file is going to be my Lambda function
+handler. This is going to be the code that
+executes when my Lambda function is called.
+And for this, it's just going to be a really basic
+"hello world" function. It simply returns
+a status code of 200 (which means it was successful)
+and a "hello world" message in the body.
+But if you only wanted to run a simple Python script by
+itself, then AWS actually has a native Python runtime.
+So if "hello world" was all you wanted to do, you could
+just use that. You don't need to use Docker.
+Where Docker starts to become really useful
+is if you actually need a lot of packages or
+dependencies with your Python application.
+That's because many popular Python packages actually use a lot
+of platform specific binaries or code behind the scenes.
+And it can be really difficult to get these binaries
+installed or working correctly for the
+Amazon Linux runtime that AWS Lambda uses.
+That's why a lot of people who develop Python Lambda functions
+find that they have an error in their AWS Lambda
+when the same Python code works fine on their machine.
+With Docker though, this is really easy to fix.
+Everything inside the image will be run as is.
+So to demonstrate that, let's also install the
+"numpy" package and use that in our code.
+Go to our image folder and in here we're going to create a
+new file and we're going to call it "requirements.txt".
+And in here we can use this to list all of the packages
+or dependencies we need for our project.
+So here I'm going to add numpy.
+And now I've gone back to my Python function code
+and I've included numpy as a dependency.
+And I've also used it to generate a random matrix
+so that I can use it as part of my application.
+And I'll print it out here as well.
+So now I have a Python hello world application that also uses an external package.
+And I'm ready to build it into a Docker image.
+To turn this app into a Docker image, we'll need a Dockerfile.
+Which is basically just a set of instructions on how to build the image.
+So go to your image folder and let's create a new file here.
+We have to call it "Dockerfile".
+And the name here does matter. It has to be
+named "Dockerfile" with the capital "D".
+The first line of our Dockerfile is going to tell us where to base this image on.
+So we're not building the image from scratch.
+We're actually going to use this base image,
+which is an AWS Lambda Python 3.11 image.
+And then add our stuff into this image to build our own image.
+And if you want to use a different base image,
+then the AWS documentation has a list of
+all the different base images they publish.
+So you can click in the link below (in the video description)
+to go to this page and look at all the
+different Python versions you can choose from.
+Or if you don't want to use Python, then AWS
+also provides a bunch of base images in other
+languages too, such as TypeScript and Java.
+The next line we need to add to the Dockerfile is
+to copy this requirements text, which is here.
+So when we run this Dockerfile, the root directory that it
+works with is basically wherever this Dockerfile is based.
+So because the Dockerfile is in the same folder as requirements
+text, we can just call it requirements text
+without having to have an absolute path to the file.
+And we want to copy this into the Lambda "task root".
+So this is going to be an environment variable that
+is available to the Dockerfile when it's building.
+And this is basically where Lambda will consider as the root path for its function.
+Next, we're going to want to run "pip install" on the
+requirements text file, which is how we get our
+numpy dependency installed into the Docker image.
+My next command is going to copy all the files in this source folder.
+So that's going to be my main.py application file.
+And it's also going to put it in the Lambda task root.
+And the last line is going to set the default command
+of the Dockerfile to this handler function.
+This is going to be "main", which is the name of this file,
+and then "handler", which is the name of the function.
+So this is what the Lambda function runs when it is used.
+Now your Dockerfile is ready and you can build an image from it.
+But before we upload it to AWS, you might want to test it locally.
+So first go back to your terminal and then navigate
+to the folder where your Dockerfile is.
+So that's the "image" folder in this project.
+And then build your Dockerfile.
+And you can do that using a command like this.
+And once you've built your Dockerfile, you have to run it.
+So you can do that using a command like this.
+And here I'm going to run it on port 9000.
+And once the image is running, you can go to another terminal
+and then send an HTTP request to it like this.
+And this will actually run the function inside your Dockerfile.
+So if I run that, you can see that I get my status code 200
+and my "hello world" message and even my numpy matrix.
+Now let's go ahead and create the AWS infrastructure
+that will have the Lambda function and the
+API endpoint that we can use to run this image.
+Go to the "lib" folder in your project and you'll find this AWS stack file here.
+And it should look something like this.
+So we're going to delete all this commented code because we don't need that.
+And at the top we're going to import AWS Lambda.
+And in here, let's create our Docker image function.
+I'm going to call this Docker function and it's
+going to be a Lambda "DockerImageFunction".
+And here are the parameters.
+For the code, we're going to use Docker image code from asset.
+And this is going to be a directory where we have the Dockerfile.
+When we compile this, CDK will go into this folder and
+it will use this Dockerfile to create an image.
+And it's going to upload that image and associate it
+with this Lambda function so that we can use it.
+For the memory size, I'm going to put 1024MB and then
+I'm going to give it a timeout of 10 seconds.
+By default, I think Lambda has quite a low timeout.
+Maybe it's like 2 seconds and that might not be enough
+time for a Docker image to start up and run.
+And for the architecture, I'm going to put architecture "arm64".
+Now, most of you probably don't need this.
+So this is probably going to be fine to have it like this.
+But because I'm running this on a Mac M1, I need the
+architecture of the Lambda function to match the
+architecture that I'm building this image with.
+So when I run it on this machine, it's going to be built with "arm64".
+If I don't do this, it's going to fail.
+But you can choose arm64 or the Intel one if you are using a Windows
+or if you know that you are using an Intel processor.
+Or just leave it out completely if you're unsure.
+Now, to make the Lambda function easily accessible with
+an API endpoint, I'm also going to add a function URL.
+So to do that, you can use this add function URL
+method on your Lambda function to create a URL
+endpoint that you can just use right away.
+But I'm going to set the arguments here so that auth type is
+"NONE" so that we don't need to be authenticated to use it.
+Anyone with a URL will be able to call it.
+And I'm also going to set the CORS header to allow all
+HTTP methods and allow all headers and origins.
+And finally, to actually see the value of this function URL,
+we're also going to create an output variable for it.
+So I'm going to do like that so that when we build our CDK application,
+we actually get this function URL in a string.
+So this should be all the infrastructure code we need.
+And because we also have the Python application
+file ready and the Docker image file
+ready, we should be ready to deploy this.
+Now you're ready to deploy your Docker image to AWS.
+But before you do that, please make sure that
+you have your AWS CLI ready and configured
+because you will need the permissions
+from that to interact with your AWS account.
+As a sanity check, you can type `aws sts get-caller-identity`.
+And if your AWS CLI is configured properly, you should get a response like this.
+Now let's go back to our project root directory and set up CDK.
+So in your project root folder, type "cdk bootstrap".
+And here you can even choose the region you
+want to bootstrap in or leave it blank if you
+just want to use your default AWS region.
+Bootstrapping will create a bunch of resources
+in your AWS account that CDK will need.
+But you only need to run it once per account per region.
+And because I've already run it for this account in this region, nothing happens.
+And that's fine as well.
+With bootstrapping completed, we can now run
+"cdk deploy" to deploy our application.
+And the first time you run this, you might have to press yes
+to confirm that you do want to create these resources.
+And you can see here it's actually building and
+publishing our image to this private repo.
+After a couple of minutes, it should finish deploying.
+And you can find the URL for the function right here
+in this function value output that we've created.
+And we can try out the function by just clicking on this URL.
+And here you can see that our function returns "hello world from Lambda".
+And it's even returned our numpy matrix for us.
+If you go to your AWS console, you'll see this function created here.
+And if you click into it, you'll see that there's a function URL.
+And it's also using this Docker image that we created.
+Now if you get up to this point and you can't
+run the function or it has an error like
+runtime invalid entry point, then double check
+what architecture you're using because
+you could be using the wrong Lambda architecture
+for the machine that you're built with.
+So in this one, I used an ARM64 architecture
+because I'm using an M1 Apple silicon Mac.
+But if you're using an Intel or a Windows computer,
+you might need to use the x86 architecture instead.
+Otherwise, I hope this worked for you and that you
+have a working Lambda Docker Python function.
+And you can use this as a basis to start developing your
+app and use whatever packages and dependencies you want.
+Now Docker Lambda functions are a little bit slower than
+native Python Lambda functions on the cold-start.
+The cold-start is when you first use the function after
+you haven't used it for 15 minutes because Lambda
+will have to kind of create the whole runtime again.
+But it is more reliable if you do need to have
+runtime dependencies because you don't have to
+worry about having platform specific bugs or
+errors appear when you move from your development
+environment to the Lambda cloud environment.
+This is especially true if you use packages that
+are heavy on things like math, cryptography
+or basically anything that tends to use platform
+specific binaries to do the heavy lifting.
+So there is a bit of a trade off, but if you want
+an easier development experience and you
+don't mind the slower cold-start, then I do think
+that Docker functions are the way to go.
+Anyways, I hope you enjoyed this video. You
+can check in the comments for the code for
+this project. And thank you for watching.

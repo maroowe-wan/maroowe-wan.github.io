@@ -17,34 +17,14 @@ sources:
 
 ## 본문
 
-### 매니페스트는 계약이다
+쿠버네티스는 선언형이다. 원하는 최종 상태를 **매니페스트**로 기술하면 클러스터가 그것을 실현한다. 이 강의에서는 실무에서 반복적으로 쓰게 될 두 가지 매니페스트를 작성한다 — **Deployment**(이미지를 N개 실행)와 **Service**(그 실행 중인 인스턴스들에 안정적인 주소 부여). 둘을 합치면 파이프라인이 EKS에 적용하는 계약이 완성된다. 모든 매니페스트는 네 가지 최상위 필드를 공유한다. `apiVersion`(API 그룹/버전), `kind`(오브젝트 타입), `metadata`(이름과 라벨), `spec`(원하는 상태)이다.
 
-1강에서 쿠버네티스는 선언형이라고 했다. 원하는 최종 상태를 파일에 기술하면 클러스터가 그것을 현실로 만든다. 그 파일이 **매니페스트**이고, 이 강의에서는 항상 쓰게 될 두 가지를 작성한다 — **Deployment**와 **Service**다. Deployment는 "이 이미지를 N개 실행한다"고 말하고, Service는 "그 실행 중인 인스턴스들에게 안정적인 주소를 부여해 트래픽이 도달할 수 있게 한다"고 말한다. 두 가지를 합치면 파이프라인이 EKS에 적용하는 계약이 완성된다.
+### Task 1: Deployment 작성
 
-### Pod, 그리고 직접 작성하지 않는 이유
-
-쿠버네티스가 실행하는 가장 작은 단위는 **Pod**다 — 네트워크와 스토리지를 공유하는 하나 이상의 컨테이너. Pod를 직접 정의할 수도 있다.
+쿠버네티스가 실행하는 가장 작은 단위는 **Pod**다 — 네트워크와 스토리지를 공유하는 하나 이상의 컨테이너. 베어 Pod는 취약하다. 죽으면 그대로 죽고, 여러 복제본을 실행하거나 업그레이드할 방법도 없다. 그래서 Pod를 직접 생성하는 경우는 거의 없다. 대신 **Deployment**를 만든다. Deployment는 레플리카 수와 사용할 이미지를 선언하고, 실패한 Pod를 재생성하고 업그레이드를 처리하면서 그 상태를 유지한다.
 
 ```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: my-app
-spec:
-  containers:
-    - name: my-app
-      image: nginx
-      ports:
-        - containerPort: 80
-```
-
-하지만 베어 Pod는 취약하다. 죽으면 그대로 죽고, 여러 복제본을 실행하거나 업그레이드하는 방법도 없다. 실제로는 Pod를 직접 생성하는 경우가 거의 없다. 대신 Pod를 대신 관리해 주는 **Deployment**를 만든다.
-
-### Deployment 매니페스트
-
-Deployment의 역할은 몇 개의 Pod 레플리카를 실행해야 하는지, 어떤 이미지를 사용하는지를 선언하고 그 상태를 유지하는 것이다. 실패한 Pod를 다시 만들고 업그레이드를 처리한다. 전체 주석 예시는 다음과 같다.
-
-```yaml
+# deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,11 +35,11 @@ spec:
   replicas: 3                       # 3개의 복제본 실행
   selector:
     matchLabels:
-      app: my-app                   # 이 Deployment가 이 라벨을 가진 Pod를 관리한다
+      app: my-app                   # 이 라벨을 가진 Pod를 관리한다
   template:                         # Pod 청사진
     metadata:
       labels:
-        app: my-app                 # Pod에 이 라벨을 붙인다 — selector와 일치해야 한다
+        app: my-app                 # Pod에 이 라벨을 붙인다 — selector와 반드시 일치해야 한다
     spec:
       containers:
         - name: my-app
@@ -68,34 +48,16 @@ spec:
             - containerPort: 3000
 ```
 
-모든 쿠버네티스 오브젝트는 네 가지 최상위 필드를 공유하며, 명시적으로 이름 붙일 가치가 있다.
+`spec` 안에서 가장 중요한 세 필드가 있다. `replicas`(이 숫자를 바꾸고 다시 적용하면 스케일링 완료), `selector.matchLabels`(Deployment가 자신이 소유한 Pod를 찾는 방법), `template`(Pod 청사진). template의 라벨은 **반드시** selector와 일치해야 한다 — 두 곳 모두에 `app: my-app`이 등장하는 이유가 여기 있다. 일치하지 않으면 Deployment는 자신의 Pod를 인식하지 못한다.
 
-- **`apiVersion`** — 이 오브젝트가 속하는 API 그룹/버전 (Deployment는 `apps/v1`).
-- **`kind`** — 오브젝트 타입 (`Deployment`).
-- **`metadata`** — 오브젝트를 식별하는 이름과 라벨.
-- **`spec`** — 원하는 상태. 실제 설정이 여기에 있다.
+> `image:` 줄 끝의 `:a1b9f3c`가 2~3강에서 CI 파이프라인이 만든 커밋 SHA 태그다. 이것이 **주입 지점**이다 — "우리가 빌드한 이미지"와 "클러스터가 실행하는 것"이 만나는 연결부. 새 버전을 배포할 때 실제로 바뀌는 것은 이 태그 하나다.
 
-Deployment `spec` 안에서 가장 중요한 세 가지 필드는:
+### Task 2: Service 작성
 
-- **`replicas`** — 실행할 동일한 Pod의 수. 스케일링이 필요하면 이 숫자를 바꾸고 다시 적용한다.
-- **`selector.matchLabels`** — Deployment가 자신이 소유한 Pod를 찾는 방법. 일치하는 라벨을 가진 Pod를 찾는다.
-- **`template`** — 각 Pod의 청사진. 라벨이 **반드시** selector와 일치해야 한다(두 곳 모두에 `app: my-app`이 나타남에 주목하라). 그렇지 않으면 Deployment가 자신의 Pod를 인식하지 못한다.
-
-### 이미지 태그가 주입되는 위치
-
-파이프라인에서 가장 중요한 한 줄이 Pod template 안에 있다.
+Pod는 **임시적**이다. 생성되고, 파괴되고, 재스케줄되면서 매번 새 IP를 받는다. Pod IP를 클라이언트에 알려줄 수 없다 — 내일이면 사라질 수도 있다. **Service**는 Pod 집합에 하나의 안정적인 주소를 부여하고 요청을 분산시켜 이 문제를 해결한다.
 
 ```yaml
-          image: 111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
-```
-
-`:a1b9f3c`가 2강과 3강에서 CI 파이프라인이 만든 커밋 SHA 태그다. **이것이 주입 지점이다** — "우리가 빌드한 이미지"와 "클러스터가 실행하는 것"이 만나는 연결부다. 새 버전을 배포할 때 실제로 바뀌는 것은 이 태그다. 6강에서 두 가지 갱신 방법을 볼 것이다. 매니페스트를 다시 작성하고 `kubectl apply`하거나, `kubectl set image`로 직접 변경하거나. 어느 방식이든 움직이는 필드는 이것이다.
-
-### Service 매니페스트
-
-Pod는 **임시적**이다 — 생성되고, 파괴되고, 재스케줄되며, 각각 새로운 IP 주소를 받는다. 클라이언트에게 Pod IP를 알려줄 수 없다. 내일이면 존재하지 않을 수도 있다. **Service**는 Pod 집합에 하나의 안정적인 주소를 부여하고 요청을 분산시켜 이 문제를 해결한다.
-
-```yaml
+# service.yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -109,56 +71,58 @@ spec:
       targetPort: 3000              # 컨테이너의 포트
 ```
 
-핵심 필드는 **`selector`**다. Deployment의 Pod가 가진 것과 동일한 라벨(`app: my-app`)을 매칭한다. 이 라벨이 접착제다 — Service가 개별 Pod IP와 완전히 분리된 채로 어떤 Pod로 라우팅할지 아는 방법이다. 업그레이드 중 Pod가 오고 가더라도 Service는 자동으로 정상적인 Pod를 추적한다.
+핵심 필드는 **`selector`**다. Deployment의 Pod가 가진 것과 동일한 라벨(`app: my-app`)을 매칭한다. 이 라벨이 접착제다 — 개별 Pod IP와 완전히 분리된 채로 Service가 정상 Pod를 추적할 수 있는 비결이다. 업그레이드 중 Pod가 오고 가더라도 Service는 자동으로 올바른 Pod를 찾아낸다.
 
-다이어그램이 보여주듯이, 공유 라벨 `app: my-app`이 세 오브젝트를 연결한다. Deployment가 생성하는 Pod에 라벨을 붙이고, Service는 그 라벨로 Pod를 찾는다.
+Service `type`은 접근 범위를 제어한다. `ClusterIP`(기본값, 클러스터 내부 전용), `NodePort`(모든 노드에서 포트 개방), `LoadBalancer`(EKS에서는 공개 주소를 가진 AWS 로드 밸런서를 프로비저닝)로 나뉜다. 인터넷에 앱을 노출할 때는 `LoadBalancer`를 사용하고, 정교한 HTTP 라우팅이 필요하면 나중에 **Ingress**를 추가하면 된다. 지금 단계에서는 Service만으로 트래픽을 흘리기에 충분하다.
 
-```mermaid 라벨 셀렉터가 Deployment, Pod, Service를 연결하는 방식
-flowchart TB
-    Dep["Deployment my-app<br/>selector: app=my-app"]
-    subgraph Pods["app=my-app 라벨이 붙은 Pod들"]
-        P1[Pod 1]
-        P2[Pod 2]
-        P3[Pod 3]
-    end
-    Svc["Service my-app<br/>selector: app=my-app"]
-    Client[클라이언트 트래픽]
+> Deployment는 모든 레플리카가 교체 가능한 **스테이트리스(stateless)** 앱에 적합하다. 형제 오브젝트로는 **StatefulSet**(데이터베이스, Kafka처럼 안정적인 아이덴티티와 Pod별 전용 스토리지가 필요한 앱)과 **DaemonSet**(로그·메트릭 수집 에이전트처럼 각 노드에 정확히 하나의 Pod를 실행)이 있다. 애플리케이션 코드를 배포할 때는 거의 항상 Deployment가 정답이다.
 
-    Dep -->|생성 및 관리| P1
-    Dep -->|생성 및 관리| P2
-    Dep -->|생성 및 관리| P3
-    Client -->|안정적인 주소| Svc
-    Svc -->|라벨로 라우팅| P1
-    Svc -->|라벨로 라우팅| P2
-    Svc -->|라벨로 라우팅| P3
-```
+### Task 3: 적용 및 확인
 
-Service `type`은 접근 범위를 제어한다.
-
-- **`ClusterIP`** (기본값) — 클러스터 내부에서만 접근 가능. 내부 서비스에 적합.
-- **`NodePort`** — 모든 노드에서 포트를 연다.
-- **`LoadBalancer`** — EKS에서는 공개 주소가 있는 AWS 로드 밸런서를 프로비저닝해서 인터넷에서 앱에 접근할 수 있게 한다.
-
-실제 웹 앱을 사용자에게 노출할 때는 **Ingress**(Service 앞에서 HTTP 라우팅)를 추가로 사용하는 경우가 많지만, Service가 기반이 되는 구성요소이며 이 강좌에서 트래픽 흐름을 구성하는 데 필요한 전부다.
-
-### Deployment의 형제들
-
-Deployment는 **스테이트리스(stateless)** 앱 — 웹 서버, API — 에 적합하며, 모든 레플리카가 교체 가능하다. 두 가지 형제가 있다. **StatefulSet**(데이터베이스나 Kafka처럼 안정적인 아이덴티티와 Pod별 영구 스토리지가 필요한 앱), **DaemonSet**(로그나 메트릭 수집기 같은 에이전트로, 각 노드에 정확히 하나의 Pod를 실행한다). 애플리케이션 코드를 배포할 때는 거의 항상 Deployment를 쓰면 된다. 다른 것들도 존재한다는 것만 알아두자.
-
-### 매니페스트 적용하기
-
-작성을 마치면 파일을 클러스터에 넘긴다.
+파일을 클러스터에 넘길 때는 `kubectl apply -f`를 사용한다. 선언형 명령이라 처음 실행하면 오브젝트를 생성하고, 편집 후 다시 실행하면 새 원하는 상태에 맞게 업데이트한다. 6강에서 파이프라인이 실제로 호출하는 명령이 바로 이것이다.
 
 ```bash
 kubectl apply -f deployment.yaml
 kubectl apply -f service.yaml
 ```
 
-`kubectl apply -f`는 선언형이다. 한 번 실행하면 오브젝트를 생성하고, 편집 후 다시 실행하면 새 원하는 상태에 맞게 업데이트한다. 이 단일 명령이 이후 모든 것의 기반이다 — 6강에서 파이프라인이 실제로 호출하는 명령이 바로 이것이다.
+Deployment가 Pod를 생성했는지, Service가 Pod로 라우팅하고 있는지 확인한다.
+
+```bash
+kubectl get deployment my-app          # READY가 3/3이어야 한다
+kubectl get pods -l app=my-app         # Pod 3개, STATUS Running
+kubectl get service my-app             # 할당된 주소/포트 확인
+kubectl get endpoints my-app           # Pod IP 목록이 보여야 한다 — selector가 일치하는 증거
+```
+
+`kubectl get endpoints`에 IP가 없다면 Service `selector`가 Pod의 라벨과 맞지 않는 것이다 — 매니페스트에서 가장 흔한 실수다.
+
+두 매니페스트가 하나의 연결된 시스템을 어떻게 만드는지 아래 다이어그램이 보여준다. Deployment는 ReplicaSet을 소유하고 ReplicaSet이 Pod를 실행하며, Service는 동일한 라벨로 그 Pod들에 트래픽을 라우팅한다.
+
+```mermaid 두 매니페스트로 만들어지는 쿠버네티스 오브젝트 관계
+flowchart TD
+    Client["클라이언트 트래픽"]
+    Svc["Service my-app<br/>selector app=my-app"]
+    Deploy["Deployment my-app<br/>replicas 3"]
+    RS["ReplicaSet<br/>Pod 3개를 유지"]
+    P1["Pod<br/>label app=my-app"]
+    P2["Pod<br/>label app=my-app"]
+    P3["Pod<br/>label app=my-app"]
+
+    Deploy -->|manages| RS
+    RS -->|creates| P1
+    RS -->|creates| P2
+    RS -->|creates| P3
+
+    Client --> Svc
+    Svc -.->|routes by label match| P1
+    Svc -.->|routes by label match| P2
+    Svc -.->|routes by label match| P3
+```
 
 ## 핵심 정리
 - Deployment는 원하는 레플리카 수와 실행할 이미지를 선언하고 그 상태를 유지한다. 베어 Pod가 아닌 Deployment를 작성하라.
-- 모든 오브젝트는 `apiVersion`, `kind`, `metadata`, `spec`을 가진다. Deployment의 핵심 필드는 `replicas`, `selector`, Pod `template`이다.
+- 모든 오브젝트는 `apiVersion`, `kind`, `metadata`, `spec`을 가진다. Deployment의 핵심 필드는 `replicas`, `selector`, Pod `template`이며, 두 곳의 라벨이 반드시 일치해야 한다.
 - Pod template 안의 `image:` 줄 — 커밋 SHA 태그로 끝나는 — 이 파이프라인이 각 새 버전을 주입하는 정확한 위치다.
-- Service는 임시적인 Pod에 하나의 안정적인 주소를 부여하고 부하를 분산한다. `selector`가 Pod의 라벨과 매칭된다. EKS에서 앱을 공개적으로 노출하려면 `LoadBalancer` 타입을 사용하라.
-- `kubectl apply -f`는 매니페스트에 맞게 오브젝트를 생성하거나 업데이트하며, 파이프라인이 궁극적으로 실행하는 명령이다.
+- Service는 임시적인 Pod에 하나의 안정적인 주소를 부여하고 요청을 분산한다. `selector`가 Pod의 라벨과 매칭된다. EKS에서 앱을 공개 노출하려면 `LoadBalancer` 타입을 쓴다.
+- `kubectl apply -f`는 매니페스트에 맞게 오브젝트를 생성하거나 업데이트한다. `kubectl get endpoints`로 Service의 selector가 실제로 Pod와 연결됐는지 확인한다.

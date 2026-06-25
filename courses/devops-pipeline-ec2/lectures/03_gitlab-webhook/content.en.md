@@ -10,19 +10,17 @@ sources:
 # Setting Up GitLab and Triggering Jenkins on Push (Webhooks)
 
 ## Learning Objectives
-- Understand the basic flow of creating a GitLab repository, pushing code, and a simple branch strategy.
-- Know how a GitLab webhook delivers a `push` event to Jenkins and what makes it secure.
-- Connect GitLab to Jenkins so that pushing code automatically triggers the pipeline.
+- Push code to a GitLab repository using a simple `dev`/`main` branch strategy.
+- Connect GitLab to Jenkins so that a `push` automatically triggers a build.
+- Configure and verify a GitLab webhook secured by a shared secret token.
 
 ## Body
 
-### The repository is the trigger
+The goal of a pipeline is that *pushing code* — not running commands by hand — starts the work. To get there you need a place to push (GitLab) and a way to tell Jenkins "something changed" (a webhook). This lecture wires the two together.
 
-In the previous lecture you built an image by hand. The whole point of a pipeline is that you stop running commands manually — instead, *pushing code* sets everything in motion. That means we need two things: a place to push code (GitLab) and a mechanism that tells Jenkins "something changed, start working" (a webhook). This lecture wires those two together.
+### Task 1 — Push your app to GitLab
 
-### A quick GitLab and branch refresher
-
-Create a project in GitLab, then push your code — the same Dockerfile-equipped app from the last lecture — to it:
+**What & why:** Jenkins needs a repository to watch. Push the Dockerfile-equipped app from the previous lecture to a new GitLab project.
 
 ```bash
 git init
@@ -30,71 +28,67 @@ git remote add origin https://gitlab.com/<your-namespace>/<your-project>.git
 git add .
 git commit -m "Initial commit with Dockerfile"
 git push -u origin main
+
+# create a dev branch for day-to-day work
+git checkout -b dev
+git push -u origin dev
 ```
 
-A small but real **branch strategy** keeps the pipeline sane. The convention is to do day-to-day work on a `dev` (or feature) branch, and treat `main` as the branch that always represents what should be deployed. You can configure the pipeline to react to pushes on whichever branch you choose. For learning, triggering on every push to `dev` lets you experiment freely without touching the deployable branch.
+> Branch strategy: work on `dev`, keep `main` as "what should be deployed." Triggering on `dev` lets you experiment without touching the deployable branch.
 
-### What a webhook actually is
+### Task 2 — Create a GitLab personal access token
 
-A **webhook** is GitLab's way of saying "call me back when something happens." Instead of Jenkins constantly polling GitLab asking "anything new yet?", GitLab proactively sends an HTTP request to a URL you give it the instant an event — like a `push` — occurs. It's the difference between repeatedly checking your mailbox and having the postal service ring your doorbell.
+**What & why:** Jenkins talks to GitLab's API, which requires a token.
 
-The sequence below traces a single `push` from your machine all the way to a started Jenkins build, and shows where the secret token proves the request is authentic.
+1. GitLab → avatar (top-left) → **Preferences** (older UI: **Edit profile**) → **Access Tokens**.
+2. **Add new token**, give it a name and expiry, and set the scope to **api**.
+3. **Copy the token now** — GitLab shows it only once. If you lose it, create a new one.
 
-```mermaid How a GitLab webhook triggers a Jenkins build
-sequenceDiagram
-    participant Dev as Developer
-    participant GitLab as GitLab
-    participant Jenkins as Jenkins
-    Dev->>GitLab: git push (push event)
-    GitLab->>Jenkins: HTTP POST to webhook URL + secret token
-    Jenkins->>Jenkins: Verify secret token matches
-    Jenkins-->>GitLab: 200 OK
-    Jenkins->>Jenkins: Start build "Started by GitLab push"
-```
+### Task 3 — Install the GitLab plugin in Jenkins
 
-GitLab actually offers two ways to connect to Jenkins, and it helps to know both:
+**What & why:** The plugin lets GitLab trigger builds and lets Jenkins report status back to GitLab.
 
-- **The Jenkins integration** — the officially recommended path. It uses a GitLab plugin in Jenkins plus a saved connection, and it can also report build status *back* into the GitLab UI.
-- **A plain webhook** — a more direct, lower-level approach where GitLab simply POSTs to a Jenkins URL secured by a token.
+- **Manage Jenkins → Plugins → Available** → search **GitLab** → install.
+- The **GitLab API Plugin** is installed as a companion automatically.
 
-We'll set up the connection using the integration, then show the raw webhook so you understand what's happening underneath.
+### Task 4 — Create the GitLab connection in Jenkins
 
-### Step 1 — A personal access token in GitLab
+**What & why:** This registers your GitLab server and API token so Jenkins can authenticate.
 
-Jenkins needs permission to talk to GitLab's API. In the current GitLab UI, click your avatar (top-left) → **Preferences** (older versions label this **Edit profile**), then choose **Access Tokens** from the left-hand menu. Click **Add new token**, give it a name and an expiry, and — this is the critical part — set the scope to **api**. Copy the token immediately: GitLab shows it exactly once and you can never retrieve it again. If you lose it, you create a new one.
+**Manage Jenkins → System → GitLab** section:
 
-### Step 2 — Install the GitLab plugin in Jenkins
+- **Connection name** — any label, e.g. `gitlab-saas`.
+- **GitLab host URL** — `https://gitlab.com` (SaaS) or your self-hosted URL.
+- **Credentials** → **Add** → kind **GitLab API token** → paste the token from Task 2.
 
-In Jenkins, go to **Manage Jenkins → Plugins → Available**, search for **GitLab**, and install it (the **GitLab API Plugin** comes along as a companion). This plugin is what lets GitLab trigger builds and lets Jenkins display results back in GitLab.
+Click **Test Connection** — a success message confirms it works. **Save**.
 
-### Step 3 — Create the GitLab connection in Jenkins
+### Task 5 — Make the Jenkins job listen for pushes
 
-Go to **Manage Jenkins → System** and scroll to the new **GitLab** section. Fill in:
+**What & why:** This tells the job which incoming events should start a build.
 
-- **Connection name** — any label you like (e.g. `gitlab-saas`).
-- **GitLab host URL** — `https://gitlab.com` for GitLab SaaS, or your self-hosted server's URL.
-- **Credentials** — click **Add**, choose the kind **GitLab API token**, and paste the token from Step 1.
+In the pipeline job's config → **Build Triggers** → enable **"Build when a change is pushed to GitLab."** Select **Push Events** (and **Merge Request Events** if needed).
 
-Save, then click **Test Connection**. A success message confirms Jenkins can reach GitLab.
+Then expand **Advanced** and click **Generate** to create a **secret token**. Copy it — and note the **webhook URL** Jenkins displays in this same section. You'll need both in the next task. **Save**.
 
-### Step 4 — Make the Jenkins job listen for pushes
+### Task 6 — Create the webhook in GitLab
 
-In your Jenkins pipeline job's configuration, find **Build Triggers** and enable **"Build when a change is pushed to GitLab."** Select the events you care about — typically **Push Events** and **Merge Request Events**. This tells Jenkins which incoming notifications should actually start a build.
+**What & why:** The webhook is what GitLab calls when an event happens. It needs the URL and secret token from Jenkins, which must match on both ends.
 
-### Step 5 — Create the webhook in GitLab
+GitLab project → **Settings → Webhooks**:
 
-Now go to your GitLab project → **Settings → Webhooks**. You need two pieces of information that Jenkins displays in that same Build Triggers section:
+- **URL** — paste the webhook URL from Jenkins (Task 5).
+- **Secret token** — paste the generated token from Jenkins (Task 5).
+- Trigger: select **Push events**, choose your branches.
+- **Add webhook**.
 
-- **URL** — the endpoint Jenkins exposes for this job (Jenkins shows you the exact URL).
-- **Secret token** — click **Generate** in Jenkins to create one, then paste it into the GitLab webhook's secret token field.
+> The whole connection is just two facts that must match on both sides: a **URL** pointing GitLab at the right Jenkins job, and a **shared secret token** that proves the request is authentic.
 
-The secret token matters: it's how Jenkins verifies that an incoming request genuinely came from your GitLab project and not from some stranger who guessed the URL. Choose **Push events**, pick the branches, and add the hook. GitLab gives you a **Test → Push events** button to fire a sample event and confirm the wiring.
+Use **Test → Push events** in GitLab to fire a sample event and confirm the wiring.
 
-> The whole connection is just two facts that must match on both ends: a **URL** that points GitLab at the right Jenkins job, and a **shared secret token** that proves the request is authentic. Get those two aligned and the trigger works.
+### Task 7 — Verify end to end
 
-### Step 6 — Prove it end to end
-
-Make a trivial change — edit the README on your `dev` branch — and commit:
+**What & why:** A real push should now start a build with no manual action.
 
 ```bash
 git checkout dev
@@ -103,10 +97,30 @@ git commit -am "Test webhook"
 git push
 ```
 
-Watch Jenkins. Within a second or two a new build appears, and the console output shows it was **"Started by GitLab push"** by your user. You now have a hands-off trigger: from here on, code pushes — not commands — drive the pipeline. The structure is now in place; the next lecture defines what Jenkins actually *does* when that trigger fires.
+Watch Jenkins: within a second or two a new build appears, and the console output reads **"Started by GitLab push"**. Pushes — not commands — now drive the pipeline.
+
+The sequence diagram below traces what happens end to end, from your `git push` to the build Jenkins starts on its own.
+
+```mermaid Push-to-build flow over a GitLab webhook
+sequenceDiagram
+    participant Dev as Developer
+    participant GL as GitLab
+    participant JK as Jenkins
+    Dev->>GL: git push (dev branch)
+    Note over GL: Push event matches webhook trigger
+    GL->>JK: POST webhook to URL with secret token
+    JK->>JK: Verify token matches generated secret
+    JK->>JK: Start build ("Started by GitLab push")
+    JK-->>GL: Report build status via API token
+    GL-->>Dev: Show pipeline status on commit
+```
 
 ## Key Takeaways
-- Pushing code to GitLab — not running commands — is what now starts your pipeline, so connecting GitLab to Jenkins is the foundation of automation.
-- A webhook lets GitLab push a notification to Jenkins the instant an event occurs, rather than Jenkins polling for changes.
+- Pushing code to GitLab, not running commands, is what now starts your pipeline.
+- A webhook lets GitLab notify Jenkins the instant an event occurs, instead of Jenkins polling.
 - The connection rests on two matching facts: a **URL** pointing at the Jenkins job and a **shared secret token** that authenticates the request.
-- Configure the Jenkins job to "Build when a change is pushed to GitLab," create the matching webhook in GitLab, and verify with a test push that shows "Started by GitLab push."
+- Configure the job to "Build when a change is pushed to GitLab," create the matching webhook in GitLab, and verify with a test push showing "Started by GitLab push."
+
+## Sources
+- https://www.youtube.com/watch?v=_8YjWDmLvAE
+- https://www.youtube.com/watch?v=SObrdM1ev3M

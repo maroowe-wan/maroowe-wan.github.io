@@ -1,0 +1,50 @@
+{
+  "lecture_no": 2,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "워밍업 — .dockerignore 파일 작성하기. 아래 프로젝트 폴더 구조를 보고, 로컬 가상 환경, 컴파일된 Python 파일, Git 기록, 로컬 `.env` 시크릿 파일을 제외하는 `.dockerignore`를 작성하라. 제외 패턴은 한 줄에 하나씩 작성한다.",
+      "starter": "# 프로젝트 폴더 구조:\n# app.py\n# requirements.txt\n# Dockerfile\n# .env            ← 로컬 시크릿, 이미지에 포함되면 안 됨\n# .git/            ← 버전 기록, 불필요\n# venv/            ← 로컬 가상 환경, 이미지 의존성을 덮어쓰면 안 됨\n# __pycache__/     ← 컴파일된 바이트코드, 불필요\n# *.pyc",
+      "hints": [
+        "`.dockerignore`는 `.gitignore`와 동일한 방식으로 동작한다 — 한 줄에 glob 패턴 하나면 충분하다.",
+        "가상 환경 폴더 이름은 도구마다 다르므로 `venv/`와 `.venv/` 둘 다 제외해야 한다.",
+        "`.env` 파일에는 API 키나 데이터베이스 비밀번호가 담겨 있는 경우가 많다 — 이미지 안에 절대 들어가지 않도록 항상 제외한다."
+      ],
+      "solution": "# .dockerignore\n__pycache__/\n*.pyc\nvenv/\n.venv/\n.git/\n.env",
+      "explanation": "`docker build`가 `COPY . .`를 실행하면 빌드 컨텍스트 전체를 Docker 데몬으로 전송한다. `.dockerignore`가 없으면 로컬 가상 환경(`venv/`)이 이미지 내부에 설치된 패키지를 덮어쓸 수 있고, `__pycache__/`와 `*.pyc` 파일은 불필요한 공간을 차지하며, `.git/`은 컨텍스트를 비대하게 만들고, `.env`는 자격 증명을 이미지 레이어에 조용히 누출시킨다. 이 패턴들을 `.dockerignore`에 나열하면 첫 바이트가 데몬으로 전송되기 전에 모두 걸러진다."
+    },
+    {
+      "prompt": "핵심 1 — Flask 앱의 완전한 Dockerfile 작성하기. 다음 조건을 모두 충족해야 한다. (1) 베이스 이미지로 `python:3.12-slim` 사용, (2) 작업 디렉터리를 `/app`으로 설정, (3) `requirements.txt`를 먼저 복사하고 나머지 코드 복사 전에 pip으로 의존성 설치, (4) 앱이 포트 5000을 사용함을 문서화, (5) Python으로 `app.py`를 실행하는 기본 시작 명령을 exec(괄호) 형식으로 설정.",
+      "starter": "# app.py는 포트 5000에서 Flask를 시작함\n# requirements.txt 내용: flask\n\n# 아래에 Dockerfile을 작성하세요:\n",
+      "hints": [
+        "`FROM python:3.12-slim`으로 시작한다. `slim` 태그는 이미지를 가볍게 유지한다. `python:3.12`(너무 큼)나 `alpine`(일부 pip 패키지 호환 문제)은 피한다.",
+        "`requirements.txt`를 복사하고 `pip install`을 실행한 *뒤에* `COPY . .`를 한다. 의존성은 코드보다 드물게 바뀌므로 Docker가 해당 레이어를 캐시해 코드 변경 시 Flask를 다시 설치하지 않는다.",
+        "`EXPOSE 5000`은 포트를 문서화할 뿐이며 실제로 열지는 않는다. 실제 포트 매핑은 `docker run` 시 `-p`로 한다. Python이 PID 1이 되도록 쉘 형식이 아닌 exec 형식 `CMD [\"python\", \"app.py\"]`를 사용한다."
+      ],
+      "solution": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nEXPOSE 5000\n\nCMD [\"python\", \"app.py\"]",
+      "explanation": "각 명령은 이미지에 새 레이어를 만든다. `FROM`은 베이스 런타임을 선택하고, `WORKDIR`은 기본 경로를 설정해 이후의 `COPY`와 `RUN` 명령이 `/app` 기준으로 실행된다. `COPY requirements.txt` + `RUN pip install`을 `COPY . .`와 분리하는 것은 Docker의 레이어 캐시를 활용하기 위해서다. `app.py`만 변경됐을 때 Docker가 pip 설치 레이어를 재사용하므로 재빌드가 몇 분이 아닌 몇 초 만에 끝난다. `--no-cache-dir`은 pip의 다운로드 캐시를 이미지에 남기지 않아 최종 이미지 크기를 줄인다. `EXPOSE`는 메타데이터로서 앱이 기대하는 포트를 사람과 도구에게 알려주지만 네트워크 경로를 열지는 않는다. exec 형식 `CMD`(대괄호)는 Python을 PID 1로 직접 실행해 쉘 래퍼 없이도 `docker stop`의 SIGTERM 신호가 프로세스에 올바르게 전달되도록 한다."
+    },
+    {
+      "prompt": "핵심 2 — 이미지를 빌드하고 존재를 확인한 뒤, 호스트 포트 8080으로 앱에 접근할 수 있도록 컨테이너를 실행하라. 정확한 명령 두 개를 작성한다. 하나는 현재 디렉터리를 빌드 컨텍스트로 사용해 `flask-capstone:1.0` 태그로 이미지를 빌드하는 명령, 다른 하나는 백그라운드 모드로 호스트 포트 8080을 컨테이너 포트 5000에 매핑해 실행하는 명령이다.",
+      "starter": "# Dockerfile, app.py, requirements.txt가 있는 프로젝트 폴더에 있다고 가정\n# 명령 두 개를 작성하세요:\n\n# 1. 빌드 명령:\n\n# 2. 실행 명령 (백그라운드, 포트 게시):",
+      "hints": [
+        "빌드 명령은 `-t 이름:태그`로 이미지 이름을 지정하고, 끝의 `.`으로 현재 폴더를 빌드 컨텍스트로 사용한다.",
+        "`docker run`의 포트 플래그 형식은 `-p 호스트_포트:컨테이너_포트`다. 호스트 포트는 8080, 컨테이너 포트는 Flask가 바인딩하는 5000이다.",
+        "`-d`를 추가하면 컨테이너가 백그라운드에서 실행돼 터미널을 자유롭게 쓸 수 있다. `docker ps`로 실행 중인 컨테이너를 확인할 수 있다."
+      ],
+      "solution": "# 1. 빌드\ndocker build -t flask-capstone:1.0 .\n\n# 2. 실행 (백그라운드, 포트 게시)\ndocker run -d -p 8080:5000 flask-capstone:1.0",
+      "explanation": "`docker build -t flask-capstone:1.0 .`은 현재 디렉터리(`.` 빌드 컨텍스트)의 Dockerfile을 읽어 `flask-capstone` 이름, `1.0` 태그의 이미지를 생성한다. 빌드 후 `docker images`에 해당 항목이 나타난다. `docker run -d -p 8080:5000 flask-capstone:1.0`은 컨테이너를 백그라운드(`-d`)로 시작한다. `-p 8080:5000` 플래그는 포트 포워딩 경로를 만든다. 호스트의 `localhost:8080`으로 들어오는 트래픽이 Flask가 수신 중인 컨테이너 내부 포트 `5000`으로 전달된다. `-p` 없이 실행하면 컨테이너는 완전히 격리되어 앱에 접근할 수 없다 — 입문자들이 자주 겪는 실수다. 브라우저에서 `http://localhost:8080/`과 `http://localhost:8080/healthz`로 앱 동작을 확인할 수 있다."
+    },
+    {
+      "prompt": "응용 — 빌드한 이미지를 새 릴리스용으로 재태깅하고 해당 명령의 의미를 설명하라. (a) `docker tag` 명령을 실행해 `flask-capstone:1.0`과 같은 이미지를 가리키는 두 번째 태그 `flask-capstone:latest`를 생성하라. (b) `docker images`를 실행해 IMAGE ID가 동일한 두 행을 확인하라. (c) Kubernetes 배포에서 `flask-capstone:latest` 대신 `flask-capstone:1.0`을 참조해야 하는 이유를 1~2문장으로 설명하라.",
+      "starter": "# 이전 실습에서 flask-capstone:1.0 이미지가 이미 존재한다고 가정\n\n# (a) docker tag 명령 작성:\n\n# (b) docker images 실행 — IMAGE ID가 같은 두 행을 찾아라.\n\n# (c) 이유 설명 (1~2문장):",
+      "hints": [
+        "`docker tag 원본이미지:태그 대상이미지:태그` — 빌드나 복사 없이 같은 이미지 ID를 가리키는 새 이름만 추가된다.",
+        "태깅 후 `docker images`를 실행해 IMAGE ID 열을 비교한다. `flask-capstone:1.0`과 `flask-capstone:latest`의 ID가 동일해야 한다.",
+        "`flask-capstone:2.0`을 빌드하고 `latest`로 재태깅하면 어떻게 될지 생각해보자. `latest`를 참조하는 배포는 이제 조용히 새 코드를 실행하게 되고 이름으로 1.0으로 롤백할 방법이 없어진다."
+      ],
+      "solution": "# (a)\ndocker tag flask-capstone:1.0 flask-capstone:latest\n\n# (b) `docker images` 예상 출력 (ID는 실행 환경마다 다름):\n# REPOSITORY         TAG       IMAGE ID       CREATED        SIZE\n# flask-capstone     1.0       a1b2c3d4e5f6   2 minutes ago  140MB\n# flask-capstone     latest    a1b2c3d4e5f6   2 minutes ago  140MB\n#\n# 두 행의 IMAGE ID가 동일 — 데이터가 복제된 것이 아니다.\n\n# (c)\n# Kubernetes Deployment 매니페스트는 flask-capstone:1.0을 명시적으로 참조한다.\n# 나중에 flask-capstone:2.0을 빌드하면 특정 버전으로 앞뒤로 롤링할 수 있다.\n# 'latest'를 쓰면 클러스터가 어느 빌드인지 구분할 수 없어 롤백이 불가능하다.",
+      "explanation": "`docker tag`는 비용이 없는 작업이다 — 이미 디스크에 있는 동일한 이미지 레이어를 가리키는 새 이름(참조)을 추가할 뿐이다. 복사나 재빌드는 일어나지 않는다. 그래서 두 태그의 IMAGE ID가 같다. Kubernetes에서 이것이 중요한 이유는, Deployment의 `image:` 필드가 클러스터가 *어느 버전*의 앱을 실행할지 식별하는 유일한 수단이기 때문이다. 명시적인 버전 태그(`1.0`, `2.0`)를 쓰면 배포를 고정하고, 실행 중인 버전과 빌드된 버전을 비교하며, `kubectl rollout undo`로 알려진 정상 태그로 되돌릴 수 있다. `latest` 태그는 떠다니는 포인터다. `flask-capstone:latest`를 다시 푸시하는 순간 조용히 다른 것을 가리키게 되어 클러스터의 실행 상태를 신뢰할 수 없게 된다. Kubernetes에 배포하는 모든 이미지는 명시적 버전 태그를 참조하는 것이 모범 사례다."
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "lecture_no": 2,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "Warmup — Write a .dockerignore file. Given the project folder below, create a `.dockerignore` that excludes the local virtual environment, compiled Python files, the Git history, and any local `.env` secrets file. List one exclusion pattern per line.",
+      "starter": "# Project folder contents:\n# app.py\n# requirements.txt\n# Dockerfile\n# .env            ← local secrets, must NOT enter the image\n# .git/            ← version history, not needed\n# venv/            ← local virtualenv, must NOT override image deps\n# __pycache__/     ← compiled bytecode, not needed\n# *.pyc",
+      "hints": [
+        "A `.dockerignore` works exactly like `.gitignore` — one glob pattern per line is enough.",
+        "Make sure to exclude both `venv/` and `.venv/` because different tools use different names for the virtual environment folder.",
+        "The `.env` file often holds API keys or database passwords — always exclude it so it never ends up inside the image."
+      ],
+      "solution": "# .dockerignore\n__pycache__/\n*.pyc\nvenv/\n.venv/\n.git/\n.env",
+      "explanation": "When `docker build` runs `COPY . .` it sends the entire build context to the Docker daemon. Without a `.dockerignore` the local virtual environment (`venv/`) can shadow the clean packages installed inside the image, `__pycache__/` and `*.pyc` files waste space, `.git/` bloats the context, and `.env` can silently leak credentials into the image layer. Listing these patterns in `.dockerignore` prevents all of that before the first byte is even sent to the daemon."
+    },
+    {
+      "prompt": "Core 1 — Write the complete Dockerfile for the Flask app. The file must: (1) use `python:3.12-slim` as the base image, (2) set `/app` as the working directory, (3) copy `requirements.txt` first and install dependencies with pip before copying the rest of the code, (4) document that the app listens on port 5000, and (5) set the default startup command to run `app.py` with Python using exec (bracket) form.",
+      "starter": "# app.py exists and starts Flask on port 5000\n# requirements.txt contains: flask\n\n# Write your Dockerfile below:\n",
+      "hints": [
+        "Start with `FROM python:3.12-slim`. The `slim` tag keeps the image lean; avoid `python:3.12` (too large) or `alpine` (may break some pip packages).",
+        "Copy `requirements.txt` and run `pip install` *before* `COPY . .`. Because dependencies rarely change, Docker caches that layer and skips reinstalling Flask on every code change.",
+        "`EXPOSE 5000` only documents the port — it does not publish it. The actual port mapping is done at `docker run` time with `-p`. Use `CMD [\"python\", \"app.py\"]` (exec form, not shell form) so Python is PID 1."
+      ],
+      "solution": "FROM python:3.12-slim\n\nWORKDIR /app\n\nCOPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n\nCOPY . .\n\nEXPOSE 5000\n\nCMD [\"python\", \"app.py\"]",
+      "explanation": "Each instruction creates a new layer in the image. `FROM` picks the base runtime. `WORKDIR` sets the default path so all subsequent `COPY` and `RUN` commands resolve relative to `/app`. Separating `COPY requirements.txt` + `RUN pip install` from `COPY . .` exploits Docker's layer cache: when only `app.py` changes, Docker reuses the cached pip-install layer and the rebuild takes seconds instead of minutes. `--no-cache-dir` prevents pip from storing its download cache inside the image, keeping the final image smaller. `EXPOSE` is metadata — it tells humans and tools what port the app expects, but it does not open any network path. Exec-form `CMD` (square brackets) runs Python as PID 1 without a shell wrapper, which ensures signals like SIGTERM from `docker stop` reach the process correctly."
+    },
+    {
+      "prompt": "Core 2 — Build the image and verify it exists, then run a container from it with the app reachable on your host machine at port 8080. Write the exact two commands: one to build the image tagged `flask-capstone:1.0` using the current directory as the build context, and one to run it in detached mode mapping host port 8080 to container port 5000.",
+      "starter": "# You are in the project folder that contains Dockerfile, app.py, requirements.txt\n# Write the two shell commands:\n\n# 1. Build command:\n\n# 2. Run command (detached, port published):",
+      "hints": [
+        "The build command uses `-t name:tag` to set the image name and the final `.` to tell Docker to use the current folder as the build context.",
+        "For `docker run`, the port flag format is `-p host_port:container_port`. Host port is 8080; container port is 5000 (what Flask binds to inside the container).",
+        "Add `-d` to run the container in the background so your terminal stays free. You can verify the container is running with `docker ps`."
+      ],
+      "solution": "# 1. Build\ndocker build -t flask-capstone:1.0 .\n\n# 2. Run (detached, port published)\ndocker run -d -p 8080:5000 flask-capstone:1.0",
+      "explanation": "`docker build -t flask-capstone:1.0 .` reads the Dockerfile in the current directory (the `.` build context) and produces an image named `flask-capstone` with tag `1.0`. After the build, `docker images` will show the entry. `docker run -d -p 8080:5000 flask-capstone:1.0` starts a container in detached mode (`-d`) so the process runs in the background. The `-p 8080:5000` flag opens a port-forwarding path: traffic arriving at `localhost:8080` on the host is forwarded to port `5000` inside the container where Flask is listening. Without `-p` the container is completely isolated and the app is unreachable from the host — a very common beginner mistake. You can confirm the app is working by visiting `http://localhost:8080/` and `http://localhost:8080/healthz` in a browser."
+    },
+    {
+      "prompt": "Application — Re-tag the built image for a new release and explain what the command does. (a) Run the `docker tag` command to create a second tag `flask-capstone:latest` that points to the same image as `flask-capstone:1.0`. (b) Run `docker images` and identify the two rows that share the same Image ID. (c) In one or two sentences, explain why Kubernetes deployments should reference `flask-capstone:1.0` rather than `flask-capstone:latest`.",
+      "starter": "# The image flask-capstone:1.0 already exists from the previous task.\n\n# (a) Write the docker tag command:\n\n# (b) Run docker images — look for the two rows with the same IMAGE ID.\n\n# (c) Write your explanation here (1-2 sentences):",
+      "hints": [
+        "`docker tag SOURCE_IMAGE:TAG TARGET_IMAGE:TAG` — no build or copy takes place; it just adds a new name pointing at the same image ID.",
+        "After tagging, run `docker images` and compare the IMAGE ID column. Both `flask-capstone:1.0` and `flask-capstone:latest` should show identical IDs.",
+        "Think about what happens when you build `flask-capstone:2.0` and retag it as `latest`. Any deployment still pointing at `latest` now silently runs the new code — there is no way to roll back to 1.0 by name."
+      ],
+      "solution": "# (a)\ndocker tag flask-capstone:1.0 flask-capstone:latest\n\n# (b) Expected output of `docker images` (IDs will differ on your machine):\n# REPOSITORY         TAG       IMAGE ID       CREATED        SIZE\n# flask-capstone     1.0       a1b2c3d4e5f6   2 minutes ago  140MB\n# flask-capstone     latest    a1b2c3d4e5f6   2 minutes ago  140MB\n#\n# Both rows share the same IMAGE ID — no data was duplicated.\n\n# (c)\n# A Kubernetes Deployment manifest names flask-capstone:1.0 explicitly;\n# when you later build flask-capstone:2.0 you can roll forward or back to\n# a specific version. With 'latest', the cluster cannot distinguish one\n# build from another, making rollbacks impossible to reason about.",
+      "explanation": "`docker tag` is a zero-cost operation — it adds a new name (reference) pointing at the exact same image layers already on disk. No copying or rebuilding happens. This is why both tags show the same IMAGE ID. The practical importance for Kubernetes is that a Deployment's `image:` field is the only handle the cluster has to identify *which* version of your app to run. Explicit semver-style tags (`1.0`, `2.0`) let you pin deployments, compare what is running against what is built, and perform `kubectl rollout undo` to a known-good tag. The `latest` tag is a floating pointer: the moment you push `flask-capstone:latest` again it silently points somewhere else, making the cluster's running state untrustworthy. Best practice is to always push and reference explicit version tags for anything that enters Kubernetes."
+    }
+  ]
+}

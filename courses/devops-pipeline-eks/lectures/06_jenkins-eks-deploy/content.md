@@ -1,6 +1,6 @@
 ---
 lecture_no: 6
-title: "Jenkins에서 EKS 자동 배포"
+title: "Jenkins에서 EKS로 자동 배포"
 lecture_type: practical
 sources:
   - https://www.youtube.com/watch?v=h7k45phtZgc
@@ -8,24 +8,22 @@ sources:
   - https://www.youtube.com/watch?v=u5924Zxr8Vw
 ---
 
-# Jenkins에서 EKS 자동 배포
+# Jenkins에서 EKS로 자동 배포
 
 ## 학습 목표
-- 새로 빌드된 이미지 태그로 매니페스트를 갱신하는 과정을 자동화한다.
-- `kubectl apply` 또는 `kubectl set image`로 EKS에 롤아웃한다.
-- 푸시 한 번으로 EKS까지 배포되는 파이프라인을 완성한다.
+- 새로 빌드한 이미지 태그로 매니페스트(또는 실행 중인 Deployment)를 업데이트한다.
+- `kubectl apply` 또는 `kubectl set image`로 EKS에 롤아웃하고, 완료될 때까지 기다린다.
+- `git push` 한 번으로 EKS까지 배포가 완료되는 파이프라인을 완성한다.
 
 ## 본문
 
-### 루프 완성하기
+### 배포 스테이지가 하는 일
 
-이 강의에서 모든 것이 연결된다. 이미 있는 것들은 이렇다. 커밋 태그 이미지를 빌드하고 ECR에 푸시하는 CI 파이프라인(3강), 배포를 기술하는 매니페스트(4강), RBAC 그룹에 매핑된 IAM 역할을 통해 EKS에 인증된 Jenkins(5강). 빠진 마지막 조각은 새로 빌드된 태그를 가져다 EKS에 실행하라고 지시하는 **배포 스테이지**다. 이것만 추가하면, `git push` 하나로 사람의 개입 없이 실행 중인 Pod까지 흐름이 이어진다 — 진정한 지속적 배포다.
+지금까지 만든 조각들을 정리해 보자. 커밋 SHA를 태그로 붙인 이미지를 빌드해 ECR에 푸시하는 CI 파이프라인, Deployment를 기술하는 매니페스트, 그리고 IAM 역할을 RBAC 그룹에 매핑해 EKS에 인증된 Jenkins가 있다. 남은 것은 새 태그를 클러스터에 밀어 넣는 **배포 스테이지** 하나뿐이다. 핵심 질문은 하나다: 새 이미지 태그를 클러스터의 Deployment에 어떻게 반영할 것인가? 깔끔한 방법이 두 가지 있다.
 
-이 스테이지의 과제는 하나의 질문으로 요약된다. **새 이미지 태그를 어떻게 클러스터의 Deployment에 넣는가?** 두 가지 깔끔한 방법이 있으며, 둘 다 알아야 한다.
+### 방법 A: 매니페스트를 수정한 뒤 `kubectl apply`
 
-### 방법 A: 매니페스트를 다시 작성한 후 `kubectl apply`
-
-이미지 태그는 `deployment.yaml`의 한 줄에 있다. 가장 투명한 방법은 해당 파일에 새 태그를 대입한 뒤 적용하는 것이다. 빌드에서 이미 `IMAGE_TAG`(커밋 SHA)를 export했으므로, 배포 스테이지가 즉석에서 매니페스트를 수정할 수 있다.
+`deployment.yaml`에 플레이스홀더(`image: IMAGE_PLACEHOLDER`)를 넣어 두고, 배포 시점에 실제 태그로 치환한 뒤 apply하는 방식이다. 매니페스트가 유일한 진실의 원천(single source of truth)으로 남으므로, 레플리카 수·포트·프로브·리소스 제한 등 모든 필드가 한꺼번에 적용되고 클러스터 상태가 항상 저장소와 일치한다. 나중에 GitOps로 확장하기에도 유리하므로 이 방식을 권장한다.
 
 ```groovy
 stage('Deploy to EKS') {
@@ -35,39 +33,34 @@ stage('Deploy to EKS') {
           sed -i 's|IMAGE_PLACEHOLDER|${REGISTRY}/${ECR_REPO}:${IMAGE_TAG}|' deployment.yaml
           kubectl apply -f deployment.yaml
           kubectl apply -f service.yaml
+          kubectl rollout status deployment/my-app --timeout=120s
         """
     }
 }
 ```
 
-`deployment.yaml`에는 이미지 자리에 플레이스홀더(`image: IMAGE_PLACEHOLDER`)를 두고, `sed`가 적용 전에 실제 값으로 교체한다.
-
-이 방법의 큰 장점은 매니페스트가 **단일 소스 오브 트루스(single source of truth)**로 유지된다는 것이다. 레플리카 수, 포트, 프로브, 리소스 제한 등 모든 필드가 함께 적용되므로 클러스터는 항상 저장소의 파일과 일치한다. 나중에 GitOps로 확장할 때도 자연스럽게 연결되는 방법으로, 권장하는 접근이다.
-
 ### 방법 B: `kubectl set image`
 
-Deployment가 이미 존재하고 바뀌는 것이 *이미지 태그 하나뿐*이라면, YAML 파일을 건드리지 않고 그 필드만 직접 업데이트할 수 있다.
+Deployment가 이미 존재하고 이미지 태그만 바꾸는 경우라면, YAML을 건드리지 않고 해당 필드만 직접 업데이트할 수 있다.
 
 ```bash
 kubectl set image deployment/my-app \
   my-app=111122223333.dkr.ecr.us-east-1.amazonaws.com/my-app:a1b9f3c
 ```
 
-"Deployment `my-app`에서 `my-app`이라는 컨테이너를 이 새 이미지로 설정하라"고 읽으면 된다. `=` 왼쪽의 컨테이너 이름은 Pod template의 `name:` 필드(4강)와 일치해야 한다.
+"Deployment `my-app` 안의 컨테이너 `my-app`을 이 이미지로 교체하라"는 뜻이다. `=` 왼쪽의 이름은 Pod 템플릿의 컨테이너 `name:`과 반드시 일치해야 한다. 간결하고 빠른 롤아웃에 편리하지만, 클러스터의 실행 상태가 Git 파일과 **드리프트(drift)**될 수 있다는 단점이 있다. 학습용 파이프라인에서는 무방하지만, 저장소를 정확히 반영하고 싶다면 방법 A가 낫다.
 
-간결하고 빠른 롤아웃에 좋지만, 미묘한 비용이 있다. *라이브* 상태와 *파일* 상태가 벌어질 수 있다. 클러스터는 `a1b9f3c` 태그를 실행하지만, Git의 `deployment.yaml`은 여전히 `IMAGE_PLACEHOLDER`나 이전 태그를 담고 있다. 학습 파이프라인이라면 `set image`로도 충분하다. 하지만 저장소를 정확하게 유지하고 싶다면 방법 A가 맞다.
+### 롤아웃 완료 대기
 
-### 롤아웃이 완료될 때까지 기다리기
-
-두 명령 중 어느 것을 실행하든 롤아웃을 *시작*할 뿐이며, 거의 즉시 반환된다 — 새 Pod가 실제로 정상 상태가 될 때까지 기다리지 않는다. 파이프라인이 기다리게(그리고 롤아웃이 멈추면 실패하게) 하려면 다음을 추가한다.
+두 명령 모두 롤아웃을 *시작*하고 즉시 반환한다. 새 Pod가 실제로 정상 상태가 될 때까지 파이프라인을 블로킹하거나, 그렇지 않으면 빌드를 실패시켜야 한다.
 
 ```bash
 kubectl rollout status deployment/my-app --timeout=120s
 ```
 
-`kubectl rollout status`는 Deployment의 Pod가 모두 새 이미지로 정상 교체될 때까지 블로킹되고, 타임아웃 안에 완료되지 않으면 0이 아닌 종료 코드로 나온다. 이것이 중요하다. 없으면 파이프라인이 *배포를 요청한* 순간에 "성공"을 보고한다. 새 버전이 크래시 루프를 돌고 있어도. 있으면 문제가 있는 릴리스가 빌드를 빨간색으로 만든다 — 원하는 바로 그 것이다. 7강에서 거기서 롤백하는 방법을 보여준다.
+> `rollout status` 없이는 배포를 *요청*하는 순간 파이프라인이 "성공"을 보고한다. 새 버전이 크래시 루프에 빠져 있어도 마찬가지다. 이 명령을 추가하면 배포가 실패했을 때 빌드가 빨간불로 바뀐다.
 
-완전한 배포 스테이지는 이렇다. 인증 → 이미지 갱신 → 롤아웃 성공 대기.
+`set image` 방식의 배포 스테이지 전체 코드:
 
 ```groovy
 stage('Deploy to EKS') {
@@ -81,25 +74,43 @@ stage('Deploy to EKS') {
 }
 ```
 
-### 롤아웃이 실제로 어떻게 동작하는가
+### 롤아웃 동작 원리와 커밋 SHA 태그가 중요한 이유
 
-이미지를 변경하면 Deployment가 모든 것을 한꺼번에 종료하고 새로 시작하지 않는다. 기본적으로 **롤링 업데이트**를 수행한다. 새 이미지로 새 Pod를 시작하고, 준비가 됐는지 기다린 다음, 구버전 Pod를 조금씩 종료한다 — 항상 작동하는 버전이 트래픽을 받는다. 메커니즘(그리고 이를 게이팅하는 헬스체크)은 7강에서 자세히 다룬다. 지금 핵심은 한 줄의 이미지 변경이 신중하고 점진적인 무중단 교체를 트리거한다는 것이다.
+이미지를 변경하면 **롤링 업데이트**가 시작된다. Kubernetes는 새 Pod를 띄우고 준비 상태가 되면 기존 Pod를 조금씩 종료하므로, 항상 정상 버전이 트래픽을 받는 상태가 유지된다. 단 한 줄의 변경으로 다운타임 없이 배포가 된다.
 
-### 커밋 SHA 태그가 여기서 빛을 발하는 이유
+아래 다이어그램은 배포 스테이지 전체 흐름을 보여 준다. Jenkins가 kubeconfig로 인증하고 새 이미지를 적용하면, 클러스터가 Pod를 교체하는 동안 `rollout status`가 완료될 때까지 블로킹하는 과정이다.
 
-배포 스테이지가 `IMAGE_TAG` — 빌드가 생성한 바로 그 커밋 SHA — 를 클러스터로 바로 전달한다. 2강부터 추적해온 실이 여기서 팽팽해지는 순간이다. 푸시한 커밋이 빌드한 이미지를 결정하고, ECR의 태그를 결정하고, EKS가 실행하는 것을 정확히 결정한다. 태그가 고유하고 불변이므로, 바꾸면 *항상* 롤아웃이 트리거된다(Pod template이 바뀐 것을 쿠버네티스가 감지한다). 그리고 실행 중인 Pod를 보면 단일 커밋으로 추적할 수 있다.
+```mermaid Jenkins 배포 스테이지: EKS 인증 후 롤링 업데이트 트리거
+sequenceDiagram
+    participant J as Jenkins Deploy Stage
+    participant AWS as aws eks update-kubeconfig
+    participant API as EKS API Server
+    participant CTL as Deployment Controller
+    participant POD as Pods
+    J->>AWS: Request kubeconfig credentials
+    AWS-->>J: Write kubeconfig with EKS token
+    J->>API: kubectl apply or kubectl set image
+    Note over J,API: Authenticated via IAM role mapped to RBAC group
+    API->>CTL: New image tag in Deployment spec
+    CTL->>POD: Start new Pods with new image
+    POD-->>CTL: New Pods ready
+    CTL->>POD: Terminate old Pods gradually
+    Note over CTL,POD: Rolling update keeps a version always serving
+    J->>API: kubectl rollout status
+    API-->>J: Rollout complete or timeout fails the build
+```
 
-> 흔한 함정: `latest` 태그로 배포하면 종종 **아무것도 일어나지 않는다.** 쿠버네티스 관점에서 Deployment spec이 바뀌지 않았으므로 롤아웃이 트리거되지 않는다. 고유한 커밋 SHA 태그는 이 함정을 완전히 피한다 — 2강에서 `latest`를 금지한 또 하나의 이유다.
+배포 스테이지는 `IMAGE_TAG`(커밋 SHA)를 그대로 클러스터에 전달하므로, 푸시한 커밋이 EKS에서 실행되는 내용을 정확히 결정하며 실행 중인 모든 Pod를 특정 커밋으로 추적할 수 있다.
 
-### 완성된 그림
+> `latest` 태그로 배포하면 아무 일도 일어나지 않는 경우가 많다. Kubernetes 입장에서 Deployment 스펙이 바뀌지 않았으므로 롤아웃이 트리거되지 않기 때문이다. 커밋 SHA 태그는 항상 새로운 값이므로 롤아웃이 반드시 실행되고, 이 함정을 피할 수 있다.
 
-이제 엔드-투-엔드 파이프라인이 완성됐다. **GitLab에 푸시 → 웹훅 → Jenkins가 체크아웃·테스트·빌드·커밋 태그 이미지를 ECR에 푸시 → Jenkins가 EKS에 인증하고 Deployment를 갱신 → EKS가 롤링 업데이트 수행 → `kubectl rollout status`가 성공을 확인.** 한 번의 푸시, 완전 자동, 프로덕션까지.
+### 전체 흐름 정리
 
-이것을 *자신의* 코드에 적용하려면 프로젝트 특화 부분만 바꾸면 된다. `Dockerfile`, `deployment.yaml` / `service.yaml`(이미지와 포트), `Jenkinsfile`의 환경 변수(계정 ID, 리전, 리포지토리 이름, 클러스터 이름). 파이프라인 구조 자체는 바뀌지 않는다.
+처음부터 끝까지: **Git에 푸시 → 웹훅 → Jenkins가 체크아웃·테스트·빌드 후 커밋 태그 이미지를 ECR에 푸시 → Jenkins가 EKS에 인증하고 Deployment를 업데이트 → EKS가 롤링 업데이트 수행 → `kubectl rollout status`로 성공 확인.** 자신의 코드에 적용하려면 프로젝트별 부분만 바꾸면 된다: `Dockerfile`, `deployment.yaml` / `service.yaml`, 그리고 `Jenkinsfile`의 환경 변수(계정 ID, 리전, 레포 이름, 클러스터 이름).
 
 ## 핵심 정리
-- 배포 스테이지의 역할은 새 이미지 태그를 클러스터의 Deployment에 넣고, 롤아웃 완료를 기다리는 것이다.
-- 이미지 업데이트 두 가지 방법: 매니페스트를 다시 작성하고 `kubectl apply -f`(파일을 소스 오브 트루스로 유지 — 권장), 또는 `kubectl set image deployment/<d> <container>=<image>:<tag>`(간결하지만 저장소와 벌어질 수 있다).
-- 항상 `kubectl rollout status --timeout=...`를 따라붙여서 문제가 있는 릴리스가 파이프라인을 실패시키도록 한다. 조용히 "성공"하면 안 된다.
-- 고유한 커밋 SHA 태그를 전달하면 롤아웃이 보장되고 모든 Pod를 추적할 수 있다. `latest`를 배포하면 아무것도 안 될 수 있다.
-- 완성된 파이프라인은 GitLab 단일 푸시로 EKS의 롤링 배포까지, 수동 단계 없이 이어진다.
+- 배포 스테이지의 역할은 새 이미지 태그를 Deployment에 반영하고 롤아웃이 끝날 때까지 기다리는 것이다.
+- 방법은 두 가지다: 매니페스트를 수정한 뒤 `kubectl apply -f`(진실의 원천 방식, 권장), 또는 `kubectl set image deployment/<d> <container>=<image>:<tag>`(간결하지만 드리프트 가능성 있음).
+- 반드시 `kubectl rollout status --timeout=...`으로 마무리한다. 배포가 실패하면 빌드도 실패해야 한다.
+- 커밋 SHA 태그를 사용한다. 롤아웃을 보장하고 모든 Pod를 특정 커밋으로 추적할 수 있으며, `latest`는 아무 효과가 없을 수 있다.
+- 완성된 파이프라인은 `git push` 한 번으로 EKS 롤링 배포까지 수동 개입 없이 완료된다.

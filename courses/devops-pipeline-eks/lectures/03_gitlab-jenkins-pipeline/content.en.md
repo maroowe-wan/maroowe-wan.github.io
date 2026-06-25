@@ -11,55 +11,36 @@ sources:
 
 ## Learning Objectives
 - Trigger a Jenkins pipeline automatically from a GitLab webhook.
-- Write a `Jenkinsfile` with checkout, build, test, and image-push stages.
-- End up with a skeleton where a push to GitLab automatically produces a container image in ECR.
+- Write a `Jenkinsfile` with checkout, test, build, and image-push stages.
+- End up with a CI skeleton where a push to GitLab automatically produces a container image in ECR.
 
 ## Body
 
-### The goal of this lecture
+You can already build an image and push it to ECR by hand. Doing that once is fine; doing it on every commit is misery. Here we automate it: a developer pushes to GitLab, Jenkins wakes up, tests, builds, and pushes the image to ECR — no human in the loop. The result is the **CI skeleton** (continuous integration). The deploy-to-EKS step comes later, in Lecture 6.
 
-So far you can build an image and push it to ECR *by hand*. That is fine once; it is miserable every day. In this lecture we automate it: a developer pushes to GitLab, and within seconds Jenkins wakes up, builds the image, runs tests, and pushes the result to ECR — no human in the loop. By the end you have the **CI skeleton** (continuous integration), and the only thing missing is the deploy-to-EKS step, which we add in Lecture 6.
+Two roles to keep straight: **GitLab** is the source host (it stores the repo and fires an event on push). **Jenkins** is the engine (it listens for that event and runs the work defined in a `Jenkinsfile`).
 
-The two roles to keep straight:
+### Step 1 — Wire GitLab to Jenkins with a webhook
 
-- **GitLab** is the *source host*. It stores your repository and fires an event when code changes.
-- **Jenkins** is the *engine*. It listens for that event and runs the actual work, defined as code in a `Jenkinsfile`.
+A **webhook** is an HTTP request GitLab sends to a URL whenever something happens (e.g. a push to `main`). Point that URL at Jenkins and a push triggers a build. There are two sides to configure.
 
-### Wiring GitLab to Jenkins with a webhook
+**On Jenkins:** create a Pipeline job, install the GitLab plugin if needed, and enable the GitLab webhook trigger so the job accepts incoming calls. Jenkins receives webhook posts at a path like:
 
-A **webhook** is just an HTTP request that GitLab sends to a URL of your choosing whenever something happens — for example, a push to the `main` branch. We point that URL at Jenkins so a push *triggers* a build automatically. The flow is as follows: GitLab detects a push, sends a webhook to Jenkins, and Jenkins starts the pipeline.
-
-```mermaid GitLab push triggers a Jenkins build via webhook
-sequenceDiagram
-    participant Dev as Developer
-    participant GL as GitLab
-    participant JK as Jenkins
-    participant ECR as Amazon ECR
-    Dev->>GL: git push to main
-    GL->>JK: webhook (HTTP POST) "push event"
-    activate JK
-    JK->>GL: checkout the pushed commit
-    JK->>JK: run tests, then docker build
-    JK->>ECR: docker push commit-tagged image
-    deactivate JK
-    JK-->>GL: report build status
+```
+http://<jenkins-host>:8080/project/<job-name>
 ```
 
-There are two sides to configure:
+**On GitLab:** open *Settings → Webhooks*, paste the Jenkins URL, and select **Push events** and **Merge request events**. Save.
 
-**On Jenkins**, create a Pipeline job and enable the GitLab webhook trigger so the job will accept incoming webhook calls. (Install the GitLab plugin if it is not already present.) Jenkins will accept webhook posts at a path like `http://<jenkins-host>/project/<job-name>` (or `/gitlab-webhook/`, depending on your plugin).
+**Verify:** before trusting the webhook, click **Build Now** in Jenkins once to confirm the job runs at all. Then use GitLab's **Test** button to fire a sample event and confirm Jenkins responds.
 
-**On GitLab**, go to your project's *Settings → Webhooks*, paste the Jenkins URL, and select the events you care about — typically **Push events** and **Merge request events**. Save, and use GitLab's "Test" button to fire a sample event and confirm Jenkins responds.
+> Get a manual build green *first*, then prove the trigger. Debugging "did the pipeline work?" and "did the webhook fire?" at the same time is twice the pain.
 
-> Before relying on the webhook, click **Build Now** in Jenkins once to confirm the job runs at all. Debugging "did the pipeline work?" and "did the webhook fire?" at the same time is twice the pain. Get a manual build green first, then prove the trigger.
+If Jenkins runs on a cloud VM, its security group must allow inbound traffic on the Jenkins port (8080 by default), or webhook delivery fails with a connection error.
 
-A quick reality check on networking: GitLab must be able to *reach* your Jenkins URL. If Jenkins lives on a cloud VM, its security group/firewall has to allow inbound traffic on the Jenkins port (8080 by default), or the webhook delivery will fail with a connection error.
+### Step 2 — Define the pipeline as a Jenkinsfile
 
-### The Jenkinsfile: your pipeline as code
-
-Rather than clicking through Jenkins' UI to define build steps, you write them in a **`Jenkinsfile`** that lives in your repository alongside the code. This is "pipeline as code" — the build process is versioned, reviewable, and travels with the project. A declarative `Jenkinsfile` is organized into **stages**, each a logical phase of the build.
-
-Here is a skeleton for our CI pipeline:
+Rather than clicking through the Jenkins UI, write the build steps in a **`Jenkinsfile`** stored in your repo. This is "pipeline as code": the build is versioned, reviewable, and travels with the project. A declarative `Jenkinsfile` is organized into **stages**.
 
 ```groovy
 pipeline {
@@ -105,32 +86,33 @@ pipeline {
 }
 ```
 
-Walking through the stages:
+What each stage does:
 
-- **Checkout** pulls the exact commit that triggered the build. Jenkins exposes that commit's SHA as `GIT_COMMIT`, which we shorten and reuse as our image tag — closing the loop with Lecture 2's "tag by commit" rule.
-- **Test** runs your test suite. Put it *before* the build so a failing test stops the pipeline early, before you waste time building and pushing an image you would never deploy. (Many teams also slot a static-analysis or code-quality scan in here.)
-- **Build Image** runs `docker build`, tagging with the full ECR address and the commit SHA.
-- **Push to ECR** authenticates to ECR (the same `get-login-password` dance from Lecture 2) and pushes.
+- **Checkout** pulls the exact commit that triggered the build. Jenkins exposes its SHA as `GIT_COMMIT`, which we shorten and reuse as the image tag — never `latest`, so every artifact is traceable.
+- **Test** runs the suite *before* the build, so a failing test stops the pipeline early instead of building an image you'd never deploy.
+- **Build Image** runs `docker build`, tagging with the full ECR address and commit SHA.
+- **Push to ECR** authenticates with `get-login-password` and pushes.
 
-### Where do the AWS credentials come from?
+**Verify:** commit a trivial change (e.g. a `test.txt`) and watch Jenkins go from *pending* to *success*, then confirm the new commit-tagged image appears in your ECR repository.
 
-The push stage needs permission to talk to ECR. **Do not** paste an access key and secret directly into the `Jenkinsfile` — that is a secret leaking into your repository. Instead:
+### Step 3 — Supply AWS credentials safely
 
-- If Jenkins runs on an EC2 instance, attach an **IAM role** to that instance granting ECR push/pull permissions. The AWS CLI picks the role up automatically, with no static keys anywhere.
-- Otherwise, store the credentials in **Jenkins Credentials** and inject them into the job, so they never appear in source control.
+The push stage needs permission to talk to ECR. **Never** paste an access key into the `Jenkinsfile` — that leaks a secret into your repo. Instead:
 
-The IAM permissions ECR needs are modest: get an authorization token, and push/pull layers — ideally scoped to just your repository rather than every repo in the account. We will lean on this same "the machine has an IAM identity" idea heavily in Lecture 5, when Jenkins needs to authenticate to EKS itself.
+- If Jenkins runs on EC2, attach an **IAM role** to the instance granting ECR push/pull. The AWS CLI picks it up automatically, with no static keys anywhere.
+- Otherwise, store the keys in **Jenkins Credentials** and inject them into the job.
+
+Keep the IAM permissions modest: get an authorization token plus push/pull, ideally scoped to just this repository. We reuse this "the machine has an IAM identity" idea in Lecture 5, when Jenkins authenticates to EKS itself.
 
 ### What you have built
 
-At this point your CI skeleton is complete: **push to GitLab → webhook → Jenkins checks out, tests, builds, and pushes a commit-tagged image to ECR — fully automatically.** Every commit now leaves behind a traceable, deployable artifact in your registry.
+Your CI skeleton is now complete: **push to GitLab → webhook → Jenkins checks out, tests, builds, and pushes a commit-tagged image to ECR — automatically.** Every commit leaves a deployable artifact in your registry.
 
-What is still missing is the *delivery* half: nothing yet tells EKS to run that new image. That requires two things — manifests describing the deployment (Lecture 4) and a way for Jenkins to authenticate to and command the cluster (Lecture 5) — after which we add a final deploy stage in Lecture 6.
+Still missing is *delivery*: nothing yet tells EKS to run the new image. That needs manifests (Lecture 4) and a way for Jenkins to authenticate to the cluster (Lecture 5), after which we add a deploy stage in Lecture 6.
 
 ## Key Takeaways
-- A GitLab webhook turns a `git push` into an automatic Jenkins build; configure the trigger on Jenkins and the webhook URL on GitLab, then test both.
-- A `Jenkinsfile` defines the pipeline as versioned code, organized into stages: Checkout → Test → Build Image → Push to ECR.
-- Reuse the triggering commit's SHA (`GIT_COMMIT`) as the image tag, so every artifact is traceable.
-- Run tests before building so failures stop the pipeline early.
-- Never hardcode AWS keys in the `Jenkinsfile`; use an IAM role on the Jenkins host or Jenkins-managed credentials.
-- The result is a complete CI skeleton — the deploy-to-EKS step comes in Lectures 5 and 6.
+- A GitLab webhook turns a `git push` into an automatic Jenkins build; configure the trigger on Jenkins, the webhook URL on GitLab, then test both.
+- A `Jenkinsfile` defines the pipeline as versioned code: Checkout → Test → Build Image → Push to ECR.
+- Reuse the commit SHA (`GIT_COMMIT`) as the image tag so every artifact is traceable; run tests before building to fail fast.
+- Never hardcode AWS keys; use an IAM role on the Jenkins host or Jenkins-managed credentials.
+- The result is a complete CI skeleton — deploy-to-EKS arrives in Lectures 5 and 6.

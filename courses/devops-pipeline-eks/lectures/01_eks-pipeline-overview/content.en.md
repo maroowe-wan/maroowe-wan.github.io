@@ -12,85 +12,92 @@ sources:
 
 ## Learning Objectives
 - Explain what Amazon EKS is and what "declarative, manifest-based deployment" means.
-- Understand why a CI/CD pipeline ends with `kubectl`/manifests being applied to a cluster.
-- See how GitLab, Jenkins, Amazon ECR, and EKS fit together into one end-to-end flow.
+- Understand why a CI/CD pipeline ends with manifests being applied via `kubectl`.
+- See how GitLab, Jenkins, Amazon ECR, and EKS fit into one end-to-end flow.
 
 ## Body
 
-### Why this course exists
+### The goal of this course
 
-If you are a developer, your real goal is simple: you push code, and a little while later the new version is running in production — safely, with no downtime, and with an easy way to undo a bad release. Everything in this course is in service of that one sentence.
+You push code, and a short while later the new version is running in production — safely, with no downtime, and with an easy way to roll back. This course builds the road between your `git push` and a healthy Pod serving traffic, using four tools:
 
-We are deliberately *not* trying to make you a Kubernetes internals expert. Instead, we treat Kubernetes (specifically AWS's managed flavor, EKS) as the **destination** that your automated pipeline delivers to. The interesting work is the road between your `git push` and a healthy Pod serving traffic, and that road is built from four tools: **GitLab** (where your source and your container images live), **Jenkins** (the engine that builds and deploys), **Amazon ECR** (the registry that stores your images), and **Amazon EKS** (the Kubernetes cluster that runs them).
+- **GitLab** — hosts your application source code.
+- **Jenkins** — the engine that builds and deploys.
+- **Amazon ECR** — AWS's private registry that stores your container images.
+- **Amazon EKS** — the managed Kubernetes cluster that runs them.
 
-### What is Kubernetes, briefly
+We treat Kubernetes as the **destination**, not the subject. You won't become a Kubernetes internals expert; you'll learn to ship to it automatically.
 
-Kubernetes (often abbreviated **k8s** — the "8" stands for the eight letters between "k" and "s") is an open-source **container orchestration platform**. In plain terms, it takes your containerized application and handles the boring-but-critical parts of running it: starting the right number of copies, restarting copies that crash, spreading them across machines, and replacing old versions with new ones gradually.
+### Kubernetes and EKS in brief
 
-A Kubernetes cluster has two halves:
+Kubernetes (**k8s**) is a container orchestration platform: it runs the right number of container copies, restarts ones that crash, spreads them across machines, and replaces old versions with new ones gradually. A cluster has a **control plane** (the brain — holds the desired state and makes decisions) and **worker nodes** (the machines that actually run your containers). The smallest deployable unit is a **Pod** (one or more containers sharing networking and storage).
 
-- The **control plane** is the brain. It holds the desired state of everything and makes decisions. Its key pieces are the **API server** (the front door you talk to), **etcd** (a key-value database that stores cluster state), the **scheduler** (decides which machine runs each Pod), and the **controller manager** (the loop that keeps reality matching what you asked for, including rolling updates and rollbacks).
-- The **worker nodes** are the muscle — the actual machines that run your containers. Each node runs a **kubelet** (talks to the control plane), a **container runtime** (pulls images and runs containers), and **kube-proxy** (routes network traffic to the right Pods).
+Operating a production control plane (API server, etcd, failover across zones) takes deep expertise. **Amazon EKS (Elastic Kubernetes Service)** is AWS's *managed* Kubernetes: AWS runs the control plane for you, and you bring the worker nodes and workloads. (GKE and AKS are the Google and Azure equivalents.)
 
-The smallest thing you deploy is a **Pod** — a wrapper around one or more containers that share networking and storage. You rarely create Pods by hand; higher-level objects manage them for you, which leads us to the most important idea in this whole course.
+### The key idea: declarative deployment
 
-### The big idea: declarative deployment
+Traditional deployment is **imperative** — you script the steps ("stop the old process, copy the new build, start it"). If a step fails halfway, you're stuck in a broken state.
 
-Traditional deployment is **imperative** — you list the *steps*: "SSH to the server, stop the old process, copy the new build, start it again." If a step fails halfway, you are left in a broken in-between state.
+Kubernetes is **declarative**. You write the *desired end state* in a text file — a **manifest** (YAML), e.g. "run 3 copies of this image, reachable on port 80" — and the control plane continuously makes reality match it. If a Pod dies, it's recreated. Change the image version and re-apply, and Kubernetes figures out how to get there.
 
-Kubernetes is **declarative** instead. You write down the *desired end state* in a text file (a **manifest**, usually YAML) — "I want 3 copies of this image running, reachable on port 80" — and hand it to the cluster. The control plane's job is to continuously make reality match that description. If a Pod dies, it is recreated. If you change the image version in the file and re-apply it, Kubernetes figures out how to get from the current state to the new one.
+> Your deployment is a file that describes what you want, not a script of what to do. Version that file in Git and your infrastructure becomes reviewable, repeatable, and revertible.
 
-> This is the single mental shift that makes the whole pipeline click: your deployment is **a file that describes what you want**, not a script that lists what to do. Version that file in Git, and your infrastructure becomes reviewable, repeatable, and revertible.
-
-Because the desired state is just text, your pipeline's final job is wonderfully simple: take a manifest, point it at the cluster, and run `kubectl apply -f`. That is why "the end of the pipeline is applying manifests" — there is nothing more to it.
-
-### Why EKS instead of running Kubernetes yourself
-
-Kubernetes is powerful but genuinely hard to operate. Setting up and babysitting a production-grade control plane (the API server, etcd, failover across data centers) takes deep expertise. **Amazon EKS (Elastic Kubernetes Service)** is AWS's *managed* Kubernetes: AWS runs and maintains the control plane for you across multiple availability zones, and you bring the worker nodes and the workloads. Google's GKE and Azure's AKS are the equivalents on other clouds.
-
-For a team that wants Kubernetes' benefits — self-healing, horizontal scaling, automatic rollbacks, portability — without owning the hardest part, a managed service like EKS is the pragmatic choice. (For a tiny side project, plain Kubernetes is often overkill; that is a real trade-off, not a marketing point.)
+Because the desired state is just text, the pipeline's final job is simple: point a manifest at the cluster and run `kubectl apply -f`. That's why "the end of the pipeline is applying manifests."
 
 ### How the four tools connect
 
-Here is the end-to-end flow this course builds, one lecture at a time. The structure is as follows:
+The end-to-end flow this course builds, step by step:
 
-1. **You push code to GitLab.** GitLab hosts your application source — and, conveniently, can also host your container registry, though in AWS we will push images to ECR.
-2. **GitLab triggers Jenkins** via a webhook. A webhook is just an HTTP call GitLab makes to Jenkins saying "something changed, start working."
-3. **Jenkins builds a container image** from your `Dockerfile`, tags it (we will tag by commit SHA, never just `latest`), and **pushes it to Amazon ECR**, AWS's private Docker registry.
-4. **Jenkins updates the Kubernetes manifest** to point at the new image tag and runs `kubectl apply` (or `kubectl set image`) against the **EKS cluster**.
-5. **EKS performs a rolling update**: it brings up new Pods with the new image, waits until they report healthy, and only then retires the old ones — so users never see downtime. If something is wrong, one command rolls it back.
+1. **Push to GitLab.** GitLab hosts your source code.
+2. **GitLab triggers Jenkins** via a webhook (an HTTP call saying "something changed, start working").
+3. **Jenkins builds a container image** from your `Dockerfile`, tags it by commit SHA (never just `latest`), and **pushes it to Amazon ECR**.
+4. **Jenkins updates the manifest** to point at the new image tag and runs `kubectl apply` (or `kubectl set image`) against the **EKS cluster**.
+5. **EKS performs a rolling update**: it starts new Pods, waits until they report healthy, then retires the old ones — so users see no downtime. One command rolls it back if needed.
 
-The diagram below traces that same flow end to end, and shows how the image tag threads through it.
+The diagram below traces this whole journey, from a developer's `git push` to running Pods inside the EKS cluster.
 
-```mermaid End-to-end EKS deployment pipeline
+```mermaid End-to-end EKS deployment pipeline from git push to running Pods
 flowchart LR
-    Dev[Developer]
-    GL[GitLab]
-    JK[Jenkins]
-    ECR[Amazon ECR]
-    EKS[Amazon EKS cluster]
+    Dev[Developer] -->|git push| GitLab[GitLab Repo]
+    GitLab -->|webhook trigger| Jenkins[Jenkins]
 
-    Dev -->|git push| GL
-    GL -->|webhook| JK
-    JK -->|build and push image| ECR
-    JK -->|kubectl apply manifest| EKS
-    ECR -->|pull image| EKS
-    EKS -->|rolling update| EKS
+    subgraph CI["Jenkins: build and test"]
+        Build[Build image from Dockerfile] --> Test[Run tests]
+        Test --> Tag[Tag image by commit SHA]
+    end
+
+    Jenkins --> Build
+    Tag -->|docker push| ECR[Amazon ECR Registry]
+
+    subgraph CD["Jenkins: deploy"]
+        Manifest[Update manifest with new image tag] --> Apply[kubectl apply / set image]
+    end
+
+    Tag --> Manifest
+    ECR -.image pulled by.-> Pods
+    Apply -->|target cluster| EKS
+
+    subgraph EKS["Amazon EKS Cluster"]
+        ControlPlane[Control Plane] -->|rolling update| Pods[Pods on Worker Nodes]
+    end
 ```
 
-That image tag is the thread that ties it all together: it is *produced* in the build stage, *stored* in ECR, and *consumed* by the manifest at deploy time. Keep your eye on it as we go.
+The **image tag** is the thread tying it together: *produced* in the build, *stored* in ECR, *consumed* by the manifest at deploy time.
 
-### What "good" looks like
+### Principles we'll reinforce
 
-A few principles we will reinforce throughout, that experienced operators take for granted:
-
-- **Tag images by commit, not `latest`.** A tag like `v1.4.2` or the Git commit SHA tells you *exactly* what is running. `latest` is a moving target that makes rollbacks and debugging miserable.
-- **Authenticate machines, not humans.** Jenkins should reach AWS and EKS using an IAM role (covered in Lecture 5), not someone's personal credentials pasted into a job.
-- **Let health checks gate your rollout.** Kubernetes will only shift traffic to a new version once it reports ready — but only if you *configure* readiness checks. We cover this in Lecture 7.
+- **Tag by commit, not `latest`.** A SHA or `v1.4.2` tells you exactly what's running; `latest` makes rollbacks and debugging miserable.
+- **Authenticate machines, not humans.** Jenkins reaches AWS/EKS via an IAM role (Lecture 5), not pasted personal credentials.
+- **Let health checks gate the rollout.** Kubernetes only shifts traffic to a new version once readiness checks pass — if you configure them (Lecture 7).
 
 ## Key Takeaways
-- The pipeline's purpose is to turn `git push` into a safe, repeatable deployment on Kubernetes; everything else is detail.
-- Kubernetes is declarative: you describe the desired end state in a manifest, and the control plane makes reality match it. The pipeline's final act is `kubectl apply`.
+- The pipeline turns `git push` into a safe, repeatable deployment on Kubernetes.
+- Kubernetes is declarative: describe the desired state in a manifest, and the control plane makes it real. The pipeline's final act is `kubectl apply`.
 - EKS is AWS-managed Kubernetes — AWS runs the control plane, you run the workloads.
-- The flow is: push to GitLab → webhook triggers Jenkins → Jenkins builds and pushes an image to ECR → Jenkins applies an updated manifest to EKS → EKS rolls out the new version.
-- The image tag (ideally a commit SHA) is the value that connects build, registry, and deploy.
+- Flow: GitLab → webhook → Jenkins builds & pushes image to ECR → Jenkins applies manifest to EKS → rolling update.
+- The commit-based image tag connects build, registry, and deploy.
+
+## Sources
+- https://www.youtube.com/watch?v=TlHvYWVUZyc
+- https://www.youtube.com/watch?v=KOE_6QYQqA4
+- https://www.youtube.com/watch?v=aRXg75S5DWA

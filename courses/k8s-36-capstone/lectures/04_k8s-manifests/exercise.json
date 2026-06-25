@@ -1,0 +1,50 @@
+{
+  "lecture_no": 4,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "워밍업: ConfigMap 매니페스트를 작성하라. `configmap.yaml` 파일을 생성한다. ConfigMap 이름은 `flask-config`, 레이블은 `app: flask-capstone`이며, 데이터 항목 두 개를 포함한다: `APP_ENV`는 `\"production\"`, `APP_GREETING`은 `\"Hello from Kubernetes!\"`.",
+      "starter": "# configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: ___\n  labels:\n    app: ___\ndata:\n  APP_ENV: ___\n  APP_GREETING: ___",
+      "hints": [
+        "ConfigMap의 `kind`는 `ConfigMap`, `apiVersion`은 `v1`이다.",
+        "`metadata.name`은 나중에 Deployment의 `configMapRef.name` 필드에서 참조할 이름과 일치해야 한다 — `flask-config`를 사용한다.",
+        "`data` 아래 각 항목은 별도의 하위 키 없이 단순한 `키: \"값\"` 형태로 작성한다."
+      ],
+      "solution": "# configmap.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: flask-config\n  labels:\n    app: flask-capstone\ndata:\n  APP_ENV: \"production\"\n  APP_GREETING: \"Hello from Kubernetes!\"",
+      "explanation": "ConfigMap은 설정을 컨테이너 이미지 밖에 저장한다. 런타임에 Deployment가 `envFrom`을 통해 `data`의 모든 키를 컨테이너의 환경 변수로 주입한다. 덕분에 `APP_ENV`를 `production`에서 `staging`으로 바꾸고 싶을 때 이 파일만 수정하고 Pod를 재시작하면 된다 — 이미지를 다시 빌드할 필요가 없다."
+    },
+    {
+      "prompt": "핵심 과제 1: Deployment 매니페스트를 작성하라. `flask-capstone` 앱을 위한 `deployment.yaml`을 다음 요건을 모두 충족하도록 작성한다.\n- `replicas: 2`\n- 컨테이너 이미지 `flask-capstone:1.0`, `imagePullPolicy: IfNotPresent`\n- `containerPort: 5000`\n- `flask-config` ConfigMap의 모든 키를 `envFrom`으로 환경 변수 주입\n- 레이블과 셀렉터: `spec.selector.matchLabels`와 `spec.template.metadata.labels` 모두 `app: flask-capstone` 사용\n- Readiness 프로브: `/healthz` HTTP GET, 포트 5000, `initialDelaySeconds: 3`, `periodSeconds: 5`\n- Liveness 프로브: `/healthz` HTTP GET, 포트 5000, `initialDelaySeconds: 10`, `periodSeconds: 10`",
+      "starter": "# deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: flask-capstone\n  labels:\n    app: flask-capstone\nspec:\n  replicas: ___\n  selector:\n    matchLabels:\n      app: ___\n  template:\n    metadata:\n      labels:\n        app: ___\n    spec:\n      containers:\n        - name: flask\n          image: ___\n          imagePullPolicy: ___\n          ports:\n            - containerPort: ___\n          envFrom:\n            - configMapRef:\n                name: ___\n          readinessProbe:\n            httpGet:\n              path: ___\n              port: ___\n            initialDelaySeconds: ___\n            periodSeconds: ___\n          livenessProbe:\n            httpGet:\n              path: ___\n              port: ___\n            initialDelaySeconds: ___\n            periodSeconds: ___",
+      "hints": [
+        "`spec.selector.matchLabels`와 `spec.template.metadata.labels`에는 동일한 레이블(`app: flask-capstone`)이 있어야 한다. 두 값이 다르면 API 서버가 매니페스트를 거부한다.",
+        "`imagePullPolicy: IfNotPresent`를 설정해야 쿠버네티스가 3강에서 클러스터에 로드한 이미지를 사용한다. 이 설정이 없으면 레지스트리에서 이미지를 당기려다 실패해 `ImagePullBackOff` 상태가 된다.",
+        "readiness 프로브와 liveness 프로브 모두 `path: /healthz`, `port: 5000`에 대해 `httpGet`을 사용한다. 차이는 타이밍이다: readiness는 `initialDelaySeconds: 3` / `periodSeconds: 5`, liveness는 `initialDelaySeconds: 10` / `periodSeconds: 10`."
+      ],
+      "solution": "# deployment.yaml\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: flask-capstone\n  labels:\n    app: flask-capstone\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: flask-capstone\n  template:\n    metadata:\n      labels:\n        app: flask-capstone\n    spec:\n      containers:\n        - name: flask\n          image: flask-capstone:1.0\n          imagePullPolicy: IfNotPresent\n          ports:\n            - containerPort: 5000\n          envFrom:\n            - configMapRef:\n                name: flask-config\n          readinessProbe:\n            httpGet:\n              path: /healthz\n              port: 5000\n            initialDelaySeconds: 3\n            periodSeconds: 5\n          livenessProbe:\n            httpGet:\n              path: /healthz\n              port: 5000\n            initialDelaySeconds: 10\n            periodSeconds: 10",
+      "explanation": "Deployment 안에 레이블 블록이 세 개 등장하며 각각 역할이 다르다. `metadata.labels`는 Deployment 오브젝트 자체에 붙는 레이블이고, `spec.selector.matchLabels`는 Deployment가 소유할 Pod를 식별하는 규칙이며, `spec.template.metadata.labels`는 새로 만드는 모든 Pod에 찍히는 레이블이다. API 서버는 `matchLabels`와 템플릿 레이블이 일치하는지 강제로 검사한다 — 다르면 Deployment가 자신의 Pod를 인식하지 못해 매니페스트가 거부된다. `imagePullPolicy: IfNotPresent`는 이미지를 클러스터에 직접 로드한 경우 필수다. 당겨올 레지스트리가 없기 때문이다. readiness 프로브는 더 빨리, 더 자주 실행해 준비되지 않은 Pod를 Service 트래픽에서 신속히 제거한다. liveness 프로브는 첫 체크를 늦춰 앱이 충분히 뜬 뒤에야 재시작을 고려하게 한다."
+    },
+    {
+      "prompt": "핵심 과제 2: Service 매니페스트를 작성하라. 다음 조건을 충족하는 `service.yaml`을 작성해 `flask-capstone` Pod들을 노출한다.\n- 타입: `ClusterIP`\n- `selector: app: flask-capstone` (Deployment가 Pod에 찍는 레이블과 일치해야 함)\n- Service 포트 `80`에서 컨테이너 포트 `5000`으로 TCP 전달",
+      "starter": "# service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: flask-capstone\n  labels:\n    app: flask-capstone\nspec:\n  type: ___\n  selector:\n    app: ___\n  ports:\n    - port: ___\n      targetPort: ___\n      protocol: ___",
+      "hints": [
+        "`type: ClusterIP`는 Service를 클러스터 내부에서만 접근 가능하게 한다. 클러스터 내 다른 Pod들은 `flask-capstone:80`으로 앱에 접근한다.",
+        "`port`는 외부(호출자)가 사용하는 포트(80)이고, `targetPort`는 Service가 컨테이너로 트래픽을 전달하는 포트(5000)다. 두 값이 같을 필요는 없다.",
+        "Service의 `selector`에는 `app: flask-capstone`이 있어야 한다 — Deployment가 각 Pod에 찍는 레이블과 같아야 Service가 엔드포인트 풀에 어떤 Pod를 포함할지 알 수 있다."
+      ],
+      "solution": "# service.yaml\napiVersion: v1\nkind: Service\nmetadata:\n  name: flask-capstone\n  labels:\n    app: flask-capstone\nspec:\n  type: ClusterIP\n  selector:\n    app: flask-capstone\n  ports:\n    - port: 80\n      targetPort: 5000\n      protocol: TCP",
+      "explanation": "ClusterIP Service는 Pod 그룹에 안정적인 내부 IP와 DNS 이름(`flask-capstone`)을 부여한다. 개별 Pod의 IP는 재시작마다 바뀌지만 호출자는 그걸 신경 쓸 필요가 없다. `selector: app: flask-capstone`은 Deployment가 각 Pod에 찍은 레이블과 같다 — Service가 멤버를 이름이 아닌 레이블 합의로 찾는 방식이다. `port: 80` / `targetPort: 5000` 분리 덕분에 클러스터 내부에서는 일반적인 HTTP 포트 80으로 통신하면서 Flask 프로세스는 컨테이너 안에서 5000을 계속 리슨할 수 있다. readiness 프로브를 통과한 Pod만 엔드포인트 풀에 추가되므로, Deployment의 readiness 프로브 설정이 실제로 트래픽을 받는 Pod를 직접 결정한다."
+    },
+    {
+      "prompt": "응용: 동료가 아래와 같은 깨진 Deployment 스니펫을 건네줬다. 세 가지 버그를 찾아 수정하라 — 레이블 불일치 하나, 잘못된 imagePullPolicy 하나, 잘못된 포트를 가리키는 프로브 하나 — 그리고 각 버그가 런타임에 어떤 장애를 유발했을지 간략히 설명하라.\n\n```yaml\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: flask-app          # 버그 A\n  template:\n    metadata:\n      labels:\n        app: flask-capstone\n    spec:\n      containers:\n        - name: flask\n          image: flask-capstone:1.0\n          imagePullPolicy: Always   # 버그 B\n          ports:\n            - containerPort: 5000\n          readinessProbe:\n            httpGet:\n              path: /healthz\n              port: 8080            # 버그 C\n            initialDelaySeconds: 3\n            periodSeconds: 5\n```",
+      "starter": "# 세 가지 버그를 수정한 스니펫을 아래에 작성하라.\n# 수정한 각 줄 뒤에 해당 버그가 유발했을 장애를 짧게 주석으로 설명한다.\n\nspec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: ___          # 기존: flask-app\n  template:\n    metadata:\n      labels:\n        app: flask-capstone\n    spec:\n      containers:\n        - name: flask\n          image: flask-capstone:1.0\n          imagePullPolicy: ___  # 기존: Always\n          ports:\n            - containerPort: 5000\n          readinessProbe:\n            httpGet:\n              path: /healthz\n              port: ___         # 기존: 8080\n            initialDelaySeconds: 3\n            periodSeconds: 5",
+      "hints": [
+        "버그 A: `spec.selector.matchLabels.app`과 `spec.template.metadata.labels.app`을 비교해보라. API 서버는 두 값이 다른 Deployment를 거부한다.",
+        "버그 B: `flask-capstone:1.0` 이미지는 3강에서 클러스터에 직접 로드했다 — 외부 레지스트리에는 없다. `Always`로 설정하면 쿠버네티스가 이미지를 당기려 할 때 어떤 일이 벌어지는가?",
+        "버그 C: Flask는 컨테이너 안에서 5000 포트를 리슨하는데, readiness 프로브는 8080을 두드리고 있다. 프로브 연결이 거부되면 쿠버네티스는 어떻게 반응하는가?"
+      ],
+      "solution": "spec:\n  replicas: 2\n  selector:\n    matchLabels:\n      app: flask-capstone   # 수정 A: flask-app → spec.template.metadata.labels.app과 일치해야 함\n  template:\n    metadata:\n      labels:\n        app: flask-capstone\n    spec:\n      containers:\n        - name: flask\n          image: flask-capstone:1.0\n          imagePullPolicy: IfNotPresent  # 수정 B: Always → Always는 레지스트리 풀을 강제함; 이 이미지는 레지스트리에 없으므로 Pod가 ImagePullBackOff 상태로 멈춤\n          ports:\n            - containerPort: 5000\n          readinessProbe:\n            httpGet:\n              path: /healthz\n              port: 5000              # 수정 C: 8080 → 8080을 리슨하는 것이 없으므로 프로브가 항상 실패해 Pod가 Service 엔드포인트 풀에 진입하지 못함\n            initialDelaySeconds: 3\n            periodSeconds: 5",
+      "explanation": "버그 A (레이블 불일치): 쿠버네티스는 `spec.selector.matchLabels`와 `spec.template.metadata.labels`가 일치하도록 강제한다. API 서버가 이를 어드미션 단계에서 검사해 매니페스트를 즉시 거부한다 — Pod가 단 한 개도 생성되지 않는다. 버그 B (imagePullPolicy: Always): `Always`로 설정하면 kubelet이 로컬에 캐시된 이미지를 무시하고 항상 레지스트리에 접근한다. `flask-capstone:1.0`은 클러스터 노드에 직접 로드된 것이지 Docker Hub나 어떤 레지스트리에도 push되지 않았으므로, 풀이 실패하고 모든 Pod가 `ImagePullBackOff` 상태에 무기한 머문다. `IfNotPresent`는 kubelet에게 노드에 이미지가 이미 있으면 그것을 쓰고 진짜 없을 때만 당기라고 지시한다. 버그 C (잘못된 프로브 포트): readiness 프로브가 8080 포트에 HTTP GET을 시도하지만 Flask는 5000을 리슨한다. 연결이 거부되어 프로브가 실패하고, 쿠버네티스가 Pod를 Ready 상태로 표시하지 않는다 — 앱이 실제로는 정상 동작 중이어도 Service가 해당 Pod를 엔드포인트 풀에 추가하지 않아 트래픽이 전혀 전달되지 않는다."
+    }
+  ]
+}

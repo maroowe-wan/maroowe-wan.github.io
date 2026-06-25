@@ -12,67 +12,55 @@ sources:
 
 ## Learning Objectives
 - Understand why a container image is the unit we ship through the whole pipeline.
-- Learn the standard Dockerfile pattern for turning any web app into an image.
-- Verify your image works locally with `docker build` and `docker run` before automating anything.
+- Write a standard Dockerfile that turns a web app into an image.
+- Build and run the image locally with `docker build` and `docker run`, then verify it works.
 
 ## Body
 
-### Why ship containers at all
+### Why we do this
 
-You've probably said — or heard — "but it works on my machine." That sentence is the exact problem containers were invented to solve. Your app depends on a specific runtime version, certain libraries, and a particular configuration. Move it to a teammate's laptop or a server with slightly different versions, and it breaks.
+A **container** packages your code with everything it needs to run — runtime, libraries, settings — so it runs identically on your laptop and on EC2. That kills "works on my machine." Three terms to keep straight:
 
-A **container** packages your code together with everything it needs to run — runtime, system tools, libraries, settings — into one standalone unit. Because that unit carries its own environment, it runs identically on your laptop, a colleague's machine, and an EC2 server. There are three terms worth nailing down right away:
+- **Dockerfile** — the text recipe with build instructions.
+- **Image** — the immutable snapshot built from the Dockerfile.
+- **Container** — a running instance of an image.
 
-- **Dockerfile** — a text file containing the instructions to build an image. Think of it as a recipe.
-- **Image** — an immutable, built snapshot produced from the Dockerfile. Think of it as the meal, frozen and ready.
-- **Container** — a running instance of an image. Think of it as the meal being served. One image can spawn many containers.
+> In this pipeline the image is the single artifact that travels from your laptop, through Jenkins, into ECR, and onto EC2. Everything we automate later is just "build this image, store it, run it somewhere." So the Dockerfile is the foundation.
 
-The relationship flows in one direction: a Dockerfile *builds* an image, and an image *runs* as a container, as the diagram below makes clear.
+### Step 1 — Write the Dockerfile
 
-```mermaid From Dockerfile to running container
-flowchart LR
-    Dockerfile["Dockerfile (recipe)"] -->|docker build| Image["Image (immutable snapshot)"]
-    Image -->|docker run| C1["Container 1"]
-    Image -->|docker run| C2["Container 2"]
-    Image -->|docker run| C3["Container N"]
-```
-
-> In this pipeline, the image is the single artifact that travels from your laptop, through Jenkins, into ECR, and onto EC2. Everything we automate later is really just "build this image, store it, and run it somewhere." Getting the Dockerfile right is the foundation.
-
-### The standard Dockerfile pattern
-
-Almost every Dockerfile for a web app follows the same skeleton. Here is the pattern using a small Node.js app as the example — but the *shape* applies to any language. Create a file named exactly `Dockerfile` (no extension) in the root of your project:
+Create a file named exactly `Dockerfile` (no extension) in your project root. This example uses Node.js, but the shape applies to any language.
 
 ```dockerfile
-# 1. Start from an official base image that already has your runtime
+# Start from an official slim base image with your runtime
 FROM node:20-alpine
 
-# 2. Set the working directory inside the image
+# Working directory inside the image
 WORKDIR /app
 
-# 3. Copy dependency manifest FIRST, then install — this layer gets cached
+# Copy dependency manifest FIRST, then install — so this layer is cached
 COPY package.json package-lock.json ./
 RUN npm install
 
-# 4. Now copy the rest of the source code
+# Now copy the rest of the source
 COPY . .
 
-# 5. Document the port the app listens on
+# Document the port the app listens on
 EXPOSE 8080
 
-# 6. Define the command that runs when a container starts
+# Command that runs when the container starts
 CMD ["node", "index.js"]
 ```
 
-A few of these lines deserve explanation, because they encode real best practices:
+Three things that matter here:
 
-- **`FROM`** picks a base image. Prefer an official, slim image — `node:20-alpine` is based on Alpine Linux (a tiny ~5 MB distribution), which keeps your final image small and fast to push and pull. A bloated base image costs you on every deploy.
-- **Each instruction is a cached layer.** Docker rebuilds only the layers that changed. This is *why* we copy `package.json` and run `npm install` **before** copying the source code. Your dependencies change rarely, but your source changes constantly — so installing dependencies in an earlier layer means Docker can reuse the cached install on most builds. Get this order wrong and every code change forces a full reinstall.
-- **`CMD` uses the array (exec) form** — `["node", "index.js"]` rather than a plain string. The exec form runs your process directly instead of wrapping it in a shell, which makes signal handling and shutdown behave correctly.
+- **`FROM` — use a slim official image.** `node:20-alpine` is built on Alpine Linux (~5 MB), keeping your image small and fast to push/pull.
+- **Layer caching dictates the order.** Each instruction is a cached layer, and Docker rebuilds only what changed. Dependencies change rarely, source changes constantly — so copy `package.json` and run `npm install` *before* `COPY . .`. Reverse it and every code change forces a full reinstall.
+- **`CMD` uses exec (array) form** — `["node", "index.js"]`, not a string. It runs the process directly instead of through a shell, so signals and shutdown behave correctly.
 
-### Don't copy junk: the .dockerignore file
+### Step 2 — Add a .dockerignore
 
-When you write `COPY . .`, Docker copies *everything* in the folder — including your local `node_modules`, build artifacts, and, dangerously, any stray secret files. Create a `.dockerignore` file (it works just like `.gitignore`) to exclude them:
+`COPY . .` copies *everything*, including local `node_modules` and any stray secrets. Exclude them just like `.gitignore`:
 
 ```
 node_modules
@@ -80,38 +68,48 @@ node_modules
 *.env
 ```
 
-This keeps your image small, your builds fast, and your secrets out of a layer that anyone who pulls the image could inspect.
+This keeps the image small and keeps secrets out of a layer anyone who pulls the image could inspect.
 
-### Build it and run it locally
+### Step 3 — Build the image
 
-Now turn the recipe into an image. The `-t` flag tags it with a memorable name:
+The `-t` flag tags it; the trailing `.` points Docker at the current directory.
 
 ```bash
 docker build -t myapp:local .
 ```
 
-The trailing `.` tells Docker to look for the Dockerfile in the current directory. Watch the output: Docker steps through each instruction, pulling the base image, installing dependencies, and copying your code, then prints the built image ID. Confirm it exists:
+Verify it was created:
 
 ```bash
 docker images
 ```
 
-Now run it. A common beginner trap is to start the container and then wonder why `localhost` shows nothing:
+### Step 4 — Run it and verify
 
 ```bash
 docker run -p 5000:8080 myapp:local
 ```
 
-The `-p 5000:8080` flag is the key. By default a container's ports are *not* reachable from your machine. This flag **maps** port `5000` on your host to port `8080` inside the container (the port we `EXPOSE`d). Open `http://localhost:5000` and you should see your app. The mapping reads `host:container`.
+The `-p 5000:8080` flag is essential. Container ports are *not* reachable by default; this maps host port `5000` to container port `8080` (the one we `EXPOSE`d). The format is `host:container`. Open `http://localhost:5000` and you should see your app.
 
-To run it in the background, add `-d` (detached). Inspect what's running with `docker ps`, read logs with `docker logs <container>`, and stop it with `docker stop <container>`.
+To run in the background and manage it:
 
-### This is your starting point
+```bash
+docker run -d -p 5000:8080 myapp:local   # detached
+docker ps                                # what's running
+docker logs <container>                  # read logs
+docker stop <container>                  # stop it
+```
 
-You now have a reproducible, portable image of your app and you've proven it runs. That image is exactly what the rest of the pipeline will build, store, and deploy automatically. In the lectures ahead, every step you just did by hand — build, tag, run — becomes a stage that Jenkins executes for you on every push.
+You now have a reproducible image and proof it runs. Every step you just did by hand becomes a Jenkins stage in the lectures ahead.
 
 ## Key Takeaways
-- A container packages your app with its entire environment, eliminating "works on my machine" and giving you one artifact that runs the same everywhere.
-- Remember the chain: a **Dockerfile** builds an **image**, and an **image** runs as a **container**.
-- Order your Dockerfile to exploit layer caching — copy and install dependencies *before* copying source code — and use a slim base image plus `.dockerignore` to stay small and safe.
-- Validate locally with `docker build -t name .` and `docker run -p host:container name`; remember that port mapping is required to reach the app, and the format is `host:container`.
+- A container bundles your app with its whole environment — one artifact that runs the same everywhere.
+- The chain: a **Dockerfile** builds an **image**, and an **image** runs as a **container**.
+- Order the Dockerfile for layer caching (deps before source), use a slim base, and add `.dockerignore`.
+- Build with `docker build -t name .`, run with `docker run -p host:container name`; port mapping is required to reach the app.
+
+## Sources
+- https://www.youtube.com/watch?v=gAkwW2tuIqE
+- https://www.youtube.com/watch?v=LQjaJINkQXY
+- https://www.youtube.com/watch?v=SnSH8Ht3MIc

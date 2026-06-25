@@ -1,0 +1,61 @@
+{
+  "lecture_no": 5,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "현재 디렉터리를 대상으로 하는 단일 `kubectl apply` 명령으로 두 매니페스트를 클러스터에 적용하고, 파드 3개가 모두 `READY 1/1` 상태의 `Running`이 될 때까지 확인하라.",
+      "starter": "# deployment.yaml과 service.yaml이 있는 디렉터리에 있다고 가정한다\n# (4강에서 작성, 이미지 flask-capstone:1.0은 이미 클러스터에 로드되어 있음)\n\n# 1. 현재 폴더의 모든 파일 적용\n# 2. 모든 파드가 Running 상태가 될 때까지 모니터링\n",
+      "solution": "kubectl apply -f .\nkubectl get pods -w",
+      "explanation": "`kubectl apply -f .`는 현재 디렉터리의 모든 YAML 파일을 읽어 각각의 원하는 상태를 쿠버네티스 API 서버에 선언적으로 전달한다. 반복 실행해도 안전하다. `get pods`의 `-w`(watch) 옵션은 상태 변경을 실시간으로 스트리밍해줘서, 직접 반복 실행하지 않아도 파드가 `Pending` → `ContainerCreating` → `Running`으로 전환되는 과정을 볼 수 있다. 모든 파드의 READY 열이 `1/1`이 되면 완료다.",
+      "hints": [
+        "`apply` 대상을 `.`(디렉터리)으로 지정하는 것은 각 YAML 파일을 개별적으로 나열하는 것과 동일하다. 파일이 여러 개인 워크로드를 관리할 때의 관용적인 방법이다.",
+        "파드가 1분 이상 `Pending` 상태에 머문다면 `kubectl describe pod <이름>`을 실행해 하단 Events 섹션을 확인한다. 스케줄러가 노드를 찾지 못하는 것인지, 이미지를 가져오지 못하는 것인지 확인할 수 있다.",
+        "모든 파드가 `Running` 상태가 된 것을 확인했다면 Ctrl-C로 `-w` 모니터링을 종료한다."
+      ]
+    },
+    {
+      "prompt": "세 단계 트리아지 흐름(`get` → `describe` → `logs`)으로 실행 중인 디플로이먼트를 점검하라. 먼저 모든 파드와 서비스를 나열하고, 파드 하나를 describe해 Events 섹션을 확인한 뒤, 해당 파드의 로그를 실시간으로 스트리밍하라.",
+      "starter": "# <pod-name>을 실제 클러스터의 파드 이름으로 교체한다\n# 예시: flask-capstone-7d9f4c6b8-xkp2m\n\n# 1단계: 파드와 서비스 목록 조회\n\n# 2단계: 파드 하나를 describe\n\n# 3단계: 파드 로그를 실시간 스트리밍\n",
+      "solution": "# 1단계\nkubectl get pods\nkubectl get svc\n\n# 2단계  (위 출력에서 실제 파드 이름으로 대체)\nkubectl describe pod <pod-name>\n\n# 3단계\nkubectl logs -f <pod-name>",
+      "explanation": "`kubectl get`은 요약 테이블을 보여줘서 어떤 파드가 비정상인지 빠르게 파악할 수 있다. `kubectl describe pod`는 전체 오브젝트 스펙과 함께 하단에 시간 순서로 정렬된 Events 목록을 출력한다. 스케줄러 결정, 이미지 풀, 프로브 실패, 재시작 이유가 모두 기록되므로 쿠버네티스에서 가장 유용한 디버깅 정보다. `kubectl logs -f`는 컨테이너의 stdout/stderr를 실시간으로 테일링해 앱 수준의 오류(트레이스백, 포트 충돌, 환경 변수 누락 등)를 확인할 수 있다. 세 명령은 각각 클러스터 인벤토리, 쿠버네티스 레이어 이벤트, 애플리케이션 출력이라는 서로 다른 레이어를 커버한다.",
+      "hints": [
+        "`kubectl get pods` 출력에서 파드 이름을 복사한다. 이름은 `flask-capstone-<해시>-<해시>` 형태다.",
+        "`describe` 출력에서 맨 아래로 스크롤하면 `Events:` 섹션이 있다. 쿠버네티스가 실제로 한 일(이미지 풀, 시작, 라이브니스/레디니스 프로브 결과)이 여기에 기록된다.",
+        "파드가 이미 크래시 후 재시작된 상태라면 `kubectl logs --previous <pod-name>`으로 현재 실행 중인 컨테이너가 아닌, 이전에 종료된 컨테이너의 로그를 확인할 수 있다."
+      ]
+    },
+    {
+      "prompt": "`localhost:8080`에서 `flask-capstone` 서비스의 포트 5000으로 port-forward 터널을 열고, 루트 경로와 `/healthz` 엔드포인트에 curl을 보내 앱이 정상적으로 응답하는지 확인하라.",
+      "starter": "# 터미널 A — 터널 시작 (실행 상태 유지)\n\n# 터미널 B — 터널이 열린 동안 요청 전송\n",
+      "solution": "# 터미널 A\nkubectl port-forward svc/flask-capstone 8080:5000\n\n# 터미널 B\ncurl http://localhost:8080/\ncurl http://localhost:8080/healthz",
+      "explanation": "`kubectl port-forward svc/<이름> <로컬포트>:<서비스포트>`는 쿠버네티스 API 서버를 통해 인증된 터널을 생성한다. 외부 로드밸런서나 방화벽 규칙이 필요 없어 빠른 인터랙티브 테스트에 적합하다. 터널은 명령이 실행 중인 동안만 유지되며, Ctrl-C로 즉시 닫힌다. `/healthz`에서 `200` 응답이 돌아오면 파드가 단순히 시작된 것이 아니라 실제로 HTTP 트래픽을 처리하고 있다는 뜻이다. 이것이 정상 배포의 정의다.",
+      "hints": [
+        "`port-forward` 명령은 별도 터미널 탭에서 실행해 실행 상태로 유지한 채, 다른 탭에서 curl을 날린다.",
+        "`curl`이 `connection refused`를 반환한다면 port-forward 프로세스가 아직 실행 중인지, 그리고 `5000`이 아닌 `8080` 포트로 curl을 보내고 있는지 확인한다.",
+        "minikube에서는 `minikube service flask-capstone --url`을 사용할 수도 있다. 터미널을 열어둘 필요 없이 NodePort 기반의 URL을 출력해주는 더 오래 지속되는 방법이다."
+      ]
+    },
+    {
+      "prompt": "`kubectl set image`로 `flask-capstone:2.0`으로 롤링 업데이트를 수행하고, `kubectl rollout status`로 진행 상황을 확인하며, `kubectl get pods -w`로 기존 파드가 새 파드로 교체되는 과정을 병행해서 관찰하라.",
+      "starter": "# flask-capstone:2.0이 이미 빌드되어 클러스터에 로드되어 있다고 가정한다:\n#   minikube image load flask-capstone:2.0\n\n# 터미널 A — 업데이트 트리거\n\n# 터미널 B — 롤아웃 상태 확인 (완료될 때까지 블로킹)\n\n# 터미널 C (선택) — 파드 교체 과정 실시간 관찰\n",
+      "solution": "# 터미널 A\nkubectl set image deployment/flask-capstone flask-capstone=flask-capstone:2.0\n\n# 터미널 B\nkubectl rollout status deployment/flask-capstone\n\n# 터미널 C (선택)\nkubectl get pods -w",
+      "explanation": "`kubectl set image deployment/<이름> <컨테이너>=<이미지>`는 디플로이먼트 스펙 내 컨테이너 이미지 필드를 패치하는 명령형 단축키다. 쿠버네티스는 변경을 감지하고 롤링 업데이트를 시작한다. 새 버전 파드를 생성하되(`maxSurge` 기본 25%로 상한 제한), 교체 파드가 Ready가 되어야만 기존 파드를 종료(`maxUnavailable` 기본 25%로 제어)하므로 원하는 용량의 75% 이상이 항상 트래픽을 처리한다. `kubectl rollout status`는 진행 상황을 사람이 읽기 쉬운 형태로 출력하다가 `successfully rolled out`으로 완료되면 블로킹이 풀린다. `get pods -w`는 기존 `flask-capstone-*` 파드가 `Terminating`이 되고 새 파드가 올라오는 모습을 시각적으로 보여준다. 무중단 롤링 교체의 시각적 증거다.",
+      "hints": [
+        "`set image` 문법은 `deployment/<디플로이먼트명> <컨테이너명>=<새이미지>` 형태다. 컨테이너 이름은 deployment.yaml의 `containers:` 목록 내 `name:` 필드 값이다. 이 캡스톤에서는 `flask-capstone`이다.",
+        "`rollout status`가 2분 이상 멈춰 있다면 새 파드가 비정상일 가능성이 높다. 다른 터미널에서 `kubectl get pods`를 실행해 `ImagePullBackOff`나 `CrashLoopBackOff` 상태가 있는지 확인한다.",
+        "대안으로 `deployment.yaml`의 이미지 태그를 `flask-capstone:2.0`으로 수정하고 `kubectl apply -f deployment.yaml`을 재실행하는 방법도 동일한 롤링 업데이트를 트리거한다."
+      ]
+    },
+    {
+      "prompt": "존재하지 않는 태그 `flask-capstone:broken`으로 업데이트해 잘못된 배포를 시뮬레이션하고, `ImagePullBackOff`가 발생하는 동안 기존 파드는 계속 실행 중임을 확인(무중단)한 뒤, 단일 명령으로 이전 리비전으로 롤백하고 롤백이 완료됐는지 확인하라.",
+      "starter": "# 1단계: 잘못된 업데이트 트리거\n\n# 2단계: 실패 관찰 (새 파드의 상태는?)\n\n# 3단계: 기존 파드가 여전히 Running이며 서비스 중임을 확인\n\n# 4단계: 롤백\n\n# 5단계: 롤백 완료 확인\n",
+      "solution": "# 1단계: 잘못된 업데이트 트리거\nkubectl set image deployment/flask-capstone flask-capstone=flask-capstone:broken\n\n# 2단계: 새 파드가 이미지를 가져오지 못하는 것을 관찰\nkubectl get pods -w\n# 새 파드는 ImagePullBackOff, 기존 파드는 Running 유지\n\n# 3단계: 앱이 v2(또는 롤백 기준에 따라 v1)로 여전히 응답하는지 확인\n# (다른 터미널에서 port-forward를 유지 중)\ncurl http://localhost:8080/healthz\n\n# 4단계: 이전 리비전으로 롤백\nkubectl rollout undo deployment/flask-capstone\n\n# 5단계: 검증\nkubectl rollout status deployment/flask-capstone\nkubectl get pods",
+      "explanation": "이 실습은 롤링 업데이트를 프로덕션에서 신뢰할 수 있게 만드는 쿠버네티스 안전망을 직접 체험한다. 디플로이먼트의 `maxUnavailable`이 25%(기본값)로 설정되어 있으므로, 쿠버네티스는 새로운 정상 파드로 교체되는 수 이상의 기존 파드를 종료하지 않는다. `flask-capstone:broken`은 풀이 불가능하므로 새 파드가 Ready가 되지 않고, 따라서 기존 파드도 종료되지 않는다. 기존 레플리카셋이 모든 트래픽을 계속 처리한다. `kubectl rollout undo`는 롤아웃 이력에 저장된 이전 리비전으로 디플로이먼트를 되돌리되, 동일한 점진적 메커니즘을 역방향으로 사용한다. 결과적으로 잘못된 이미지 태그는 롤아웃이 멈추는 것으로 이어질 뿐, 서비스 장애로 이어지지 않는다. `kubectl rollout history deployment/flask-capstone`으로 모든 번호 매겨진 리비전을 확인하고, `--to-revision=<N>`으로 특정 리비전을 지정할 수도 있다.",
+      "hints": [
+        "멈춰 있는 새 파드 중 하나를 `kubectl describe pod <새파드명>`으로 확인하면 Events 섹션에서 `Failed to pull image`와 정확한 오류 내용을 볼 수 있다. 실제 인시던트에서 `ImagePullBackOff`를 진단하는 방법이다.",
+        "잘못된 롤아웃이 멈춰 있는 동안 서비스에 curl을 보내 기존 파드가 여전히 응답하는지 확인한다. 무중단 안전성을 보여주는 핵심 관찰 포인트다.",
+        "`rollout undo` 이후 `kubectl rollout status`를 실행해 `successfully rolled out`이 출력될 때까지 기다린다. 롤백 자체도 롤링 방식으로 진행되므로 몇 초가 걸린다."
+      ]
+    }
+  ]
+}

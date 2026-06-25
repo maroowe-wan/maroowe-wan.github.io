@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K8S-Capstone</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
+<link rel="stylesheet" href="../../../assets/css/style.css?v=bbg2">
+</head>
+<body><div class="wrap">
+<nav>
+  <div class="navtop"><a class="home" href="../../index.html">← All courses</a><a class='lang-toggle' data-lang='ko' href='../../../ko/courses/k8s-36-capstone/index.html'>한국어</a></div>
+  <h1>K8S-Capstone</h1>
+  <div class="sub">Docker/Kubernetes beginners who have been introduced to Pod/Deployment/Service concepts in the existing K8S series and are ready to wire everything together in a capstone project. Basic Python knowledge and comfort with a terminal are sufficient. · 5 lectures</div>
+  <ul><li><a href='#lec1'>01. Building a Simple Flask Web App</a></li>
+<li><a href='#lec2'>02. Containerizing the App with Docker</a></li>
+<li><a href='#lec3'>03. Preparing a Local Kubernetes Cluster</a></li>
+<li><a href='#lec4'>04. Writing Kubernetes Manifests for the Flask App</a></li>
+<li><a href='#lec5'>05. &quot;Deploy, Expose, Verify, and Roll Out&quot;</a></li></ul>
+</nav>
+<main><article id='lec1' class='lecture'>
+          <h2>01. Building a Simple Flask Web App </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Build a minimal web and REST application in Flask with a couple of endpoints (<code class='ic'>/</code> and <code class='ic'>/api</code>) and run it locally.</li>
+<li>Add a dedicated health-check route (<code class='ic'>/healthz</code>) that returns HTTP 200, so the app is ready for Kubernetes probes later.</li>
+<li>Declare dependencies in a <code class='ic'>requirements.txt</code> file and start the app with either <code class='ic'>flask run</code> or <code class='ic'>python app.py</code>.</li>
+</ul>
+<h3>Body</h3>
+<h4>Why we start here</h4>
+<p>Welcome to the first lecture of our five-part capstone. Across this course you will take a single Python web app all the way to a running deployment on a local Kubernetes cluster. The journey is <strong>app → image → cluster → deployment → operations</strong>, and every later step depends on the small choices we make right now. The five stages of that journey, and where this lecture sits, are shown below.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    A[&quot;L1 App&lt;br/&gt;Flask web app&quot;] --&gt; B[&quot;L2 Image&lt;br/&gt;Docker&quot;]
+    B --&gt; C[&quot;L3 Cluster&lt;br/&gt;local Kubernetes&quot;]
+    C --&gt; D[&quot;L4 Deployment&lt;br/&gt;Pod and probes&quot;]
+    D --&gt; E[&quot;L5 Operations&lt;br/&gt;run and observe&quot;]
+    style A fill:#cde4ff,stroke:#2b6cb0</div><figcaption>Capstone journey across the five lectures</figcaption></figure>
+<p>So before we touch Docker, manifests, or <code class='ic'>kubectl</code>, we need a real application to deploy. In this lecture we build that application with <strong>Flask</strong>, a lightweight (&quot;micro&quot;) web framework for Python. Flask is popular precisely because it is small and explicit: a working web server is only a handful of lines, yet the same framework powers real production systems. That makes it a perfect starting point for learning the deployment pipeline without getting lost in application complexity.</p>
+<blockquote class='callout'>
+<p>Keep one detail in mind throughout this lecture: the <code class='ic'>/healthz</code> endpoint we add is not just a nice extra. In Kubernetes, the platform repeatedly calls a URL like this to decide whether your container is alive and ready to receive traffic. The app we build today is shaped specifically so that Kubernetes can supervise it later.</p>
+</blockquote>
+<h4>Step 1 — Set up your environment</h4>
+<p>You need Python 3 installed and a terminal. It is good practice to isolate each project&#x27;s dependencies in a <strong>virtual environment</strong> so they don&#x27;t collide with other Python projects on your machine. Create and activate one, then install Flask:</p>
+<pre><code>
+# Create an isolated environment in a folder named .venv
+python -m venv .venv
+
+# Activate it
+# macOS / Linux:
+source .venv/bin/activate
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+
+# Install Flask into the active environment
+pip install flask
+</code></pre>
+<p>If <code class='ic'>pip</code> is not found, try <code class='ic'>pip3</code>. Once Flask installs cleanly, you are ready to write code.</p>
+<h4>Step 2 — Understand what an API endpoint is</h4>
+<p>An <strong>API</strong> (Application Programming Interface) is simply a set of rules that lets different software systems talk to each other over the network. A client sends a <strong>request</strong> to a URL; the server processes it and sends back a <strong>response</strong>, often containing data. In Flask, each URL your app responds to is called a <strong>route</strong>, and you attach a route to a normal Python function using a <strong>decorator</strong> — the <code class='ic'>@app.route(...)</code> line that sits directly above the function.</p>
+<p>When you build APIs you also work with <strong>HTTP methods</strong>, which describe the <em>intent</em> of a request: <code class='ic'>GET</code> retrieves data, <code class='ic'>POST</code> creates something new, <code class='ic'>PUT</code> updates existing data, and <code class='ic'>DELETE</code> removes it. For this lecture a couple of simple <code class='ic'>GET</code> routes are all we need.</p>
+<h4>Step 3 — Write the application</h4>
+<p>Create a file called <code class='ic'>app.py</code>. Here is the complete, working application — type or paste it in, then we&#x27;ll walk through each part:</p>
+<pre><code>
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+
+@app.route(&quot;/&quot;)
+def home():
+    # A plain web page response: just text in the browser.
+    return &quot;Hello from the Capstone Flask app!&quot;
+
+
+@app.route(&quot;/api&quot;)
+def api():
+    # A REST-style response: structured JSON data.
+    return jsonify({
+        &quot;message&quot;: &quot;Hello, API!&quot;,
+        &quot;service&quot;: &quot;capstone-flask&quot;,
+        &quot;version&quot;: &quot;1.0.0&quot;
+    })
+
+
+@app.route(&quot;/healthz&quot;)
+def healthz():
+    # Health-check endpoint for Kubernetes probes.
+    # Returning a 200 status code tells the platform the app is healthy.
+    return jsonify({&quot;status&quot;: &quot;ok&quot;}), 200
+
+
+if __name__ == &quot;__main__&quot;:
+    # host=&quot;0.0.0.0&quot; makes the app reachable from outside the container later.
+    app.run(host=&quot;0.0.0.0&quot;, port=5000)
+</code></pre>
+<p>Let&#x27;s unpack the important pieces.</p>
+<p><strong>Creating the app.</strong> <code class='ic'>app = Flask(__name__)</code> builds the Flask application object. The special <code class='ic'>__name__</code> value tells Flask where to find resources relative to this file. Every route and every run command refers back to this <code class='ic'>app</code> variable.</p>
+<p><strong>The <code class='ic'>/</code> route.</strong> The <code class='ic'>home()</code> function returns a plain string, which the browser renders as a simple web page. This is the bare-minimum &quot;it works&quot; endpoint.</p>
+<p><strong>The <code class='ic'>/api</code> route.</strong> Here we return <strong>JSON</strong> (JavaScript Object Notation), the standard format for REST APIs — essentially a collection of key/value pairs, very similar to a Python dictionary. We build a normal Python <code class='ic'>dict</code> and pass it to <code class='ic'>jsonify(...)</code>, which converts it to a proper JSON response with the correct content type. This is how real REST APIs hand structured data back to clients.</p>
+<p><strong>The <code class='ic'>/healthz</code> route.</strong> This is the route that matters most for the rest of the course. It returns a tiny JSON body <strong>and an explicit <code class='ic'>200</code> status code</strong>. The pattern <code class='ic'>return body, 200</code> lets you set the HTTP status alongside the response. <code class='ic'>200</code> means &quot;success.&quot; A health check should be cheap and self-contained: it must not query a database or call other services, because Kubernetes will hit it frequently and expects a fast, reliable answer.</p>
+<blockquote class='callout'>
+<p><code class='ic'>/healthz</code> is a widely used naming convention for liveness/readiness endpoints (the trailing <code class='ic'>z</code> is a long-standing convention to avoid clashing with a real <code class='ic'>/health</code> page). In Lecture 4 you will point Kubernetes liveness and readiness probes directly at this path.</p>
+</blockquote>
+<p><strong>The run block.</strong> The <code class='ic'>if __name__ == &quot;__main__&quot;:</code> guard runs the development server only when you execute the file directly. We bind to <code class='ic'>host=&quot;0.0.0.0&quot;</code> instead of the default <code class='ic'>127.0.0.1</code>. This is a deliberate, forward-looking choice: <code class='ic'>0.0.0.0</code> means &quot;listen on all network interfaces,&quot; which is required once the app runs inside a Docker container (Lecture 2) and inside a Pod (Lecture 4). With the default localhost-only binding, traffic from outside the container could never reach it.</p>
+<p>Putting the three routes together, the diagram below shows how one Flask app dispatches an incoming request: it matches the request URL to the right decorated function and returns either plain text or JSON.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    C[&quot;Client&lt;br/&gt;browser or curl&quot;] --&gt;|HTTP GET request| F[&quot;Flask app&lt;br/&gt;matches URL to a route&quot;]
+    F --&gt;|&quot;path /&quot;| H[&quot;home function&quot;]
+    F --&gt;|&quot;path /api&quot;| A[&quot;api function&quot;]
+    F --&gt;|&quot;path /healthz&quot;| Z[&quot;healthz function&quot;]
+    H --&gt;|plain text| R[&quot;Response back to client&quot;]
+    A --&gt;|JSON body| R
+    Z --&gt;|&quot;JSON body + status 200&quot;| R</div><figcaption>How Flask dispatches a request to one of the three routes</figcaption></figure>
+<h4>Step 4 — Declare dependencies with requirements.txt</h4>
+<p>Right now Flask is installed only on your machine. For the app to be reproducible — and especially for Docker to install the same packages inside the image in Lecture 2 — you must record the dependencies in a file named <code class='ic'>requirements.txt</code>:</p>
+<pre><code>
+Flask==3.0.3
+</code></pre>
+<p>Pinning an exact version (<code class='ic'>==3.0.3</code>) means everyone who builds this project — including the Docker image — gets the identical Flask release, avoiding &quot;works on my machine&quot; surprises. You can generate this file automatically from your active environment with <code class='ic'>pip freeze</code>, but for a one-dependency app it&#x27;s clearer to write it by hand. Anyone (or any build step) can then reinstall everything in one command:</p>
+<pre><code>
+pip install -r requirements.txt
+</code></pre>
+<blockquote class='callout'>
+<p>This <code class='ic'>requirements.txt</code> is exactly what the <code class='ic'>Dockerfile</code> will copy and install in the next lecture. Keeping it accurate now saves you a broken build later.</p>
+</blockquote>
+<h4>Step 5 — Run the app and verify every endpoint</h4>
+<p>You can start the app two equivalent ways. The simplest is to run the file directly:</p>
+<pre><code>
+python app.py
+</code></pre>
+<p>Alternatively, use Flask&#x27;s own CLI, which is handy because it offers options like auto-reload:</p>
+<pre><code>
+# Tell Flask which file holds the app, then run it
+# macOS / Linux:
+export FLASK_APP=app.py
+# Windows (PowerShell):
+$env:FLASK_APP = &quot;app.py&quot;
+
+flask run --host=0.0.0.0 --port=5000
+</code></pre>
+<p>Either way, the development server starts and listens on port 5000. You&#x27;ll see a warning that this is a development server and not for production use — that is expected and perfectly fine for local development and for this course.</p>
+<p>Now verify all three endpoints. Open a browser, or use <code class='ic'>curl</code> from a second terminal:</p>
+<pre><code>
+curl http://localhost:5000/
+# -&gt; Hello from the Capstone Flask app!
+
+curl http://localhost:5000/api
+# -&gt; {&quot;message&quot;:&quot;Hello, API!&quot;,&quot;service&quot;:&quot;capstone-flask&quot;,&quot;version&quot;:&quot;1.0.0&quot;}
+
+curl -i http://localhost:5000/healthz
+# -&gt; HTTP/1.1 200 OK
+#    {&quot;status&quot;:&quot;ok&quot;}
+</code></pre>
+<p>The <code class='ic'>-i</code> flag on the last command prints the response headers, so you can confirm the status line reads <code class='ic'>200 OK</code>. That <code class='ic'>200</code> is precisely what a Kubernetes probe will look for when it decides whether to keep your container running and route traffic to it.</p>
+<p>If you can reach all three routes, the request/response flow is now: a client sends an HTTP request to a route, Flask matches the URL to the decorated function, the function returns either text or JSON, and Flask sends the response back. That same flow will hold whether the app runs on your laptop, inside a container, or inside a Pod.</p>
+<h4>Where this leads</h4>
+<p>What you built is intentionally minimal, but it is structured for the road ahead:</p>
+<ul>
+<li>The <code class='ic'>0.0.0.0</code> binding and port 5000 will let the container and Pod expose the app.</li>
+<li><code class='ic'>requirements.txt</code> becomes the dependency layer of your Docker image in <strong>Lecture 2</strong>.</li>
+<li><code class='ic'>/healthz</code> becomes the target of Kubernetes liveness and readiness probes in <strong>Lecture 4</strong>.</li>
+</ul>
+<p>In the next lecture we&#x27;ll wrap this exact app in a <code class='ic'>Dockerfile</code>, build an image, and run it as a container — the first step in turning your code into something a cluster can schedule.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>Flask turns a few lines of Python into a working web server; <code class='ic'>@app.route(...)</code> maps a URL to a function, and <code class='ic'>jsonify(...)</code> returns structured JSON for REST endpoints.</li>
+<li>The <code class='ic'>/healthz</code> endpoint must be cheap and return HTTP <strong>200</strong>; it is the hook Kubernetes probes will use in Lecture 4, so design for it from day one.</li>
+<li>Binding to <code class='ic'>host=&quot;0.0.0.0&quot;</code> (not localhost) is what allows the app to be reached from outside a container and Pod later.</li>
+<li><code class='ic'>requirements.txt</code> with a pinned version makes the app reproducible and feeds directly into the Docker build in Lecture 2.</li>
+<li>Run the app with <code class='ic'>python app.py</code> or <code class='ic'>flask run</code>, then verify <code class='ic'>/</code>, <code class='ic'>/api</code>, and <code class='ic'>/healthz</code> before moving on.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warmup — Set up a virtual environment and install Flask.</p>
+<p>Create a project directory called <code class='ic'>capstone-app</code>, initialize a Python virtual environment inside it, activate the environment, and install Flask. Then create a <code class='ic'>requirements.txt</code> that pins Flask to the version you just installed. Verify that <code class='ic'>pip install -r requirements.txt</code> runs without errors.</p></div>
+              <pre class='starter'><code># Run these commands in your terminal (macOS/Linux shown; Windows equivalents in hints)
+mkdir capstone-app
+cd capstone-app
+# Your commands here...</code></pre>
+              <details><summary>Hint</summary><ul><li>On Windows PowerShell the activation command is `.venv\Scripts\Activate.ps1`. If you get an execution-policy error, run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` first.</li><li>Use `pip show flask` (after installation) to see the exact version string. Copy that string exactly into `requirements.txt` — capitalisation of &#x27;Flask&#x27; and the `==` operator both matter.</li><li>If `python` is not found, try `python3`. On Windows you may also open a terminal from the Python installer&#x27;s &#x27;Add to PATH&#x27; shortcut.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>mkdir capstone-app
+cd capstone-app
+
+# Create and activate the virtual environment
+python -m venv .venv
+source .venv/bin/activate          # macOS/Linux
+# .venv\Scripts\Activate.ps1       # Windows PowerShell
+
+# Install Flask
+pip install flask
+
+# Pin the version in requirements.txt
+# Check which version was installed:
+pip show flask   # note the Version: line, e.g. 3.0.3
+
+# Write requirements.txt
+echo &#x27;Flask==3.0.3&#x27; &gt; requirements.txt
+# (Replace 3.0.3 with the version pip show reported)
+
+# Verify the file works
+pip install -r requirements.txt
+# Expected output: Requirement already satisfied: Flask==3.0.3 ...</code></pre>
+                <div class='exp2'><p>A virtual environment isolates this project&#x27;s packages from the rest of your system. <code class='ic'>python -m venv .venv</code> creates the environment; activating it redirects <code class='ic'>pip</code> and <code class='ic'>python</code> to the local copy. Pinning an exact version (<code class='ic'>Flask==3.0.3</code>) in <code class='ic'>requirements.txt</code> ensures every future install — including the Docker build in Lecture 2 — gets the identical release, eliminating &#x27;works on my machine&#x27; problems. <code class='ic'>pip install -r requirements.txt</code> is the single command that will be used inside the Dockerfile, so confirming it works now prevents a broken build later.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core 1 — Write the three-route Flask app.</p>
+<p>Inside <code class='ic'>capstone-app/</code>, create <code class='ic'>app.py</code> with exactly three routes:</p>
+<ul>
+<li><code class='ic'>GET /</code> — returns the plain-text string <code class='ic'>&quot;Hello from the Capstone Flask app!&quot;</code></li>
+<li><code class='ic'>GET /api</code> — returns a JSON object with keys <code class='ic'>message</code>, <code class='ic'>service</code>, and <code class='ic'>version</code></li>
+<li><code class='ic'>GET /healthz</code> — returns the JSON object <code class='ic'>{&quot;status&quot;: &quot;ok&quot;}</code> with HTTP status code <strong>200</strong> explicitly set</li>
+</ul>
+<p>Bind the development server to <code class='ic'>host=&quot;0.0.0.0&quot;</code>, port <code class='ic'>5000</code>. Start the app with <code class='ic'>python app.py</code> and verify all three endpoints using <code class='ic'>curl</code>.</p></div>
+              <pre class='starter'><code># app.py — fill in the blanks
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+
+@app.route(&quot;/&quot;)
+def home():
+    # TODO: return the plain-text greeting
+    pass
+
+
+@app.route(&quot;/api&quot;)
+def api():
+    # TODO: return a JSON object with message, service, version
+    pass
+
+
+@app.route(&quot;/healthz&quot;)
+def healthz():
+    # TODO: return {&quot;status&quot;: &quot;ok&quot;} with status code 200
+    pass
+
+
+if __name__ == &quot;__main__&quot;:
+    # TODO: run on host 0.0.0.0, port 5000
+    pass</code></pre>
+              <details><summary>Hint</summary><ul><li>The `@app.route(&quot;/&quot;)` decorator must appear on the line immediately above the function definition — no blank lines between them.</li><li>To return both a body and a status code, use a tuple: `return jsonify({...}), 200`. The integer is the HTTP status. Returning only `jsonify({...})` also works (Flask defaults to 200) but being explicit documents intent for future readers.</li><li>Use `curl -i http://localhost:5000/healthz` (note the `-i` flag) to print response headers. The first line should read `HTTP/1.1 200 OK` — this is exactly what a Kubernetes liveness probe checks.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+
+@app.route(&quot;/&quot;)
+def home():
+    return &quot;Hello from the Capstone Flask app!&quot;
+
+
+@app.route(&quot;/api&quot;)
+def api():
+    return jsonify({
+        &quot;message&quot;: &quot;Hello, API!&quot;,
+        &quot;service&quot;: &quot;capstone-flask&quot;,
+        &quot;version&quot;: &quot;1.0.0&quot;
+    })
+
+
+@app.route(&quot;/healthz&quot;)
+def healthz():
+    return jsonify({&quot;status&quot;: &quot;ok&quot;}), 200
+
+
+if __name__ == &quot;__main__&quot;:
+    app.run(host=&quot;0.0.0.0&quot;, port=5000)
+
+# --- Verification commands (run in a second terminal) ---
+# curl http://localhost:5000/
+# Expected: Hello from the Capstone Flask app!
+#
+# curl http://localhost:5000/api
+# Expected: {&quot;message&quot;:&quot;Hello, API!&quot;,&quot;service&quot;:&quot;capstone-flask&quot;,&quot;version&quot;:&quot;1.0.0&quot;}
+#
+# curl -i http://localhost:5000/healthz
+# Expected first line: HTTP/1.1 200 OK
+#          body:       {&quot;status&quot;:&quot;ok&quot;}</code></pre>
+                <div class='exp2'><p><code class='ic'>app = Flask(__name__)</code> creates the application object; <code class='ic'>__name__</code> lets Flask locate resources relative to this file. Each <code class='ic'>@app.route(...)</code> decorator registers the URL pattern and ties it to the function directly beneath it. <code class='ic'>jsonify(...)</code> converts a Python dict into a proper JSON response with the <code class='ic'>Content-Type: application/json</code> header — never return a raw <code class='ic'>str</code> for JSON endpoints. The two-value return <code class='ic'>return body, 200</code> sets both the response body and the HTTP status code. Binding to <code class='ic'>host=&quot;0.0.0.0&quot;</code> (all interfaces) rather than the default <code class='ic'>127.0.0.1</code> (localhost only) is essential: once this app runs inside a Docker container or a Kubernetes Pod, requests arrive on a non-loopback interface, and a localhost-only binding would silently drop them.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core 2 — Run the app with <code class='ic'>flask run</code> and confirm the <code class='ic'>/healthz</code> status code.</p>
+<p>Stop any running server. This time start the app using the Flask CLI (<code class='ic'>flask run</code>) instead of <code class='ic'>python app.py</code>. Then use <code class='ic'>curl -i</code> to call <code class='ic'>/healthz</code> and confirm the response line is <code class='ic'>HTTP/1.1 200 OK</code>. Finally, deliberately break the health check by changing the status code in <code class='ic'>healthz()</code> to <code class='ic'>500</code>, restart the server, re-run the same <code class='ic'>curl -i</code> command, and observe the difference.</p></div>
+              <pre class='starter'><code># 1. Set the environment variable and start via flask run
+# macOS/Linux:
+export FLASK_APP=app.py
+# Windows PowerShell:
+# $env:FLASK_APP = &quot;app.py&quot;
+
+flask run --host=0.0.0.0 --port=5000
+
+# 2. In a second terminal:
+curl -i http://localhost:5000/healthz
+
+# 3. Edit healthz() to return 500, restart, and curl again</code></pre>
+              <details><summary>Hint</summary><ul><li>If `flask` command is not found, make sure your virtual environment is activated. The Flask CLI is installed inside `.venv`, not globally.</li><li>The `-i` flag in `curl -i` prints response headers before the body. Look for the very first line — it contains the protocol version, status code, and status message (e.g. `HTTP/1.1 200 OK`).</li><li>Remember to restore the status code back to `200` after the experiment, or every subsequent test in this task and in later lectures will behave unexpectedly.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># --- Start with flask run ---
+# macOS/Linux
+export FLASK_APP=app.py
+flask run --host=0.0.0.0 --port=5000
+
+# Windows PowerShell
+$env:FLASK_APP = &quot;app.py&quot;
+flask run --host=0.0.0.0 --port=5000
+
+# --- Verify healthy state ---
+curl -i http://localhost:5000/healthz
+# First response line: HTTP/1.1 200 OK
+# Body: {&quot;status&quot;:&quot;ok&quot;}
+
+# --- Break the health check (edit app.py) ---
+# Change the healthz function to:
+#   return jsonify({&quot;status&quot;: &quot;ok&quot;}), 500
+# Restart the server, then:
+curl -i http://localhost:5000/healthz
+# First response line: HTTP/1.1 500 INTERNAL SERVER ERROR
+# Body: {&quot;status&quot;:&quot;ok&quot;}
+
+# Key observation: the body still says &quot;ok&quot; but the status line is 500.
+# A Kubernetes probe reads the status code, not the body — so 500 = unhealthy,
+# regardless of what the JSON says.
+
+# --- Restore the correct code before moving on ---
+# return jsonify({&quot;status&quot;: &quot;ok&quot;}), 200</code></pre>
+                <div class='exp2'><p><code class='ic'>flask run</code> is the Flask CLI launcher. It reads the <code class='ic'>FLASK_APP</code> environment variable to find your application file and supports useful flags like <code class='ic'>--reload</code> (auto-restart on code changes). Both <code class='ic'>python app.py</code> and <code class='ic'>flask run</code> start the same development server; the CLI is preferred in development because of those extra options. The broken-health-check experiment highlights a critical Kubernetes concept: a probe cares only about the HTTP status code, not the response body. An app can return a JSON body that says <code class='ic'>{&quot;status&quot;: &quot;ok&quot;}</code> while simultaneously returning a <code class='ic'>500</code> status code — Kubernetes would mark the container unhealthy and restart it. That is why the <code class='ic'>healthz()</code> function must explicitly return <code class='ic'>200</code> and must never return <code class='ic'>500</code> unless the app is genuinely unable to serve traffic.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied — Extend the <code class='ic'>/api</code> endpoint to return dynamic data.</p>
+<p>Modify <code class='ic'>app.py</code> so that the <code class='ic'>/api</code> route also returns two additional fields: <code class='ic'>&quot;environment&quot;</code> (hardcoded to the string <code class='ic'>&quot;local&quot;</code>) and <code class='ic'>&quot;python_version&quot;</code> (the actual Python version string from the standard library, e.g. <code class='ic'>&quot;3.11.9&quot;</code>). The response should look like:</p>
+<pre><code>
+{
+  &quot;message&quot;: &quot;Hello, API!&quot;,
+  &quot;service&quot;: &quot;capstone-flask&quot;,
+  &quot;version&quot;: &quot;1.0.0&quot;,
+  &quot;environment&quot;: &quot;local&quot;,
+  &quot;python_version&quot;: &quot;3.11.9&quot;
+}
+</code></pre>
+<p>Verify the output with <code class='ic'>curl http://localhost:5000/api</code> and confirm the <code class='ic'>/healthz</code> endpoint still returns <code class='ic'>200 OK</code> (extending one endpoint must not break the health check).</p></div>
+              <pre class='starter'><code># Modify the api() function in app.py.
+# Hint: the Python standard library module you need is already part of the language.
+
+import sys   # add this import at the top of app.py
+
+@app.route(&quot;/api&quot;)
+def api():
+    return jsonify({
+        &quot;message&quot;: &quot;Hello, API!&quot;,
+        &quot;service&quot;: &quot;capstone-flask&quot;,
+        &quot;version&quot;: &quot;1.0.0&quot;,
+        # TODO: add environment and python_version fields
+    })</code></pre>
+              <details><summary>Hint</summary><ul><li>`sys.version` returns a string like `&#x27;3.11.9 (main, Apr  2 2024, 08:16:37) [GCC 13.2.0]&#x27;`. Use `.split()[0]` to extract just the version number, or `sys.version_info` if you prefer a tuple — e.g. `f&quot;{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}&quot;`.</li><li>If you use `flask run` with `--reload` (or `FLASK_ENV=development`), the server restarts automatically when you save `app.py` — no need to stop and restart manually.</li><li>JSON object keys returned by `jsonify` are sorted alphabetically in Flask&#x27;s default configuration. The order in `curl` output may differ from the order you wrote them — that is normal and correct JSON behaviour.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Full updated app.py
+import sys
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+
+@app.route(&quot;/&quot;)
+def home():
+    return &quot;Hello from the Capstone Flask app!&quot;
+
+
+@app.route(&quot;/api&quot;)
+def api():
+    return jsonify({
+        &quot;message&quot;: &quot;Hello, API!&quot;,
+        &quot;service&quot;: &quot;capstone-flask&quot;,
+        &quot;version&quot;: &quot;1.0.0&quot;,
+        &quot;environment&quot;: &quot;local&quot;,
+        &quot;python_version&quot;: sys.version.split()[0]  # e.g. &#x27;3.11.9&#x27;
+    })
+
+
+@app.route(&quot;/healthz&quot;)
+def healthz():
+    return jsonify({&quot;status&quot;: &quot;ok&quot;}), 200
+
+
+if __name__ == &quot;__main__&quot;:
+    app.run(host=&quot;0.0.0.0&quot;, port=5000)
+
+# --- Verification ---
+# curl http://localhost:5000/api
+# Expected output includes:
+# {&quot;environment&quot;:&quot;local&quot;,&quot;message&quot;:&quot;Hello, API!&quot;,&quot;python_version&quot;:&quot;3.11.9&quot;,
+#  &quot;service&quot;:&quot;capstone-flask&quot;,&quot;version&quot;:&quot;1.0.0&quot;}
+#
+# curl -i http://localhost:5000/healthz
+# Expected: HTTP/1.1 200 OK</code></pre>
+                <div class='exp2'><p><code class='ic'>sys.version</code> is a built-in string that contains the full Python version plus build metadata (e.g. <code class='ic'>&#x27;3.11.9 (main, Apr 2 2024, ...)&#x27;</code>). Calling <code class='ic'>.split()[0]</code> takes only the version number before the first space, giving a clean value like <code class='ic'>&#x27;3.11.9&#x27;</code>. This exercise practises a key REST API pattern: each route is independent, so adding fields to <code class='ic'>/api</code> has zero effect on <code class='ic'>/healthz</code>. Verifying <code class='ic'>/healthz</code> after the change is a good habit — it mirrors what a CI pipeline would do to guard against accidental regressions. In later lectures, <code class='ic'>&quot;environment&quot;</code> will be driven by a Kubernetes ConfigMap or environment variable rather than a hardcoded string, so structuring the field now prepares the code for that change.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=zsYIw6RXjfM' target='_blank'>Create A Python API in 12 Minutes</a></li><li><a href='https://www.youtube.com/watch?v=5aYpkLfkgRE' target='_blank'>build a meme Python website (Flask Tutorial for Beginners)</a></li></ul></div>
+        </article>
+<article id='lec2' class='lecture'>
+          <h2>02. Containerizing the App with Docker </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Write a complete, working <code class='ic'>Dockerfile</code> for the Flask app from Lecture 1 — choosing a base image, installing dependencies, and declaring the startup command.</li>
+<li>Build the image with <code class='ic'>docker build</code> and run it with <code class='ic'>docker run</code>, then confirm the app is reachable by publishing its port (<code class='ic'>EXPOSE</code> / <code class='ic'>-p</code>).</li>
+<li>Tag the image with a meaningful <code class='ic'>name:version</code> (for example, <code class='ic'>flask-capstone:1.0</code>) so it is ready for the Kubernetes deployment in the lectures that follow.</li>
+</ul>
+<h3>Body</h3>
+<h4>Where we are in the capstone</h4>
+<p>In Lecture 1 you built a small Flask app from scratch. You now have three files sitting in a project folder: <code class='ic'>app.py</code> (which serves <code class='ic'>/</code>, an <code class='ic'>/api</code> endpoint, and a <code class='ic'>/healthz</code> health check that returns <code class='ic'>200</code>), <code class='ic'>requirements.txt</code> (which lists <code class='ic'>flask</code> as a dependency), and you confirmed the whole thing runs locally with <code class='ic'>python app.py</code>.</p>
+<p>That app works on <em>your</em> machine. But &quot;works on my machine&quot; is exactly the problem we are about to solve. The version of Python you have installed, the exact Flask version <code class='ic'>pip</code> happened to grab, the system libraries your OS ships with — all of these quietly shape how the app behaves. Hand the same code to a teammate on a different OS, or to a Kubernetes node in a cluster, and small differences can turn into broken builds and mysterious runtime errors.</p>
+<p>Docker fixes this by packaging the app <strong>together with its entire environment</strong> into a single, portable artifact called an <strong>image</strong>. In this lecture we turn the Flask app into an image, run it as a container, and tag it so the next lectures can load it into a local Kubernetes cluster. This is the bridge step: app → image → cluster.</p>
+<blockquote class='callout'>
+<p>Kubernetes does not run your source code directly. It runs <em>container images</em>. Everything you do in this lecture is the prerequisite for everything Kubernetes does in Lectures 3 through 5.</p>
+</blockquote>
+<h4>Two concepts you must keep straight: image vs. container</h4>
+<p>These two words get used interchangeably in casual conversation, but they are not the same thing, and the distinction matters for Kubernetes.</p>
+<ul>
+<li>An <strong>image</strong> is a read-only, packaged blueprint: your code plus a base operating system layer, the Python runtime, and your installed dependencies, frozen into an immutable bundle. You cannot edit an image after it is built — you build a new one instead. Think of it as the recipe, or the blueprint for a house.</li>
+<li>A <strong>container</strong> is a <em>running instance</em> of an image. It is a live, isolated process on your machine that shares the host&#x27;s CPU and memory but behaves as if it has its own little sandboxed operating system. If the image is the blueprint, the container is the actual house. You can start many containers from the same image, and you can stop and delete them freely.</li>
+</ul>
+<p>The mental model is simple: <strong>you build an image once, then run as many containers from it as you like.</strong> In Kubernetes, a Deployment will run several identical containers (replicas) from the one image you build here. The diagram below traces that whole pipeline, from the Dockerfile recipe to the running containers.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    DF[&quot;Dockerfile&lt;br/&gt;(recipe)&quot;]
+    BUILD[&quot;docker build -t&lt;br/&gt;flask-capstone:1.0&quot;]
+    IMG[&quot;Image&lt;br/&gt;flask-capstone:1.0&lt;br/&gt;(read-only blueprint)&quot;]
+    RUN[&quot;docker run&quot;]
+    C1[&quot;Container 1&quot;]
+    C2[&quot;Container 2&quot;]
+    C3[&quot;Container 3&quot;]
+
+    DF --&gt;|&quot;build once&quot;| BUILD
+    BUILD --&gt; IMG
+    IMG --&gt;|&quot;run many&quot;| RUN
+    RUN --&gt; C1
+    RUN --&gt; C2
+    RUN --&gt; C3</div><figcaption>Docker pipeline: from Dockerfile to running containers</figcaption></figure>
+<p>Before going further, make sure Docker Desktop (or the Docker Engine) is installed and running. On Docker Desktop you should see a green &quot;running&quot; indicator. You can verify from the terminal with <code class='ic'>docker version</code>.</p>
+<h4>Anatomy of a Dockerfile</h4>
+<p>An image is built from a plain text file of instructions called a <strong>Dockerfile</strong> (capital D, no file extension). Each instruction is read top to bottom, and Docker executes them in order to assemble the image layer by layer. Here is a complete Dockerfile for our Flask app. Create it in the same folder as <code class='ic'>app.py</code>:</p>
+<pre><code>
+# 1. Base image: a slim Python runtime to keep the image small
+FROM python:3.12-slim
+
+# 2. Set the working directory inside the container
+WORKDIR /app
+
+# 3. Copy only the dependency list first (better build caching)
+COPY requirements.txt .
+
+# 4. Install the Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 5. Copy the rest of the application code
+COPY . .
+
+# 6. Document the port the app listens on
+EXPOSE 5000
+
+# 7. The command that runs when a container starts
+CMD [&quot;python&quot;, &quot;app.py&quot;]
+</code></pre>
+<p>Let&#x27;s walk through <em>why</em> each line is written this way, because every choice has a reason.</p>
+<p><strong><code class='ic'>FROM python:3.12-slim</code></strong> — Every image is built on top of a <strong>base image</strong>, an existing image that already contains an OS layer and, here, a working Python install. We pick <code class='ic'>python:3.12-slim</code> rather than the full <code class='ic'>python:3.12</code> because the <code class='ic'>slim</code> variant drops build tools and docs we don&#x27;t need, producing a much smaller image. (There is an even smaller <code class='ic'>alpine</code> variant, but it occasionally trips up Python packages that expect standard Linux libraries, so <code class='ic'>slim</code> is the safer default for beginners.)</p>
+<p><strong><code class='ic'>WORKDIR /app</code></strong> — This sets the directory inside the container where subsequent commands run and where your code will live. From here on, relative paths are relative to <code class='ic'>/app</code>.</p>
+<p><strong><code class='ic'>COPY requirements.txt .</code> then <code class='ic'>RUN pip install ...</code></strong> — Notice we copy <em>only</em> <code class='ic'>requirements.txt</code> first, install dependencies, and <em>then</em> copy the rest of the code. This ordering is deliberate. Docker caches each layer, and rebuilds only the layers that changed. Because your dependencies change far less often than your code, putting the <code class='ic'>pip install</code> step before the <code class='ic'>COPY . .</code> means that editing <code class='ic'>app.py</code> won&#x27;t force Docker to reinstall Flask on every rebuild. This single trick can turn a 60-second rebuild into a 2-second one. The <code class='ic'>--no-cache-dir</code> flag tells <code class='ic'>pip</code> not to keep its download cache, shaving more weight off the final image.</p>
+<p><strong><code class='ic'>COPY . .</code></strong> — Now we copy everything else in the project folder (including <code class='ic'>app.py</code>) into <code class='ic'>/app</code>.</p>
+<p><strong><code class='ic'>EXPOSE 5000</code></strong> — This <em>documents</em> that the app listens on port 5000 inside the container. Important caveat: <code class='ic'>EXPOSE</code> by itself does <strong>not</strong> open the port to the outside world — it is metadata that tells humans and tools which port the container expects to use. The actual publishing happens at run time with <code class='ic'>-p</code>. (Make sure 5000 matches whatever port your Flask app binds to in <code class='ic'>app.py</code>.)</p>
+<p><strong><code class='ic'>CMD [&quot;python&quot;, &quot;app.py&quot;]</code></strong> — This is the <strong>default command</strong> that runs when a container starts from the image. When Kubernetes launches your container later, this is what it executes. The bracket form (called <em>exec form</em>) is preferred because it runs the process directly without an extra shell wrapper.</p>
+<h4>One small but important detail: a .dockerignore file</h4>
+<p>When <code class='ic'>COPY . .</code> runs, it copies <em>everything</em> in the folder — including things you don&#x27;t want inside the image, like a local virtual environment, <code class='ic'>.git</code> history, or <code class='ic'>__pycache__</code> folders. These bloat the image and can even leak secrets. The fix is a <code class='ic'>.dockerignore</code> file (sibling to the Dockerfile), which works just like <code class='ic'>.gitignore</code>:</p>
+<pre><code>
+__pycache__/
+*.pyc
+.venv/
+venv/
+.git/
+.env
+</code></pre>
+<blockquote class='callout'>
+<p>Always add a <code class='ic'>.dockerignore</code>. A leaner build context means smaller, faster, safer images — and it prevents your local virtual environment from accidentally overriding the clean dependencies installed inside the container.</p>
+</blockquote>
+<h4>Building the image</h4>
+<p>With the Dockerfile in place, build the image from the project folder (the <code class='ic'>.</code> at the end is the <em>build context</em> — the folder Docker reads from):</p>
+<pre><code>
+docker build -t flask-capstone:1.0 .
+</code></pre>
+<p>The <code class='ic'>-t</code> flag <em>tags</em> the image with a name and version in <code class='ic'>name:tag</code> format. We are using <code class='ic'>flask-capstone:1.0</code> and will keep this exact name throughout the rest of the capstone, so the Kubernetes manifests in Lecture 4 reference the same image. As the build runs, you&#x27;ll see Docker work through each Dockerfile instruction as a numbered step. When it finishes, confirm the image exists:</p>
+<pre><code>
+docker images
+</code></pre>
+<p>You should see <code class='ic'>flask-capstone</code> with tag <code class='ic'>1.0</code> in the list.</p>
+<h4>Running the container and publishing the port</h4>
+<p>Now start a container from the image:</p>
+<pre><code>
+docker run -p 8080:5000 flask-capstone:1.0
+</code></pre>
+<p>The <code class='ic'>-p 8080:5000</code> flag is the crucial part. It <strong>publishes</strong> the container&#x27;s port to your host machine, and the format is <code class='ic'>host_port:container_port</code>. So this maps port <code class='ic'>8080</code> on your computer to port <code class='ic'>5000</code> inside the container.</p>
+<p>Why does this matter? A container is an isolated process. By default, nothing on your machine can reach inside it — that isolation is the whole point. The <code class='ic'>-p</code> flag opens a controlled doorway: traffic arriving at <code class='ic'>localhost:8080</code> is forwarded into the container&#x27;s port <code class='ic'>5000</code>, where Flask is listening. (Without <code class='ic'>-p</code>, you&#x27;d get a connection-refused error even though the app is running fine inside the container — a very common beginner gotcha.)</p>
+<p>Open a browser and visit <code class='ic'>http://localhost:8080/</code>, then check the health endpoint at <code class='ic'>http://localhost:8080/healthz</code> — it should return <code class='ic'>200</code>. That same <code class='ic'>/healthz</code> path becomes the readiness and liveness probe in Lecture 4, so it&#x27;s worth confirming it works through the container now.</p>
+<p>The flow, end to end, is as follows: your browser hits <code class='ic'>localhost:8080</code> on the host → Docker forwards it to port <code class='ic'>5000</code> inside the container → Flask handles the request and responds back out through the same mapping. The diagram below shows that request crossing the container boundary opened by <code class='ic'>-p</code>.</p>
+<figure class='diagram'><div class='mermaid'>sequenceDiagram
+    participant B as Browser (host)
+    participant D as Docker (port mapping)
+    participant F as Flask (container port 5000)
+    B-&gt;&gt;D: GET localhost:8080/healthz
+    D-&gt;&gt;F: Forward to container port 5000
+    F--&gt;&gt;D: 200 OK
+    D--&gt;&gt;B: 200 OK</div><figcaption>Request flow across the port mapping opened by -p 8080:5000</figcaption></figure>
+<p>A couple of practical run-time tips:</p>
+<ul>
+<li>Run it in the background with the <code class='ic'>-d</code> (detached) flag so your terminal stays free: <code class='ic'>docker run -d -p 8080:5000 flask-capstone:1.0</code>.</li>
+<li>List running containers with <code class='ic'>docker ps</code>, and stop one with <code class='ic'>docker stop &lt;container_id&gt;</code>.</li>
+</ul>
+<h4>Tagging for what comes next</h4>
+<p>You&#x27;ve already given the image a meaningful tag with <code class='ic'>-t flask-capstone:1.0</code>. But you can also <strong>re-tag</strong> an existing image at any time with <code class='ic'>docker tag</code>, which is useful when you want to point the same image at a new name or version:</p>
+<pre><code>
+docker tag flask-capstone:1.0 flask-capstone:latest
+</code></pre>
+<p>This doesn&#x27;t copy or rebuild anything — it just adds a second label pointing at the same image.</p>
+<p>Why do we care about clean, versioned tags in a Kubernetes course? Because <strong>tags are how Kubernetes identifies which image to run.</strong> A Deployment manifest will literally name <code class='ic'>flask-capstone:1.0</code>. When you ship a new version of the app, you build <code class='ic'>flask-capstone:2.0</code> and tell Kubernetes to roll over to it — which is exactly the rolling-update workflow you&#x27;ll perform in Lecture 5. A vague tag like <code class='ic'>latest</code> makes that impossible to reason about, because &quot;latest&quot; can silently mean different things at different times. Explicit version tags (<code class='ic'>1.0</code>, <code class='ic'>2.0</code>, ...) are a best practice that pays off the moment you start operating the app.</p>
+<blockquote class='callout'>
+<p>Pin a real version like <code class='ic'>1.0</code> for anything you deploy to Kubernetes. Relying on <code class='ic'>latest</code> makes rollouts and rollbacks ambiguous, because the cluster can&#x27;t tell one &quot;latest&quot; from another.</p>
+</blockquote>
+<h4>What about Docker Hub?</h4>
+<p>You may have seen tutorials push images to <strong>Docker Hub</strong> (a public registry) with <code class='ic'>docker push</code>, so other machines can <code class='ic'>docker pull</code> them. That&#x27;s the normal way clusters in the cloud get their images. For this capstone, though, we&#x27;re running a <strong>local</strong> Kubernetes cluster (minikube or kind), and in Lecture 3 you&#x27;ll load the image directly into the cluster with <code class='ic'>minikube image load</code> or <code class='ic'>kind load docker-image</code> — no registry required. So you don&#x27;t need a Docker Hub account here. Just keep the image built and tagged locally, and the next lecture picks it up from there.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A <strong>Dockerfile</strong> is the recipe for an <strong>image</strong>; a <strong>container</strong> is a running instance of that image. You build once and run many.</li>
+<li>A solid Flask Dockerfile uses a <code class='ic'>slim</code> base image, copies <code class='ic'>requirements.txt</code> and installs dependencies <em>before</em> copying the code (for build caching), declares the port with <code class='ic'>EXPOSE</code>, and sets the startup <code class='ic'>CMD</code>.</li>
+<li><code class='ic'>docker build -t flask-capstone:1.0 .</code> builds the image; <code class='ic'>docker run -p 8080:5000 flask-capstone:1.0</code> runs it and publishes the port. <code class='ic'>EXPOSE</code> only documents the port — <code class='ic'>-p</code> actually opens it.</li>
+<li>Add a <code class='ic'>.dockerignore</code> to keep builds lean and avoid leaking local files into the image.</li>
+<li>Tag images with explicit versions (<code class='ic'>flask-capstone:1.0</code>, not just <code class='ic'>latest</code>); these tags are exactly what your Kubernetes manifests will reference for deployments, rolling updates, and rollbacks.</li>
+<li><strong>Next up (Lecture 3):</strong> stand up a local Kubernetes cluster and load this image into it — no registry needed.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warmup — Write a .dockerignore file. Given the project folder below, create a <code class='ic'>.dockerignore</code> that excludes the local virtual environment, compiled Python files, the Git history, and any local <code class='ic'>.env</code> secrets file. List one exclusion pattern per line.</p></div>
+              <pre class='starter'><code># Project folder contents:
+# app.py
+# requirements.txt
+# Dockerfile
+# .env            ← local secrets, must NOT enter the image
+# .git/            ← version history, not needed
+# venv/            ← local virtualenv, must NOT override image deps
+# __pycache__/     ← compiled bytecode, not needed
+# *.pyc</code></pre>
+              <details><summary>Hint</summary><ul><li>A `.dockerignore` works exactly like `.gitignore` — one glob pattern per line is enough.</li><li>Make sure to exclude both `venv/` and `.venv/` because different tools use different names for the virtual environment folder.</li><li>The `.env` file often holds API keys or database passwords — always exclude it so it never ends up inside the image.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># .dockerignore
+__pycache__/
+*.pyc
+venv/
+.venv/
+.git/
+.env</code></pre>
+                <div class='exp2'><p>When <code class='ic'>docker build</code> runs <code class='ic'>COPY . .</code> it sends the entire build context to the Docker daemon. Without a <code class='ic'>.dockerignore</code> the local virtual environment (<code class='ic'>venv/</code>) can shadow the clean packages installed inside the image, <code class='ic'>__pycache__/</code> and <code class='ic'>*.pyc</code> files waste space, <code class='ic'>.git/</code> bloats the context, and <code class='ic'>.env</code> can silently leak credentials into the image layer. Listing these patterns in <code class='ic'>.dockerignore</code> prevents all of that before the first byte is even sent to the daemon.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core 1 — Write the complete Dockerfile for the Flask app. The file must: (1) use <code class='ic'>python:3.12-slim</code> as the base image, (2) set <code class='ic'>/app</code> as the working directory, (3) copy <code class='ic'>requirements.txt</code> first and install dependencies with pip before copying the rest of the code, (4) document that the app listens on port 5000, and (5) set the default startup command to run <code class='ic'>app.py</code> with Python using exec (bracket) form.</p></div>
+              <pre class='starter'><code># app.py exists and starts Flask on port 5000
+# requirements.txt contains: flask
+
+# Write your Dockerfile below:
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Start with `FROM python:3.12-slim`. The `slim` tag keeps the image lean; avoid `python:3.12` (too large) or `alpine` (may break some pip packages).</li><li>Copy `requirements.txt` and run `pip install` *before* `COPY . .`. Because dependencies rarely change, Docker caches that layer and skips reinstalling Flask on every code change.</li><li>`EXPOSE 5000` only documents the port — it does not publish it. The actual port mapping is done at `docker run` time with `-p`. Use `CMD [&quot;python&quot;, &quot;app.py&quot;]` (exec form, not shell form) so Python is PID 1.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD [&quot;python&quot;, &quot;app.py&quot;]</code></pre>
+                <div class='exp2'><p>Each instruction creates a new layer in the image. <code class='ic'>FROM</code> picks the base runtime. <code class='ic'>WORKDIR</code> sets the default path so all subsequent <code class='ic'>COPY</code> and <code class='ic'>RUN</code> commands resolve relative to <code class='ic'>/app</code>. Separating <code class='ic'>COPY requirements.txt</code> + <code class='ic'>RUN pip install</code> from <code class='ic'>COPY . .</code> exploits Docker&#x27;s layer cache: when only <code class='ic'>app.py</code> changes, Docker reuses the cached pip-install layer and the rebuild takes seconds instead of minutes. <code class='ic'>--no-cache-dir</code> prevents pip from storing its download cache inside the image, keeping the final image smaller. <code class='ic'>EXPOSE</code> is metadata — it tells humans and tools what port the app expects, but it does not open any network path. Exec-form <code class='ic'>CMD</code> (square brackets) runs Python as PID 1 without a shell wrapper, which ensures signals like SIGTERM from <code class='ic'>docker stop</code> reach the process correctly.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core 2 — Build the image and verify it exists, then run a container from it with the app reachable on your host machine at port 8080. Write the exact two commands: one to build the image tagged <code class='ic'>flask-capstone:1.0</code> using the current directory as the build context, and one to run it in detached mode mapping host port 8080 to container port 5000.</p></div>
+              <pre class='starter'><code># You are in the project folder that contains Dockerfile, app.py, requirements.txt
+# Write the two shell commands:
+
+# 1. Build command:
+
+# 2. Run command (detached, port published):</code></pre>
+              <details><summary>Hint</summary><ul><li>The build command uses `-t name:tag` to set the image name and the final `.` to tell Docker to use the current folder as the build context.</li><li>For `docker run`, the port flag format is `-p host_port:container_port`. Host port is 8080; container port is 5000 (what Flask binds to inside the container).</li><li>Add `-d` to run the container in the background so your terminal stays free. You can verify the container is running with `docker ps`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># 1. Build
+docker build -t flask-capstone:1.0 .
+
+# 2. Run (detached, port published)
+docker run -d -p 8080:5000 flask-capstone:1.0</code></pre>
+                <div class='exp2'><p><code class='ic'>docker build -t flask-capstone:1.0 .</code> reads the Dockerfile in the current directory (the <code class='ic'>.</code> build context) and produces an image named <code class='ic'>flask-capstone</code> with tag <code class='ic'>1.0</code>. After the build, <code class='ic'>docker images</code> will show the entry. <code class='ic'>docker run -d -p 8080:5000 flask-capstone:1.0</code> starts a container in detached mode (<code class='ic'>-d</code>) so the process runs in the background. The <code class='ic'>-p 8080:5000</code> flag opens a port-forwarding path: traffic arriving at <code class='ic'>localhost:8080</code> on the host is forwarded to port <code class='ic'>5000</code> inside the container where Flask is listening. Without <code class='ic'>-p</code> the container is completely isolated and the app is unreachable from the host — a very common beginner mistake. You can confirm the app is working by visiting <code class='ic'>http://localhost:8080/</code> and <code class='ic'>http://localhost:8080/healthz</code> in a browser.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Application — Re-tag the built image for a new release and explain what the command does. (a) Run the <code class='ic'>docker tag</code> command to create a second tag <code class='ic'>flask-capstone:latest</code> that points to the same image as <code class='ic'>flask-capstone:1.0</code>. (b) Run <code class='ic'>docker images</code> and identify the two rows that share the same Image ID. (c) In one or two sentences, explain why Kubernetes deployments should reference <code class='ic'>flask-capstone:1.0</code> rather than <code class='ic'>flask-capstone:latest</code>.</p></div>
+              <pre class='starter'><code># The image flask-capstone:1.0 already exists from the previous task.
+
+# (a) Write the docker tag command:
+
+# (b) Run docker images — look for the two rows with the same IMAGE ID.
+
+# (c) Write your explanation here (1-2 sentences):</code></pre>
+              <details><summary>Hint</summary><ul><li>`docker tag SOURCE_IMAGE:TAG TARGET_IMAGE:TAG` — no build or copy takes place; it just adds a new name pointing at the same image ID.</li><li>After tagging, run `docker images` and compare the IMAGE ID column. Both `flask-capstone:1.0` and `flask-capstone:latest` should show identical IDs.</li><li>Think about what happens when you build `flask-capstone:2.0` and retag it as `latest`. Any deployment still pointing at `latest` now silently runs the new code — there is no way to roll back to 1.0 by name.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># (a)
+docker tag flask-capstone:1.0 flask-capstone:latest
+
+# (b) Expected output of `docker images` (IDs will differ on your machine):
+# REPOSITORY         TAG       IMAGE ID       CREATED        SIZE
+# flask-capstone     1.0       a1b2c3d4e5f6   2 minutes ago  140MB
+# flask-capstone     latest    a1b2c3d4e5f6   2 minutes ago  140MB
+#
+# Both rows share the same IMAGE ID — no data was duplicated.
+
+# (c)
+# A Kubernetes Deployment manifest names flask-capstone:1.0 explicitly;
+# when you later build flask-capstone:2.0 you can roll forward or back to
+# a specific version. With &#x27;latest&#x27;, the cluster cannot distinguish one
+# build from another, making rollbacks impossible to reason about.</code></pre>
+                <div class='exp2'><p><code class='ic'>docker tag</code> is a zero-cost operation — it adds a new name (reference) pointing at the exact same image layers already on disk. No copying or rebuilding happens. This is why both tags show the same IMAGE ID. The practical importance for Kubernetes is that a Deployment&#x27;s <code class='ic'>image:</code> field is the only handle the cluster has to identify <em>which</em> version of your app to run. Explicit semver-style tags (<code class='ic'>1.0</code>, <code class='ic'>2.0</code>) let you pin deployments, compare what is running against what is built, and perform <code class='ic'>kubectl rollout undo</code> to a known-good tag. The <code class='ic'>latest</code> tag is a floating pointer: the moment you push <code class='ic'>flask-capstone:latest</code> again it silently points somewhere else, making the cluster&#x27;s running state untrustworthy. Best practice is to always push and reference explicit version tags for anything that enters Kubernetes.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=gDF_qGzYEYQ' target='_blank'>Stable Diffusion GUI App with Docker and Flask - Step by Step Tutorial for Python Beginners</a></li><li><a href='https://www.youtube.com/watch?v=-l7YocEQtA0' target='_blank'>Docker Simply Explained with a Machine Learning Project for Beginners</a></li><li><a href='https://www.youtube.com/watch?v=wbsbXfkv47A' target='_blank'>How to Run a Python Docker Image on AWS Lambda</a></li></ul></div>
+        </article>
+<article id='lec3' class='lecture'>
+          <h2>03. Preparing a Local Kubernetes Cluster </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Install <strong>minikube</strong> or <strong>kind</strong> and start a Kubernetes cluster on your own laptop.</li>
+<li>Connect to that cluster with <strong>kubectl</strong> and confirm it is healthy using <code class='ic'>kubectl get nodes</code> and <code class='ic'>kubectl cluster-info</code>.</li>
+<li>Load the image you built in Lecture 2 (<code class='ic'>flask-capstone:1.0</code>) <strong>directly into the cluster</strong> with <code class='ic'>minikube image load</code> or <code class='ic'>kind load docker-image</code> — so you can deploy without ever pushing to a registry.</li>
+</ul>
+<h3>Body</h3>
+<h4>Where we are in the capstone</h4>
+<p>So far in this capstone you have a working app and a way to package it. In Lecture 1 you wrote a small Flask application with a <code class='ic'>/healthz</code> endpoint, and in Lecture 2 you wrapped it in a Docker image and tagged it <code class='ic'>flask-capstone:1.0</code>. That image is sitting on your machine right now, ready to run.</p>
+<p>The missing piece is a place to run it <em>as Kubernetes would</em>. That is what this lecture builds: a small, real Kubernetes cluster that lives entirely on your laptop. By the end you will have a running cluster, a working <code class='ic'>kubectl</code> connection, and your <code class='ic'>flask-capstone:1.0</code> image loaded inside the cluster — primed for Lecture 4, where you will write the Deployment and Service manifests that actually schedule it.</p>
+<blockquote class='callout'>
+<p>The whole point of this lecture is to get your local image <em>inside</em> the cluster without touching a remote registry. That single trick is what makes local Kubernetes development fast and free.</p>
+</blockquote>
+<h4>Why a local cluster (and why not a real one)</h4>
+<p>A production Kubernetes cluster is a serious thing: typically three control-plane nodes for high availability plus a fleet of worker nodes, each on its own physical or virtual machine. The control plane decides <em>what should run where</em>; the workers actually run your containers. You would never spin that up just to test one Flask app.</p>
+<p>For learning and local development we use a <strong>single-node cluster</strong> instead — one machine that plays both the control-plane and the worker role at the same time. There are two popular tools for this, and you only need to pick <strong>one</strong>:</p>
+<ul>
+<li><strong>minikube</strong> — a mature, batteries-included single-node cluster. It runs Kubernetes inside a Docker container (or a VM) on your machine and ships with handy extras like <code class='ic'>minikube service</code> and addons.</li>
+<li><strong>kind</strong> — &quot;<strong>K</strong>ubernetes <strong>in</strong> <strong>D</strong>ocker.&quot; It runs each Kubernetes node as a Docker container. It is lightweight, starts quickly, and is the tool many CI systems use.</li>
+</ul>
+<p>Both give you the same <code class='ic'>kubectl</code> experience. Choose whichever you like — the rest of this capstone works identically on either.</p>
+<blockquote class='callout'>
+<p>Prerequisite for both: <strong>Docker must be installed and running.</strong> Both minikube (with the Docker driver) and kind use Docker as their engine, so start Docker Desktop or the Docker daemon before you continue.</p>
+</blockquote>
+<h4>Meet kubectl, your remote control</h4>
+<p>Before we start a cluster, understand the tool you will drive it with. <strong>kubectl</strong> (pronounced &quot;kube-control&quot; or &quot;kube-cuttle&quot;) is the command-line client for Kubernetes. Every action — create a Pod, inspect a Service, read logs — is sent as a request to the cluster&#x27;s <strong>API server</strong>, the single front door through which all changes flow. kubectl simply formats those requests for you.</p>
+<p>A nice bonus: kubectl is not tied to minikube or kind. The exact same tool talks to a managed cloud cluster (EKS, GKE, AKS) too. Learn it here and you have learned it everywhere.</p>
+<p>Both minikube and kind install kubectl as a dependency, so installing the cluster tool usually gives you kubectl for free. Verify it with:</p>
+<pre><code>
+kubectl version --client
+</code></pre>
+<h4>Path A — Using minikube</h4>
+<p><strong>1. Install and start.</strong> On macOS you can use Homebrew (<code class='ic'>brew install minikube</code>); on Windows use the official installer or <code class='ic'>winget</code>/Chocolatey; on Linux grab the binary from the minikube site. Then start a cluster with the Docker driver:</p>
+<pre><code>
+minikube start --driver=docker
+</code></pre>
+<p>This downloads a node image and boots a one-node cluster inside a Docker container. A single node is the default, so you don&#x27;t need to ask for one explicitly.</p>
+<p><strong>2. Confirm it&#x27;s healthy.</strong></p>
+<pre><code>
+minikube status
+kubectl get nodes
+kubectl cluster-info
+</code></pre>
+<p><code class='ic'>minikube status</code> should report the host, kubelet, and apiserver as <code class='ic'>Running</code>. <code class='ic'>kubectl get nodes</code> should list one node with status <code class='ic'>Ready</code>. <code class='ic'>kubectl cluster-info</code> prints the API server URL — proof that kubectl is wired up to the cluster.</p>
+<p><strong>3. Load your image.</strong> This is the key step. Your <code class='ic'>flask-capstone:1.0</code> image lives in your <em>local</em> Docker, but the cluster has its own separate image store and cannot see it. minikube gives you a one-line command to copy it in:</p>
+<pre><code>
+minikube image load flask-capstone:1.0
+</code></pre>
+<p>After this, the image exists inside the cluster. You can verify it:</p>
+<pre><code>
+minikube image ls | grep flask-capstone
+</code></pre>
+<h4>Path B — Using kind</h4>
+<p><strong>1. Install and create.</strong> Install kind (Homebrew, the Go toolchain, or the release binary), then create a cluster:</p>
+<pre><code>
+kind create cluster --name capstone
+</code></pre>
+<p>This spins up a Kubernetes node as a Docker container and automatically points kubectl at it.</p>
+<p><strong>2. Confirm it&#x27;s healthy.</strong></p>
+<pre><code>
+kubectl get nodes
+kubectl cluster-info --context kind-capstone
+</code></pre>
+<p>You should again see one <code class='ic'>Ready</code> node and a printed API server URL. kind sets your kubectl context to <code class='ic'>kind-&lt;name&gt;</code> (here <code class='ic'>kind-capstone</code>).</p>
+<p><strong>3. Load your image.</strong></p>
+<pre><code>
+kind load docker-image flask-capstone:1.0 --name capstone
+</code></pre>
+<p>This copies the image from your local Docker into the kind node&#x27;s container runtime. Now the cluster can run it without any registry.</p>
+<h4>Why we skip the registry — and what <code class='ic'>imagePullPolicy</code> has to do with it</h4>
+<p>The &quot;normal&quot; way to get an image into Kubernetes is to push it to a registry like Docker Hub or Amazon ECR, then let the cluster pull it back down. During development that loop is painful: every code change means <em>build → push → pull</em>, over and over, and a private registry can cost money and require credentials.</p>
+<p>Loading the image directly sidesteps all of that. But there&#x27;s a catch you must understand for Lecture 4. By default, Kubernetes may still try to <strong>pull</strong> an image from a remote registry — especially if the tag is <code class='ic'>:latest</code> — and since <code class='ic'>flask-capstone:1.0</code> was never pushed anywhere, that pull fails and your Pod gets stuck in <code class='ic'>ImagePullBackOff</code> (Kubernetes&#x27; way of saying &quot;I couldn&#x27;t fetch the image&quot;).</p>
+<p>The fix is a field on the container spec called <strong><code class='ic'>imagePullPolicy</code></strong>:</p>
+<ul>
+<li><code class='ic'>imagePullPolicy: IfNotPresent</code> — use the local copy if it already exists; only pull if it&#x27;s missing. Because we <em>loaded</em> the image, it is already present, so Kubernetes uses it directly and never reaches out to a registry.</li>
+<li><code class='ic'>imagePullPolicy: Never</code> — never pull at all; fail if the image isn&#x27;t local. Also works here, but stricter.</li>
+</ul>
+<blockquote class='callout'>
+<p>For this capstone we use a fixed tag (<code class='ic'>flask-capstone:1.0</code>, not <code class='ic'>:latest</code>) and set <code class='ic'>imagePullPolicy: IfNotPresent</code>. The fixed tag stops Kubernetes from defaulting to &quot;always pull,&quot; and the policy lets it use the image you loaded. Remember this for Lecture 4 — it&#x27;s exactly the line that keeps your Pod from getting stuck.</p>
+</blockquote>
+<p>One quick caveat from the source material: minikube&#x27;s older <code class='ic'>eval $(minikube docker-env)</code> trick (which retargets your Docker client at minikube&#x27;s internal daemon) only works on <strong>single-node</strong> clusters. The <code class='ic'>minikube image load</code> and <code class='ic'>kind load docker-image</code> commands shown above are simpler and work the same way regardless, so we prefer them.</p>
+<h4>A mental model of what just happened</h4>
+<p>The structure is as follows. Your laptop runs Docker, which holds the <code class='ic'>flask-capstone:1.0</code> image you built in Lecture 2. Your cluster tool (minikube or kind) runs a single Kubernetes node inside a Docker container; that node has its <em>own</em> image store, separate from your laptop&#x27;s Docker. The <code class='ic'>image load</code> command copies the image across that boundary. kubectl, meanwhile, sits on your laptop and sends commands to the node&#x27;s API server. Once the image is on the node and kubectl is connected, everything is in place for Kubernetes to schedule a Pod from that image — which is exactly what Lecture 4 will do. The diagram below shows these two boundaries and the two flows that cross between them.</p>
+<figure class='diagram'><div class='mermaid'>flowchart LR
+    subgraph Laptop[&quot;Your laptop&quot;]
+        Kubectl[&quot;kubectl&quot;]
+        Docker[&quot;Docker&lt;br/&gt;holds flask-capstone:1.0&quot;]
+    end
+    subgraph Node[&quot;Single-node cluster (minikube / kind container)&quot;]
+        API[&quot;API server&quot;]
+        Kubelet[&quot;kubelet&quot;]
+        Store[&quot;Node image store&quot;]
+    end
+    Kubectl --&gt;|&quot;commands&quot;| API
+    API --&gt; Kubelet
+    Docker --&gt;|&quot;image load&quot;| Store
+    Kubelet --&gt;|&quot;runs Pod from&quot;| Store</div><figcaption>Local cluster layout: kubectl drives the API server while image load copies the image across the laptop-to-cluster boundary</figcaption></figure>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A <strong>single-node local cluster</strong> (minikube or kind) gives you a real Kubernetes environment on your laptop; pick one tool and start it with Docker running.</li>
+<li><code class='ic'>kubectl get nodes</code> (look for <code class='ic'>Ready</code>) and <code class='ic'>kubectl cluster-info</code> are your two quick health checks that kubectl is connected to a live cluster.</li>
+<li>Load your Lecture 2 image with <code class='ic'>minikube image load flask-capstone:1.0</code> or <code class='ic'>kind load docker-image flask-capstone:1.0 --name &lt;cluster&gt;</code> to deploy <strong>without a registry</strong>.</li>
+<li>Pair a <strong>fixed tag</strong> (<code class='ic'>:1.0</code>, not <code class='ic'>:latest</code>) with <strong><code class='ic'>imagePullPolicy: IfNotPresent</code></strong> so Kubernetes uses the loaded image instead of trying — and failing — to pull it. This sets you up cleanly for the manifests in Lecture 4.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warmup — Verify your tools are ready.</p>
+<p>Before starting a cluster, confirm that Docker, your cluster tool (minikube or kind), and kubectl are all installed and accessible from your terminal. Run the three verification commands below and record what each one prints.</p></div>
+              <pre class='starter'><code># Run each command and note the output.
+
+# 1. Check Docker is running
+docker version --format &#x27;{{.Server.Version}}&#x27;
+
+# 2. Check your cluster tool
+minikube version          # if you chose minikube
+# kind version            # if you chose kind
+
+# 3. Check kubectl (client side only)
+kubectl version --client</code></pre>
+              <details><summary>Hint</summary><ul><li>If `docker version` returns only the client section (no server), Docker Desktop is not running — start it and retry.</li><li>If `minikube` or `kind` is not found, follow the install instructions at minikube.sigs.k8s.io or kind.sigs.k8s.io and make sure the binary is in your PATH.</li><li>kubectl is usually installed as a dependency of minikube/kind. If it is still missing, install it separately from kubernetes.io/docs/tasks/tools.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Expected output (versions will differ on your machine):
+
+# docker version
+# 24.0.7
+
+# minikube version
+# minikube version: v1.33.1
+# commit: 5883c09216182566a63dff4c326a6fc9ed2982ff
+
+# kubectl version --client
+# Client Version: v1.30.2
+# Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3</code></pre>
+                <div class='exp2'><p>These three commands confirm that the Docker daemon is responsive (a prerequisite for both minikube and kind), that your chosen cluster tool is on the PATH, and that kubectl is installed client-side. None of them touch a cluster yet — they simply verify the starting conditions. If any command fails, install or start the missing tool before proceeding.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core 1 — Start a local cluster and verify it is healthy.</p>
+<p>Using minikube <strong>or</strong> kind, create a single-node Kubernetes cluster and confirm it is ready. You must see exactly one node with status <code class='ic'>Ready</code> and a printed API-server URL before you move on.</p></div>
+              <pre class='starter'><code># --- Option A: minikube ---
+minikube start --driver=docker
+
+# --- Option B: kind ---
+kind create cluster --name capstone
+
+# After the cluster is up, run these health checks (same for both):
+kubectl get nodes
+kubectl cluster-info</code></pre>
+              <details><summary>Hint</summary><ul><li>If `minikube start` reports &#x27;Exiting due to PROVIDER_DOCKER_NOT_RUNNING&#x27;, Docker Desktop is not running — start it first.</li><li>For kind, verify your kubectl context was switched automatically with `kubectl config current-context`; it should print `kind-capstone`. If not, run `kubectl cluster-info --context kind-capstone` explicitly.</li><li>A node stuck in `NotReady` usually means the cluster is still initialising. Wait 30-60 seconds and re-run `kubectl get nodes`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># minikube path
+minikube start --driver=docker
+# Wait for &quot;Done! kubectl is now configured to use \&quot;minikube\&quot; cluster&quot;
+
+minikube status
+# Expected:
+# minikube
+# type: Control Plane
+# host: Running
+# kubelet: Running
+# apiserver: Running
+# kubeconfig: Configured
+
+kubectl get nodes
+# NAME       STATUS   ROLES           AGE   VERSION
+# minikube   Ready    control-plane   1m    v1.30.0
+
+kubectl cluster-info
+# Kubernetes control plane is running at https://127.0.0.1:&lt;port&gt;
+# CoreDNS is running at https://127.0.0.1:&lt;port&gt;/api/v1/...
+
+# -------------------------------------------------------
+# kind path
+kind create cluster --name capstone
+# Wait for &quot;Have a nice day!&quot;
+
+kubectl get nodes
+# NAME                     STATUS   ROLES           AGE   VERSION
+# capstone-control-plane   Ready    control-plane   1m    v1.30.0
+
+kubectl cluster-info --context kind-capstone
+# Kubernetes control plane is running at https://127.0.0.1:&lt;port&gt;</code></pre>
+                <div class='exp2'><p><code class='ic'>minikube start --driver=docker</code> (or <code class='ic'>kind create cluster</code>) does three things: it downloads a Kubernetes node image (once, cached thereafter), boots that node as a Docker container on your machine, and writes a new entry into <code class='ic'>~/.kube/config</code> so kubectl knows how to reach the cluster. <code class='ic'>kubectl get nodes</code> reads from the cluster&#x27;s API server — if it returns a <code class='ic'>Ready</code> node, kubectl is correctly wired up. <code class='ic'>kubectl cluster-info</code> prints the API-server URL, confirming the control plane is reachable. Both checks together confirm the cluster is healthy before you invest time loading images.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core 2 — Load the <code class='ic'>flask-capstone:1.0</code> image into the cluster.</p>
+<p>The image you built in Lecture 2 lives in your local Docker daemon, but the cluster uses a separate internal image store and cannot see it yet. Copy the image into the cluster using the appropriate command for your tool, then verify it is present inside the cluster.</p></div>
+              <pre class='starter'><code># Confirm the image exists in your local Docker first:
+docker images flask-capstone
+# Expected: a row showing flask-capstone  1.0  ...
+
+# --- Option A: minikube ---
+minikube image load flask-capstone:1.0
+minikube image ls | grep flask-capstone
+
+# --- Option B: kind ---
+kind load docker-image flask-capstone:1.0 --name capstone
+# Verification for kind (exec into the node):
+docker exec -it capstone-control-plane crictl images | grep flask-capstone</code></pre>
+              <details><summary>Hint</summary><ul><li>If `docker images flask-capstone` returns nothing, the image does not exist yet — go back to Lecture 2 and build it with `docker build -t flask-capstone:1.0 .`.</li><li>For minikube, a long pause after `minikube image load` is normal on first run; subsequent loads of the same image are instant because minikube caches it.</li><li>For kind, make sure you include `--name capstone` (or whatever name you used with `kind create cluster`). Omitting it targets the default cluster named `kind`, which may not exist.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># minikube path
+minikube image load flask-capstone:1.0
+# (no output on success; the command exits 0)
+
+minikube image ls | grep flask-capstone
+# docker.io/library/flask-capstone:1.0
+
+# -------------------------------------------------------
+# kind path
+kind load docker-image flask-capstone:1.0 --name capstone
+# Image: &quot;flask-capstone:1.0&quot; with ID &quot;sha256:...&quot; not yet present on node &quot;capstone-control-plane&quot;, loading...
+
+# Verify inside the node container:
+docker exec -it capstone-control-plane crictl images | grep flask
+# IMAGE                           TAG   IMAGE ID       SIZE
+# docker.io/library/flask-capstone  1.0  sha256:...   ...</code></pre>
+                <div class='exp2'><p>Both <code class='ic'>minikube image load</code> and <code class='ic'>kind load docker-image</code> copy the image tarball from your local Docker daemon across what the lecture calls the &#x27;laptop-to-cluster boundary&#x27; — into the node container&#x27;s own container runtime (containerd). After this step, the image lives inside the cluster and can be referenced in a Pod spec without pulling from any registry. The verification step proves the copy succeeded: <code class='ic'>minikube image ls</code> lists images stored on the minikube node, and <code class='ic'>crictl images</code> (run inside the kind node container) lists images known to containerd on that node.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Applied — Understand <code class='ic'>imagePullPolicy</code> and predict the failure.</p>
+<p>Now that the image is loaded, answer the following two questions by checking the lecture content and then testing your understanding:</p>
+<p>1. Write a minimal Pod spec YAML snippet that schedules the <code class='ic'>flask-capstone:1.0</code> container with the correct <code class='ic'>imagePullPolicy</code> for a local-only image. The Pod should not pull from any remote registry.</p>
+<p>2. If you accidentally set <code class='ic'>imagePullPolicy: Always</code> (or omitted the field on a <code class='ic'>:latest</code>-tagged image), what error status would you see on the Pod, and why? Explain in 1-2 sentences.</p>
+<p>Apply the Pod from question 1 to your running cluster and confirm it reaches <code class='ic'>Running</code> status.</p></div>
+              <pre class='starter'><code># Fill in the blank — write a Pod spec with the correct imagePullPolicy:
+cat &lt;&lt;&#x27;EOF&#x27; &gt; /tmp/flask-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: flask-test
+spec:
+  containers:
+    - name: flask
+      image: flask-capstone:1.0
+      imagePullPolicy: _______________   # &lt;-- fill this in
+      ports:
+        - containerPort: 5000
+EOF
+
+kubectl apply -f /tmp/flask-pod.yaml
+kubectl get pod flask-test</code></pre>
+              <details><summary>Hint</summary><ul><li>The lecture says to use `IfNotPresent` (not `Never`). Both work for a loaded image, but `IfNotPresent` is the conventional choice for local dev because it gracefully falls back to a registry pull if the image *is* available remotely.</li><li>If the Pod stays in `ContainerCreating` for more than a minute, describe it with `kubectl describe pod flask-test` and look at the Events section for clues.</li><li>To observe the `ImagePullBackOff` failure deliberately, create a second Pod with `imagePullPolicy: Always` and watch `kubectl get pod` — it will never reach `Running` because there is no remote registry entry.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Question 1 — correct Pod spec:
+cat &lt;&lt;&#x27;EOF&#x27; &gt; /tmp/flask-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: flask-test
+spec:
+  containers:
+    - name: flask
+      image: flask-capstone:1.0
+      imagePullPolicy: IfNotPresent
+      ports:
+        - containerPort: 5000
+EOF
+
+kubectl apply -f /tmp/flask-pod.yaml
+# pod/flask-test created
+
+kubectl get pod flask-test
+# NAME         READY   STATUS    RESTARTS   AGE
+# flask-test   1/1     Running   0          10s
+
+# ---
+# Question 2 answer:
+# If imagePullPolicy is Always (or the tag is :latest, which defaults to Always),
+# Kubernetes will attempt to pull flask-capstone:1.0 from a remote registry.
+# Because the image was never pushed, the pull fails and the Pod enters
+# ImagePullBackOff — Kubernetes&#x27; signal that it cannot fetch the image.</code></pre>
+                <div class='exp2'><p><code class='ic'>imagePullPolicy: IfNotPresent</code> tells the kubelet: &#x27;if this image is already in the node&#x27;s image store, use it; only reach out to a registry if it is absent.&#x27; Since we loaded <code class='ic'>flask-capstone:1.0</code> in the previous task, it <em>is</em> present, so the kubelet uses it locally and the Pod starts without any network call to a registry. The pairing of a fixed, non-<code class='ic'>:latest</code> tag with <code class='ic'>IfNotPresent</code> is the standard recipe for local Kubernetes development. By contrast, <code class='ic'>imagePullPolicy: Always</code> forces a fresh registry pull every time a Pod is scheduled — appropriate in CI/CD where you want the latest pushed image, but fatal here because no such registry entry exists.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=7tWJbsGglYA' target='_blank'>Using local docker images in Minikube</a></li><li><a href='https://www.youtube.com/watch?v=qBudNa-j7as' target='_blank'>Minikube Tutorial: Setting Up Your Environment - Part 3</a></li><li><a href='https://www.youtube.com/watch?v=hDBgeUuPgXo' target='_blank'>Kubernetes Hands-On: Step-By-Step Guide to Deploying an App with Docker, Minikube &amp; kubectl</a></li></ul></div>
+        </article>
+<article id='lec4' class='lecture'>
+          <h2>04. Writing Kubernetes Manifests for the Flask App </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Write the Deployment, Service, and ConfigMap YAML manifests that run our <code class='ic'>flask-capstone:1.0</code> image.</li>
+<li>Make labels and selectors (<code class='ic'>matchLabels</code>) line up correctly, and set <code class='ic'>replicas</code>, the container image, and <code class='ic'>containerPort</code>.</li>
+<li>Wire up lightweight readiness and liveness probes against the <code class='ic'>/healthz</code> endpoint, and move runtime settings out of the image into a ConfigMap.</li>
+</ul>
+<h3>Body</h3>
+<h4>Where we are in the journey</h4>
+<p>So far this capstone has moved through three clear stages. In Lecture 1 we built a small Flask app with a couple of routes, including a <code class='ic'>/healthz</code> health-check endpoint that simply returns HTTP 200. In Lecture 2 we wrapped that app in a Docker image and tagged it <code class='ic'>flask-capstone:1.0</code>. In Lecture 3 we spun up a local cluster (minikube or kind) and loaded that exact image into the cluster so we don&#x27;t need an external registry.</p>
+<p>Right now the image is sitting inside the cluster, but nothing is running it. Kubernetes does not &quot;just run&quot; an image — you have to <em>describe</em> what you want, and Kubernetes makes reality match that description. That description is a <strong>manifest</strong>: a YAML file that declares the desired state of an object. In this lecture we write three of them. We won&#x27;t apply them yet (that&#x27;s Lecture 5) — the goal here is to author correct, well-structured YAML and understand every field.</p>
+<blockquote class='callout'>
+<p>A manifest is declarative. You don&#x27;t tell Kubernetes <em>how</em> to start your app step by step; you tell it <em>what</em> you want to exist, and the cluster continuously works to keep that true.</p>
+</blockquote>
+<p>The three objects we need, and the role each one plays, are as follows:</p>
+<ul>
+<li><strong>Deployment</strong> — runs and supervises copies (replicas) of our Flask Pod. If a Pod dies, the Deployment recreates it.</li>
+<li><strong>Service</strong> — gives those Pods one stable network address so other things can reach them, even as individual Pods come and go.</li>
+<li><strong>ConfigMap</strong> — holds configuration values (like an environment name) outside the image, so we can change settings without rebuilding.</li>
+</ul>
+<p>Let&#x27;s build them one at a time.</p>
+<h4>The ConfigMap: configuration out of the image</h4>
+<p>A core principle from the source material is worth repeating: <strong>don&#x27;t bake configuration into your image.</strong> If the database URL or the environment name lives inside the container image, then changing it means rebuilding and re-shipping the whole image. A ConfigMap fixes this by storing those values separately and injecting them into the Pod at runtime — think of it as a small dictionary of settings that your Pods can read.</p>
+<p>We&#x27;ll keep it simple and store two values: an environment name and a greeting message.</p>
+<pre><code>
+# configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flask-config
+  labels:
+    app: flask-capstone
+data:
+  APP_ENV: &quot;production&quot;
+  APP_GREETING: &quot;Hello from Kubernetes!&quot;
+</code></pre>
+<p><code class='ic'>data</code> is just key/value pairs. In the next section we&#x27;ll inject these into the container as environment variables, so inside the running app <code class='ic'>os.environ[&quot;APP_ENV&quot;]</code> would read <code class='ic'>&quot;production&quot;</code>. The payoff: when you later want to flip <code class='ic'>APP_ENV</code> to <code class='ic'>staging</code>, you edit this one file (and restart the Pods) — the image never changes.</p>
+<h4>The Deployment: running the app</h4>
+<p>The Deployment is the heart of this lecture. Its job, stated plainly, is to declare how many copies of our Pod should be running and to keep that true. Here is the full manifest, then we&#x27;ll walk through it.</p>
+<pre><code>
+# deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-capstone
+  labels:
+    app: flask-capstone
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-capstone
+  template:
+    metadata:
+      labels:
+        app: flask-capstone
+    spec:
+      containers:
+        - name: flask
+          image: flask-capstone:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: flask-config
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+</code></pre>
+<p>Let&#x27;s unpack the important fields.</p>
+<p><strong><code class='ic'>replicas: 2</code></strong> asks for two identical Pods. Running more than one copy is the standard way to avoid downtime — if one Pod (or the node under it) fails, the other keeps serving while Kubernetes replaces the lost one.</p>
+<p><strong><code class='ic'>image: flask-capstone:1.0</code></strong> is the exact name and tag we built in Lecture 2. Note there&#x27;s no registry prefix (like <code class='ic'>docker.io/...</code>); that&#x27;s deliberate, because the image lives locally inside the cluster.</p>
+<p><strong><code class='ic'>imagePullPolicy: IfNotPresent</code></strong> is essential for our setup. It tells the kubelet: <em>use the image already present on the node; only pull from a registry if it&#x27;s missing.</em> Because we side-loaded the image in Lecture 3, there is no registry to pull from. If we left the default (which pulls every time for a <code class='ic'>:latest</code>-style image), Kubernetes would try to fetch <code class='ic'>flask-capstone:1.0</code> from a registry, fail, and leave the Pod stuck in <code class='ic'>ImagePullBackOff</code>.</p>
+<blockquote class='callout'>
+<p><code class='ic'>imagePullPolicy: IfNotPresent</code> is the line that makes locally loaded images work. Forget it and your Pods will sit in <code class='ic'>ImagePullBackOff</code> looking for a registry that doesn&#x27;t have your image.</p>
+</blockquote>
+<p><strong><code class='ic'>containerPort: 5000</code></strong> documents the port the Flask process listens on inside the container. (Flask&#x27;s development server defaults to 5000.) This is informational — it doesn&#x27;t open the port by itself — but the Service and the probes both target this port.</p>
+<p><strong><code class='ic'>envFrom</code> / <code class='ic'>configMapRef</code></strong> pulls <em>every</em> key from the <code class='ic'>flask-config</code> ConfigMap and exposes it as an environment variable in the container. So <code class='ic'>APP_ENV</code> and <code class='ic'>APP_GREETING</code> become available to the app at runtime, with no values hardcoded in the manifest.</p>
+<h4>How labels and selectors match up</h4>
+<p>This is the part beginners most often get wrong, so it deserves a careful look. Three label-related blocks appear in the Deployment, and they are <em>not</em> redundant — they each do a different job:</p>
+<p>1. <code class='ic'>metadata.labels</code> (top level) — labels on the <strong>Deployment object itself</strong>. Useful for organizing and querying Deployments. It does not control which Pods are managed.</p>
+<p>2. <code class='ic'>spec.selector.matchLabels</code> — the rule that says <em>&quot;this Deployment owns Pods carrying these labels.&quot;</em></p>
+<p>3. <code class='ic'>spec.template.metadata.labels</code> — the labels <strong>stamped onto each Pod</strong> the Deployment creates.</p>
+<p>The hard requirement: <strong><code class='ic'>spec.selector.matchLabels</code> must match <code class='ic'>spec.template.metadata.labels</code>.</strong> In our file both say <code class='ic'>app: flask-capstone</code>, so the Deployment&#x27;s selector matches the Pods it stamps out, and it correctly adopts and supervises them. If these two disagree, the API server rejects the manifest — the Deployment would have no way to recognize the Pods it just created. The flow of ownership is as follows: the Deployment&#x27;s selector points at the Pod template&#x27;s labels, and those same labels later let the Service find the Pods.</p>
+<h4>The Service: a stable address for the Pods</h4>
+<p>Pods are disposable. Each gets its own IP, and that IP changes whenever a Pod is recreated. So we never talk to a Pod directly — we put a <strong>Service</strong> in front of the group. A Service has a stable name and IP, and it forwards traffic to whatever Pods currently match its selector.</p>
+<pre><code>
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-capstone
+  labels:
+    app: flask-capstone
+spec:
+  type: ClusterIP
+  selector:
+    app: flask-capstone
+  ports:
+    - port: 80
+      targetPort: 5000
+      protocol: TCP
+</code></pre>
+<p>The key link here is <strong><code class='ic'>selector: app: flask-capstone</code></strong>. The Service uses this to find Pods — and it matches the very labels the Deployment stamps onto each Pod (<code class='ic'>spec.template.metadata.labels</code>). That&#x27;s how a Service and a Deployment connect: not by referencing each other by name, but by agreeing on a label. This is also why the readiness probe matters: only Pods that report <em>ready</em> are added to the Service&#x27;s pool of endpoints.</p>
+<p>The two ports play different roles. <strong><code class='ic'>port: 80</code></strong> is the port the Service exposes to the rest of the cluster — other Pods reach our app at <code class='ic'>flask-capstone:80</code>. <strong><code class='ic'>targetPort: 5000</code></strong> is the port on the container that traffic is forwarded to, which is exactly the <code class='ic'>containerPort</code> our Flask app listens on. We chose <code class='ic'>type: ClusterIP</code> (the default), which keeps the Service reachable only from inside the cluster; in Lecture 5 we&#x27;ll expose it to our laptop.</p>
+<p>Putting all three objects side by side, the diagram below shows how the <code class='ic'>app: flask-capstone</code> label is the single piece of glue that ties the Deployment, its Pods, and the Service together — and how a client request flows through the ClusterIP down to port 5000 on each container.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TB
+    Client[&quot;Other Pod in cluster&quot;]
+    subgraph Deploy[&quot;Deployment flask-capstone (replicas 2)&quot;]
+        Sel[&quot;spec.selector.matchLabels&lt;br/&gt;app: flask-capstone&quot;]
+        Tpl[&quot;spec.template.metadata.labels&lt;br/&gt;app: flask-capstone&quot;]
+        Sel -. &quot;must match&quot; .- Tpl
+    end
+    Pod1[&quot;Pod 1&lt;br/&gt;label app: flask-capstone&lt;br/&gt;containerPort 5000&quot;]
+    Pod2[&quot;Pod 2&lt;br/&gt;label app: flask-capstone&lt;br/&gt;containerPort 5000&quot;]
+    Svc[&quot;Service flask-capstone&lt;br/&gt;ClusterIP, port 80&quot;]
+
+    Tpl -- &quot;stamps label onto&quot; --&gt; Pod1
+    Tpl -- &quot;stamps label onto&quot; --&gt; Pod2
+    Svc -- &quot;selector app: flask-capstone&lt;br/&gt;matches Pod labels&quot; --&gt; Pod1
+    Svc -- &quot;selector app: flask-capstone&lt;br/&gt;matches Pod labels&quot; --&gt; Pod2
+    Client -- &quot;request to flask-capstone:80&quot; --&gt; Svc
+    Svc -- &quot;forwards to targetPort 5000&quot; --&gt; Pod1
+    Svc -- &quot;forwards to targetPort 5000&quot; --&gt; Pod2</div><figcaption>Label/selector glue and traffic flow across Deployment, Pods, and Service</figcaption></figure>
+<h4>Connecting <code class='ic'>/healthz</code> to the probes</h4>
+<p>In Lecture 1 we added a <code class='ic'>/healthz</code> route that returns 200. Now it earns its keep. Kubernetes uses two kinds of health checks here, and they are genuinely different:</p>
+<ul>
+<li><strong>Readiness probe</strong> — <em>&quot;Is this Pod ready to receive traffic yet?&quot;</em> If the probe fails, Kubernetes does <strong>not</strong> kill the Pod; it simply removes the Pod from the Service&#x27;s endpoints so no requests are routed to it until it recovers. This is what prevents traffic from hitting a Pod that&#x27;s still warming up.</li>
+<li><strong>Liveness probe</strong> — <em>&quot;Is this Pod still healthy, or is it stuck?&quot;</em> If the probe fails repeatedly, Kubernetes <strong>restarts</strong> the container. This is the automatic recovery for a deadlocked or silently unresponsive app.</li>
+</ul>
+<p>Both of ours use <code class='ic'>httpGet</code> against <code class='ic'>path: /healthz</code> on <code class='ic'>port: 5000</code> — Kubernetes makes a simple HTTP GET, and a 200 means healthy. The timing fields keep the probes gentle: <code class='ic'>initialDelaySeconds</code> gives the app a moment to boot before the first check, and <code class='ic'>periodSeconds</code> sets how often to re-check afterward. We start the liveness check a little later and a little less often than readiness, because we want to route traffic away from a slow Pod quickly, but we don&#x27;t want to restart Pods over a brief hiccup.</p>
+<blockquote class='callout'>
+<p>Readiness controls <em>traffic</em>; liveness controls <em>restarts</em>. Pointing both at a lightweight <code class='ic'>/healthz</code> that just returns 200 is a safe, common pattern. Avoid putting heavy work (like deep database queries) behind a liveness probe — a slow check can trigger needless restarts.</p>
+</blockquote>
+<h4>What we&#x27;ll do with these files next</h4>
+<p>You should now have three files in a folder: <code class='ic'>configmap.yaml</code>, <code class='ic'>deployment.yaml</code>, and <code class='ic'>service.yaml</code>. They describe a complete, self-contained deployment of our Flask app — two replicas, fed by a ConfigMap, fronted by a Service, and kept healthy through <code class='ic'>/healthz</code> probes. In Lecture 5 we&#x27;ll bring them to life with <code class='ic'>kubectl apply</code>, watch the Pods come up with <code class='ic'>kubectl get</code> and <code class='ic'>kubectl describe</code>, reach the app from our machine, and then perform a rolling update and a rollback.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li>A manifest declares <strong>desired state</strong>; the three core objects here are the <strong>Deployment</strong> (runs replicas), the <strong>Service</strong> (stable address), and the <strong>ConfigMap</strong> (externalized settings).</li>
+<li><code class='ic'>spec.selector.matchLabels</code> <strong>must</strong> equal <code class='ic'>spec.template.metadata.labels</code>, and the Service&#x27;s <code class='ic'>selector</code> must match those same Pod labels — labels are the glue, not name references.</li>
+<li>Set <code class='ic'>image: flask-capstone:1.0</code> with <code class='ic'>imagePullPolicy: IfNotPresent</code> so the cluster uses the locally loaded image instead of trying (and failing) to pull from a registry.</li>
+<li><code class='ic'>containerPort: 5000</code> on the Pod and <code class='ic'>targetPort: 5000</code> on the Service must agree; the Service&#x27;s <code class='ic'>port: 80</code> is what other clients call.</li>
+<li>Readiness probes gate <strong>traffic</strong>, liveness probes trigger <strong>restarts</strong> — point both at the lightweight <code class='ic'>/healthz</code> endpoint with sensible delays.</li>
+<li>Keep configuration in a ConfigMap injected via <code class='ic'>envFrom</code>, so changing a setting doesn&#x27;t require rebuilding the image.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Warm-up: Write the ConfigMap manifest. Create a file named <code class='ic'>configmap.yaml</code> that defines a ConfigMap named <code class='ic'>flask-config</code> with the label <code class='ic'>app: flask-capstone</code> and two data entries: <code class='ic'>APP_ENV</code> set to <code class='ic'>&quot;production&quot;</code> and <code class='ic'>APP_GREETING</code> set to <code class='ic'>&quot;Hello from Kubernetes!&quot;</code>.</p></div>
+              <pre class='starter'><code># configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ___
+  labels:
+    app: ___
+data:
+  APP_ENV: ___
+  APP_GREETING: ___</code></pre>
+              <details><summary>Hint</summary><ul><li>The `kind` for a ConfigMap is `ConfigMap` and its `apiVersion` is `v1`.</li><li>The `metadata.name` must match the name you will reference in the Deployment&#x27;s `configMapRef.name` field later — use `flask-config`.</li><li>Under `data`, each entry is a plain key: &quot;value&quot; pair with no special sub-keys.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flask-config
+  labels:
+    app: flask-capstone
+data:
+  APP_ENV: &quot;production&quot;
+  APP_GREETING: &quot;Hello from Kubernetes!&quot;</code></pre>
+                <div class='exp2'><p>A ConfigMap stores configuration outside the container image. At runtime, the Deployment injects every key in <code class='ic'>data</code> as an environment variable into the container via <code class='ic'>envFrom</code>. This means you can change <code class='ic'>APP_ENV</code> from <code class='ic'>production</code> to <code class='ic'>staging</code> by editing only this file and restarting the Pods — the image itself never needs to be rebuilt.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Core task 1: Write the Deployment manifest. Create <code class='ic'>deployment.yaml</code> for the <code class='ic'>flask-capstone</code> app with all of the following requirements:</p>
+<ul>
+<li><code class='ic'>replicas: 2</code></li>
+<li>Container image <code class='ic'>flask-capstone:1.0</code> with <code class='ic'>imagePullPolicy: IfNotPresent</code></li>
+<li><code class='ic'>containerPort: 5000</code></li>
+<li>All keys from the <code class='ic'>flask-config</code> ConfigMap injected as environment variables via <code class='ic'>envFrom</code></li>
+<li>Labels and selectors: both <code class='ic'>spec.selector.matchLabels</code> and <code class='ic'>spec.template.metadata.labels</code> must use <code class='ic'>app: flask-capstone</code></li>
+<li>A readiness probe: HTTP GET <code class='ic'>/healthz</code> on port 5000, <code class='ic'>initialDelaySeconds: 3</code>, <code class='ic'>periodSeconds: 5</code></li>
+<li>A liveness probe: HTTP GET <code class='ic'>/healthz</code> on port 5000, <code class='ic'>initialDelaySeconds: 10</code>, <code class='ic'>periodSeconds: 10</code></li>
+</ul></div>
+              <pre class='starter'><code># deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-capstone
+  labels:
+    app: flask-capstone
+spec:
+  replicas: ___
+  selector:
+    matchLabels:
+      app: ___
+  template:
+    metadata:
+      labels:
+        app: ___
+    spec:
+      containers:
+        - name: flask
+          image: ___
+          imagePullPolicy: ___
+          ports:
+            - containerPort: ___
+          envFrom:
+            - configMapRef:
+                name: ___
+          readinessProbe:
+            httpGet:
+              path: ___
+              port: ___
+            initialDelaySeconds: ___
+            periodSeconds: ___
+          livenessProbe:
+            httpGet:
+              path: ___
+              port: ___
+            initialDelaySeconds: ___
+            periodSeconds: ___</code></pre>
+              <details><summary>Hint</summary><ul><li>`spec.selector.matchLabels` and `spec.template.metadata.labels` must carry the identical label (`app: flask-capstone`). A mismatch causes the API server to reject the manifest.</li><li>Set `imagePullPolicy: IfNotPresent` so Kubernetes uses the image already loaded into the cluster (from Lecture 3) instead of attempting a registry pull, which would fail with `ImagePullBackOff`.</li><li>Both the readiness probe and the liveness probe use `httpGet` with `path: /healthz` and `port: 5000`. The difference is in the timing: readiness uses `initialDelaySeconds: 3` / `periodSeconds: 5`, while liveness uses `initialDelaySeconds: 10` / `periodSeconds: 10`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-capstone
+  labels:
+    app: flask-capstone
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-capstone
+  template:
+    metadata:
+      labels:
+        app: flask-capstone
+    spec:
+      containers:
+        - name: flask
+          image: flask-capstone:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: flask-config
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10</code></pre>
+                <div class='exp2'><p>Three label blocks appear in the Deployment, each with a distinct role: <code class='ic'>metadata.labels</code> tags the Deployment object itself; <code class='ic'>spec.selector.matchLabels</code> is the rule the Deployment uses to identify which Pods it owns; <code class='ic'>spec.template.metadata.labels</code> are the labels stamped onto every new Pod. The API server enforces that <code class='ic'>matchLabels</code> equals the template labels — if they differ, the Deployment cannot recognise its own Pods and the manifest is rejected. <code class='ic'>imagePullPolicy: IfNotPresent</code> is mandatory when the image was side-loaded into the cluster, because there is no registry for Kubernetes to pull from. The readiness probe fires sooner and more frequently to remove unready Pods from Service traffic quickly; the liveness probe waits longer before the first check so the app has time to boot before a restart is ever considered.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Core task 2: Write the Service manifest. Create <code class='ic'>service.yaml</code> that exposes the <code class='ic'>flask-capstone</code> Pods with the following properties:</p>
+<ul>
+<li>Type <code class='ic'>ClusterIP</code></li>
+<li><code class='ic'>selector: app: flask-capstone</code> (must match the Pod labels set by the Deployment)</li>
+<li>Service port <code class='ic'>80</code> forwarding to container port <code class='ic'>5000</code> over TCP</li>
+</ul></div>
+              <pre class='starter'><code># service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-capstone
+  labels:
+    app: flask-capstone
+spec:
+  type: ___
+  selector:
+    app: ___
+  ports:
+    - port: ___
+      targetPort: ___
+      protocol: ___</code></pre>
+              <details><summary>Hint</summary><ul><li>`type: ClusterIP` makes the Service reachable only from inside the cluster. Other Pods in the cluster can reach the app at `flask-capstone:80`.</li><li>`port` is what callers use (80); `targetPort` is where the Service forwards the traffic on the container (5000). They serve different audiences and do not have to be the same number.</li><li>The Service&#x27;s `selector` must carry `app: flask-capstone` — the same label the Deployment stamps onto each Pod — so the Service knows which Pods to include in its endpoint pool.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-capstone
+  labels:
+    app: flask-capstone
+spec:
+  type: ClusterIP
+  selector:
+    app: flask-capstone
+  ports:
+    - port: 80
+      targetPort: 5000
+      protocol: TCP</code></pre>
+                <div class='exp2'><p>A ClusterIP Service gives the group of Pods one stable internal IP and DNS name (<code class='ic'>flask-capstone</code>) so callers never need to track individual Pod IPs, which change on every restart. The <code class='ic'>selector: app: flask-capstone</code> is the same label the Deployment stamped onto each Pod; this is how the Service discovers its members — by label agreement, not by name reference. The <code class='ic'>port: 80</code> / <code class='ic'>targetPort: 5000</code> split lets the rest of the cluster communicate on the conventional HTTP port 80 while the Flask process continues to listen on 5000 inside the container. Only Pods that pass the readiness probe are added to the endpoint pool, which is why the readiness probe in the Deployment directly affects whether traffic reaches a given Pod.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Application: A teammate hands you the following broken Deployment snippet. Identify and fix all three bugs — one label mismatch, one wrong imagePullPolicy, and one probe targeting the wrong port — then briefly explain what runtime failure each bug would have caused.</p>
+<pre><code>
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-app          # BUG A
+  template:
+    metadata:
+      labels:
+        app: flask-capstone
+    spec:
+      containers:
+        - name: flask
+          image: flask-capstone:1.0
+          imagePullPolicy: Always   # BUG B
+          ports:
+            - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080            # BUG C
+            initialDelaySeconds: 3
+            periodSeconds: 5
+</code></pre></div>
+              <pre class='starter'><code># Fix the three bugs and write the corrected snippet below.
+# Then add a short comment after each corrected line explaining the failure the bug would have caused.
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ___          # was: flask-app
+  template:
+    metadata:
+      labels:
+        app: flask-capstone
+    spec:
+      containers:
+        - name: flask
+          image: flask-capstone:1.0
+          imagePullPolicy: ___  # was: Always
+          ports:
+            - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: ___         # was: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5</code></pre>
+              <details><summary>Hint</summary><ul><li>Bug A: compare `spec.selector.matchLabels.app` with `spec.template.metadata.labels.app`. The API server rejects any Deployment where these two values differ.</li><li>Bug B: the image `flask-capstone:1.0` was loaded directly into the cluster in Lecture 3 — it does not exist on any external registry. What happens when Kubernetes tries to pull it with `Always`?</li><li>Bug C: Flask listens on port 5000 inside the container, but the readiness probe is knocking on port 8080. What does Kubernetes do when the probe connection is refused?</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-capstone   # FIXED A: was flask-app — must equal spec.template.metadata.labels.app
+  template:
+    metadata:
+      labels:
+        app: flask-capstone
+    spec:
+      containers:
+        - name: flask
+          image: flask-capstone:1.0
+          imagePullPolicy: IfNotPresent  # FIXED B: was Always — Always forces a registry pull; no registry has this image, so Pods would stay in ImagePullBackOff
+          ports:
+            - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000              # FIXED C: was 8080 — nothing listens on 8080, so the probe would always fail and the Pod would never enter the Service endpoint pool
+            initialDelaySeconds: 3
+            periodSeconds: 5</code></pre>
+                <div class='exp2'><p>Bug A (label mismatch): Kubernetes requires <code class='ic'>spec.selector.matchLabels</code> to equal <code class='ic'>spec.template.metadata.labels</code>. The API server enforces this at admission time and rejects the manifest outright with a validation error — no Pods are ever created. Bug B (imagePullPolicy: Always): with <code class='ic'>Always</code>, the kubelet ignores any locally cached image and always reaches out to a registry. Because <code class='ic'>flask-capstone:1.0</code> was loaded directly into the cluster node (not pushed to Docker Hub or any registry), the pull fails and every Pod stays indefinitely in <code class='ic'>ImagePullBackOff</code>. <code class='ic'>IfNotPresent</code> tells the kubelet to use the image already present on the node and only pull if it is genuinely absent. Bug C (wrong probe port): the readiness probe attempts an HTTP GET on port 8080, but Flask listens on 5000. The connection is refused, the probe reports failure, and Kubernetes never marks the Pod as Ready — meaning the Service never adds the Pod to its endpoint pool and no traffic is ever routed to it, even though the app is actually running fine.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=6IPu3WU_M0o' target='_blank'>Kubernetes Basics: Pods, Nodes, Containers, Deployments &amp; Clusters</a></li><li><a href='https://www.youtube.com/watch?v=fqfieWP1jY4' target='_blank'>Kubernetes Health Checks: Liveness vs. Readiness vs. Startup Probe</a></li><li><a href='https://www.youtube.com/watch?v=P7mHN_PUz_w' target='_blank'>ConfigMaps in Kubernetes: Update Configs Without Rebuilding Containers</a></li></ul></div>
+        </article>
+<article id='lec5' class='lecture'>
+          <h2>05. &quot;Deploy, Expose, Verify, and Roll Out&quot; </h2>
+          <h3>Learning Objectives</h3>
+<ul>
+<li>Apply your manifests with <code class='ic'>kubectl apply</code>, then verify Pod and Service health using <code class='ic'>get</code>, <code class='ic'>describe</code>, and <code class='ic'>logs</code>.</li>
+<li>Reach your running app from outside the cluster with <code class='ic'>kubectl port-forward</code> (or a NodePort / <code class='ic'>minikube service</code>).</li>
+<li>Ship a new version with a zero-downtime rolling update using <code class='ic'>kubectl set image</code> and <code class='ic'>kubectl rollout</code>, and roll back instantly with <code class='ic'>kubectl rollout undo</code>.</li>
+</ul>
+<h3>Body</h3>
+<p>This is the final lecture of the capstone, and it&#x27;s where everything you&#x27;ve built comes alive. So far you wrote a Flask app (Lecture 1), packaged it into the image <code class='ic'>flask-capstone:1.0</code> (Lecture 2), spun up a local cluster and loaded the image into it (Lecture 3), and authored <code class='ic'>deployment.yaml</code> and <code class='ic'>service.yaml</code> (Lecture 4). Right now those manifests are just files sitting on disk. In this lecture we hand them to Kubernetes, watch it bring your app to life, open a door to it from your laptop, and then practice the single most valuable day-2 skill an operator has: upgrading a live app without downtime — and undoing that upgrade in seconds when something goes wrong.</p>
+<h4>Step 1 — Apply the manifests</h4>
+<p>A manifest describes the <em>desired state</em> — &quot;I want 3 replicas of <code class='ic'>flask-capstone:1.0</code> exposed on port 5000.&quot; Kubernetes is a control loop that constantly works to make reality match that description. You hand it the desired state with <code class='ic'>apply</code>:</p>
+<pre><code>
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+</code></pre>
+<p>You can also point <code class='ic'>apply</code> at a whole folder, which is the habit I&#x27;d recommend once you have several files:</p>
+<pre><code>
+kubectl apply -f .
+</code></pre>
+<p><code class='ic'>apply</code> is <em>declarative</em>: run it again after editing a file and Kubernetes computes the difference and changes only what&#x27;s needed. That&#x27;s why we prefer it over imperative one-off commands — your YAML is the single source of truth.</p>
+<blockquote class='callout'>
+<p>Use <code class='ic'>kubectl apply</code> rather than <code class='ic'>kubectl create</code>. <code class='ic'>apply</code> is idempotent — running it repeatedly is safe and is exactly how you&#x27;ll push updates later in this lecture.</p>
+</blockquote>
+<h4>Step 2 — Verify that it&#x27;s actually healthy</h4>
+<p>Applying a manifest only means Kubernetes <em>accepted</em> your request. It does not mean your app is running. Always verify. Start with a quick inventory:</p>
+<pre><code>
+kubectl get pods
+kubectl get svc
+</code></pre>
+<p>You&#x27;re looking for Pods with status <code class='ic'>Running</code> and a <code class='ic'>READY</code> column that reads <code class='ic'>1/1</code> (the container is up <em>and</em> its readiness probe is passing). To watch the rollout happen live, append <code class='ic'>-w</code> (watch):</p>
+<pre><code>
+kubectl get pods -w
+</code></pre>
+<p>If a Pod is <em>not</em> healthy, <code class='ic'>describe</code> is your microscope. It prints the Pod&#x27;s events at the bottom — the single most useful debugging output in Kubernetes:</p>
+<pre><code>
+kubectl describe pod &lt;pod-name&gt;
+</code></pre>
+<p>And to see what your app itself is saying, read its logs (its stdout/stderr):</p>
+<pre><code>
+kubectl logs &lt;pod-name&gt;
+kubectl logs -f &lt;pod-name&gt;   # -f follows the stream, like tail -f
+</code></pre>
+<p>The mental model is a simple triage flow: <code class='ic'>get</code> tells you <em>which</em> Pod is unhappy, <code class='ic'>describe</code> tells you <em>why Kubernetes</em> is unhappy with it, and <code class='ic'>logs</code> tells you what <em>the application</em> is doing. The flow is as follows: list with <code class='ic'>get</code>, drill into the suspect with <code class='ic'>describe</code>, then confirm with <code class='ic'>logs</code>, as the diagram below shows.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    A[&quot;kubectl get pods&quot;] --&gt; B{&quot;READY 1/1 and Running?&quot;}
+    B --&gt;|Yes| OK[&quot;App is healthy - move on&quot;]
+    B --&gt;|No| C[&quot;kubectl describe pod &amp;lt;name&amp;gt;&lt;br/&gt;read the Events at the bottom&quot;]
+    C --&gt; D{&quot;Which layer is unhappy?&quot;}
+    D --&gt;|Kubernetes cannot schedule or pull| E[&quot;Fix infra: image load,&lt;br/&gt;imagePullPolicy, resources&quot;]
+    D --&gt;|Container starts then dies| F[&quot;kubectl logs &amp;lt;name&amp;gt;&lt;br/&gt;add --previous after a crash&quot;]
+    F --&gt; G[&quot;Fix the app, then re-apply&quot;]
+    E --&gt; A
+    G --&gt; A</div><figcaption>Verification and triage flow: get to describe to logs</figcaption></figure>
+<blockquote class='callout'>
+<p>Two failures you will almost certainly meet:</p>
+<p><strong><code class='ic'>ImagePullBackOff</code></strong> — Kubernetes can&#x27;t fetch the image. On minikube/kind this usually means you forgot to load the image (<code class='ic'>minikube image load flask-capstone:1.0</code>) or your manifest must set <code class='ic'>imagePullPolicy: IfNotPresent</code> so the cluster uses the locally loaded copy instead of trying to download it.</p>
+<p><strong><code class='ic'>CrashLoopBackOff</code></strong> — the image was pulled, but the container starts and immediately dies, so Kubernetes keeps restarting it with increasing delay. The cause is inside the app — run <code class='ic'>kubectl logs &lt;pod&gt;</code> (add <code class='ic'>--previous</code> to see the log from the crash before the last restart).</p>
+</blockquote>
+<h4>Step 3 — Expose the app and reach it</h4>
+<p>Your Pods are running, but they live on a private cluster network you can&#x27;t touch directly from your laptop. The quickest way to open a temporary tunnel for testing is <code class='ic'>port-forward</code>:</p>
+<pre><code>
+kubectl port-forward svc/flask-capstone 8080:5000
+</code></pre>
+<p>This wires <code class='ic'>localhost:8080</code> on your machine straight to port 5000 on the Service. Open another terminal and hit it:</p>
+<pre><code>
+curl http://localhost:8080/
+curl http://localhost:8080/healthz
+</code></pre>
+<p>You should see your Flask responses. <code class='ic'>port-forward</code> is perfect for a quick check, but it only lives as long as the command runs (Ctrl-C ends it). For something more durable, expose the Service as a <strong>NodePort</strong>, which opens a fixed port on the cluster node itself. On minikube the friendliest way is:</p>
+<pre><code>
+minikube service flask-capstone --url
+</code></pre>
+<p>This prints a URL you can open in a browser. (Under the hood it maps the NodePort to a reachable address — handy because on some platforms the node IP isn&#x27;t directly routable.) Either way, the moment you get a <code class='ic'>200</code> back from <code class='ic'>/healthz</code>, you have a genuinely deployed app.</p>
+<h4>Step 4 — Roll out a new version with zero downtime</h4>
+<p>Now the part operators care about most. You&#x27;ve fixed a bug or added a feature, rebuilt the image, and tagged it <code class='ic'>flask-capstone:2.0</code>. (Remember to load the new tag into the cluster too: <code class='ic'>minikube image load flask-capstone:2.0</code>.) You want to ship it <em>without</em> a single failed request.</p>
+<p>By default a Deployment uses the <strong>rolling update</strong> strategy: Kubernetes brings up new-version Pods a few at a time and tears down old ones only as the new ones become ready, so there is always a healthy set serving traffic. Two knobs govern the pace, and their defaults are <code class='ic'>25%</code> each:</p>
+<ul>
+<li><strong><code class='ic'>maxUnavailable</code></strong> — how many Pods may be down at once during the update (with 3 replicas, default lets 1 be unavailable).</li>
+<li><strong><code class='ic'>maxSurge</code></strong> — how many <em>extra</em> Pods may be created above your desired count (so you briefly run up to 125% of replicas).</li>
+</ul>
+<p>You can trigger the update in two equivalent ways. The clean, repeatable way is to bump the image tag in <code class='ic'>deployment.yaml</code> and re-apply:</p>
+<pre><code>
+# edit image: flask-capstone:2.0 in deployment.yaml, then
+kubectl apply -f deployment.yaml
+</code></pre>
+<p>The quick imperative way — great for demos — is <code class='ic'>set image</code>:</p>
+<pre><code>
+kubectl set image deployment/flask-capstone flask-capstone=flask-capstone:2.0
+</code></pre>
+<p>(The pattern is <code class='ic'>deployment/&lt;name&gt; &lt;container-name&gt;=&lt;new-image&gt;</code>.) Either command kicks off the same rolling replacement. Watch it progress in a human-readable form:</p>
+<pre><code>
+kubectl rollout status deployment/flask-capstone
+</code></pre>
+<p>It blocks until the rollout finishes and prints <code class='ic'>successfully rolled out</code>. While it runs, a parallel <code class='ic'>kubectl get pods -w</code> shows old Pods terminating and new ones appearing — never all at once. If you kept that <code class='ic'>curl</code> loop from Step 3 running, you&#x27;ll see responses flip from v1 to v2 with no errors in between. That&#x27;s zero-downtime deployment in action. The diagram below traces how the Deployment shifts replicas from the old ReplicaSet to the new one, one Pod at a time.</p>
+<figure class='diagram'><div class='mermaid'>flowchart TD
+    subgraph S0[&quot;Start - v1 steady state&quot;]
+        A1[&quot;old RS: 3 Pods v1.0 Ready&quot;]
+    end
+    subgraph S1[&quot;maxSurge adds one new Pod&quot;]
+        B1[&quot;old RS: 3 Pods v1.0&quot;]
+        B2[&quot;new RS: 1 Pod v2.0 starting&quot;]
+    end
+    subgraph S2[&quot;New Pod Ready, one old Pod terminates&quot;]
+        C1[&quot;old RS: 2 Pods v1.0&quot;]
+        C2[&quot;new RS: 1 Pod v2.0 Ready + 1 starting&quot;]
+    end
+    subgraph S3[&quot;Repeat until all replaced&quot;]
+        D1[&quot;old RS: 0 Pods&quot;]
+        D2[&quot;new RS: 3 Pods v2.0 Ready&quot;]
+    end
+    S0 --&gt; S1 --&gt; S2 --&gt; S3
+    note[&quot;maxUnavailable caps how many can be down;&lt;br/&gt;maxSurge caps the extra Pods - traffic never drops to zero&quot;]
+    S2 -.governed by.- note</div><figcaption>Rolling update: gradual Pod swap from old to new ReplicaSet (3 replicas)</figcaption></figure>
+<p>The <code class='ic'>rollout</code> subcommand has more to offer. You can pause mid-upgrade to inspect things, then resume, and you can review what&#x27;s happened:</p>
+<pre><code>
+kubectl rollout pause deployment/flask-capstone
+kubectl rollout resume deployment/flask-capstone
+kubectl rollout history deployment/flask-capstone
+</code></pre>
+<p>Each apply or <code class='ic'>set image</code> creates a numbered <em>revision</em>, which is exactly what makes the next step possible.</p>
+<h4>Step 5 — Roll back when 2.0 misbehaves</h4>
+<p>Suppose <code class='ic'>flask-capstone:2.0</code> ships a bug, or — a classic — you fat-finger a tag that doesn&#x27;t exist. With a bad tag the new Pods land in <code class='ic'>ImagePullBackOff</code>, but here&#x27;s the reassuring part: <strong>Kubernetes will not kill the old, working Pods until the new ones are healthy.</strong> Your app keeps serving v1 while the rollout simply hangs (<code class='ic'>rollout status</code> waits forever). That&#x27;s the safety net doing its job. When you&#x27;ve confirmed the new version is bad, undo it:</p>
+<pre><code>
+kubectl rollout undo deployment/flask-capstone
+</code></pre>
+<p>Kubernetes rolls you straight back to the previous revision — the same gradual, zero-downtime mechanism, just in reverse. You can also target a specific past revision from the history:</p>
+<pre><code>
+kubectl rollout undo deployment/flask-capstone --to-revision=2
+</code></pre>
+<p>A few seconds and one command turns a bad release into a non-event. This is precisely why teams trust Kubernetes for production: every deploy is reversible.</p>
+<h4>The whole journey, in one breath</h4>
+<p>Step back and look at what you just did across five lectures. You started with a few lines of Python. You wrote a Dockerfile and built <strong>an image</strong> (<code class='ic'>flask-capstone:1.0</code>). You stood up <strong>a cluster</strong> and loaded the image into it. You described your intent in <strong>manifests</strong> — a Deployment for &quot;keep N copies of this image running&quot; and a Service for &quot;give them one stable address.&quot; Then, in this lecture, you <strong>deployed</strong> those manifests, <strong>verified</strong> health with <code class='ic'>get</code>/<code class='ic'>describe</code>/<code class='ic'>logs</code>, <strong>exposed</strong> the app to the outside world, and <strong>operated</strong> it through a real upgrade and rollback. App → image → cluster → manifest → deploy → operate: that loop is the entire shape of running software on Kubernetes, and you&#x27;ve now done it end to end with your own hands.</p>
+<p>The deployment strategies covered in the source videos go further — recreate, blue-green, and canary releases let larger teams trade speed for safety in different ways — but rolling updates with <code class='ic'>rollout undo</code> are the everyday default, and they&#x27;re now part of your toolkit.</p>
+<h3>Key Takeaways</h3>
+<ul>
+<li><code class='ic'>kubectl apply -f</code> declaratively sends your desired state to the cluster; re-applying is safe and is how you push updates.</li>
+<li>Always verify after applying: <code class='ic'>get</code> to find the unhealthy Pod, <code class='ic'>describe</code> to read its events, <code class='ic'>logs</code> to read the app&#x27;s own output.</li>
+<li><code class='ic'>ImagePullBackOff</code> means Kubernetes can&#x27;t get the image (load it locally and set <code class='ic'>imagePullPolicy: IfNotPresent</code>); <code class='ic'>CrashLoopBackOff</code> means the app starts and dies (check <code class='ic'>kubectl logs --previous</code>).</li>
+<li><code class='ic'>port-forward</code> opens a quick temporary tunnel for testing; a NodePort (or <code class='ic'>minikube service --url</code>) gives a more durable external entry point.</li>
+<li>The default rolling update (<code class='ic'>maxUnavailable</code>/<code class='ic'>maxSurge</code> ≈ 25%) replaces Pods gradually so there&#x27;s no downtime; trigger it with <code class='ic'>kubectl set image</code> or by re-applying an edited manifest, and watch it with <code class='ic'>kubectl rollout status</code>.</li>
+<li>Every release is a numbered revision, so <code class='ic'>kubectl rollout undo</code> rolls back to the last good version in seconds — and bad images never take down the old, working Pods.</li>
+</ul>
+          <section class='ex'><h3>🛠 Practice</h3><div class='task'>
+              <div class='q'><p>Practice 1. Apply both manifests to your cluster using a single <code class='ic'>kubectl apply</code> command that targets the current directory, then confirm that all three Pods reach <code class='ic'>Running</code> status with <code class='ic'>READY 1/1</code>.</p></div>
+              <pre class='starter'><code># Assume you are in the directory that contains deployment.yaml and service.yaml
+# (created in Lecture 4, image flask-capstone:1.0 already loaded into the cluster)
+
+# 1. Apply everything in the current folder
+# 2. Watch Pod status until all are Running
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Pointing `apply` at `.` (a directory) is equivalent to listing each YAML file individually; it is the idiomatic way to manage a multi-file workload.</li><li>If Pods stay in `Pending` for more than a minute, run `kubectl describe pod &lt;name&gt;` and look at the Events section at the bottom — it will tell you whether the scheduler cannot find a node or whether the image cannot be pulled.</li><li>Press Ctrl-C to exit the `-w` watch loop once all Pods show `Running`.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code>kubectl apply -f .
+kubectl get pods -w</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl apply -f .</code> reads every YAML file in the current directory and sends each one&#x27;s desired state to the Kubernetes API server as a declarative upsert — safe to run repeatedly. The <code class='ic'>-w</code> (watch) flag on <code class='ic'>get pods</code> streams status changes in real time so you can see Pods move from <code class='ic'>Pending</code> → <code class='ic'>ContainerCreating</code> → <code class='ic'>Running</code> without polling manually. You are done when the READY column reads <code class='ic'>1/1</code> for every Pod.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 2. Use the three-command triage flow (<code class='ic'>get</code> → <code class='ic'>describe</code> → <code class='ic'>logs</code>) to inspect your running Deployment. First list all Pods and the Service, then describe one Pod (note the Events section), then stream its logs live.</p></div>
+              <pre class='starter'><code># Replace &lt;pod-name&gt; with an actual Pod name from your cluster
+# Example: flask-capstone-7d9f4c6b8-xkp2m
+
+# Step 1: list Pods and Services
+
+# Step 2: describe one Pod
+
+# Step 3: follow the Pod&#x27;s logs
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Copy a Pod name from the `kubectl get pods` output; the name looks like `flask-capstone-&lt;hash&gt;-&lt;hash&gt;`.</li><li>In the `describe` output, scroll to the very bottom — the `Events:` section is last, and it is where Kubernetes records what it actually did (pull, start, liveness/readiness probe results).</li><li>Use `kubectl logs --previous &lt;pod-name&gt;` if the Pod has already crashed and restarted; it shows the log from the terminated container rather than the current running one.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1
+kubectl get pods
+kubectl get svc
+
+# Step 2  (substitute a real pod name from the output above)
+kubectl describe pod &lt;pod-name&gt;
+
+# Step 3
+kubectl logs -f &lt;pod-name&gt;</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl get</code> gives you a quick summary table — enough to spot which Pod is unhealthy. <code class='ic'>kubectl describe pod</code> prints the full object spec plus a chronological Events list at the bottom; Events are the single most informative debugging output in Kubernetes because they record scheduler decisions, image pulls, probe failures, and restart reasons. <code class='ic'>kubectl logs -f</code> tails the container&#x27;s stdout/stderr in real time, which is where application-level errors (tracebacks, port conflicts, missing env vars) appear. The three commands cover three different layers: cluster inventory, Kubernetes-layer events, and application output.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 3. Open a port-forward tunnel from <code class='ic'>localhost:8080</code> to the <code class='ic'>flask-capstone</code> Service on port 5000, then verify the app is reachable by curling both the root path and the <code class='ic'>/healthz</code> endpoint.</p></div>
+              <pre class='starter'><code># Terminal A — start the tunnel (leave this running)
+
+# Terminal B — send requests while the tunnel is open
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Run the `port-forward` command in a dedicated terminal tab so you can leave it running while you curl from another tab.</li><li>If `curl` returns `connection refused`, check that the port-forward process is still running and that you are curling port `8080`, not `5000`.</li><li>On minikube you can also use `minikube service flask-capstone --url` as a more durable alternative — it prints a URL backed by a NodePort that survives without an open terminal.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Terminal A
+kubectl port-forward svc/flask-capstone 8080:5000
+
+# Terminal B
+curl http://localhost:8080/
+curl http://localhost:8080/healthz</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl port-forward svc/&lt;name&gt; &lt;local-port&gt;:&lt;service-port&gt;</code> creates an authenticated tunnel through the Kubernetes API server; it requires no external LoadBalancer or open firewall rule, making it ideal for quick interactive testing. The tunnel exists only while the command runs — Ctrl-C tears it down. A <code class='ic'>200</code> response from <code class='ic'>/healthz</code> confirms that the Pod is not just started but is genuinely serving HTTP traffic, which is the definition of a healthy deployment.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 4. Perform a rolling update to <code class='ic'>flask-capstone:2.0</code> using <code class='ic'>kubectl set image</code>, watch the rollout progress with <code class='ic'>kubectl rollout status</code>, and observe old Pods being replaced by new ones in parallel with <code class='ic'>kubectl get pods -w</code>.</p></div>
+              <pre class='starter'><code># Assume flask-capstone:2.0 has already been built and loaded into the cluster:
+#   minikube image load flask-capstone:2.0
+
+# Terminal A — trigger the update
+
+# Terminal B — watch rollout status (blocks until complete)
+
+# Terminal C (optional) — watch Pod replacement live
+</code></pre>
+              <details><summary>Hint</summary><ul><li>The `set image` syntax is `deployment/&lt;deployment-name&gt; &lt;container-name&gt;=&lt;new-image&gt;`. The container name is the `name:` field inside the `containers:` list in your deployment.yaml — in this capstone it is `flask-capstone`.</li><li>If `rollout status` hangs for more than two minutes, the new Pods are probably unhealthy. Open another terminal and run `kubectl get pods` to see if any are in `ImagePullBackOff` or `CrashLoopBackOff`.</li><li>You can also edit `deployment.yaml` to change the image tag to `flask-capstone:2.0` and re-run `kubectl apply -f deployment.yaml` — both approaches trigger the identical rolling update mechanism.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Terminal A
+kubectl set image deployment/flask-capstone flask-capstone=flask-capstone:2.0
+
+# Terminal B
+kubectl rollout status deployment/flask-capstone
+
+# Terminal C (optional)
+kubectl get pods -w</code></pre>
+                <div class='exp2'><p><code class='ic'>kubectl set image deployment/&lt;name&gt; &lt;container&gt;=&lt;image&gt;</code> is an imperative shortcut that patches the container&#x27;s image field inside the Deployment spec. Kubernetes detects the change and starts a rolling update: it creates new-version Pods (capped by <code class='ic'>maxSurge</code>, default 25%) and terminates old ones only as replacements become Ready (governed by <code class='ic'>maxUnavailable</code>, also default 25%), so at least 75% of desired capacity is always serving traffic. <code class='ic'>kubectl rollout status</code> blocks and prints human-readable progress, finishing with <code class='ic'>successfully rolled out</code>. The <code class='ic'>-w</code> watch on <code class='ic'>get pods</code> lets you see the old <code class='ic'>flask-capstone-*</code> Pods reach <code class='ic'>Terminating</code> while new ones start up — the visual proof of zero-downtime rolling replacement.</p></div>
+              </details></div><div class='task'>
+              <div class='q'><p>Practice 5. Simulate a bad deploy by updating the Deployment to the non-existent tag <code class='ic'>flask-capstone:broken</code>, observe that <code class='ic'>ImagePullBackOff</code> appears while old Pods keep running (no downtime), then roll back to the previous revision with a single command and confirm the rollback succeeds.</p></div>
+              <pre class='starter'><code># Step 1: trigger a bad update
+
+# Step 2: observe the failure (what status do the new Pods show?)
+
+# Step 3: confirm old Pods are still Running and serving
+
+# Step 4: roll back
+
+# Step 5: verify the rollback completed successfully
+</code></pre>
+              <details><summary>Hint</summary><ul><li>Run `kubectl describe pod &lt;new-pod-name&gt;` on one of the stuck new Pods — the Events section will show `Failed to pull image` with the exact error, which is how you confirm `ImagePullBackOff` in a real incident.</li><li>While the bad rollout is hanging, curl your service to prove the old Pods are still answering; this is the key observation that shows zero-downtime safety.</li><li>After `rollout undo`, run `kubectl rollout status` and wait for `successfully rolled out` before moving on — the rollback is itself a rolling operation and takes a few seconds.</li></ul></details>
+              <details><summary>Show answer</summary>
+                <pre class='sol'><code># Step 1: trigger the bad update
+kubectl set image deployment/flask-capstone flask-capstone=flask-capstone:broken
+
+# Step 2: watch new Pods fail to pull the image
+kubectl get pods -w
+# New pods will show ImagePullBackOff; old pods stay Running
+
+# Step 3: confirm the app is still reachable on v2 (or v1 if rolling back from v1)
+# (keep port-forward running in another terminal)
+curl http://localhost:8080/healthz
+
+# Step 4: roll back to the previous revision
+kubectl rollout undo deployment/flask-capstone
+
+# Step 5: verify
+kubectl rollout status deployment/flask-capstone
+kubectl get pods</code></pre>
+                <div class='exp2'><p>This exercise demonstrates the Kubernetes safety net that makes rolling updates trustworthy in production. Because the Deployment&#x27;s <code class='ic'>maxUnavailable</code> is set to 25% (default), Kubernetes will not terminate more old-version Pods than the update allows healthy new ones to replace. Since <code class='ic'>flask-capstone:broken</code> cannot be pulled, no new Pod ever becomes Ready, so no old Pod is terminated — the old ReplicaSet continues to serve all traffic. <code class='ic'>kubectl rollout undo</code> reverses the Deployment to its previous revision (stored in the rollout history) using the same gradual mechanism, just in the opposite direction. The result: a bad image tag causes a hanging rollout and never a service outage. <code class='ic'>kubectl rollout history deployment/flask-capstone</code> lists all numbered revisions; you can target any specific one with <code class='ic'>--to-revision=&lt;N&gt;</code>.</p></div>
+              </details></div></section>
+          <div class='src'><strong>References</strong><ul><li><a href='https://www.youtube.com/watch?v=lxc4EXZOOvE' target='_blank'>Most Common Kubernetes Deployment Strategies (Examples &amp; Code)</a></li><li><a href='https://www.youtube.com/watch?v=Y_ITXcL94T0' target='_blank'>What is Kubernetes Rolling Updates?</a></li><li><a href='https://www.youtube.com/watch?v=wWA9JgAvuqw' target='_blank'>Kubernetes Rolling Updates &amp; Rollbacks | Zero Downtime Deployments Explained</a></li></ul></div>
+        </article></main>
+</div>
+<script src="../../../assets/js/main.js?v=bbg2"></script>
+</body></html>

@@ -17,19 +17,13 @@ sources:
 
 ## 본문
 
-### 마지막 한 걸음
+이미지는 이미 ECR에 들어 있다. 이번 강의에서는 그것을 EC2에서 실행시키는 마지막 스테이지를 작성한다. Jenkins가 SSH 세션을 열고 새 이미지를 pull한 뒤 컨테이너를 교체한다 — 매 빌드마다 자동으로.
 
-모든 준비가 끝났다. 이미지가 ECR에 들어 있고, 이제 그것이 EC2 서버에서 *실행*되어야 한다. 이번 강의에서 네트워크를 통해 서버까지 닿아 이전 버전을 새 버전으로 자동 교체하는 배포 스테이지를 만든다. 모든 성공 빌드에서 자동으로. 파이프라인이 현실이 되는 순간이다. `git push` 한 번에 몇 분 후 새 버전이 live 상태가 된다.
+### 1단계 — EC2 서버 준비
 
-### EC2 서버 준비하기
+**무엇을, 왜:** Jenkins가 배포하려면 서버가 이미지를 pull하고 실행할 준비가 되어 있어야 한다. 한 번만 해두면 되는 준비가 세 가지다. Docker와 Compose 플러그인 설치, ECR 읽기 권한을 부여하는 **IAM 역할**을 인스턴스에 연결(서버에 키를 저장하지 않아도 됨), 그리고 앱 실행 방법을 기술한 `docker-compose.yml`.
 
-Jenkins가 배포하기 전에 EC2 인스턴스에 세 가지가 준비되어야 한다.
-
-1. **Docker와 Compose 플러그인 설치** — 이미지를 pull하고 컨테이너를 실행하기 위해.
-2. **ECR에서 pull할 권한** — EC2 인스턴스에 **IAM 역할**을 연결해 ECR 읽기 권한을 부여하는 것이 깔끔한 방법이다. 저장된 키 없이 서버가 ECR에 인증할 수 있다.
-3. **`docker-compose.yml` 파일** — 앱을 어떻게 실행할지 기술하는 파일(사용할 이미지, 포트, 환경 변수 등).
-
-서버에 둘 최소한의 compose 파일은 다음과 같다.
+서버에 둘 compose 파일(`/home/ec2-user/docker-compose.yml` 등):
 
 ```yaml
 services:
@@ -40,23 +34,30 @@ services:
     restart: always
 ```
 
-이미지가 변수 `${IMAGE}`로 되어 있음에 주목하라. Jenkins가 배포 시점에 정확한 ECR 이미지 태그를 공급하므로 같은 compose 파일이 파이프라인이 방금 빌드한 버전을 항상 실행한다.
+`${IMAGE}`는 변수다. Jenkins가 배포 시점에 정확한 ECR 태그를 채워 넣으므로, 같은 파일이 파이프라인이 방금 빌드한 버전을 항상 실행한다.
 
-### Jenkins에서 EC2로 SSH 연결하기
+**확인:** 인스턴스에서 `docker --version && docker compose version`을 실행하고, `aws ecr get-login-password --region <region>`이 토큰을 반환하는지 확인한다.
 
-Jenkins는 직접 접속하듯 **SSH(Secure Shell)**를 통해 EC2에 접근한다. 인스턴스의 프라이빗 키를 사용하는데, 전문적인 방법은 그 키를 Jenkins의 자격증명 저장소에 **SSH 자격증명**으로 저장하는 것이다. Jenkinsfile에 직접 붙여 넣거나 Git에 커밋하는 것은 절대 안 된다.
+### 2단계 — EC2 호스트 키 등록
 
-대부분의 튜토리얼이 넘어가는 신뢰의 두 번째 측면이 있다. SSH는 *서버*의 신원도 검증한다. 클라이언트가 처음 연결할 때 SSH는 서버의 **호스트 키**를 `known_hosts`라는 파일에 기록한다. 이후 연결 시마다 서버가 같은 키를 제시하는지 확인한다. 이 확인이 **중간자(MITM) 공격**을 막는다. 공격자가 연결을 가로채고 서버인 척하는 것을 차단한다. 첫 번째 자동 배포 전에 EC2 호스트 키를 Jenkins의 SSH 에이전트에 등록해야 한다.
+**무엇을, 왜:** SSH는 **호스트 키**로 *서버*의 신원을 검증한다. 이 키는 `known_hosts`에 기록된다. 미리 등록해 두면 SSH가 중간자(MITM) — 즉 서버인 척 위장한 공격자 — 를 탐지할 수 있다. Jenkins가 실행되는 사용자로 Jenkins 호스트에서 한 번만 실행한다:
 
 ```bash
-# Jenkins 호스트에서 한 번만 실행한 뒤 지문을 대역 외(out-of-band)에서 검증한다
-# (예: EC2 콘솔과 비교)
+# 한 번만 실행한 뒤 신뢰하기 전에 EC2 콘솔에서 지문을 검증한다
 ssh-keyscan -H <EC2_HOST> >> ~/.ssh/known_hosts
 ```
 
-> 호스트 키 검증은 선택적 마무리 작업이 아니다. 공격자가 서버인 척 접속하는 것을 막는 유일한 수단이다. `known_hosts`에 키를 한 번 등록해 두면 SSH는 키가 바뀔 경우 연결을 거부한다.
+> 많은 튜토리얼에서 `-o StrictHostKeyChecking=no`를 쓴다. 호스트 키 검증을 완전히 비활성화해 편하긴 하지만, MITM 보호 자체를 포기하는 것이다. `known_hosts`를 미리 채우는 방법을 우선으로 쓰고, 임시 학습 환경에서만 완화를 고려한다.
 
-**SSH Agent 플러그인**은 파이프라인이 블록 실행 동안 저장된 키를 빌릴 수 있게 한다. 호스트 키가 이미 `known_hosts`에 있으면 배포 블록이 검증을 약화시키는 플래그 없이 안전하게 연결한다.
+### 3단계 — SSH 키를 Jenkins에 저장
+
+**무엇을, 왜:** Jenkins는 인스턴스의 프라이빗 키로 접속한다. 이 키를 **SSH 자격증명**(예: ID `ec2-ssh-key`)으로 저장하고 **SSH Agent 플러그인**을 사용해 배포 블록 실행 동안에만 빌려 쓴다 — 키를 Jenkinsfile에 직접 붙여 넣거나 커밋하는 것은 절대 안 된다.
+
+> SSH 프라이빗 키는 서버 비밀번호와 같다. 이 잡에만 범위를 한정하고 저장소와 빌드 로그에 절대 닿지 않게 한다. 배포 키가 유출되면 서버가 유출된 것이다.
+
+### 4단계 — 배포 스테이지 작성
+
+**무엇을, 왜:** 호스트 키가 신뢰되고 SSH 키가 자격증명에 저장됐다면, 이 스테이지가 검증된 SSH 세션을 열고 배포를 구성하는 네 개의 명령을 실행한다.
 
 ```groovy
 stage('Deploy to EC2') {
@@ -76,40 +77,36 @@ stage('Deploy to EC2') {
 }
 ```
 
-> 많은 튜토리얼에서 `-o StrictHostKeyChecking=no`를 볼 수 있다. 이 옵션은 호스트 키 검증을 비활성화해 처음 연결이 "그냥 작동"하게 만들지만, 그 주소에 응답하는 어떤 서버에도 SSH가 연결하게 되어 MITM 공격 보호가 완전히 사라진다. 기본값으로 쓰지 않는다. `known_hosts`를 미리 채우는 방법을 쓰고, 임시 학습 환경에서만 완화를 고려하되 무엇을 포기하는지 정확히 이해한 뒤 사용한다.
+SSH 세션 안에서 실행되는 명령:
+1. **`docker login`** — EC2가 IAM 역할 토큰으로 ECR에 인증한다.
+2. **`export IMAGE=...`** — compose 파일이 실행할 커밋 태그 이미지의 정확한 주소를 설정한다.
+3. **`docker compose pull`** — 새 이미지를 다운로드한다.
+4. **`docker compose up -d`** — 교체 명령이다. Compose가 이미지가 바뀐 것을 감지하고 이전 컨테이너를 중지한 뒤 새 컨테이너를 백그라운드로 실행한다. 선언적 방식이라 원하는 상태를 기술하면 Compose가 알아서 맞춘다.
 
-> SSH 프라이빗 키는 서버 비밀번호와 같다. Jenkins 자격증명에 저장하고 이 잡에 대해서만 범위를 지정하며 절대 저장소나 빌드 로그에 닿지 않게 한다. 배포 키가 유출되면 서버가 유출된 것이다.
+아래 다이어그램은 Jenkins가 SSH 세션을 여는 순간부터 새 컨테이너가 트래픽을 받기까지의 흐름을 보여 준다.
 
-### 배포 스테이지가 실제로 하는 일
-
-SSH 세션 *안에서* 실행되는 명령들은 함께 배포를 구성하므로 하나씩 살펴보자.
-
-1. **ECR 로그인** — EC2 서버가 프라이빗 이미지를 pull할 수 있도록 인증한다(IAM 역할 덕분에 임시 로그인 토큰 외에 키가 필요 없다).
-2. **`IMAGE` 변수 설정** — 파이프라인이 방금 빌드한 커밋 태그 이미지의 정확한 주소로 설정한다. compose 파일이 정확히 무엇을 실행할지 알 수 있다.
-3. **`docker compose pull`** — ECR에서 새 이미지를 다운로드한다.
-4. **`docker compose up -d`** — 이것이 교체 명령이다. Compose가 실행 중인 컨테이너와 원하는 상태를 비교하고, 이미지가 바뀌었으므로 이전 컨테이너를 정상적으로 중지하고 새 이미지에서 새 컨테이너를 시작한다. `-d`는 백그라운드로 실행해 SSH 세션에 즉시 제어권을 반환한다.
-
-아래 시퀀스 다이어그램은 Jenkins가 EC2에 열어 실행하는 SSH 세션 안의 네 명령을 보여 준다.
-
-```mermaid 배포 스테이지 — Jenkins가 EC2 위에서 SSH로 실행하는 명령들
+```mermaid Jenkins→EC2 SSH 배포 시퀀스
 sequenceDiagram
-    participant Jenkins as Jenkins
-    participant EC2 as EC2 서버
-    participant ECR as AWS ECR
-    Jenkins->>EC2: ssh (호스트 키 검증, SSH Agent로 키 대여)
-    EC2->>ECR: docker login (IAM 역할 토큰)
-    EC2->>EC2: export IMAGE=registry/myapp:commit
-    EC2->>ECR: docker compose pull
-    ECR-->>EC2: 새 이미지
-    EC2->>EC2: docker compose up -d (이전 컨테이너를 새 것으로 교체)
-    EC2-->>Jenkins: 배포 결과
+    participant J as Jenkins
+    participant E as EC2
+    participant R as ECR
+    participant C as docker compose
+    J->>E: SSH 세션 개설 (ec2-ssh-key, 호스트 키 검증)
+    E->>R: IAM 역할 토큰으로 docker login
+    R-->>E: 로그인 성공
+    J->>E: IMAGE 환경 변수 설정 (커밋 태그 ECR 참조)
+    E->>C: docker compose pull
+    C->>R: 새 이미지 pull
+    R-->>C: 이미지 레이어 전송
+    E->>C: docker compose up -d
+    C->>C: 이전 컨테이너 중지 후 새 컨테이너 시작
+    C-->>E: 새 컨테이너 실행 중
+    E-->>J: 배포 스테이지 성공
 ```
 
-`docker compose up -d`의 장점은 **선언적**이라는 점이다. 원하는 최종 상태를 기술하면 Compose가 무엇을 변경할지 알아서 처리한다. 컨테이너를 올바른 순서로 수동으로 중지·삭제·재실행할 필요가 없다.
+### 5단계 — 완성된 파이프라인
 
-### 완성된 파이프라인
-
-이 배포 스테이지를 push 스테이지 뒤에 추가하면 Jenkinsfile이 전체 여정을 담는다.
+push 스테이지 뒤에 배포 스테이지를 추가하면 Jenkinsfile이 전체 여정을 담는다:
 
 ```groovy
 pipeline {
@@ -124,13 +121,18 @@ pipeline {
 }
 ```
 
-이제 이 강좌 전체가 쌓아 온 목표를 실행해 보자. 앱을 수정하고, 커밋하고, GitLab에 push한다. 웹훅이 실행되고, Jenkins가 모든 스테이지를 하나씩 진행하고, 터미널 한 번 건드리지 않고 EC2 서버가 새 이미지를 pull해 서비스한다. 서버 URL을 열면 변경 사항이 live 상태다.
+**전체 흐름 확인:** 코드를 수정하고 커밋한 뒤 GitLab에 push한다. 웹훅이 실행되고, Jenkins가 모든 스테이지를 순서대로 진행하고, EC2가 새 이미지를 pull해 서비스한다. 서버 URL을 열면 변경 사항이 live 상태다 — 터미널을 한 번도 열지 않고.
 
-완전한 CI/CD 파이프라인이 완성됐다. 한 가지 견고함이 더 필요하다. 지금 이 상태에서 새 버전이 망가져 있어도 그대로 배포된다. 마지막 강의에서 헬스체크, 롤백, 적절한 시크릿 처리를 추가해 이 파이프라인을 프로덕션에 적합한 수준으로 만든다.
+다음 강의에서는 안전망을 추가한다. 헬스체크, 롤백, 시크릿 처리를 갖춰 이 파이프라인을 프로덕션에 적합한 수준으로 만든다.
 
 ## 핵심 정리
-- 배포 스테이지는 **SSH**로 EC2에서 명령을 실행한다. 프라이빗 키는 Jenkins SSH 자격증명으로 저장하고(SSH Agent 플러그인 사용 권장) 절대 저장소에 두지 않는다.
-- 서버도 검증한다. `known_hosts`에 EC2 호스트 키를 등록해(예: `ssh-keyscan`) SSH가 중간자를 감지할 수 있게 한다. `StrictHostKeyChecking=no`를 기본으로 쓰지 않는다. 그 보호를 비활성화하는 것이기 때문이다.
-- EC2에 Docker, ECR pull 권한을 위한 **IAM 역할**, image 변수를 사용하는 `docker-compose.yml`을 준비한다.
-- 교체는 SSH 세션 안의 두 명령이다. `docker compose pull` → `docker compose up -d`. Compose가 선언적으로 이전 컨테이너를 새 컨테이너로 교체한다.
-- 이 스테이지가 추가되면 단일 `git push`가 수동 단계 없이 live EC2 배포까지 자동으로 흘러간다.
+- 배포 스테이지는 **SSH**로 EC2에서 명령을 실행한다. 프라이빗 키는 Jenkins SSH 자격증명(SSH Agent 플러그인)으로 저장하고 절대 저장소에 두지 않는다.
+- `known_hosts`에 EC2 호스트 키를 등록해(`ssh-keyscan`) SSH가 MITM을 탐지할 수 있게 한다. `StrictHostKeyChecking=no`를 기본으로 쓰지 않는다.
+- EC2에 Docker, ECR pull을 위한 **IAM 역할**, image 변수를 사용하는 `docker-compose.yml`을 준비한다.
+- 교체는 두 명령으로 이뤄진다 — `docker compose pull` 후 `docker compose up -d` — Compose가 선언적으로 이전 컨테이너를 새 컨테이너로 교체한다.
+- 이 스테이지가 추가되면 단일 `git push`가 수동 단계 없이 live EC2 배포까지 자동으로 이어진다.
+
+## 출처
+- https://www.youtube.com/watch?v=nQdyiK7-VlQ
+- https://www.youtube.com/watch?v=mAPbPAtRPUw
+- https://www.youtube.com/watch?v=j0_keQl-XAg

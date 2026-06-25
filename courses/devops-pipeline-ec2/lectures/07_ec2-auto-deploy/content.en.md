@@ -13,23 +13,17 @@ sources:
 ## Learning Objectives
 - Connect from Jenkins to EC2 securely over SSH.
 - Write a deploy stage that pulls the newest image and swaps the running container with docker compose.
-- Complete the pipeline so a single push reaches all the way to a live EC2 deployment.
+- Complete the pipeline so a single push reaches a live EC2 deployment.
 
 ## Body
 
-### The last mile
+The image is already in ECR. This lecture writes the final stage that runs it on EC2 — Jenkins opens an SSH session, pulls the new image, and swaps the container, automatically on every build.
 
-Everything is in place except the final hand-off: your image sits in ECR, and now it needs to *run* on your EC2 server. This lecture builds the deploy stage that reaches across the network, into the server, and replaces the old version with the new one — automatically, on every successful build. This is the moment the whole pipeline becomes real: one `git push`, and minutes later the new version is live.
+### Step 1 — Prepare the EC2 server
 
-### Preparing the EC2 server
+**What & why:** Jenkins can only deploy if the server is ready to pull and run images. Prepare three things once: Docker + the Compose plugin, an **IAM role** attached to the instance granting ECR read access (so no keys are stored on the box), and a `docker-compose.yml` that describes how to run the app.
 
-Your EC2 instance needs three things ready before Jenkins can deploy to it:
-
-1. **Docker and the Compose plugin installed** — so it can pull images and run containers.
-2. **Permission to pull from ECR** — the clean way is to attach an **IAM role** to the EC2 instance granting ECR read access, so the server can authenticate to ECR without any stored keys.
-3. **A `docker-compose.yml` file** that describes how to run your app — which image, which ports, which environment.
-
-A minimal compose file on the server looks like this:
+Place this compose file on the server (e.g. `/home/ec2-user/docker-compose.yml`):
 
 ```yaml
 services:
@@ -40,23 +34,30 @@ services:
     restart: always
 ```
 
-Notice the image is a variable, `${IMAGE}`. Jenkins will supply the exact ECR image tag at deploy time, so the same compose file always runs whatever version the pipeline just built.
+`${IMAGE}` is a variable — Jenkins supplies the exact ECR tag at deploy time, so the same file always runs whatever the pipeline just built.
 
-### Connecting from Jenkins to EC2 over SSH
+**Verify:** `docker --version && docker compose version` on the instance, and confirm `aws ecr get-login-password --region <region>` returns a token.
 
-Jenkins reaches EC2 the same way you would: over **SSH** (Secure Shell), using the instance's private key. The professional practice is to store that private key in Jenkins' credential store as an **SSH credential** — never paste it into the Jenkinsfile, and never commit it to Git.
+### Step 2 — Register the EC2 host key
 
-There's a second piece of trust most tutorials gloss over: SSH also verifies the *server's* identity. The first time a client connects, SSH records the server's **host key** in a file called `known_hosts`. On every later connection it checks that the server still presents the same key. That check is what stops a **man-in-the-middle (MITM)** attack — an attacker who intercepts your connection and impersonates your server. So before the first automated deploy, register the EC2 host key with Jenkins' SSH agent (the Linux user it runs as):
+**What & why:** SSH verifies the *server's* identity using its **host key**, recorded in `known_hosts`. Registering it once lets SSH detect a man-in-the-middle (an attacker impersonating your server). Run this on the Jenkins host as the user Jenkins runs as:
 
 ```bash
-# Run once on the Jenkins host, then verify the fingerprint out of band
-# (e.g. against the EC2 console) before trusting it
+# Run once, then verify the fingerprint against the EC2 console before trusting it
 ssh-keyscan -H <EC2_HOST> >> ~/.ssh/known_hosts
 ```
 
-> Verifying the host key isn't optional polish — it's the only thing standing between your deploy and an attacker silently impersonating your server. Register the key once in `known_hosts` and SSH will refuse to connect if it ever changes.
+> You'll see `-o StrictHostKeyChecking=no` in many tutorials. It disables host-key verification entirely — convenient, but it throws away your protection against MITM. Prefer pre-populating `known_hosts`; only relax it in a throwaway lab.
 
-The **SSH Agent plugin** lets a pipeline borrow a stored key for the duration of a block. With the host key already in `known_hosts`, the deploy block connects securely with full verification — no flags needed to weaken it:
+### Step 3 — Store the SSH key in Jenkins
+
+**What & why:** Jenkins connects with the instance's private key. Store it as an **SSH credential** (e.g. ID `ec2-ssh-key`) and use the **SSH Agent plugin** to borrow it for the deploy block — never paste the key into the Jenkinsfile or commit it.
+
+> Treat the SSH private key like the password to your server, because that's what it is. Scope it to this job and keep it out of your repo and build logs. A leaked deploy key is a leaked server.
+
+### Step 4 — Write the deploy stage
+
+**What & why:** With the host key trusted and the SSH key in credentials, this stage opens a verified SSH session and runs the four commands that make up the deployment.
 
 ```groovy
 stage('Deploy to EC2') {
@@ -76,40 +77,36 @@ stage('Deploy to EC2') {
 }
 ```
 
-> You'll see `-o StrictHostKeyChecking=no` in many tutorials. It disables host-key verification, which makes the *very* first connection "just work" — but it also throws away your protection against MITM attacks, because SSH will now connect to *any* server answering at that address. Don't make it your default. Prefer pre-populating `known_hosts`; only relax this in a throwaway lab, and understand exactly what you're giving up.
+Inside the SSH session:
+1. **`docker login`** — EC2 authenticates to ECR using its IAM role token.
+2. **`export IMAGE=...`** — sets the exact commit-tagged image for the compose file.
+3. **`docker compose pull`** — downloads the new image.
+4. **`docker compose up -d`** — the swap. Compose sees the image changed, stops the old container, and starts a new one detached. It's declarative: you describe the desired state and Compose reconciles it.
 
-> Treat the SSH private key like the password to your server, because that's exactly what it is. Store it in Jenkins credentials, scope it to this job, and never let it touch your repository or the build log. A leaked deploy key is a leaked server.
+The diagram below traces this exchange end to end, from Jenkins opening the SSH session to the new container serving traffic.
 
-### What the deploy stage actually does
-
-Walk through the commands that run *inside* the SSH session, because together they are the deployment:
-
-1. **Log in to ECR** — the EC2 server authenticates so it can pull your private image (thanks to its IAM role, no keys are needed beyond the temporary login token).
-2. **Set the `IMAGE` variable** — to the exact commit-tagged image the pipeline built, so the compose file knows precisely what to run.
-3. **`docker compose pull`** — downloads the new image from ECR.
-4. **`docker compose up -d`** — this is the swap. Compose compares the running container against the desired state; because the image changed, it gracefully stops the old container and starts a new one from the new image. The `-d` runs it detached, in the background.
-
-The sequence below shows those four commands running inside the SSH session that Jenkins opens to EC2.
-
-```mermaid Deploy stage - commands Jenkins runs over SSH on EC2
+```mermaid Jenkins-to-EC2 deploy sequence over SSH
 sequenceDiagram
-    participant Jenkins as Jenkins
-    participant EC2 as EC2 Server
-    participant ECR as AWS ECR
-    Jenkins->>EC2: ssh (verify host key, borrow key via SSH Agent)
-    EC2->>ECR: docker login (IAM role token)
-    EC2->>EC2: export IMAGE=registry/myapp:commit
-    EC2->>ECR: docker compose pull
-    ECR-->>EC2: new image
-    EC2->>EC2: docker compose up -d (swap old to new container)
-    EC2-->>Jenkins: deploy result
+    participant J as Jenkins
+    participant E as EC2
+    participant R as ECR
+    participant C as docker compose
+    J->>E: Open verified SSH session (ec2-ssh-key)
+    E->>R: docker login via IAM role token
+    R-->>E: Login succeeded
+    J->>E: export IMAGE (commit-tagged ECR ref)
+    E->>C: docker compose pull
+    C->>R: Pull new image
+    R-->>C: Image layers
+    E->>C: docker compose up -d
+    C->>C: Stop old container, start new one
+    C-->>E: New container running
+    E-->>J: Deploy stage success
 ```
 
-The beauty of `docker compose up -d` is that it's **declarative**: you describe the desired end state, and Compose figures out what to change. You don't manually stop, remove, and re-run containers in the right order — Compose does the reconciliation for you.
+### Step 5 — The completed pipeline
 
-### The completed pipeline
-
-Add this deploy stage after the push stage, and your Jenkinsfile now spans the entire journey:
+Add the deploy stage after the push stage and the Jenkinsfile now spans the whole journey:
 
 ```groovy
 pipeline {
@@ -124,13 +121,18 @@ pipeline {
 }
 ```
 
-Now do the thing this whole course has been building toward: make a change to your app, commit it, and push to GitLab. Watch the webhook fire, Jenkins march through every stage, and — without you touching a terminal — your EC2 server pull the new image and serve it. Open the server's URL and your change is live.
+**Verify the whole loop:** make a change, commit, and push to GitLab. The webhook fires, Jenkins runs every stage, EC2 pulls the new image, and the server serves it. Open the server URL — your change is live, with no manual steps.
 
-You've built a complete CI/CD pipeline. There's one more layer of robustness to add, though: right now, if the new version is broken, you'll deploy it anyway. The final lecture adds the safety net — health checks, rollback, and proper secret handling — that makes this pipeline production-worthy.
+The next lecture adds the safety net — health checks, rollback, and secret handling — that makes this production-worthy.
 
 ## Key Takeaways
-- The deploy stage uses **SSH** to run commands on EC2; store the private key as a Jenkins SSH credential (e.g. via the SSH Agent plugin) and never put it in your repo.
-- Verify the server too: register the EC2 host key in `known_hosts` (e.g. with `ssh-keyscan`) so SSH can detect a man-in-the-middle. Avoid `StrictHostKeyChecking=no` as a default — it disables that protection.
-- Prepare EC2 with Docker, an **IAM role** for ECR pull access, and a `docker-compose.yml` whose image is a variable the pipeline fills in.
-- The swap is just two commands inside the SSH session — `docker compose pull` then `docker compose up -d` — and Compose declaratively replaces the old container with the new one.
-- With this stage added, a single `git push` now flows all the way to a live EC2 deployment with no manual steps.
+- The deploy stage runs commands on EC2 over **SSH**; store the private key as a Jenkins SSH credential (SSH Agent plugin) and never put it in your repo.
+- Register the EC2 host key in `known_hosts` (e.g. `ssh-keyscan`) so SSH can detect a MITM. Avoid `StrictHostKeyChecking=no` as a default.
+- Prepare EC2 with Docker, an **IAM role** for ECR pull, and a `docker-compose.yml` whose image is a variable the pipeline fills in.
+- The swap is two commands — `docker compose pull` then `docker compose up -d` — and Compose declaratively replaces the old container.
+- With this stage, a single `git push` flows all the way to a live EC2 deployment.
+
+## Sources
+- https://www.youtube.com/watch?v=nQdyiK7-VlQ
+- https://www.youtube.com/watch?v=mAPbPAtRPUw
+- https://www.youtube.com/watch?v=j0_keQl-XAg

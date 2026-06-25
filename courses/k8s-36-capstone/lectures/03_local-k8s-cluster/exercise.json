@@ -1,0 +1,50 @@
+{
+  "lecture_no": 3,
+  "mode": "practical",
+  "tasks": [
+    {
+      "prompt": "준비 확인 — 도구가 사용 가능한 상태인지 점검한다.\n\n클러스터를 시작하기 전에 Docker, 클러스터 도구(minikube 또는 kind), kubectl이 모두 설치되어 터미널에서 접근 가능한지 확인한다. 아래 세 가지 확인 명령을 실행하고 각각 어떤 출력이 나오는지 기록한다.",
+      "starter": "# 각 명령을 실행하고 출력을 확인한다.\n\n# 1. Docker 실행 여부 확인\ndocker version --format '{{.Server.Version}}'\n\n# 2. 클러스터 도구 확인\nminikube version          # minikube를 선택한 경우\n# kind version            # kind를 선택한 경우\n\n# 3. kubectl 확인 (클라이언트 쪽만)\nkubectl version --client",
+      "solution": "# 예상 출력 (버전은 환경마다 다를 수 있음):\n\n# docker version\n# 24.0.7\n\n# minikube version\n# minikube version: v1.33.1\n# commit: 5883c09216182566a63dff4c326a6fc9ed2982ff\n\n# kubectl version --client\n# Client Version: v1.30.2\n# Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3",
+      "explanation": "이 세 명령은 Docker 데몬이 응답하는지(minikube와 kind 모두의 전제 조건), 선택한 클러스터 도구가 PATH에 있는지, kubectl이 클라이언트 쪽에 설치되어 있는지를 각각 확인한다. 아직 클러스터에는 아무것도 하지 않고, 시작 조건만 점검하는 단계다. 어떤 명령이라도 실패하면 해당 도구를 설치하거나 실행한 뒤 다시 진행한다.",
+      "hints": [
+        "`docker version` 결과에 클라이언트 섹션만 나오고 서버 섹션이 없으면 Docker Desktop이 실행 중이 아닌 것이다. 시작한 뒤 다시 시도한다.",
+        "`minikube` 또는 `kind` 명령을 찾을 수 없다면 minikube.sigs.k8s.io 또는 kind.sigs.k8s.io의 설치 안내를 따라 설치하고 바이너리가 PATH에 있는지 확인한다.",
+        "kubectl은 보통 minikube/kind 설치 시 함께 설치된다. 그래도 없다면 kubernetes.io/docs/tasks/tools에서 별도로 설치한다."
+      ]
+    },
+    {
+      "prompt": "핵심 1 — 로컬 클러스터를 시작하고 정상 여부를 확인한다.\n\nminikube **또는** kind를 사용해 단일 노드 쿠버네티스 클러스터를 만들고 준비 상태를 확인한다. `Ready` 상태의 노드 하나와 API 서버 URL이 출력되어야 다음 단계로 넘어갈 수 있다.",
+      "starter": "# --- 옵션 A: minikube ---\nminikube start --driver=docker\n\n# --- 옵션 B: kind ---\nkind create cluster --name capstone\n\n# 클러스터가 올라온 뒤 상태 확인 (두 도구 공통):\nkubectl get nodes\nkubectl cluster-info",
+      "solution": "# minikube 방식\nminikube start --driver=docker\n# \"Done! kubectl is now configured to use \\\"minikube\\\" cluster\" 메시지를 기다린다.\n\nminikube status\n# 예상 출력:\n# minikube\n# type: Control Plane\n# host: Running\n# kubelet: Running\n# apiserver: Running\n# kubeconfig: Configured\n\nkubectl get nodes\n# NAME       STATUS   ROLES           AGE   VERSION\n# minikube   Ready    control-plane   1m    v1.30.0\n\nkubectl cluster-info\n# Kubernetes control plane is running at https://127.0.0.1:<port>\n# CoreDNS is running at https://127.0.0.1:<port>/api/v1/...\n\n# -------------------------------------------------------\n# kind 방식\nkind create cluster --name capstone\n# \"Have a nice day!\" 메시지를 기다린다.\n\nkubectl get nodes\n# NAME                     STATUS   ROLES           AGE   VERSION\n# capstone-control-plane   Ready    control-plane   1m    v1.30.0\n\nkubectl cluster-info --context kind-capstone\n# Kubernetes control plane is running at https://127.0.0.1:<port>",
+      "explanation": "`minikube start --driver=docker`(또는 `kind create cluster`)는 세 가지 일을 한다. 쿠버네티스 노드 이미지를 내려받고(이후에는 캐시됨), 그 노드를 내 머신의 Docker 컨테이너로 부팅하고, `~/.kube/config`에 새 항목을 추가해 kubectl이 클러스터에 접근할 수 있게 한다. `kubectl get nodes`는 클러스터 API 서버에서 읽어오므로, `Ready` 노드가 반환되면 kubectl이 올바르게 연결된 것이다. `kubectl cluster-info`는 API 서버 URL을 출력해 컨트롤 플레인에 도달할 수 있음을 확인한다. 이 두 가지 확인을 통과해야 이미지 로드 단계로 넘어가는 것이 안전하다.",
+      "hints": [
+        "`minikube start` 실행 시 'Exiting due to PROVIDER_DOCKER_NOT_RUNNING'이 나오면 Docker Desktop이 실행 중이 아닌 것이다. 먼저 시작한다.",
+        "kind를 사용하는 경우 `kubectl config current-context` 명령으로 컨텍스트가 자동으로 전환되었는지 확인한다. `kind-capstone`이 출력되어야 한다. 다르다면 `kubectl cluster-info --context kind-capstone`을 명시적으로 실행한다.",
+        "`NotReady` 상태로 멈춰 있다면 클러스터가 아직 초기화 중인 것이다. 30~60초 기다린 뒤 `kubectl get nodes`를 다시 실행한다."
+      ]
+    },
+    {
+      "prompt": "핵심 2 — `flask-capstone:1.0` 이미지를 클러스터에 로드한다.\n\n2강에서 빌드한 이미지는 로컬 Docker 데몬에만 있고, 클러스터는 별도의 내부 이미지 저장소를 사용하므로 아직 그 이미지를 볼 수 없다. 사용하는 도구에 맞는 명령으로 이미지를 클러스터에 복사하고, 클러스터 안에 이미지가 존재하는지 확인한다.",
+      "starter": "# 먼저 로컬 Docker에 이미지가 있는지 확인한다:\ndocker images flask-capstone\n# 예상 출력: flask-capstone  1.0  ... 행이 표시되어야 한다.\n\n# --- 옵션 A: minikube ---\nminikube image load flask-capstone:1.0\nminikube image ls | grep flask-capstone\n\n# --- 옵션 B: kind ---\nkind load docker-image flask-capstone:1.0 --name capstone\n# kind 검증 (노드 컨테이너 내부에서):\ndocker exec -it capstone-control-plane crictl images | grep flask-capstone",
+      "solution": "# minikube 방식\nminikube image load flask-capstone:1.0\n# (성공 시 출력 없음; 명령이 0으로 종료됨)\n\nminikube image ls | grep flask-capstone\n# docker.io/library/flask-capstone:1.0\n\n# -------------------------------------------------------\n# kind 방식\nkind load docker-image flask-capstone:1.0 --name capstone\n# Image: \"flask-capstone:1.0\" with ID \"sha256:...\" not yet present on node \"capstone-control-plane\", loading...\n\n# 노드 컨테이너 내부에서 확인:\ndocker exec -it capstone-control-plane crictl images | grep flask\n# IMAGE                           TAG   IMAGE ID       SIZE\n# docker.io/library/flask-capstone  1.0  sha256:...   ...",
+      "explanation": "`minikube image load`와 `kind load docker-image` 모두 강의에서 말하는 '노트북-클러스터 경계'를 넘어, 로컬 Docker 데몬의 이미지 타르볼을 노드 컨테이너의 컨테이너 런타임(containerd)으로 복사한다. 이 단계 이후 이미지는 클러스터 안에 존재하며, 레지스트리 없이 Pod 스펙에서 참조할 수 있다. 확인 명령이 성공의 증거다. `minikube image ls`는 minikube 노드에 저장된 이미지를 나열하고, `crictl images`(kind 노드 컨테이너 내부에서 실행)는 그 노드의 containerd가 알고 있는 이미지를 나열한다.",
+      "hints": [
+        "`docker images flask-capstone` 결과가 비어 있다면 이미지가 아직 없는 것이다. 2강으로 돌아가 `docker build -t flask-capstone:1.0 .`으로 빌드한다.",
+        "minikube에서 `minikube image load` 후 오래 걸린다면 첫 실행이라 정상이다. 같은 이미지의 두 번째 로드는 캐시 덕분에 즉시 완료된다.",
+        "kind 사용 시 `--name capstone`(또는 `kind create cluster`에서 지정한 이름)을 반드시 포함한다. 생략하면 기본 클러스터 이름인 `kind`를 대상으로 하는데, 이 클러스터가 없을 수 있다."
+      ]
+    },
+    {
+      "prompt": "응용 — `imagePullPolicy`를 이해하고 실패 상황을 예측한다.\n\n이미지가 로드되었으니, 아래 두 가지 질문에 답하고 직접 테스트해 이해를 확인한다.\n\n1. 로컬 전용 이미지를 올바른 `imagePullPolicy`로 스케줄링하는 최소한의 Pod 스펙 YAML을 작성한다. 이 Pod는 원격 레지스트리에 절대 요청하지 않아야 한다.\n\n2. `imagePullPolicy: Always`로 설정하거나 `:latest` 태그 이미지에서 필드를 생략했을 때, Pod에 어떤 오류 상태가 나타나고 왜 그런지 1~2문장으로 설명한다.\n\n1번 질문의 Pod를 실행 중인 클러스터에 적용하고 `Running` 상태가 되는지 확인한다.",
+      "starter": "# 빈칸을 채워 올바른 imagePullPolicy가 있는 Pod 스펙을 작성한다:\ncat <<'EOF' > /tmp/flask-pod.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: flask-test\nspec:\n  containers:\n    - name: flask\n      image: flask-capstone:1.0\n      imagePullPolicy: _______________   # <-- 여기를 채운다\n      ports:\n        - containerPort: 5000\nEOF\n\nkubectl apply -f /tmp/flask-pod.yaml\nkubectl get pod flask-test",
+      "solution": "# 질문 1 — 올바른 Pod 스펙:\ncat <<'EOF' > /tmp/flask-pod.yaml\napiVersion: v1\nkind: Pod\nmetadata:\n  name: flask-test\nspec:\n  containers:\n    - name: flask\n      image: flask-capstone:1.0\n      imagePullPolicy: IfNotPresent\n      ports:\n        - containerPort: 5000\nEOF\n\nkubectl apply -f /tmp/flask-pod.yaml\n# pod/flask-test created\n\nkubectl get pod flask-test\n# NAME         READY   STATUS    RESTARTS   AGE\n# flask-test   1/1     Running   0          10s\n\n# ---\n# 질문 2 답:\n# imagePullPolicy가 Always이거나 태그가 :latest여서 Always가 기본값이 되면,\n# 쿠버네티스는 원격 레지스트리에서 flask-capstone:1.0을 풀하려 시도한다.\n# 이미지가 레지스트리에 올라간 적이 없으므로 풀이 실패하고,\n# Pod는 ImagePullBackOff 상태가 된다.",
+      "explanation": "`imagePullPolicy: IfNotPresent`는 kubelet에게 '이 이미지가 노드 이미지 저장소에 이미 있으면 그것을 사용하고, 없을 때만 레지스트리에 접근하라'고 지시한다. 이전 작업에서 `flask-capstone:1.0`을 로드해 두었으므로 이미 존재하고, kubelet은 네트워크 요청 없이 로컬 이미지를 그대로 사용해 Pod를 시작한다. 고정 non-`:latest` 태그와 `IfNotPresent`의 조합이 로컬 쿠버네티스 개발의 표준 방식이다. 반면 `imagePullPolicy: Always`는 Pod가 스케줄될 때마다 레지스트리에서 신선한 이미지를 강제로 내려받는다. CI/CD처럼 항상 최신 푸시 이미지가 필요한 환경에서는 맞는 설정이지만, 레지스트리에 존재하지 않는 로컬 이미지에 쓰면 치명적이다.",
+      "hints": [
+        "강의에서는 `Never`가 아닌 `IfNotPresent`를 쓰도록 안내한다. 둘 다 로드된 이미지에는 동작하지만, `IfNotPresent`는 이미지가 원격에도 존재한다면 레지스트리에서 가져오는 유연성도 갖추고 있어 로컬 개발의 관례적인 선택이다.",
+        "Pod가 1분 이상 `ContainerCreating` 상태에 머물러 있다면 `kubectl describe pod flask-test`로 상세 정보를 확인하고 Events 섹션에서 단서를 찾는다.",
+        "`ImagePullBackOff` 실패를 직접 관찰하려면, `imagePullPolicy: Always`로 설정한 두 번째 Pod를 만들고 `kubectl get pod`를 지켜본다. 원격 레지스트리에 이미지가 없으므로 `Running` 상태에 도달하지 못한다."
+      ]
+    }
+  ]
+}

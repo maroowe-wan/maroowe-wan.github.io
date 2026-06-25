@@ -1,0 +1,50 @@
+{
+  "lecture_no": 3,
+  "mode": "quiz",
+  "questions": [
+    {
+      "question": "A team is managing a Node.js application across a developer's laptop, a staging server, and a production environment. The app works on the developer's machine but fails on the staging server due to library version mismatches. Which tool directly addresses this problem, and what mechanism does it use?",
+      "options": [
+        "Git — it stores the exact version of every library in a commit so servers can replicate the developer's environment by checking out the same commit.",
+        "Docker — it packages the app together with its libraries and runtime into a container, ensuring the app runs identically across all environments.",
+        "Kubernetes — it provisions separate virtual machines for each environment so library conflicts cannot occur between them.",
+        "Terraform — it declares the OS version and package list as code, guaranteeing every server gets the same software stack."
+      ],
+      "answer_index": 1,
+      "explanation": "Docker solves the 'it works on my machine' problem by bundling the application with all its dependencies (libraries, runtime, config) into a self-contained container image. Because the container carries its own environment, it behaves identically on a laptop, staging, or production. Option A is wrong — Git tracks code history but does not carry runtime environments; a different OS or library version on the server still breaks the app. Option C is wrong — Kubernetes orchestrates containers that already exist; it does not provision VMs to avoid library conflicts. Option D is partially relevant (Terraform can provision identical server configurations) but Terraform does not solve in-process library conflicts the way Docker does — it manages infrastructure, not application packaging."
+    },
+    {
+      "question": "Which of the following statements best explains the difference between what Terraform and Ansible each solve within the Infrastructure as Code category?",
+      "options": [
+        "Terraform installs and configures software on existing servers; Ansible creates and destroys cloud infrastructure such as virtual machines and networks.",
+        "Terraform is declarative and provisions cloud infrastructure (servers, networks, permissions); Ansible is mainly a configuration tool that installs software and applies settings on servers that already exist.",
+        "Terraform and Ansible are interchangeable — both provision infrastructure and configure software using the same declarative approach.",
+        "Terraform manages container orchestration, while Ansible manages version control for infrastructure code."
+      ],
+      "answer_index": 1,
+      "explanation": "Terraform and Ansible address different layers of the IaC problem. Terraform is declarative: you describe the desired end state (e.g., '5 EC2 instances with this VPC') and Terraform provisions it idempotently. Ansible is primarily a configuration management tool: once servers exist, it SSH-connects to them, installs packages, applies patches, and tweaks config files. In practice, teams often chain them — Terraform to create the servers, Ansible to configure them. Option A reverses the roles entirely. Option C is wrong — they are complementary, not interchangeable; Terraform's declarative model differs significantly from Ansible's task-based model. Option D is wrong — Terraform does not do container orchestration (that is Kubernetes) and Ansible does not manage version control (that is Git)."
+    },
+    {
+      "question": "A DevOps team sets up automated monitoring and is discussing the three pillars of observability. A site reliability engineer says: 'We can see our error rate climbing on the dashboard, but we cannot tell which user request caused the spike or which downstream service it hit.' Which pillar of observability is the team missing?",
+      "options": [
+        "Metrics — the team needs more counters and gauges to pinpoint exactly which service is failing.",
+        "Logs — the team should increase log verbosity so every function call is recorded in a text file.",
+        "Traces — the team lacks the ability to follow a single request as it travels through multiple services, which is what would reveal where the spike originates.",
+        "Dashboards — the team needs Grafana to render a more detailed breakdown of the error-rate metric."
+      ],
+      "answer_index": 2,
+      "explanation": "The three pillars of observability are metrics (numbers over time), logs (timestamped discrete events), and traces (the path of a single request through multiple services). The scenario already has metrics (the dashboard shows the error rate climbing) but the team cannot follow a specific request across services — that is exactly what distributed tracing provides. Traces let you reconstruct the full journey of one request, identify which service added latency or threw an error, and correlate it back to the originating call. Option A is wrong — the team already has metrics; more counters do not reveal per-request paths. Option B is wrong — logs record events but do not inherently correlate a single request's journey across multiple services. Option D is wrong — Grafana is the visualization layer for metrics that already exist; the missing pillar is traces, not a better chart."
+    },
+    {
+      "question": "A developer pushes a code change and wants it to reach production without any manual steps. Mapping this requirement onto the DevOps toolchain stages, which sequence of tools correctly reflects the end-to-end automated path from source code to running application?",
+      "options": [
+        "Kubernetes → Docker → Jenkins → Git → Prometheus",
+        "Git → Jenkins/GitLab CI → Docker → Kubernetes → Prometheus/Grafana",
+        "Docker → Git → Argo CD → Terraform → Grafana",
+        "Terraform → Ansible → Git → Docker → Jenkins"
+      ],
+      "answer_index": 1,
+      "explanation": "The correct flow follows the DevOps workflow stages: the developer commits to Git (version control); a CI/CD tool such as Jenkins or GitLab CI detects the push, builds the app, and runs tests; Docker packages the result into a container image; Kubernetes pulls the image and runs it at scale; Prometheus and Grafana then monitor the running system and surface health metrics. Option A reverses the early stages — code must exist in Git before Docker can package it and before a CI/CD pipeline can trigger. Option C starts with Docker before code is committed and places IaC (Terraform) between the container and monitoring, which does not match the build-and-deploy flow. Option D starts with infrastructure provisioning, which happens separately before the code pipeline runs, and the sequence mixes IaC (Terraform/Ansible) into the application delivery path incorrectly."
+    }
+  ]
+}
